@@ -37,6 +37,15 @@ A summary should be:
 - readable in under a minute
 - enough to understand what changed, why, and what remains
 
+### `projects/app/.runtime/` (project runtime-only temporary data)
+
+Use `projects/app/.runtime/` for project-level runtime artifacts that are not durable:
+- local run traces
+- temporary debug snapshots
+- generated runtime logs for manual validation
+
+Do not write these files into `projects/app/` source folders.
+
 ## 3. Git Rules
 
 ### Commit by default
@@ -54,6 +63,7 @@ A summary should be:
 ### Do not commit by default
 
 - `runs/raw/**`
+- `projects/app/.runtime/**` (except `.gitkeep`)
 - temporary logs and traces
 - scratch dumps
 - machine-local clutter

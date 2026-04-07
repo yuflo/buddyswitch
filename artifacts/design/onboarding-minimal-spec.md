@@ -27,7 +27,9 @@
 
 ## state_coverage
 
+- Loading state while onboarding shell and step content initialize.
 - Active step states: step 1, step 2, step 3.
+- Empty state before profile data is entered (no `display name` and no `primary goal` selected).
 - Validation error state on profile step.
 - Completion state after finish.
 - Reset state after restart.

@@ -31,6 +31,7 @@ description: Run focused smoke checks and produce structured pass/fail/blocked r
 ## Output Path
 
 - Default: `artifacts/test/<slug>.md`
+- Project runtime-only temporary outputs: `projects/app/.runtime/`
 - If user provides a path, use it as-is.
 
 ## Required Output Fields
@@ -47,3 +48,4 @@ description: Run focused smoke checks and produce structured pass/fail/blocked r
 - Do not perform broad refactors unless explicitly requested.
 - Do not make product decisions.
 - Do not provide unstructured "looks good" output.
+- Do not write runtime noise into `projects/app/` source folders; use `projects/app/.runtime/`.

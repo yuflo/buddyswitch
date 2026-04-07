@@ -46,3 +46,8 @@ Every run should return:
 ## Default Artifact Path
 
 - `artifacts/test/`
+
+## Runtime Output Rule
+
+- Temporary runtime logs, traces, or generated debug files for project checks must go to `projects/app/.runtime/`.
+- Do not place runtime noise in source directories under `projects/app/`.

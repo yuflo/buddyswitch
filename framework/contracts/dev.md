@@ -45,6 +45,8 @@ Every run should return:
 ## Working Area
 
 - primarily `projects/app/`
+- project runtime temporary data must be written only to `projects/app/.runtime/`
+- do not write runtime noise into source folders under `projects/app/`
 
 ## Default Artifact Path
 

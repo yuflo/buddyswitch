@@ -53,8 +53,10 @@ When the user writes `switch <agent>: <task>`, you must:
 - Durable outputs go to `artifacts/`.
 - Noisy raw dumps go to `runs/raw/`.
 - Compact useful summaries go to `runs/summaries/`.
+- Project runtime-only temporary data goes to `projects/app/.runtime/`.
 - Durable outputs and summaries are expected to be commit-friendly.
 - Raw dumps, scratch traces, and temporary logs should stay out of Git.
+- Agent-target cleanup depends on path conventions (`runs/raw/<agent>`, `runs/summaries/<agent>`), not heuristic guessing.
 
 ## Project Code Location
 

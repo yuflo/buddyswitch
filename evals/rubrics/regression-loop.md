@@ -2,12 +2,15 @@
 
 ## When To Run
 
-Run the 5-case suite after any change to:
+Run the 7-case suite after any change to:
 - `AGENTS.md`
 - `.codex/agents/*.toml`
 - `framework/contracts/**`
+- `framework/templates/**`
 - `.agents/skills/**/SKILL.md`
 - `framework/docs/switch-spec.md`
+- `framework/docs/artifacts-runs-git-policy.md`
+- `scripts/cleanup_buddyswitch.sh`
 
 ## How To Run (Lightweight)
 
@@ -32,6 +35,8 @@ Run the 5-case suite after any change to:
 - 03-switch-dev-boundary: pass/fail
 - 04-switch-test-structure: pass/fail
 - 05-invalid-switch-error: pass/fail
+- 06-switch-market-deep-research: pass/fail
+- 07-cleanup-storage-script: pass/fail
 
 ## Regressions
 

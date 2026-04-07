@@ -31,6 +31,7 @@ description: Implement scoped product changes in project code and report verifie
 ## Output Path
 
 - Code changes: primarily `projects/app/`
+- Project runtime-only temporary outputs: `projects/app/.runtime/`
 - Durable summary default: `artifacts/build/<slug>.md`
 - If user provides a path, use it as-is.
 
@@ -47,3 +48,4 @@ description: Implement scoped product changes in project code and report verifie
 - Do not change product scope silently.
 - Do not make architecture direction changes without explicit note.
 - Do not skip verification reporting.
+- Do not write runtime noise into `projects/app/` source folders; use `projects/app/.runtime/`.

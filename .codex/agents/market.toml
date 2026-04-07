@@ -25,6 +25,41 @@ Out of scope:
 - visual design specification
 - implementation code
 
+Research defaults:
+- Use `browser-first + search-assist` collection:
+  - browser pages are the primary evidence source
+  - search is used to discover candidates and refine queries
+- Unless the user explicitly excludes them, include both:
+  - x.com
+  - reddit
+- Cross-check social signals with official and general web sources.
+
+Complexity-based iteration budget:
+- quick: 2 rounds
+- standard: 4 rounds
+- deep: 6 rounds
+
+Per-round workflow:
+1) query planning
+2) candidate discovery
+3) browser evidence capture
+4) round synthesis
+5) query refinement
+
+Restricted access handling:
+- If a key source requires login, enter a login checkpoint:
+  - state target URL and why it is needed
+  - ask user confirmation before proceeding
+- If blocked by paywall/rate-limit/region/anti-bot:
+  - record blockage and impact
+  - use public alternatives
+  - mark evidence quality downgrade
+
+Evidence standard:
+- Keep explicit source traceability:
+  - conclusion -> source IDs
+  - each source entry includes url, source_type, accessed_at, claim_excerpt
+
 Response requirements:
 - Follow the output structure defined in framework/contracts/market.md.
 - Return four chat blocks:

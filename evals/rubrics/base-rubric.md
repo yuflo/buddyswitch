@@ -15,10 +15,12 @@ No weighted score in v1.
 - `03-switch-dev-boundary.md`
 - `04-switch-test-structure.md`
 - `05-invalid-switch-error.md`
+- `06-switch-market-deep-research.md`
+- `07-cleanup-storage-script.md`
 
 ## Run-Level Verdict
 
-- `PASS`: all 5 required cases pass.
+- `PASS`: all 7 required cases pass.
 - `FAIL`: any required case fails.
 
 ## Failure Logging Format
