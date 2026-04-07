@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BuddySwitch Onboarding Demo</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header>
+      <h1>BuddySwitch Onboarding Demo</h1>
+      <p class="subtitle">A minimal 3-step onboarding flow for framework validation.</p>
+    </header>
+
+    <section class="progress" aria-live="polite">
+      <div class="progress-label" id="progressLabel">Step 1 of 3</div>
+      <div class="progress-track" role="progressbar" aria-valuemin="1" aria-valuemax="3" aria-valuenow="1" id="progressTrack">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+    </section>
+
+    <form id="onboardingForm" novalidate>
+      <section class="step is-active" data-step="0">
+        <h2>Welcome</h2>
+        <p>This onboarding captures two fields and confirms the setup.</p>
+        <button type="button" class="btn primary" data-action="next">Start</button>
+      </section>
+
+      <section class="step" data-step="1">
+        <h2>Profile Setup</h2>
+        <label for="name">Display Name</label>
+        <input id="name" name="name" type="text" placeholder="e.g. Alex" required>
+
+        <label for="goal">Primary Goal</label>
+        <select id="goal" name="goal" required>
+          <option value="">Choose one</option>
+          <option value="prototype">Ship a prototype</option>
+          <option value="learn">Learn the workflow</option>
+          <option value="collaborate">Collaborate with team</option>
+        </select>
+
+        <p class="error" id="formError" aria-live="polite"></p>
+        <div class="actions">
+          <button type="button" class="btn" data-action="back">Back</button>
+          <button type="button" class="btn primary" data-action="next">Continue</button>
+        </div>
+      </section>
+
+      <section class="step" data-step="2">
+        <h2>Confirm</h2>
+        <p>Review your onboarding details:</p>
+        <ul class="summary">
+          <li><strong>Name:</strong> <span id="summaryName">-</span></li>
+          <li><strong>Goal:</strong> <span id="summaryGoal">-</span></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="btn" data-action="back">Back</button>
+          <button type="button" class="btn primary" data-action="finish">Finish</button>
+        </div>
+      </section>
+    </form>
+
+    <section id="doneState" class="done" hidden>
+      <h2>Onboarding Complete</h2>
+      <p>Your profile setup is done for this demo flow.</p>
+      <button type="button" class="btn" id="restartBtn">Run Again</button>
+    </section>
+  </main>
+
+  <script src="./main.js"></script>
+</body>
+</html>

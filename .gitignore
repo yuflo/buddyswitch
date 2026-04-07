@@ -1,0 +1,19 @@
+# BuddySwitch run noise (never commit raw execution output)
+runs/raw/**
+!runs/raw/.gitkeep
+
+# Temporary and local noise
+*.log
+*.tmp
+*.trace
+*.out
+*.dump
+*.pyc
+__pycache__/
+tmp/
+.DS_Store
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
