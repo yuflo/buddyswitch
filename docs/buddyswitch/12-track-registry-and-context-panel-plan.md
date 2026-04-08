@@ -9,7 +9,7 @@ The Context Panel should not infer product Tracks from filenames or agent roles.
 ## Model
 
 - Project: the single physical BuddySwitch workspace.
-- Track: an explicit product iteration record in `artifacts/workspace-registry.json`.
+- Track: an explicit product iteration record managed through `scripts/registry.py` and currently dumped to `artifacts/workspace-registry.json`.
 - Artifact: a durable agent output under `artifacts/`.
 - Untracked Artifact: an artifact not registered to any Track. It is a diagnostic item, not an Inbox.
 
@@ -17,11 +17,19 @@ The Context Panel should not infer product Tracks from filenames or agent roles.
 
 ## Registry
 
-The registry lives at:
+The v1 local dump backend lives at:
 
 ```text
 artifacts/workspace-registry.json
 ```
+
+Registry writes should go through:
+
+```text
+scripts/registry.py
+```
+
+This adapter is not the final storage architecture. It preserves the operation model that can later move to a database or standard storage API.
 
 Minimal schema:
 
@@ -46,17 +54,18 @@ Minimal schema:
 
 ## Context Panel Behavior
 
-- Read `artifacts/workspace-registry.json`.
+- Read registry-backed snapshot data.
 - Render only registry-declared Tracks in the primary Track list.
 - Render files not referenced by any Track as `Untracked Artifacts` diagnostics.
 - Do not call agents, LLMs, cleanup, shell commands, or write registry changes from the browser.
 - Generate copyable `switch ...` and cleanup commands only.
+- Use the local Context Panel server for active refresh; static snapshots remain available for debugging.
 
 ## Agent Boundary
 
 Track creation and artifact association require explicit user intent.
 
-Agents may suggest registry metadata such as `track_id`, `title`, `role`, `type`, and `state`, but must not create or associate Tracks based only on their own judgment.
+Agents may suggest registry metadata such as `track_id`, `title`, `role`, `type`, and `state`, but must not create or associate Tracks based only on their own judgment. When explicit Track intent is present, agents should use `scripts/registry.py` rather than editing JSON directly.
 
 ## Validation
 

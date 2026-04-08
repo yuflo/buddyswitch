@@ -17,6 +17,7 @@
       <div class="meta">
         <span>Snapshot</span>
         <strong id="generatedAt">not loaded</strong>
+        <button id="refreshButton" class="refresh-button" type="button">Refresh</button>
       </div>
     </header>
 
@@ -83,8 +84,8 @@
     </section>
 
     <footer class="footer">
-      <code>python3 scripts/build_console_snapshot.py</code>
-      <span>Refresh the snapshot, then reload this page.</span>
+      <code>python3 scripts/serve_context_panel.py</code>
+      <span>Use the local server for active refresh, or regenerate the static snapshot with <code>python3 scripts/build_console_snapshot.py</code>.</span>
     </footer>
   </main>
 

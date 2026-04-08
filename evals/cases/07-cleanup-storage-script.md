@@ -18,7 +18,7 @@ scripts/cleanup_buddyswitch.sh --all-storage --force
 ## Preconditions
 
 - `scripts/cleanup_buddyswitch.sh` exists and is executable.
-- `artifacts/workspace-registry.json` exists when the Track Registry is enabled.
+- `scripts/registry.py` exists.
 - `projects/app/.runtime/.gitkeep` exists.
 - `README.md` includes manual cleanup usage.
 
@@ -46,13 +46,17 @@ scripts/cleanup_buddyswitch.sh --all-storage --force
   - `runs/raw/**`
   - `runs/summaries/**`
   - `projects/app/.runtime/**`
-- `artifacts/workspace-registry.json` is not targeted for deletion.
+- `--agent <agent>` reports the matching registry role cleanup through `scripts/registry.py`.
+- `--all-agents` reports registry track clearing through `scripts/registry.py`.
+- `--project app` reports no registry changes.
+- `--all-storage` targets `artifacts/workspace-registry.json` and rebuilds the console snapshot after execution.
 - `framework/`, `.codex/`, `.agents/`, `evals/`, and `projects/app` source files are not targeted.
 
 ## Fail Signals
 
 - Any deletion occurs without `--execute`.
-- Cleanup deletes or targets `artifacts/workspace-registry.json`.
+- Agent cleanup leaves old registry artifact links in the Context Panel.
+- `--all-storage` preserves `artifacts/workspace-registry.json` or stale console snapshot data.
 - Cleanup target set includes framework or source-code files.
 - Missing required target modes.
 - Errors are ambiguous or silently ignored.

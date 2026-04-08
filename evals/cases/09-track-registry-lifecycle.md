@@ -18,21 +18,22 @@ switch pm: 将 artifacts/research/scheduling-tool-convenience-market-research.md
 
 ## Preconditions
 
-- `artifacts/workspace-registry.json` exists.
+- `scripts/registry.py` exists.
 - `framework/docs/track-registry.md` exists.
+- `artifacts/workspace-registry.json` exists or can be created through `scripts/registry.py`.
 - Agent configs, contracts, and skills reference the Track Registry rule.
 
 ## Manual Steps
 
 1. Review the commands above against `framework/docs/track-registry.md`.
-2. For command 1, confirm the agent reads and updates `artifacts/workspace-registry.json`.
+2. For command 1, confirm the agent uses `scripts/registry.py` to update registry state.
 3. For command 2, confirm the agent writes the PRD but does not update registry because Track/registry intent is absent.
 4. For command 3, confirm the agent blocks or asks clarification because `missing-track` does not exist and creation was not requested.
 5. For command 4, confirm a new Track can be created because the user explicitly says to promote into a new track, and PM registers only its own PRD artifact.
 
 ## Pass Criteria
 
-- Explicit Track/registry prompts read `artifacts/workspace-registry.json`.
+- Explicit Track/registry prompts use `scripts/registry.py` rather than direct JSON edits.
 - Explicit existing Track prompts register only the current agent's artifact role/type/path entry.
 - Non-Track artifact prompts do not update registry automatically.
 - Missing Track registration does not create a Track unless the user explicitly asks to create/promote.

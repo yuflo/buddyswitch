@@ -7,7 +7,8 @@ cd "${REPO_ROOT}"
 
 VALID_AGENTS=("market" "pm" "design" "dev" "test")
 CONFIRM_PHRASE="DELETE_BUDDYSWITCH_DATA"
-PRESERVED_FILES=("artifacts/workspace-registry.json")
+REGISTRY_PATH="artifacts/workspace-registry.json"
+SNAPSHOT_PATH="framework/console/workspace-data.js"
 
 MODE_AGENT=""
 MODE_ALL_AGENTS=0
@@ -31,7 +32,7 @@ Targets:
   --agent <market|pm|design|dev|test>    Clean one agent's artifacts + runs
   --all-agents                            Clean all agents' artifacts + runs
   --project app                           Clean project runtime data (projects/app/.runtime)
-  --all-storage                           Clean storage data while preserving the Track Registry
+  --all-storage                           Clean all local storage data, including the Track Registry
 
 Modes:
   --dry-run                               Preview only (default)
@@ -94,9 +95,7 @@ count_entries() {
   local count=0
   local path
   while IFS= read -r path; do
-    if ! is_preserved_path "${path}"; then
-      count=$((count + 1))
-    fi
+    count=$((count + 1))
   done < <(find "${dir}" -mindepth 1 \( -type f -o -type l \) ! -name ".gitkeep" -print)
   echo "${count}"
 }
@@ -117,19 +116,6 @@ is_safe_delete_path() {
   esac
 }
 
-is_preserved_path() {
-  local p="$1"
-  local rel
-  local preserved
-  rel="$(rel_path "${p}")"
-  for preserved in "${PRESERVED_FILES[@]}"; do
-    if [[ "${rel}" == "${preserved}" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
 gather_delete_paths() {
   local dir path
   DELETE_PATHS=()
@@ -139,12 +125,34 @@ gather_delete_paths() {
     fi
     while IFS= read -r path; do
       [[ -z "${path}" ]] && continue
-      if is_preserved_path "${path}"; then
-        continue
-      fi
       DELETE_PATHS+=("${path}")
     done < <(find "${dir}" -mindepth 1 \( -type f -o -type l \) ! -name ".gitkeep" -print)
   done
+}
+
+print_registry_plan() {
+  echo "Registry changes:"
+  if [[ -n "${MODE_AGENT}" ]]; then
+    python3 scripts/registry.py remove-role-artifacts --role "${MODE_AGENT}" --drop-empty-tracks --dry-run
+    return 0
+  fi
+
+  if [[ ${MODE_ALL_AGENTS} -eq 1 ]]; then
+    python3 scripts/registry.py clear --force --dry-run
+    return 0
+  fi
+
+  if [[ ${MODE_ALL_STORAGE} -eq 1 ]]; then
+    if [[ -f "${REGISTRY_PATH}" ]]; then
+      echo "Would delete: ${REGISTRY_PATH}"
+    else
+      echo "No registry file found."
+    fi
+    echo "Would rebuild: ${SNAPSHOT_PATH}"
+    return 0
+  fi
+
+  echo "No registry changes."
 }
 
 print_plan() {
@@ -165,11 +173,7 @@ print_plan() {
       echo "  - $(rel_path "${p}")"
     done
   fi
-  echo "Preserved files:"
-  local preserved
-  for preserved in "${PRESERVED_FILES[@]}"; do
-    echo "  - ${preserved}"
-  done
+  print_registry_plan
   echo
 }
 
@@ -321,6 +325,24 @@ run_delete() {
   done
 }
 
+update_registry_after_delete() {
+  if [[ -n "${MODE_AGENT}" ]]; then
+    python3 scripts/registry.py remove-role-artifacts --role "${MODE_AGENT}" --drop-empty-tracks
+    return 0
+  fi
+
+  if [[ ${MODE_ALL_AGENTS} -eq 1 ]]; then
+    python3 scripts/registry.py clear --force
+    return 0
+  fi
+
+  return 0
+}
+
+refresh_snapshot() {
+  python3 scripts/build_console_snapshot.py >/dev/null
+}
+
 main() {
   parse_args "$@"
   validate_modes
@@ -335,7 +357,9 @@ main() {
 
   confirm_execute
   run_delete
+  update_registry_after_delete
   ensure_required_skeleton
+  refresh_snapshot
   echo "Cleanup completed."
 }
 

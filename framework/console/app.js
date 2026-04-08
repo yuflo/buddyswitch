@@ -32,6 +32,7 @@ const topicSlug = document.getElementById("topicSlug");
 const timeline = document.getElementById("timeline");
 const switchCommands = document.getElementById("switchCommands");
 const cleanupCommands = document.getElementById("cleanupCommands");
+const refreshButton = document.getElementById("refreshButton");
 
 let selectedTrack = tracks[0] || null;
 
@@ -94,7 +95,7 @@ function suggestedTrackSwitches(track) {
   const suggestions = [];
 
   if (!market) {
-    suggestions.push(`switch market: 为 ${trackId} track 补充调研，并登记到 artifacts/workspace-registry.json`);
+    suggestions.push(`switch market: 为 ${trackId} track 补充调研，并通过 registry adapter 登记`);
   }
 
   if (!prd) {
@@ -155,7 +156,7 @@ function renderTracks() {
   trackCount.textContent = String(tracks.length);
 
   if (tracks.length === 0) {
-    trackList.append(createEl("p", "note", "No tracks found. Register a product iteration in artifacts/workspace-registry.json."));
+    trackList.append(createEl("p", "note", "No tracks found. Register a product iteration with scripts/registry.py."));
     return;
   }
 
@@ -267,6 +268,12 @@ function render() {
   renderSummaries();
   renderSelectedTrack();
   renderUntrackedArtifacts();
+}
+
+if (refreshButton) {
+  refreshButton.addEventListener("click", () => {
+    window.location.reload();
+  });
 }
 
 render();

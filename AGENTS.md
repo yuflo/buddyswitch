@@ -33,6 +33,7 @@ When the user writes `switch <agent>: <task>`, you must:
    - `framework/contracts/<agent>.md`
    - `framework/agent-registry.md`
    - `framework/docs/track-registry.md` when the task references Tracks or artifact registration
+   - `scripts/registry.py` when the task needs to create or update Track Registry state
    - relevant files in `framework/templates/`
    - relevant referenced artifacts
    - `artifacts/workspace-registry.json` when the task references Tracks or artifact registration
@@ -57,20 +58,23 @@ When the user writes `switch <agent>: <task>`, you must:
 - Tracks are explicit product iteration records in `artifacts/workspace-registry.json`.
 - Untracked artifacts are diagnostics only, not a product queue.
 - Agents must follow `framework/docs/track-registry.md` when a task references Tracks or artifact registration.
+- Agents must use `scripts/registry.py` for Track Registry changes rather than editing JSON directly.
 - Agents may suggest registry metadata, but must not create or associate Tracks without explicit user intent.
 - The interface may generate suggested `switch ...` and cleanup commands for the user to run manually in CLI.
-- Refresh interface data by running `python3 scripts/build_console_snapshot.py`.
+- Refresh interface data by running `python3 scripts/serve_context_panel.py` and using the page's `Refresh` button. `python3 scripts/build_console_snapshot.py` remains available for static debugging.
 
 ## File Placement
 
 - Durable outputs go to `artifacts/`.
 - The explicit Track Registry lives at `artifacts/workspace-registry.json`.
+- The registry file is the v1 local dump backend; `scripts/registry.py` is the temporary operation adapter for registry writes.
 - Noisy raw dumps go to `runs/raw/`.
 - Compact useful summaries go to `runs/summaries/`.
 - Project runtime-only temporary data goes to `projects/app/.runtime/`.
 - Durable outputs and summaries are expected to be commit-friendly.
 - Raw dumps, scratch traces, and temporary logs should stay out of Git.
 - Agent-target cleanup depends on path conventions (`runs/raw/<agent>`, `runs/summaries/<agent>`), not heuristic guessing.
+- Cleanup keeps registry state aligned by calling the registry adapter when agent data is removed, and `--all-storage` removes the local registry dump.
 
 ## Project Code Location
 

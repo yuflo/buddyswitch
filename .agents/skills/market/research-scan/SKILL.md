@@ -69,7 +69,7 @@ For each round, run this fixed loop:
 ## Registry Handling
 
 - Follow `framework/docs/track-registry.md`.
-- If the user explicitly references Track/registry/register/promote intent, register the research artifact with `role: "market"` and `type: "research"`.
+- If the user explicitly references Track/registry/register/promote intent, use `scripts/registry.py` to register the research artifact with `role: "market"` and `type: "research"`.
 - If the user does not explicitly reference Track/registry/register/promote intent, leave the artifact untracked and optionally suggest a registration switch.
 - Do not create or associate Tracks based only on market judgment.
 

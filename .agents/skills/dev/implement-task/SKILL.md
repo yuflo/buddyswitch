@@ -33,7 +33,7 @@ description: Implement scoped product changes in project code and report verifie
 ## Registry Handling
 
 - Follow `framework/docs/track-registry.md`.
-- If the user explicitly references Track/registry/register/promote intent, register the implementation report with `role: "dev"` and `type: "implementation-report"`.
+- If the user explicitly references Track/registry/register/promote intent, use `scripts/registry.py` to register the implementation report with `role: "dev"` and `type: "implementation-report"`.
 - If the user does not explicitly reference Track/registry/register/promote intent, leave the implementation report untracked and optionally suggest a registration switch.
 - Do not create or associate Tracks based only on dev judgment.
 

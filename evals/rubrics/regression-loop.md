@@ -16,6 +16,8 @@ Run the 9-case suite after any change to:
 - `artifacts/workspace-registry.json`
 - `scripts/cleanup_buddyswitch.sh`
 - `scripts/build_console_snapshot.py`
+- `scripts/registry.py`
+- `scripts/serve_context_panel.py`
 
 ## How To Run (Lightweight)
 

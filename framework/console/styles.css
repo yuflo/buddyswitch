@@ -153,7 +153,8 @@ h3 {
 }
 
 .topic-button,
-.copy-button {
+.copy-button,
+.refresh-button {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -241,12 +242,17 @@ h3 {
   line-height: 1.45;
 }
 
-.copy-button {
+.copy-button,
+.refresh-button {
   width: auto;
   flex: 0 0 auto;
   padding: 9px 11px;
   color: var(--accent-strong);
   font-weight: 700;
+}
+
+.refresh-button {
+  justify-self: end;
 }
 
 .summary-item {
@@ -306,7 +312,8 @@ h3 {
     flex-direction: column;
   }
 
-  .copy-button {
+  .copy-button,
+  .refresh-button {
     width: 100%;
   }
 }

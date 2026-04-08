@@ -30,6 +30,7 @@ The interface may:
 ## Location
 
 - Static interface: `framework/console/`
+- Local server: `scripts/serve_context_panel.py`
 - Snapshot generator: `scripts/build_console_snapshot.py`
 - Snapshot output: `framework/console/workspace-data.js`
 - Track registry: `artifacts/workspace-registry.json`
@@ -51,7 +52,7 @@ window.BUDDYSWITCH_WORKSPACE = {
 };
 ```
 
-Tracks are declared in `artifacts/workspace-registry.json`. The registry is the durable project state for product iteration records:
+Tracks are declared through the registry adapter and currently stored in `artifacts/workspace-registry.json`. The JSON file is the v1 local dump backend for product iteration records:
 
 ```json
 {
@@ -79,23 +80,37 @@ Artifact scanning still covers:
 
 Files not referenced by any registry track are listed in `untracked_artifacts`. They are diagnostics only, not a product queue.
 
-Track creation and artifact association must be explicit. Agents may suggest `track_id`, `title`, `role`, `type`, and `state`, but must not create tracks only from their own judgment.
+Track creation and artifact association must be explicit. Agents may suggest `track_id`, `title`, `role`, `type`, and `state`, but must not create tracks only from their own judgment. Registry writes should go through `scripts/registry.py`, not direct JSON editing.
 
 ## Refresh Workflow
 
-Run:
+Run the local server:
+
+```bash
+python3 scripts/serve_context_panel.py
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8765/
+```
+
+Use the page's `Refresh` button to reload current workspace data from the local server.
+
+For static debugging, run:
 
 ```bash
 python3 scripts/build_console_snapshot.py
 ```
 
-Then open or refresh:
+Then open:
 
 ```text
 framework/console/index.html
 ```
 
-No local server is required for v1 because the interface loads `workspace-data.js` as a script instead of fetching JSON.
+The static mode loads `workspace-data.js` as a script, so it only reflects the last generated snapshot.
 
 ## Cleanup Integration
 
@@ -109,3 +124,5 @@ scripts/cleanup_buddyswitch.sh --all-storage
 ```
 
 Generated cleanup commands must not include `--execute` or `--force` by default.
+
+Cleanup keeps registry state aligned through `scripts/registry.py` for agent-level and all-agent cleanup. `--all-storage` removes the local registry dump and rebuilds an empty/current snapshot.

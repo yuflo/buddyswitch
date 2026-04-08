@@ -82,7 +82,13 @@ def artifact_metadata(path: str, role: str | None = None, artifact_type: str | N
 
 def load_registry() -> dict[str, Any]:
     if not REGISTRY.exists():
-        raise ValueError(f"Missing required track registry: {rel(REGISTRY)}")
+        project_id = ROOT.name
+        project_name = "BuddySwitch" if project_id == "buddyswitch" else project_id.replace("-", " ").title()
+        return {
+            "schema_version": 1,
+            "project": {"id": project_id, "name": project_name},
+            "tracks": [],
+        }
 
     try:
         registry = json.loads(REGISTRY.read_text(encoding="utf-8"))

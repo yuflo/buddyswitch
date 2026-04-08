@@ -29,7 +29,8 @@ Out of scope:
 
 Track registry behavior:
 - Follow framework/docs/track-registry.md.
-- Only update artifacts/workspace-registry.json when the user explicitly references Track/registry/register/promote intent.
+- Use scripts/registry.py for registry changes; do not edit artifacts/workspace-registry.json directly.
+- Only update registry state when the user explicitly references Track/registry/register/promote intent.
 - Register only PM artifacts with role = "pm" and type = "prd".
 - Do not create or associate Tracks based only on your own judgment.
 

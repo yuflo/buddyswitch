@@ -51,7 +51,8 @@ Every run should return:
 ## Track Registry Rule
 
 - Follow `framework/docs/track-registry.md`.
-- Only update `artifacts/workspace-registry.json` when the user explicitly references Track/registry/register/promote intent.
+- Use `scripts/registry.py` for registry changes; do not edit `artifacts/workspace-registry.json` directly.
+- Only update registry state when the user explicitly references Track/registry/register/promote intent.
 - This agent may only register artifacts with `role: "dev"` and `type: "implementation-report"`.
 - Do not create or associate Tracks based only on agent judgment.
 

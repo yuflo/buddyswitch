@@ -35,7 +35,8 @@ This repository is the BuddySwitch v1 reference workspace.
 - `framework/docs/switch-spec.md`: switch syntax and error handling rules
 - `framework/docs/artifacts-runs-git-policy.md`: durable output and Git rules
 - `framework/console/`: read-only context panel for registry tracks, untracked artifacts, and copyable commands
-- `artifacts/workspace-registry.json`: explicit Track Registry for product iteration records
+- `artifacts/workspace-registry.json`: local dump backend for explicit Track Registry state
+- `scripts/registry.py`: temporary registry operation adapter
 - `projects/app/`: application code area
 - `projects/app/.runtime/`: project runtime-only data (temporary, cleanup-safe)
 - `evals/`: lightweight evaluation cases and rubrics
@@ -50,15 +51,27 @@ This repository is the BuddySwitch v1 reference workspace.
 
 BuddySwitch includes a local read-only context panel for browsing explicit tracks, untracked artifacts, summaries, suggested switch commands, and cleanup commands.
 
-- `Tracks` are product iteration records declared in `artifacts/workspace-registry.json`.
+- `Tracks` are product iteration records declared through the registry adapter and currently stored in `artifacts/workspace-registry.json`.
 - `Untracked Artifacts` are files not registered to any Track. They are diagnostics, not a product queue.
 - Track creation and artifact association should be explicit user intent, not automatic inference.
+- Use `scripts/registry.py` for registry writes; the JSON file is a temporary local dump backend, not the final storage architecture.
 
-Refresh the snapshot:
+Run the local Context Panel server:
+
+- `python3 scripts/serve_context_panel.py`
+- If port `8765` is busy: `python3 scripts/serve_context_panel.py --port 8766`
+
+Open:
+
+- `http://127.0.0.1:8765/`
+
+Use the page's `Refresh` button to reload current workspace data.
+
+Static snapshot export remains available for debugging:
 
 - `python3 scripts/build_console_snapshot.py`
 
-Open:
+Then open:
 
 - `framework/console/index.html`
 
@@ -68,7 +81,7 @@ Interface boundary:
 - It does not call Codex, Claude Code, or Gemini CLI.
 - It does not execute cleanup commands.
 - It generates copyable commands for the user to run manually in the CLI.
-- It reads generated static data from `framework/console/workspace-data.js`.
+- The local server dynamically serves current workspace data; the static file reads `framework/console/workspace-data.js`.
 
 ## Manual Cleanup
 
@@ -94,7 +107,7 @@ Examples:
   - `scripts/cleanup_buddyswitch.sh --all-agents`
 - Clean project runtime data:
   - `scripts/cleanup_buddyswitch.sh --project app`
-- Clean all storage data (`artifacts`, `runs`, `projects/app/.runtime`):
+- Clean all storage data (`artifacts`, `runs`, `projects/app/.runtime`, registry, and console snapshot):
   - `scripts/cleanup_buddyswitch.sh --all-storage`
 - Execute mode:
   - `scripts/cleanup_buddyswitch.sh --all-agents --execute`
@@ -103,6 +116,19 @@ Examples:
 Important notes:
 
 - Run `git status` before cleanup if you may want to keep generated files.
-- `artifacts/workspace-registry.json` is preserved by cleanup because it is durable project state.
+- Agent cleanup updates registry state through `scripts/registry.py` so the Context Panel does not keep old artifact links.
+- `--all-storage` removes `artifacts/workspace-registry.json` because it resets all local BuddySwitch storage.
 - Agent-target cleanup relies on path conventions (`runs/raw/<agent>`, `runs/summaries/<agent>`), not regex guessing.
 - Legacy files placed directly under `runs/summaries/` root are not covered by agent-target cleanup and are only removed by `--all-storage`.
+
+## Registry Adapter
+
+The v1 registry adapter is a temporary local operation layer for Track state:
+
+- `python3 scripts/registry.py validate`
+- `python3 scripts/registry.py list-tracks`
+- `python3 scripts/registry.py show-track <track-id>`
+- `python3 scripts/registry.py create-track <track-id> --title "<title>"`
+- `python3 scripts/registry.py add-artifact <track-id> --role pm --type prd --path artifacts/prd/example.md`
+
+Agents should use this adapter when the user explicitly asks to create, continue, promote, register, or associate work with a Track.

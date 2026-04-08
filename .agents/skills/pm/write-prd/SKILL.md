@@ -33,7 +33,7 @@ description: Produce an MVP PRD from research and requirements, aligned with the
 ## Registry Handling
 
 - Follow `framework/docs/track-registry.md`.
-- If the user explicitly references Track/registry/register/promote intent, register the PRD artifact with `role: "pm"` and `type: "prd"`.
+- If the user explicitly references Track/registry/register/promote intent, use `scripts/registry.py` to register the PRD artifact with `role: "pm"` and `type: "prd"`.
 - If the user does not explicitly reference Track/registry/register/promote intent, leave the artifact untracked and optionally suggest a registration switch.
 - Do not create or associate Tracks based only on PM judgment.
 
