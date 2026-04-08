@@ -17,10 +17,11 @@ No weighted score in v1.
 - `05-invalid-switch-error.md`
 - `06-switch-market-deep-research.md`
 - `07-cleanup-storage-script.md`
+- `08-interface-context-panel.md`
 
 ## Run-Level Verdict
 
-- `PASS`: all 7 required cases pass.
+- `PASS`: all 8 required cases pass.
 - `FAIL`: any required case fails.
 
 ## Failure Logging Format

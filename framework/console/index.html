@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BuddySwitch Context Panel</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="workspace">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">BuddySwitch v1</p>
+        <h1>Context Panel</h1>
+      </div>
+      <div class="meta">
+        <span>Snapshot</span>
+        <strong id="generatedAt">not loaded</strong>
+      </div>
+    </header>
+
+    <section class="layout" aria-label="Workspace context">
+      <aside class="sidebar" aria-label="Workspace groups">
+        <div class="sidebar-section">
+          <div class="section-head">
+            <h2>Tracks</h2>
+            <span id="trackCount">0</span>
+          </div>
+          <p class="note">Cross-agent workstreams inferred from PRD, design, build, or test artifacts.</p>
+          <div id="trackList" class="topic-list"></div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="section-head">
+            <h2>Research Inbox</h2>
+            <span id="researchInboxCount">0</span>
+          </div>
+          <p class="note">Market-only research artifacts that have not become product tracks yet.</p>
+          <div id="researchInboxList" class="topic-list"></div>
+        </div>
+      </aside>
+
+      <section class="detail" aria-label="Selected item">
+        <div class="topic-head">
+          <div>
+            <p class="eyebrow" id="selectedType">Selected item</p>
+            <h2 id="topicTitle">No item</h2>
+          </div>
+          <code id="topicSlug">-</code>
+        </div>
+
+        <section class="panel">
+          <div class="section-head">
+            <h3>Artifact Timeline</h3>
+          </div>
+          <div id="timeline" class="timeline"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h3>Suggested Switch</h3>
+          </div>
+          <div id="switchCommands" class="command-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h3>Cleanup Commands</h3>
+          </div>
+          <p class="note">Commands are dry-run by default. Add <code>--execute</code> in your CLI when you intend to delete data.</p>
+          <div id="cleanupCommands" class="command-list"></div>
+        </section>
+      </section>
+
+      <aside class="sidebar" aria-label="Run summaries">
+        <div class="section-head">
+          <h2>Run Summaries</h2>
+          <span id="summaryCount">0</span>
+        </div>
+        <div id="summaryList" class="summary-list"></div>
+      </aside>
+    </section>
+
+    <footer class="footer">
+      <code>python3 scripts/build_console_snapshot.py</code>
+      <span>Refresh the snapshot, then reload this page.</span>
+    </footer>
+  </main>
+
+  <script src="./workspace-data.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

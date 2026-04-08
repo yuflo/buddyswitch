@@ -2,7 +2,7 @@
 
 ## When To Run
 
-Run the 7-case suite after any change to:
+Run the 8-case suite after any change to:
 - `AGENTS.md`
 - `.codex/agents/*.toml`
 - `framework/contracts/**`
@@ -10,7 +10,10 @@ Run the 7-case suite after any change to:
 - `.agents/skills/**/SKILL.md`
 - `framework/docs/switch-spec.md`
 - `framework/docs/artifacts-runs-git-policy.md`
+- `framework/docs/interface-spec.md`
+- `framework/console/**`
 - `scripts/cleanup_buddyswitch.sh`
+- `scripts/build_console_snapshot.py`
 
 ## How To Run (Lightweight)
 
@@ -37,6 +40,7 @@ Run the 7-case suite after any change to:
 - 05-invalid-switch-error: pass/fail
 - 06-switch-market-deep-research: pass/fail
 - 07-cleanup-storage-script: pass/fail
+- 08-interface-context-panel: pass/fail
 
 ## Regressions
 

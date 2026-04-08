@@ -34,6 +34,7 @@ This repository is the BuddySwitch v1 reference workspace.
 - `framework/templates/`: reusable templates
 - `framework/docs/switch-spec.md`: switch syntax and error handling rules
 - `framework/docs/artifacts-runs-git-policy.md`: durable output and Git rules
+- `framework/console/`: read-only context panel for tracks, research inbox items, artifacts, and copyable commands
 - `projects/app/`: application code area
 - `projects/app/.runtime/`: project runtime-only data (temporary, cleanup-safe)
 - `evals/`: lightweight evaluation cases and rubrics
@@ -43,6 +44,30 @@ This repository is the BuddySwitch v1 reference workspace.
 - Keep one workspace repository for framework, app code, artifacts, and evals.
 - Commit durable outputs in `artifacts/` and compact summaries in `runs/summaries/`.
 - Do not commit raw dumps or scratch output in `runs/raw/`.
+
+## Context Panel
+
+BuddySwitch includes a local read-only context panel for browsing tracks, market-only research inbox items, artifacts, summaries, suggested switch commands, and cleanup commands.
+
+- `Tracks` are cross-agent workstreams inferred from PRD, design, build, or test artifacts.
+- `Research Inbox` items are market-only research artifacts that have not become product tracks yet.
+- Both are filename-inferred hints, not an explicit topic registry or hidden agent state.
+
+Refresh the snapshot:
+
+- `python3 scripts/build_console_snapshot.py`
+
+Open:
+
+- `framework/console/index.html`
+
+Interface boundary:
+
+- It does not call agents.
+- It does not call Codex, Claude Code, or Gemini CLI.
+- It does not execute cleanup commands.
+- It generates copyable commands for the user to run manually in the CLI.
+- It reads generated static data from `framework/console/workspace-data.js`.
 
 ## Manual Cleanup
 

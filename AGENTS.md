@@ -48,6 +48,14 @@ When the user writes `switch <agent>: <task>`, you must:
 - Do not silently reroute to a different agent.
 - Do not use multiple agents unless the user explicitly asks.
 
+## Context Panel Rules
+
+- `framework/console/` is a read-only context panel for tracks, research inbox items, artifacts, summaries, and copyable commands.
+- The interface must not invoke agents, call an LLM, execute cleanup, or hold hidden agent state.
+- Tracks and research inbox items are filename-inferred workspace hints, not an explicit topic registry.
+- The interface may generate suggested `switch ...` and cleanup commands for the user to run manually in CLI.
+- Refresh interface data by running `python3 scripts/build_console_snapshot.py`.
+
 ## File Placement
 
 - Durable outputs go to `artifacts/`.
