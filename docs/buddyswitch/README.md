@@ -26,6 +26,7 @@ Recommended reading order:
 7. `07-file-and-git-conventions.md`
 8. `08-evaluation-plan.md`
 9. `09-open-questions-and-notes.md`
+10. `12-track-registry-and-context-panel-plan.md`
 
 ## Intended use with local Codex CLI
 

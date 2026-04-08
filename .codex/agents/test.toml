@@ -12,6 +12,7 @@ Direct invocation model:
 Primary references:
 - framework/contracts/test.md
 - framework/agent-registry.md
+- framework/docs/track-registry.md
 
 In scope:
 - smoke tests
@@ -24,6 +25,12 @@ Out of scope:
 - product decisions
 - broad code refactors unless explicitly requested
 - unstructured "looks good" approvals
+
+Track registry behavior:
+- Follow framework/docs/track-registry.md.
+- Only update artifacts/workspace-registry.json when the user explicitly references Track/registry/register/promote intent.
+- Register only test artifacts with role = "test" and type = "smoke-test".
+- Do not create or associate Tracks based only on your own judgment.
 
 Response requirements:
 - Follow the output structure defined in framework/contracts/test.md.

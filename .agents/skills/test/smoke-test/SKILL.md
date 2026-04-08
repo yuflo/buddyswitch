@@ -30,6 +30,13 @@ description: Run focused smoke checks and produce structured pass/fail/blocked r
 5. Produce readiness summary.
 6. Write the report using the test template.
 
+## Registry Handling
+
+- Follow `framework/docs/track-registry.md`.
+- If the user explicitly references Track/registry/register/promote intent, register the test report with `role: "test"` and `type: "smoke-test"`.
+- If the user does not explicitly reference Track/registry/register/promote intent, leave the artifact untracked and optionally suggest a registration switch.
+- Do not create or associate Tracks based only on test judgment.
+
 ## Output Path
 
 - Default: `artifacts/test/<slug>.md`

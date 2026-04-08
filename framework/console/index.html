@@ -21,30 +21,21 @@
     </header>
 
     <section class="layout" aria-label="Workspace context">
-      <aside class="sidebar" aria-label="Workspace groups">
+      <aside class="sidebar" aria-label="Workspace tracks">
         <div class="sidebar-section">
           <div class="section-head">
             <h2>Tracks</h2>
             <span id="trackCount">0</span>
           </div>
-          <p class="note">Cross-agent workstreams inferred from PRD, design, build, or test artifacts.</p>
+          <p class="note">Explicit product iteration records from the workspace registry.</p>
           <div id="trackList" class="topic-list"></div>
-        </div>
-
-        <div class="sidebar-section">
-          <div class="section-head">
-            <h2>Research Inbox</h2>
-            <span id="researchInboxCount">0</span>
-          </div>
-          <p class="note">Market-only research artifacts that have not become product tracks yet.</p>
-          <div id="researchInboxList" class="topic-list"></div>
         </div>
       </aside>
 
-      <section class="detail" aria-label="Selected item">
+      <section class="detail" aria-label="Selected track">
         <div class="topic-head">
           <div>
-            <p class="eyebrow" id="selectedType">Selected item</p>
+            <p class="eyebrow" id="selectedType">Selected track</p>
             <h2 id="topicTitle">No item</h2>
           </div>
           <code id="topicSlug">-</code>
@@ -70,6 +61,15 @@
           </div>
           <p class="note">Commands are dry-run by default. Add <code>--execute</code> in your CLI when you intend to delete data.</p>
           <div id="cleanupCommands" class="command-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h3>Untracked Artifacts</h3>
+            <span id="untrackedCount">0</span>
+          </div>
+          <p class="note">Artifacts not registered to a Track. Register them explicitly or leave them as reference material.</p>
+          <div id="untrackedList" class="summary-list"></div>
         </section>
       </section>
 

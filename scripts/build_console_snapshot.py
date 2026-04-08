@@ -4,46 +4,25 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REGISTRY = ROOT / "artifacts" / "workspace-registry.json"
 OUTPUT = ROOT / "framework" / "console" / "workspace-data.js"
 
-ROLE_DIRS = {
-    "research": ROOT / "artifacts" / "research",
-    "prd": ROOT / "artifacts" / "prd",
-    "design": ROOT / "artifacts" / "design",
-    "build": ROOT / "artifacts" / "build",
-    "test": ROOT / "artifacts" / "test",
-}
+ROLE_ORDER = ("market", "pm", "design", "dev", "test")
 
-ROLE_AGENTS = {
-    "research": "market",
-    "prd": "pm",
-    "design": "design",
-    "build": "dev",
-    "test": "test",
+ARTIFACT_DIRS = {
+    "research": {"path": ROOT / "artifacts" / "research", "role": "market", "type": "research"},
+    "prd": {"path": ROOT / "artifacts" / "prd", "role": "pm", "type": "prd"},
+    "design": {"path": ROOT / "artifacts" / "design", "role": "design", "type": "design-spec"},
+    "build": {"path": ROOT / "artifacts" / "build", "role": "dev", "type": "implementation-report"},
+    "test": {"path": ROOT / "artifacts" / "test", "role": "test", "type": "smoke-test"},
 }
-
-GROUP_SUFFIXES = (
-    "-market-research",
-    "-research-report",
-    "-design-spec",
-    "-implementation-report",
-    "-test-report",
-    "-mvp-prd",
-    "-smoke-test",
-    "-research",
-    "-design",
-    "-implementation",
-    "-smoke",
-    "-spec",
-    "-impl",
-    "-prd",
-    "-mvp",
-)
 
 
 def iso_time(path: Path) -> str:
@@ -52,6 +31,13 @@ def iso_time(path: Path) -> str:
 
 def rel(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
+
+
+def normalize_registry_path(raw_path: str) -> str:
+    path = Path(raw_path)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"Registry artifact path must be repo-relative: {raw_path}")
+    return path.as_posix()
 
 
 def title_from_markdown(path: Path) -> str:
@@ -64,82 +50,130 @@ def title_from_markdown(path: Path) -> str:
     return path.stem
 
 
-def group_slug(stem: str) -> str:
-    slug = stem
-    for suffix in GROUP_SUFFIXES:
-        if slug.endswith(suffix) and len(slug) > len(suffix):
-            return slug[: -len(suffix)]
-    return slug
+def empty_artifacts() -> dict[str, list[dict[str, Any]]]:
+    return {role: [] for role in ROLE_ORDER}
 
 
-def empty_artifacts() -> dict[str, list]:
-    return {key: [] for key in ROLE_DIRS}
+def artifact_defaults(path: str) -> dict[str, str]:
+    for source_dir, config in ARTIFACT_DIRS.items():
+        prefix = f"artifacts/{source_dir}/"
+        if path.startswith(prefix):
+            return {"source_dir": source_dir, "role": config["role"], "type": config["type"]}
+    return {"source_dir": "unknown", "role": "unknown", "type": "unknown"}
 
 
-def scan_artifact_groups() -> list[dict]:
-    groups: dict[str, dict] = {}
+def artifact_metadata(path: str, role: str | None = None, artifact_type: str | None = None) -> dict[str, Any]:
+    normalized = normalize_registry_path(path)
+    defaults = artifact_defaults(normalized)
+    resolved = ROOT / normalized
+    exists = resolved.exists()
 
-    for role, directory in ROLE_DIRS.items():
+    return {
+        "role": role or defaults["role"],
+        "type": artifact_type or defaults["type"],
+        "source_dir": defaults["source_dir"],
+        "path": normalized,
+        "file_name": Path(normalized).name,
+        "title": title_from_markdown(resolved) if exists else Path(normalized).stem,
+        "updated_at": iso_time(resolved) if exists else None,
+        "missing": not exists,
+    }
+
+
+def load_registry() -> dict[str, Any]:
+    if not REGISTRY.exists():
+        raise ValueError(f"Missing required track registry: {rel(REGISTRY)}")
+
+    try:
+        registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON in {rel(REGISTRY)}: {exc}") from exc
+
+    if registry.get("schema_version") != 1:
+        raise ValueError("Registry schema_version must be 1.")
+    if not isinstance(registry.get("tracks"), list):
+        raise ValueError("Registry tracks must be a list.")
+    return registry
+
+
+def build_tracks(registry: dict[str, Any]) -> tuple[list[dict[str, Any]], set[str]]:
+    tracks: list[dict[str, Any]] = []
+    registered_paths: set[str] = set()
+
+    for raw_track in registry["tracks"]:
+        if not isinstance(raw_track, dict):
+            raise ValueError("Each registry track must be an object.")
+
+        track_id = raw_track.get("id")
+        if not isinstance(track_id, str) or not track_id:
+            raise ValueError("Each registry track must include a non-empty id.")
+
+        artifacts = empty_artifacts()
+        missing_artifacts: list[str] = []
+        updated_at: str | None = None
+
+        raw_artifacts = raw_track.get("artifacts", [])
+        if not isinstance(raw_artifacts, list):
+            raise ValueError(f"Track {track_id} artifacts must be a list.")
+
+        for ref in raw_artifacts:
+            if not isinstance(ref, dict):
+                raise ValueError(f"Track {track_id} has an artifact entry that is not an object.")
+
+            raw_path = ref.get("path")
+            if not isinstance(raw_path, str) or not raw_path:
+                raise ValueError(f"Track {track_id} has an artifact without a path.")
+
+            role = ref.get("role")
+            if role not in ROLE_ORDER:
+                raise ValueError(f"Track {track_id} has an artifact with invalid role: {role}")
+
+            metadata = artifact_metadata(raw_path, role=role, artifact_type=ref.get("type"))
+            registered_paths.add(metadata["path"])
+            artifacts[role].append(metadata)
+
+            if metadata["missing"]:
+                missing_artifacts.append(metadata["path"])
+            elif updated_at is None or metadata["updated_at"] > updated_at:
+                updated_at = metadata["updated_at"]
+
+        for role_artifacts in artifacts.values():
+            role_artifacts.sort(key=lambda item: item["updated_at"] or "", reverse=True)
+
+        tracks.append(
+            {
+                "id": track_id,
+                "title": raw_track.get("title") or track_id.replace("-", " ").title(),
+                "state": raw_track.get("state") or "active",
+                "artifacts": artifacts,
+                "updated_at": updated_at,
+                "missing_artifacts": missing_artifacts,
+                "registry_path": rel(REGISTRY),
+            }
+        )
+
+    tracks.sort(key=lambda item: (item["updated_at"] or "", item["id"]), reverse=True)
+    return tracks, registered_paths
+
+
+def scan_artifact_files() -> list[dict[str, Any]]:
+    artifacts = []
+    for source_dir, config in ARTIFACT_DIRS.items():
+        directory = config["path"]
         if not directory.exists():
             continue
         for path in sorted(directory.glob("*.md")):
             if path.name == ".gitkeep":
                 continue
-
-            slug = group_slug(path.stem)
-            group = groups.setdefault(
-                slug,
-                {
-                    "slug": slug,
-                    "label": slug.replace("-", " ").title(),
-                    "inferred": True,
-                    "inference_source": "artifact_filename",
-                    "artifacts": empty_artifacts(),
-                    "updated_at": None,
-                },
-            )
-
-            artifact = {
-                "role": role,
-                "agent": ROLE_AGENTS[role],
-                "inferred_group_slug": slug,
-                "path": rel(path),
-                "file_name": path.name,
-                "title": title_from_markdown(path),
-                "updated_at": iso_time(path),
-            }
-            group["artifacts"][role].append(artifact)
-
-            if group["updated_at"] is None or artifact["updated_at"] > group["updated_at"]:
-                group["updated_at"] = artifact["updated_at"]
-
-    for group in groups.values():
-        for artifacts in group["artifacts"].values():
-            artifacts.sort(key=lambda item: item["updated_at"], reverse=True)
-
-    return sorted(groups.values(), key=lambda item: (item["updated_at"] or "", item["slug"]), reverse=True)
+            artifacts.append(artifact_metadata(rel(path), role=config["role"], artifact_type=config["type"]))
+    return sorted(artifacts, key=lambda item: (item["updated_at"] or "", item["path"]), reverse=True)
 
 
-def has_non_research_artifacts(group: dict) -> bool:
-    return any(group["artifacts"].get(role) for role in ("prd", "design", "build", "test"))
+def scan_untracked_artifacts(registered_paths: set[str]) -> list[dict[str, Any]]:
+    return [artifact for artifact in scan_artifact_files() if artifact["path"] not in registered_paths]
 
 
-def classify_artifact_groups(groups: list[dict]) -> tuple[list[dict], list[dict]]:
-    tracks = []
-    research_inbox = []
-
-    for group in groups:
-        item = dict(group)
-        item["classification"] = "track" if has_non_research_artifacts(group) else "research_inbox"
-        if item["classification"] == "track":
-            tracks.append(item)
-        else:
-            research_inbox.append(item)
-
-    return tracks, research_inbox
-
-
-def scan_summaries() -> list[dict]:
+def scan_summaries() -> list[dict[str, Any]]:
     directory = ROOT / "runs" / "summaries"
     if not directory.exists():
         return []
@@ -159,27 +193,34 @@ def scan_summaries() -> list[dict]:
     return sorted(summaries, key=lambda item: item["updated_at"], reverse=True)
 
 
-def build_snapshot() -> dict:
-    groups = scan_artifact_groups()
-    tracks, research_inbox = classify_artifact_groups(groups)
+def build_snapshot() -> dict[str, Any]:
+    registry = load_registry()
+    tracks, registered_paths = build_tracks(registry)
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "registry_path": rel(REGISTRY),
+        "project": registry.get("project", {}),
         "tracks": tracks,
-        "research_inbox": research_inbox,
+        "untracked_artifacts": scan_untracked_artifacts(registered_paths),
         "summaries": scan_summaries(),
     }
 
 
 def main() -> int:
+    try:
+        data = build_snapshot()
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    data = build_snapshot()
     payload = "window.BUDDYSWITCH_WORKSPACE = "
     payload += json.dumps(data, ensure_ascii=True, indent=2)
     payload += ";\n"
     OUTPUT.write_text(payload, encoding="utf-8")
     print(
         f"Wrote {rel(OUTPUT)} with {len(data['tracks'])} track(s) "
-        f"and {len(data['research_inbox'])} research inbox item(s)."
+        f"and {len(data['untracked_artifacts'])} untracked artifact(s)."
     )
     return 0
 

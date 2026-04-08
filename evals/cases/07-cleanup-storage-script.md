@@ -18,6 +18,7 @@ scripts/cleanup_buddyswitch.sh --all-storage --force
 ## Preconditions
 
 - `scripts/cleanup_buddyswitch.sh` exists and is executable.
+- `artifacts/workspace-registry.json` exists when the Track Registry is enabled.
 - `projects/app/.runtime/.gitkeep` exists.
 - `README.md` includes manual cleanup usage.
 
@@ -45,11 +46,13 @@ scripts/cleanup_buddyswitch.sh --all-storage --force
   - `runs/raw/**`
   - `runs/summaries/**`
   - `projects/app/.runtime/**`
+- `artifacts/workspace-registry.json` is not targeted for deletion.
 - `framework/`, `.codex/`, `.agents/`, `evals/`, and `projects/app` source files are not targeted.
 
 ## Fail Signals
 
 - Any deletion occurs without `--execute`.
+- Cleanup deletes or targets `artifacts/workspace-registry.json`.
 - Cleanup target set includes framework or source-code files.
 - Missing required target modes.
 - Errors are ambiguous or silently ignored.

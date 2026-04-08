@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "project": {
+    "id": "buddyswitch",
+    "name": "BuddySwitch"
+  },
+  "tracks": [
+    {
+      "id": "onboarding-minimal",
+      "title": "Onboarding Minimal",
+      "state": "active",
+      "artifacts": [
+        {
+          "role": "pm",
+          "type": "prd",
+          "path": "artifacts/prd/onboarding-minimal.md"
+        },
+        {
+          "role": "design",
+          "type": "design-spec",
+          "path": "artifacts/design/onboarding-minimal-spec.md"
+        },
+        {
+          "role": "dev",
+          "type": "implementation-report",
+          "path": "artifacts/build/onboarding-minimal-impl.md"
+        },
+        {
+          "role": "test",
+          "type": "smoke-test",
+          "path": "artifacts/test/onboarding-minimal-smoke.md"
+        }
+      ]
+    }
+  ]
+}

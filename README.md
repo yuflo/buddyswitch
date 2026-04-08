@@ -34,7 +34,8 @@ This repository is the BuddySwitch v1 reference workspace.
 - `framework/templates/`: reusable templates
 - `framework/docs/switch-spec.md`: switch syntax and error handling rules
 - `framework/docs/artifacts-runs-git-policy.md`: durable output and Git rules
-- `framework/console/`: read-only context panel for tracks, research inbox items, artifacts, and copyable commands
+- `framework/console/`: read-only context panel for registry tracks, untracked artifacts, and copyable commands
+- `artifacts/workspace-registry.json`: explicit Track Registry for product iteration records
 - `projects/app/`: application code area
 - `projects/app/.runtime/`: project runtime-only data (temporary, cleanup-safe)
 - `evals/`: lightweight evaluation cases and rubrics
@@ -47,11 +48,11 @@ This repository is the BuddySwitch v1 reference workspace.
 
 ## Context Panel
 
-BuddySwitch includes a local read-only context panel for browsing tracks, market-only research inbox items, artifacts, summaries, suggested switch commands, and cleanup commands.
+BuddySwitch includes a local read-only context panel for browsing explicit tracks, untracked artifacts, summaries, suggested switch commands, and cleanup commands.
 
-- `Tracks` are cross-agent workstreams inferred from PRD, design, build, or test artifacts.
-- `Research Inbox` items are market-only research artifacts that have not become product tracks yet.
-- Both are filename-inferred hints, not an explicit topic registry or hidden agent state.
+- `Tracks` are product iteration records declared in `artifacts/workspace-registry.json`.
+- `Untracked Artifacts` are files not registered to any Track. They are diagnostics, not a product queue.
+- Track creation and artifact association should be explicit user intent, not automatic inference.
 
 Refresh the snapshot:
 
@@ -102,5 +103,6 @@ Examples:
 Important notes:
 
 - Run `git status` before cleanup if you may want to keep generated files.
+- `artifacts/workspace-registry.json` is preserved by cleanup because it is durable project state.
 - Agent-target cleanup relies on path conventions (`runs/raw/<agent>`, `runs/summaries/<agent>`), not regex guessing.
 - Legacy files placed directly under `runs/summaries/` root are not covered by agent-target cleanup and are only removed by `--all-storage`.

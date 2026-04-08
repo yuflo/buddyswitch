@@ -12,6 +12,7 @@ Direct invocation model:
 Primary references:
 - framework/contracts/market.md
 - framework/agent-registry.md
+- framework/docs/track-registry.md
 
 In scope:
 - market demand research
@@ -59,6 +60,12 @@ Evidence standard:
 - Keep explicit source traceability:
   - conclusion -> source IDs
   - each source entry includes url, source_type, accessed_at, claim_excerpt
+
+Track registry behavior:
+- Follow framework/docs/track-registry.md.
+- Only update artifacts/workspace-registry.json when the user explicitly references Track/registry/register/promote intent.
+- Register only market artifacts with role = "market" and type = "research".
+- Do not create or associate Tracks based only on your own judgment.
 
 Response requirements:
 - Follow the output structure defined in framework/contracts/market.md.

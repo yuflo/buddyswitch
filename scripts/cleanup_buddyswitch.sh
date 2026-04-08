@@ -7,6 +7,7 @@ cd "${REPO_ROOT}"
 
 VALID_AGENTS=("market" "pm" "design" "dev" "test")
 CONFIRM_PHRASE="DELETE_BUDDYSWITCH_DATA"
+PRESERVED_FILES=("artifacts/workspace-registry.json")
 
 MODE_AGENT=""
 MODE_ALL_AGENTS=0
@@ -30,7 +31,7 @@ Targets:
   --agent <market|pm|design|dev|test>    Clean one agent's artifacts + runs
   --all-agents                            Clean all agents' artifacts + runs
   --project app                           Clean project runtime data (projects/app/.runtime)
-  --all-storage                           Clean all storage data (artifacts, runs, project runtime)
+  --all-storage                           Clean storage data while preserving the Track Registry
 
 Modes:
   --dry-run                               Preview only (default)
@@ -90,7 +91,14 @@ count_entries() {
     echo 0
     return 0
   fi
-  find "${dir}" -mindepth 1 \( -type f -o -type l \) ! -name ".gitkeep" | wc -l | tr -d ' '
+  local count=0
+  local path
+  while IFS= read -r path; do
+    if ! is_preserved_path "${path}"; then
+      count=$((count + 1))
+    fi
+  done < <(find "${dir}" -mindepth 1 \( -type f -o -type l \) ! -name ".gitkeep" -print)
+  echo "${count}"
 }
 
 rel_path() {
@@ -109,6 +117,19 @@ is_safe_delete_path() {
   esac
 }
 
+is_preserved_path() {
+  local p="$1"
+  local rel
+  local preserved
+  rel="$(rel_path "${p}")"
+  for preserved in "${PRESERVED_FILES[@]}"; do
+    if [[ "${rel}" == "${preserved}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 gather_delete_paths() {
   local dir path
   DELETE_PATHS=()
@@ -118,6 +139,9 @@ gather_delete_paths() {
     fi
     while IFS= read -r path; do
       [[ -z "${path}" ]] && continue
+      if is_preserved_path "${path}"; then
+        continue
+      fi
       DELETE_PATHS+=("${path}")
     done < <(find "${dir}" -mindepth 1 \( -type f -o -type l \) ! -name ".gitkeep" -print)
   done
@@ -141,6 +165,11 @@ print_plan() {
       echo "  - $(rel_path "${p}")"
     done
   fi
+  echo "Preserved files:"
+  local preserved
+  for preserved in "${PRESERVED_FILES[@]}"; do
+    echo "  - ${preserved}"
+  done
   echo
 }
 

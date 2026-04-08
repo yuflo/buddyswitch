@@ -2,7 +2,7 @@
 
 ## When To Run
 
-Run the 8-case suite after any change to:
+Run the 9-case suite after any change to:
 - `AGENTS.md`
 - `.codex/agents/*.toml`
 - `framework/contracts/**`
@@ -11,7 +11,9 @@ Run the 8-case suite after any change to:
 - `framework/docs/switch-spec.md`
 - `framework/docs/artifacts-runs-git-policy.md`
 - `framework/docs/interface-spec.md`
+- `framework/docs/track-registry.md`
 - `framework/console/**`
+- `artifacts/workspace-registry.json`
 - `scripts/cleanup_buddyswitch.sh`
 - `scripts/build_console_snapshot.py`
 
@@ -41,6 +43,7 @@ Run the 8-case suite after any change to:
 - 06-switch-market-deep-research: pass/fail
 - 07-cleanup-storage-script: pass/fail
 - 08-interface-context-panel: pass/fail
+- 09-track-registry-lifecycle: pass/fail
 
 ## Regressions
 

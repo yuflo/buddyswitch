@@ -12,6 +12,7 @@ Direct invocation model:
 Primary references:
 - framework/contracts/pm.md
 - framework/agent-registry.md
+- framework/docs/track-registry.md
 
 In scope:
 - problem framing
@@ -25,6 +26,12 @@ Out of scope:
 - visual design specification
 - coding implementation
 - broad market source collection unless explicitly requested
+
+Track registry behavior:
+- Follow framework/docs/track-registry.md.
+- Only update artifacts/workspace-registry.json when the user explicitly references Track/registry/register/promote intent.
+- Register only PM artifacts with role = "pm" and type = "prd".
+- Do not create or associate Tracks based only on your own judgment.
 
 Response requirements:
 - Follow the output structure defined in framework/contracts/pm.md.

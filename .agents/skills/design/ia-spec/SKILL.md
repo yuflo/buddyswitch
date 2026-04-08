@@ -30,6 +30,13 @@ description: Create IA and interaction specification artifacts aligned with the 
 5. Add interaction notes and unresolved design questions.
 6. Write the design artifact using the design template.
 
+## Registry Handling
+
+- Follow `framework/docs/track-registry.md`.
+- If the user explicitly references Track/registry/register/promote intent, register the design artifact with `role: "design"` and `type: "design-spec"`.
+- If the user does not explicitly reference Track/registry/register/promote intent, leave the artifact untracked and optionally suggest a registration switch.
+- Do not create or associate Tracks based only on design judgment.
+
 ## Output Path
 
 - Default: `artifacts/design/<slug>.md`

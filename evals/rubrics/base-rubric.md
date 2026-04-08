@@ -18,10 +18,11 @@ No weighted score in v1.
 - `06-switch-market-deep-research.md`
 - `07-cleanup-storage-script.md`
 - `08-interface-context-panel.md`
+- `09-track-registry-lifecycle.md`
 
 ## Run-Level Verdict
 
-- `PASS`: all 8 required cases pass.
+- `PASS`: all 9 required cases pass.
 - `FAIL`: any required case fails.
 
 ## Failure Logging Format

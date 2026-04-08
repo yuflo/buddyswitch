@@ -30,6 +30,13 @@ description: Implement scoped product changes in project code and report verifie
 5. Summarize changed files, implementation notes, verification, and limitations.
 6. Write durable implementation summary when requested.
 
+## Registry Handling
+
+- Follow `framework/docs/track-registry.md`.
+- If the user explicitly references Track/registry/register/promote intent, register the implementation report with `role: "dev"` and `type: "implementation-report"`.
+- If the user does not explicitly reference Track/registry/register/promote intent, leave the implementation report untracked and optionally suggest a registration switch.
+- Do not create or associate Tracks based only on dev judgment.
+
 ## Output Path
 
 - Code changes: primarily `projects/app/`

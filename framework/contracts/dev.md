@@ -48,6 +48,13 @@ Every run should return:
 - project runtime temporary data must be written only to `projects/app/.runtime/`
 - do not write runtime noise into source folders under `projects/app/`
 
+## Track Registry Rule
+
+- Follow `framework/docs/track-registry.md`.
+- Only update `artifacts/workspace-registry.json` when the user explicitly references Track/registry/register/promote intent.
+- This agent may only register artifacts with `role: "dev"` and `type: "implementation-report"`.
+- Do not create or associate Tracks based only on agent judgment.
+
 ## Default Artifact Path
 
 - `artifacts/build/` (when a durable build summary is needed)

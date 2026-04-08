@@ -1,87 +1,81 @@
 window.BUDDYSWITCH_WORKSPACE = {
-  "generated_at": "2026-04-08T13:35:38+08:00",
+  "generated_at": "2026-04-08T19:43:53+08:00",
+  "registry_path": "artifacts/workspace-registry.json",
+  "project": {
+    "id": "buddyswitch",
+    "name": "BuddySwitch"
+  },
   "tracks": [
     {
-      "slug": "onboarding-minimal",
-      "label": "Onboarding Minimal",
-      "inferred": true,
-      "inference_source": "artifact_filename",
+      "id": "onboarding-minimal",
+      "title": "Onboarding Minimal",
+      "state": "active",
       "artifacts": {
-        "research": [],
-        "prd": [
+        "market": [],
+        "pm": [
           {
-            "role": "prd",
-            "agent": "pm",
-            "inferred_group_slug": "onboarding-minimal",
+            "role": "pm",
+            "type": "prd",
+            "source_dir": "prd",
             "path": "artifacts/prd/onboarding-minimal.md",
             "file_name": "onboarding-minimal.md",
             "title": "Onboarding Minimal PRD",
-            "updated_at": "2026-04-08T01:54:55+08:00"
+            "updated_at": "2026-04-08T01:54:55+08:00",
+            "missing": false
           }
         ],
         "design": [
           {
             "role": "design",
-            "agent": "design",
-            "inferred_group_slug": "onboarding-minimal",
+            "type": "design-spec",
+            "source_dir": "design",
             "path": "artifacts/design/onboarding-minimal-spec.md",
             "file_name": "onboarding-minimal-spec.md",
             "title": "Onboarding Minimal Design Spec",
-            "updated_at": "2026-04-08T01:55:10+08:00"
+            "updated_at": "2026-04-08T01:55:10+08:00",
+            "missing": false
           }
         ],
-        "build": [
+        "dev": [
           {
-            "role": "build",
-            "agent": "dev",
-            "inferred_group_slug": "onboarding-minimal",
+            "role": "dev",
+            "type": "implementation-report",
+            "source_dir": "build",
             "path": "artifacts/build/onboarding-minimal-impl.md",
             "file_name": "onboarding-minimal-impl.md",
             "title": "Onboarding Minimal Implementation Report",
-            "updated_at": "2026-04-08T01:54:55+08:00"
+            "updated_at": "2026-04-08T01:54:55+08:00",
+            "missing": false
           }
         ],
         "test": [
           {
             "role": "test",
-            "agent": "test",
-            "inferred_group_slug": "onboarding-minimal",
+            "type": "smoke-test",
+            "source_dir": "test",
             "path": "artifacts/test/onboarding-minimal-smoke.md",
             "file_name": "onboarding-minimal-smoke.md",
             "title": "Onboarding Minimal Smoke Test Report",
-            "updated_at": "2026-04-08T01:54:55+08:00"
+            "updated_at": "2026-04-08T01:54:55+08:00",
+            "missing": false
           }
         ]
       },
       "updated_at": "2026-04-08T01:55:10+08:00",
-      "classification": "track"
+      "missing_artifacts": [],
+      "registry_path": "artifacts/workspace-registry.json"
     }
   ],
-  "research_inbox": [
+  "untracked_artifacts": [
     {
-      "slug": "scheduling-tool-convenience",
-      "label": "Scheduling Tool Convenience",
-      "inferred": true,
-      "inference_source": "artifact_filename",
-      "artifacts": {
-        "research": [
-          {
-            "role": "research",
-            "agent": "market",
-            "inferred_group_slug": "scheduling-tool-convenience",
-            "path": "artifacts/research/scheduling-tool-convenience-market-research.md",
-            "file_name": "scheduling-tool-convenience-market-research.md",
-            "title": "Research Report",
-            "updated_at": "2026-04-08T02:21:18+08:00"
-          }
-        ],
-        "prd": [],
-        "design": [],
-        "build": [],
-        "test": []
-      },
+      "role": "market",
+      "type": "research",
+      "source_dir": "research",
+      "path": "artifacts/research/scheduling-tool-convenience-market-research.md",
+      "file_name": "scheduling-tool-convenience-market-research.md",
+      "title": "Research Report",
       "updated_at": "2026-04-08T02:21:18+08:00",
-      "classification": "research_inbox"
+      "missing": false
     }
   ],
   "summaries": [

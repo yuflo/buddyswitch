@@ -32,8 +32,10 @@ When the user writes `switch <agent>: <task>`, you must:
 3. Read:
    - `framework/contracts/<agent>.md`
    - `framework/agent-registry.md`
+   - `framework/docs/track-registry.md` when the task references Tracks or artifact registration
    - relevant files in `framework/templates/`
    - relevant referenced artifacts
+   - `artifacts/workspace-registry.json` when the task references Tracks or artifact registration
    - relevant repo-local skills in `.agents/skills/`
 4. Return:
    - execution summary
@@ -50,15 +52,19 @@ When the user writes `switch <agent>: <task>`, you must:
 
 ## Context Panel Rules
 
-- `framework/console/` is a read-only context panel for tracks, research inbox items, artifacts, summaries, and copyable commands.
+- `framework/console/` is a read-only context panel for registry tracks, untracked artifacts, summaries, and copyable commands.
 - The interface must not invoke agents, call an LLM, execute cleanup, or hold hidden agent state.
-- Tracks and research inbox items are filename-inferred workspace hints, not an explicit topic registry.
+- Tracks are explicit product iteration records in `artifacts/workspace-registry.json`.
+- Untracked artifacts are diagnostics only, not a product queue.
+- Agents must follow `framework/docs/track-registry.md` when a task references Tracks or artifact registration.
+- Agents may suggest registry metadata, but must not create or associate Tracks without explicit user intent.
 - The interface may generate suggested `switch ...` and cleanup commands for the user to run manually in CLI.
 - Refresh interface data by running `python3 scripts/build_console_snapshot.py`.
 
 ## File Placement
 
 - Durable outputs go to `artifacts/`.
+- The explicit Track Registry lives at `artifacts/workspace-registry.json`.
 - Noisy raw dumps go to `runs/raw/`.
 - Compact useful summaries go to `runs/summaries/`.
 - Project runtime-only temporary data goes to `projects/app/.runtime/`.

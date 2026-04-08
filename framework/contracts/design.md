@@ -43,6 +43,13 @@ Every run should return:
 3. deliverables or changed files
 4. suggested next switch (optional)
 
+## Track Registry Rule
+
+- Follow `framework/docs/track-registry.md`.
+- Only update `artifacts/workspace-registry.json` when the user explicitly references Track/registry/register/promote intent.
+- This agent may only register artifacts with `role: "design"` and `type: "design-spec"`.
+- Do not create or associate Tracks based only on agent judgment.
+
 ## Default Artifact Path
 
 - `artifacts/design/`

@@ -19,6 +19,7 @@ Use `artifacts/` for outputs that are reusable and worth preserving as project m
 - design specs
 - implementation reports
 - test reports
+- `workspace-registry.json`, the explicit Track Registry
 
 ### `runs/raw/` (raw execution dumps)
 
