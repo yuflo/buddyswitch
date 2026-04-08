@@ -1,7 +1,9 @@
-# research-scan
-
+---
 name: research-scan
 description: Run browser-first deep market research with iterative query refinement and strong source traceability.
+---
+
+# research-scan
 
 ## Agent
 

@@ -1,7 +1,9 @@
-# smoke-test
-
+---
 name: smoke-test
 description: Run focused smoke checks and produce structured pass/fail/blocked reports.
+---
+
+# smoke-test
 
 ## Agent
 

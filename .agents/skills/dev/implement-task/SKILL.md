@@ -1,7 +1,9 @@
-# implement-task
-
+---
 name: implement-task
 description: Implement scoped product changes in project code and report verified outcomes.
+---
+
+# implement-task
 
 ## Agent
 

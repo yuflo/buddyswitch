@@ -1,7 +1,9 @@
-# ia-spec
-
+---
 name: ia-spec
 description: Create IA and interaction specification artifacts aligned with the design contract.
+---
+
+# ia-spec
 
 ## Agent
 

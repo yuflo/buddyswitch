@@ -1,7 +1,9 @@
-# write-prd
-
+---
 name: write-prd
 description: Produce an MVP PRD from research and requirements, aligned with the PM contract.
+---
+
+# write-prd
 
 ## Agent
 
