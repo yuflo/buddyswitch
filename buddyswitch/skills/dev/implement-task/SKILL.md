@@ -1,6 +1,14 @@
 ---
 name: implement-task
 description: Implement scoped product changes in project code and report verified outcomes.
+track_mode: optional
+default_artifact_kind: implementation-report
+auto_summary: true
+triggers:
+  - implement
+  - build
+  - code
+  - dev
 ---
 
 # implement-task

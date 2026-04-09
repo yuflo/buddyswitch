@@ -28,16 +28,24 @@ When user sends `switch <buddy>: <task>`:
 
 1. Parse with strict syntax only.
 2. Validate buddy from `buddyswitch/manifest.toml`.
-3. Enforce that buddy's scope, skills, and object permissions from manifest.
-4. Respect object authority:
-   - `pm` controls track lifecycle (`create/update/advance/attach/detach`)
+3. Resolve skill runtime metadata from `buddyswitch/skills/**/SKILL.md` front matter.
+4. Enforce that buddy's scope, skills, and object permissions from manifest.
+5. Respect object authority:
+   - `pm` controls track lifecycle (`create/read/list/update/advance/attach/detach/archive`)
    - other buddies can read tracks and create/update artifacts
-5. Use skill docs from `buddyswitch/skills/<buddy>/<skill>/SKILL.md`.
-6. Keep outputs explicit:
+6. Execute through `scripts/switch_runtime.py` when you need default artifact/summary persistence.
+7. Use skill docs from `buddyswitch/skills/<buddy>/<skill>/SKILL.md`.
+8. Keep outputs explicit:
    - execution summary
    - working notes
    - deliverables or changed files
    - suggested next switch (optional)
+
+Default runtime behavior:
+
+- Artifact path: `artifacts/<artifact-id>--<slug>.md`
+- Summary path: `runs/summaries/<buddy>/<artifact-id>.md` when skill `auto_summary=true`
+- Users do not need to provide output file paths unless they want explicit overrides.
 
 ## Switch Rules
 

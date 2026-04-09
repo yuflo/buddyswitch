@@ -1,6 +1,14 @@
 ---
 name: research-scan
 description: Run browser-first deep market research with iterative query refinement and strong source traceability.
+track_mode: optional
+default_artifact_kind: research
+auto_summary: true
+triggers:
+  - market
+  - research
+  - demand
+  - competitor
 ---
 
 # research-scan

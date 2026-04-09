@@ -1,6 +1,14 @@
 ---
 name: smoke-test
 description: Run focused smoke checks and produce structured pass/fail/blocked reports.
+track_mode: optional
+default_artifact_kind: smoke-test
+auto_summary: true
+triggers:
+  - test
+  - smoke
+  - qa
+  - verify
 ---
 
 # smoke-test

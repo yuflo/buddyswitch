@@ -8,9 +8,12 @@ BuddySwitch now uses `buddyswitch/` env as the single source of truth.
 2. Validate parser and router:
    - `python3 scripts/parse_switch.py "switch pm: create track"`
    - `python3 scripts/codex_router.py "switch pm: create track"`
-3. Start Context Panel:
+3. Resolve/execute a switch directive (runtime default flow):
+   - `python3 scripts/switch_runtime.py resolve "switch market: quick market research for AI scheduler landing page"`
+   - `python3 scripts/switch_runtime.py execute "switch market: quick market research for AI scheduler landing page"`
+4. Start Context Panel:
    - `python3 scripts/serve_context_panel.py`
-4. Open:
+5. Open:
    - `http://127.0.0.1:8765/`
 
 ## Canonical UI
@@ -18,6 +21,7 @@ BuddySwitch now uses `buddyswitch/` env as the single source of truth.
 `switch <buddy>: <task>`
 
 Buddy list, scope, skills, and permissions are loaded from `buddyswitch/manifest.toml`.
+Users are not required to provide output paths in task text; runtime defaults are applied automatically.
 
 ## Core Storage
 
@@ -30,16 +34,17 @@ Buddy list, scope, skills, and permissions are loaded from `buddyswitch/manifest
 
 ## Env APIs
 
+- Switch runtime (primary): `scripts/switch_runtime.py` (`resolve|execute`)
 - Manifest inspection: `scripts/env_manifest.py`
-- Track CRUD/advance: `scripts/env_tracks.py`
-- Artifact CRUD/auto-register: `scripts/env_artifacts.py`
+- Track CRUD/advance (manual/debug): `scripts/env_tracks.py`
+- Artifact CRUD/auto-register (manual/debug): `scripts/env_artifacts.py`
 - Codex routing: `scripts/codex_router.py`
 
 Example commands:
 
-- `python3 scripts/env_tracks.py create onboarding-minimal --title "Onboarding Minimal" --actor pm`
-- `python3 scripts/env_artifacts.py create --artifact-id art-onboarding-prd --title "Onboarding PRD" --kind prd --producer-buddy pm --source-skill write-prd --context-track-id onboarding-minimal --actor pm`
-- `python3 scripts/env_tracks.py advance onboarding-minimal --next-buddy design --actor pm`
+- `python3 scripts/switch_runtime.py execute "switch market: quick(2轮) market research for AI scheduler landing page"`
+- `python3 scripts/switch_runtime.py execute "switch pm: create ai-scheduler-lp track"`
+- `python3 scripts/switch_runtime.py execute "switch pm: attach art-ai-scheduler-lp-market to track-ai-scheduler-lp track"`
 
 ## Context Panel
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Load and validate the BuddySwitch env manifest."""
+"""Load and validate the BuddySwitch env manifest and skill runtime metadata."""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 _BUDDY_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+_SKILL_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+\s*:")
+TRACK_MODES = {"optional", "required", "forbidden"}
 
 
 class ManifestError(ValueError):
@@ -25,16 +27,19 @@ def _require_string(node: dict[str, Any], key: str, label: str) -> str:
     value = node.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ManifestError(f"{label}.{key} must be a non-empty string")
-    return value
+    return value.strip()
 
 
 def _require_string_list(node: dict[str, Any], key: str, label: str) -> list[str]:
     value = node.get(key)
     if not isinstance(value, list) or not value:
         raise ManifestError(f"{label}.{key} must be a non-empty list")
-    if any(not isinstance(item, str) or not item.strip() for item in value):
-        raise ManifestError(f"{label}.{key} must contain only non-empty strings")
-    return value
+    cleaned: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ManifestError(f"{label}.{key} must contain only non-empty strings")
+        cleaned.append(item.strip())
+    return cleaned
 
 
 def _validate_permission(permission: str, label: str) -> None:
@@ -45,6 +50,147 @@ def _validate_permission(permission: str, label: str) -> None:
         raise ManifestError(f"{label} permission '{permission}' has unsupported object '{obj}'")
     if not action:
         raise ManifestError(f"{label} permission '{permission}' has empty action")
+
+
+def _strip_quotes(value: str) -> str:
+    value = value.strip()
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        return value[1:-1].strip()
+    return value
+
+
+def _parse_scalar(value: str, label: str) -> Any:
+    raw = _strip_quotes(value)
+    lowered = raw.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if raw.startswith("[") and raw.endswith("]"):
+        inner = raw[1:-1].strip()
+        if not inner:
+            return []
+        return [_strip_quotes(part.strip()) for part in inner.split(",") if part.strip()]
+    if not raw:
+        raise ManifestError(f"{label} must not be empty")
+    return raw
+
+
+def _parse_skill_front_matter(path: Path) -> dict[str, Any]:
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    if len(lines) < 3 or lines[0].strip() != "---":
+        raise ManifestError(f"{path.relative_to(ROOT)} must start with '---' front matter")
+
+    end = None
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            end = index
+            break
+    if end is None:
+        raise ManifestError(f"{path.relative_to(ROOT)} front matter is missing closing '---'")
+
+    block = lines[1:end]
+    data: dict[str, Any] = {}
+    i = 0
+    while i < len(block):
+        line = block[i]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            i += 1
+            continue
+
+        match = re.match(r"^([A-Za-z0-9_-]+)\s*:\s*(.*)$", stripped)
+        if not match:
+            raise ManifestError(f"Invalid front matter line in {path.relative_to(ROOT)}: {stripped}")
+        key = match.group(1)
+        value = match.group(2).strip()
+
+        if value:
+            data[key] = _parse_scalar(value, f"{path.relative_to(ROOT)}:{key}")
+            i += 1
+            continue
+
+        # Parse multiline list values:
+        items: list[Any] = []
+        i += 1
+        while i < len(block):
+            next_line = block[i]
+            next_stripped = next_line.strip()
+            if not next_stripped:
+                i += 1
+                continue
+            if _SKILL_KEY_RE.match(next_stripped) and not next_stripped.startswith("-"):
+                break
+            item_match = re.match(r"^\s*-\s*(.+)\s*$", next_line)
+            if not item_match:
+                raise ManifestError(
+                    f"Invalid list item for '{key}' in {path.relative_to(ROOT)}: {next_stripped}"
+                )
+            items.append(_parse_scalar(item_match.group(1), f"{path.relative_to(ROOT)}:{key}"))
+            i += 1
+        data[key] = items
+
+    return data
+
+
+def _load_skill_runtime(path: Path, skill_id: str) -> dict[str, Any]:
+    if not path.exists():
+        raise ManifestError(f"Skill file not found: {path.relative_to(ROOT)}")
+    front = _parse_skill_front_matter(path)
+
+    required = ("name", "description", "track_mode", "default_artifact_kind", "auto_summary", "triggers")
+    missing = [key for key in required if key not in front]
+    if missing:
+        raise ManifestError(
+            f"{path.relative_to(ROOT)} is missing required front matter key(s): {', '.join(missing)}"
+        )
+
+    name = front["name"]
+    if not isinstance(name, str) or not name.strip():
+        raise ManifestError(f"{path.relative_to(ROOT)}:name must be a non-empty string")
+    if name.strip() != skill_id:
+        raise ManifestError(
+            f"{path.relative_to(ROOT)}:name '{name}' must match manifest skill id '{skill_id}'"
+        )
+
+    description = front["description"]
+    if not isinstance(description, str) or not description.strip():
+        raise ManifestError(f"{path.relative_to(ROOT)}:description must be a non-empty string")
+
+    track_mode = front["track_mode"]
+    if not isinstance(track_mode, str) or track_mode not in TRACK_MODES:
+        raise ManifestError(
+            f"{path.relative_to(ROOT)}:track_mode must be one of {', '.join(sorted(TRACK_MODES))}"
+        )
+
+    artifact_kind = front["default_artifact_kind"]
+    if not isinstance(artifact_kind, str) or not artifact_kind.strip():
+        raise ManifestError(f"{path.relative_to(ROOT)}:default_artifact_kind must be a non-empty string")
+
+    auto_summary = front["auto_summary"]
+    if not isinstance(auto_summary, bool):
+        raise ManifestError(f"{path.relative_to(ROOT)}:auto_summary must be true or false")
+
+    triggers = front["triggers"]
+    if not isinstance(triggers, list) or not triggers:
+        raise ManifestError(f"{path.relative_to(ROOT)}:triggers must be a non-empty list")
+    if any(not isinstance(trigger, str) or not trigger.strip() for trigger in triggers):
+        raise ManifestError(f"{path.relative_to(ROOT)}:triggers must contain non-empty strings")
+
+    default = front.get("default", False)
+    if not isinstance(default, bool):
+        raise ManifestError(f"{path.relative_to(ROOT)}:default must be true or false when provided")
+
+    return {
+        "name": name.strip(),
+        "description": description.strip(),
+        "track_mode": track_mode,
+        "default_artifact_kind": artifact_kind.strip(),
+        "auto_summary": auto_summary,
+        "triggers": [trigger.strip() for trigger in triggers],
+        "default": default,
+    }
 
 
 def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
@@ -81,7 +227,7 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
     if not isinstance(skills, list) or not skills:
         raise ManifestError("skills must be a non-empty list")
     skill_ids: set[str] = set()
-    skills_by_id: dict[str, dict[str, Any]] = {}
+    lookup: dict[str, dict[str, Any]] = {}
     for index, skill in enumerate(skills):
         label = f"skills[{index}]"
         if not isinstance(skill, dict):
@@ -90,11 +236,13 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         if skill_id in skill_ids:
             raise ManifestError(f"duplicate skill id: {skill_id}")
         skill_ids.add(skill_id)
-        _require_string(skill, "path", label)
-        _require_string(skill, "description", label)
-        _require_string_list(skill, "buddies", label)
-        _require_string_list(skill, "objects", label)
-        skills_by_id[skill_id] = skill
+        skill["path"] = _require_string(skill, "path", label)
+        skill["description"] = _require_string(skill, "description", label)
+        skill["buddies"] = _require_string_list(skill, "buddies", label)
+        skill["objects"] = _require_string_list(skill, "objects", label)
+        skill_path = ROOT / skill["path"]
+        skill["runtime"] = _load_skill_runtime(skill_path, skill_id)
+        lookup[skill_id] = skill
 
     buddies = manifest.get("buddies")
     if not isinstance(buddies, list) or not buddies:
@@ -117,16 +265,15 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         permissions = _require_string_list(buddy, "permissions", label)
         for permission in permissions:
             _validate_permission(permission, label)
-
         for skill_id in declared_skills:
-            if skill_id not in skills_by_id:
+            if skill_id not in lookup:
                 raise ManifestError(f"{label}.skills contains unknown skill '{skill_id}'")
-            if buddy_id not in skills_by_id[skill_id]["buddies"]:
+            if buddy_id not in lookup[skill_id]["buddies"]:
                 raise ManifestError(
-                    f"{label}.skills '{skill_id}' missing buddy '{buddy_id}' in skills.{skill_id}.buddies"
+                    f"{label}.skills '{skill_id}' missing buddy '{buddy_id}' in skills[{skill_id}].buddies"
                 )
 
-    for skill_id, skill in skills_by_id.items():
+    for skill_id, skill in lookup.items():
         for buddy_id in skill["buddies"]:
             if buddy_id not in buddy_ids:
                 raise ManifestError(f"skills[{skill_id}].buddies contains unknown buddy '{buddy_id}'")
@@ -171,6 +318,7 @@ def buddy_skill_docs(manifest: dict[str, Any], buddy_id: str) -> list[dict[str, 
                 "path": skill["path"],
                 "description": skill["description"],
                 "objects": skill["objects"],
+                "runtime": dict(skill.get("runtime", {})),
             }
         )
     return docs

@@ -1,6 +1,14 @@
 ---
 name: ia-spec
 description: Create IA and interaction specification artifacts aligned with the design contract.
+track_mode: optional
+default_artifact_kind: design-spec
+auto_summary: true
+triggers:
+  - design
+  - ia
+  - flow
+  - ux
 ---
 
 # ia-spec

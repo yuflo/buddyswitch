@@ -44,7 +44,7 @@ def parse_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict:
             {"expected_syntax": SYNTAX, "example": EXAMPLE},
         )
 
-    match = re.match(r"^switch\s+([a-z]+)\s*:(.*)$", raw)
+    match = re.match(r"^switch\s+([a-z][a-z0-9-]*)\s*:(.*)$", raw)
     if not match:
         return error(
             "E_INVALID_SYNTAX",

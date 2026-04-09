@@ -6,7 +6,8 @@ This document defines track behavior in env-centric BuddySwitch.
 
 - Tracks: `buddyswitch/objects/tracks/*.json`
 - Artifacts: `buddyswitch/objects/artifacts/*.json`
-- APIs: `scripts/env_tracks.py`, `scripts/env_artifacts.py`
+- Runtime (primary): `scripts/switch_runtime.py`
+- APIs (manual/debug): `scripts/env_tracks.py`, `scripts/env_artifacts.py`
 
 ## Track Schema (v1)
 
@@ -37,7 +38,8 @@ Required fields:
 
 ## Permission Model
 
-- `pm` can create/update/advance tracks and attach/detach artifacts.
+- `pm` `track-manager` skill controls track lifecycle core operations:
+  - `create`, `read`, `list`, `update`, `advance`, `attach`, `detach`, `archive`
 - Other buddies can read tracks and create/update artifacts.
 - Non-PM buddies must not directly mutate track `status/current_buddy/next_buddy/artifact_ids`.
 
