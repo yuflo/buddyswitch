@@ -8,7 +8,6 @@ cd "${REPO_ROOT}"
 VALID_AGENTS=("market" "pm" "design" "dev" "test")
 CONFIRM_PHRASE="DELETE_BUDDYSWITCH_DATA"
 REGISTRY_PATH="artifacts/workspace-registry.json"
-SNAPSHOT_PATH="framework/console/workspace-data.js"
 
 MODE_AGENT=""
 MODE_ALL_AGENTS=0
@@ -148,7 +147,6 @@ print_registry_plan() {
     else
       echo "No registry file found."
     fi
-    echo "Would rebuild: ${SNAPSHOT_PATH}"
     return 0
   fi
 
@@ -339,10 +337,6 @@ update_registry_after_delete() {
   return 0
 }
 
-refresh_snapshot() {
-  python3 scripts/build_console_snapshot.py >/dev/null
-}
-
 main() {
   parse_args "$@"
   validate_modes
@@ -359,7 +353,6 @@ main() {
   run_delete
   update_registry_after_delete
   ensure_required_skeleton
-  refresh_snapshot
   echo "Cleanup completed."
 }
 

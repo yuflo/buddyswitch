@@ -54,12 +54,12 @@ Minimal schema:
 
 ## Context Panel Behavior
 
-- Read registry-backed snapshot data.
+- Read live workspace data from the local Context Panel server.
 - Render only registry-declared Tracks in the primary Track list.
-- Render files not referenced by any Track as `Untracked Artifacts` diagnostics.
+- Render files not referenced by any Track as `Artifact Inbox` diagnostics.
 - Do not call agents, LLMs, cleanup, shell commands, or write registry changes from the browser.
 - Generate copyable `switch ...` and cleanup commands only.
-- Use the local Context Panel server for active refresh; static snapshots remain available for debugging.
+- Use the local Context Panel server for active refresh.
 
 ## Agent Boundary
 
@@ -70,6 +70,6 @@ Agents may suggest registry metadata such as `track_id`, `title`, `role`, `type`
 ## Validation
 
 - `onboarding-minimal` appears as a Track because it is declared in the registry.
-- `scheduling-tool-convenience-market-research.md` appears as an Untracked Artifact until the user explicitly registers it.
-- Snapshot output includes `tracks`, `untracked_artifacts`, and `summaries`.
-- Snapshot output does not include `research_inbox`.
+- `scheduling-tool-convenience-market-research.md` appears in Artifact Inbox until the user explicitly registers it.
+- Workspace data includes `tracks`, `untracked_artifacts`, and `summaries`.
+- Workspace data does not include `research_inbox`.

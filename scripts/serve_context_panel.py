@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONSOLE_DIR = ROOT / "framework" / "console"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from build_console_snapshot import build_snapshot  # noqa: E402
+from workspace_data import build_workspace_data  # noqa: E402
 
 
 class ContextPanelHandler(SimpleHTTPRequestHandler):
@@ -28,25 +28,32 @@ class ContextPanelHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
-        if path == "/workspace-data.js":
-            self.send_workspace_data()
+        if path == "/api/workspace":
+            self.send_workspace_json()
             return
         if path == "/":
             self.path = "/index.html"
         super().do_GET()
 
-    def send_workspace_data(self) -> None:
-        data = build_snapshot()
-        payload = "window.BUDDYSWITCH_WORKSPACE = "
-        payload += json.dumps(data, ensure_ascii=True, indent=2)
-        payload += ";\n"
-        body = payload.encode("utf-8")
+    def do_HEAD(self) -> None:
+        path = urlparse(self.path).path
+        if path == "/api/workspace":
+            self.send_workspace_json(include_body=False)
+            return
+        if path == "/":
+            self.path = "/index.html"
+        super().do_HEAD()
+
+    def send_workspace_json(self, include_body: bool = True) -> None:
+        data = build_workspace_data()
+        body = json.dumps(data, ensure_ascii=True, indent=2).encode("utf-8")
 
         self.send_response(200)
-        self.send_header("Content-Type", "application/javascript; charset=utf-8")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        if include_body:
+            self.wfile.write(body)
 
 
 def main() -> int:

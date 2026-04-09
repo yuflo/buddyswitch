@@ -61,7 +61,7 @@ When the user writes `switch <agent>: <task>`, you must:
 - Agents must use `scripts/registry.py` for Track Registry changes rather than editing JSON directly.
 - Agents may suggest registry metadata, but must not create or associate Tracks without explicit user intent.
 - The interface may generate suggested `switch ...` and cleanup commands for the user to run manually in CLI.
-- Refresh interface data by running `python3 scripts/serve_context_panel.py` and using the page's `Refresh` button. `python3 scripts/build_console_snapshot.py` remains available for static debugging.
+- Refresh interface data by running `python3 scripts/serve_context_panel.py` and using the page's `Refresh workspace` button.
 
 ## File Placement
 

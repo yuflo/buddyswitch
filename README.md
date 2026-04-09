@@ -52,7 +52,7 @@ This repository is the BuddySwitch v1 reference workspace.
 BuddySwitch includes a local read-only context panel for browsing explicit tracks, untracked artifacts, summaries, suggested switch commands, and cleanup commands.
 
 - `Tracks` are product iteration records declared through the registry adapter and currently stored in `artifacts/workspace-registry.json`.
-- `Untracked Artifacts` are files not registered to any Track. They are diagnostics, not a product queue.
+- `Artifact Inbox` entries are local dump files not registered to any Track. They are diagnostics, not a product queue.
 - Track creation and artifact association should be explicit user intent, not automatic inference.
 - Use `scripts/registry.py` for registry writes; the JSON file is a temporary local dump backend, not the final storage architecture.
 
@@ -65,15 +65,7 @@ Open:
 
 - `http://127.0.0.1:8765/`
 
-Use the page's `Refresh` button to reload current workspace data.
-
-Static snapshot export remains available for debugging:
-
-- `python3 scripts/build_console_snapshot.py`
-
-Then open:
-
-- `framework/console/index.html`
+Use the page's `Refresh workspace` button to rescan current local dump data through the server. This reads from `artifacts/`, `runs/summaries/`, and `artifacts/workspace-registry.json`.
 
 Interface boundary:
 
@@ -81,7 +73,7 @@ Interface boundary:
 - It does not call Codex, Claude Code, or Gemini CLI.
 - It does not execute cleanup commands.
 - It generates copyable commands for the user to run manually in the CLI.
-- The local server dynamically serves current workspace data; the static file reads `framework/console/workspace-data.js`.
+- The local server dynamically serves current workspace data through `/api/workspace`.
 
 ## Manual Cleanup
 
@@ -107,7 +99,7 @@ Examples:
   - `scripts/cleanup_buddyswitch.sh --all-agents`
 - Clean project runtime data:
   - `scripts/cleanup_buddyswitch.sh --project app`
-- Clean all storage data (`artifacts`, `runs`, `projects/app/.runtime`, registry, and console snapshot):
+- Clean all storage data (`artifacts`, `runs`, `projects/app/.runtime`, and registry):
   - `scripts/cleanup_buddyswitch.sh --all-storage`
 - Execute mode:
   - `scripts/cleanup_buddyswitch.sh --all-agents --execute`

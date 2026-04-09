@@ -14,31 +14,30 @@ python3 scripts/serve_context_panel.py
 
 - `framework/console/index.html` exists.
 - `scripts/serve_context_panel.py` exists.
-- `scripts/build_console_snapshot.py` exists.
+- `scripts/workspace_data.py` exists.
 
 ## Manual Steps
 
 1. Run the local server command.
 2. Open `http://127.0.0.1:8765/`.
-3. Inspect the Tracks list, artifact timeline, Untracked Artifacts diagnostics, run summaries, suggested switch commands, and cleanup commands.
-4. Click `Refresh` and confirm the page reloads current workspace data from the server.
+3. Inspect the Tracks list, artifact timeline, Artifact Inbox diagnostics, run summaries, suggested switch commands, and cleanup commands.
+4. Click `Refresh workspace` and confirm the page reloads current workspace data from the server.
 5. Review generated cleanup commands.
 6. Review `framework/docs/interface-spec.md`.
 
 ## Pass Criteria
 
-- Local server serves `/workspace-data.js` from current workspace state.
-- Static snapshot generation still creates `framework/console/workspace-data.js` for debugging.
-- Snapshot data includes `tracks`, `untracked_artifacts`, and `summaries`.
-- Snapshot data does not include `research_inbox`.
+- Local server serves `/api/workspace` from current workspace state.
+- Workspace data includes `tracks`, `untracked_artifacts`, and `summaries`.
+- Workspace data does not include `research_inbox`.
 - Tracks come from `artifacts/workspace-registry.json`, not filename-based product inference.
 - Registry-declared tracks appear under Tracks when registry data exists.
-- Files under `artifacts/` that are not registry-referenced appear under Untracked Artifacts.
-- If registry and artifacts are absent after full cleanup, Tracks and Untracked Artifacts are empty.
+- Files under `artifacts/` that are not registry-referenced appear under Artifact Inbox.
+- If registry and artifacts are absent after full cleanup, Tracks and Artifact Inbox are empty.
 - The console shows:
   - Tracks list
   - artifact timeline
-  - Untracked Artifacts diagnostics
+  - Artifact Inbox diagnostics
   - run summaries
   - suggested `switch ...` commands
   - cleanup commands
@@ -52,6 +51,6 @@ python3 scripts/serve_context_panel.py
 
 - The UI directly runs cleanup or agent commands.
 - The UI stores hidden agent state.
-- The UI displays an Inbox or Research Inbox.
+- The UI displays a Research Inbox.
 - The UI cannot refresh current workspace data through the local server.
 - Cleanup commands default to destructive execution.

@@ -49,14 +49,14 @@ scripts/cleanup_buddyswitch.sh --all-storage --force
 - `--agent <agent>` reports the matching registry role cleanup through `scripts/registry.py`.
 - `--all-agents` reports registry track clearing through `scripts/registry.py`.
 - `--project app` reports no registry changes.
-- `--all-storage` targets `artifacts/workspace-registry.json` and rebuilds the console snapshot after execution.
+- `--all-storage` targets `artifacts/workspace-registry.json` and does not rebuild derived console data.
 - `framework/`, `.codex/`, `.agents/`, `evals/`, and `projects/app` source files are not targeted.
 
 ## Fail Signals
 
 - Any deletion occurs without `--execute`.
 - Agent cleanup leaves old registry artifact links in the Context Panel.
-- `--all-storage` preserves `artifacts/workspace-registry.json` or stale console snapshot data.
+- `--all-storage` preserves `artifacts/workspace-registry.json`.
 - Cleanup target set includes framework or source-code files.
 - Missing required target modes.
 - Errors are ambiguous or silently ignored.

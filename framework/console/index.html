@@ -15,9 +15,10 @@
         <h1>Context Panel</h1>
       </div>
       <div class="meta">
-        <span>Snapshot</span>
+        <span>Workspace data</span>
         <strong id="generatedAt">not loaded</strong>
-        <button id="refreshButton" class="refresh-button" type="button">Refresh</button>
+        <span id="dataStatus" class="data-status">not loaded</span>
+        <button id="refreshButton" class="refresh-button" type="button">Refresh workspace</button>
       </div>
     </header>
 
@@ -66,10 +67,10 @@
 
         <section class="panel">
           <div class="section-head">
-            <h3>Untracked Artifacts</h3>
+            <h3>Artifact Inbox</h3>
             <span id="untrackedCount">0</span>
           </div>
-          <p class="note">Artifacts not registered to a Track. Register them explicitly or leave them as reference material.</p>
+          <p class="note">Artifacts scanned from local dumps but not registered to a Track. Register them explicitly or leave them as reference material.</p>
           <div id="untrackedList" class="summary-list"></div>
         </section>
       </section>
@@ -85,11 +86,10 @@
 
     <footer class="footer">
       <code>python3 scripts/serve_context_panel.py</code>
-      <span>Use the local server for active refresh, or regenerate the static snapshot with <code>python3 scripts/build_console_snapshot.py</code>.</span>
+      <span>Use the local server for live workspace refresh.</span>
     </footer>
   </main>
 
-  <script src="./workspace-data.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

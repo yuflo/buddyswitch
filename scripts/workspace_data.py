@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Build the BuddySwitch console static workspace snapshot."""
+"""Build the BuddySwitch Context Panel workspace read model."""
 
 from __future__ import annotations
 
 import json
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,7 +11,6 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "artifacts" / "workspace-registry.json"
-OUTPUT = ROOT / "framework" / "console" / "workspace-data.js"
 
 ROLE_ORDER = ("market", "pm", "design", "dev", "test")
 
@@ -199,7 +197,7 @@ def scan_summaries() -> list[dict[str, Any]]:
     return sorted(summaries, key=lambda item: item["updated_at"], reverse=True)
 
 
-def build_snapshot() -> dict[str, Any]:
+def build_workspace_data() -> dict[str, Any]:
     registry = load_registry()
     tracks, registered_paths = build_tracks(registry)
     return {
@@ -210,26 +208,3 @@ def build_snapshot() -> dict[str, Any]:
         "untracked_artifacts": scan_untracked_artifacts(registered_paths),
         "summaries": scan_summaries(),
     }
-
-
-def main() -> int:
-    try:
-        data = build_snapshot()
-    except ValueError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    payload = "window.BUDDYSWITCH_WORKSPACE = "
-    payload += json.dumps(data, ensure_ascii=True, indent=2)
-    payload += ";\n"
-    OUTPUT.write_text(payload, encoding="utf-8")
-    print(
-        f"Wrote {rel(OUTPUT)} with {len(data['tracks'])} track(s) "
-        f"and {len(data['untracked_artifacts'])} untracked artifact(s)."
-    )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

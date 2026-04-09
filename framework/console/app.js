@@ -1,15 +1,11 @@
 "use strict";
 
-const data = window.BUDDYSWITCH_WORKSPACE || {
+const emptyWorkspace = {
   generated_at: null,
   tracks: [],
   untracked_artifacts: [],
   summaries: [],
 };
-
-const tracks = Array.isArray(data.tracks) ? data.tracks : [];
-const untrackedArtifacts = Array.isArray(data.untracked_artifacts) ? data.untracked_artifacts : [];
-const summaries = Array.isArray(data.summaries) ? data.summaries : [];
 
 const roles = [
   { key: "market", label: "Market" },
@@ -33,8 +29,44 @@ const timeline = document.getElementById("timeline");
 const switchCommands = document.getElementById("switchCommands");
 const cleanupCommands = document.getElementById("cleanupCommands");
 const refreshButton = document.getElementById("refreshButton");
+const dataStatus = document.getElementById("dataStatus");
 
+let data = normalizeWorkspaceData(emptyWorkspace);
+let tracks = data.tracks;
+let untrackedArtifacts = data.untracked_artifacts;
+let summaries = data.summaries;
 let selectedTrack = tracks[0] || null;
+
+function normalizeWorkspaceData(rawData) {
+  return {
+    ...emptyWorkspace,
+    ...(rawData || {}),
+    tracks: Array.isArray(rawData?.tracks) ? rawData.tracks : [],
+    untracked_artifacts: Array.isArray(rawData?.untracked_artifacts) ? rawData.untracked_artifacts : [],
+    summaries: Array.isArray(rawData?.summaries) ? rawData.summaries : [],
+  };
+}
+
+function applyWorkspaceData(nextData) {
+  const selectedTrackId = selectedTrack?.id || null;
+  data = normalizeWorkspaceData(nextData);
+  tracks = data.tracks;
+  untrackedArtifacts = data.untracked_artifacts;
+  summaries = data.summaries;
+  selectedTrack = tracks.find((track) => track.id === selectedTrackId) || tracks[0] || null;
+}
+
+function canFetchLiveWorkspace() {
+  return window.location.protocol === "http:" || window.location.protocol === "https:";
+}
+
+function setDataStatus(message, state = "neutral") {
+  if (!dataStatus) {
+    return;
+  }
+  dataStatus.textContent = message;
+  dataStatus.dataset.state = state;
+}
 
 function latestExistingArtifact(track, role) {
   const artifacts = track.artifacts?.[role] || [];
@@ -223,7 +255,7 @@ function renderUntrackedArtifacts() {
   untrackedCount.textContent = String(untrackedArtifacts.length);
 
   if (untrackedArtifacts.length === 0) {
-    untrackedList.append(createEl("p", "note", "No untracked artifacts found."));
+    untrackedList.append(createEl("p", "note", "No artifacts waiting in the inbox."));
     return;
   }
 
@@ -270,10 +302,55 @@ function render() {
   renderUntrackedArtifacts();
 }
 
+async function refreshWorkspaceData({ silent = false } = {}) {
+  if (!canFetchLiveWorkspace()) {
+    setDataStatus("Start the local server with python3 scripts/serve_context_panel.py.", "warning");
+    return false;
+  }
+
+  if (refreshButton) {
+    refreshButton.disabled = true;
+    refreshButton.textContent = "Refreshing";
+  }
+  setDataStatus("Reading current workspace...", "loading");
+
+  try {
+    const response = await fetch(`/api/workspace?t=${Date.now()}`, {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Workspace API returned ${response.status}`);
+    }
+
+    applyWorkspaceData(await response.json());
+    render();
+    setDataStatus("Live workspace data", "live");
+    return true;
+  } catch (error) {
+    if (!silent) {
+      console.warn("Unable to refresh live workspace data.", error);
+    }
+    setDataStatus(
+      "Unable to read workspace data. Run python3 scripts/serve_context_panel.py.",
+      "warning",
+    );
+    return false;
+  } finally {
+    if (refreshButton) {
+      refreshButton.disabled = false;
+      refreshButton.textContent = "Refresh workspace";
+    }
+  }
+}
+
 if (refreshButton) {
   refreshButton.addEventListener("click", () => {
-    window.location.reload();
+    refreshWorkspaceData();
   });
 }
 
+setDataStatus("Loading workspace data...", "loading");
 render();
+refreshWorkspaceData({ silent: true });

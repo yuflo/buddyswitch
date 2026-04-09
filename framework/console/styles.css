@@ -95,6 +95,21 @@ h3 {
   color: var(--ink);
 }
 
+.data-status {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.data-status[data-state="live"] {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.data-status[data-state="warning"] {
+  color: var(--warn);
+  font-weight: 700;
+}
+
 .layout {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr) 280px;
@@ -253,6 +268,11 @@ h3 {
 
 .refresh-button {
   justify-self: end;
+}
+
+.refresh-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .summary-item {

@@ -42,7 +42,7 @@ A summary should be:
 
 Use `projects/app/.runtime/` for project-level runtime artifacts that are not durable:
 - local run traces
-- temporary debug snapshots
+- temporary debug output
 - generated runtime logs for manual validation
 
 Do not write these files into `projects/app/` source folders.
