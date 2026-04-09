@@ -142,7 +142,7 @@ function renderTracks() {
       createEl(
         "p",
         "note",
-        "No tracks found. PM can create one with scripts/env_tracks.py create <track-id> --title \"...\".",
+        "No tracks found. Create one with switch pm: create <track-id> track ...",
       ),
     );
     return;

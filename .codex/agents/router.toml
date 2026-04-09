@@ -12,6 +12,7 @@ Directive:
 Routing source of truth:
 - buddyswitch/manifest.toml
 - scripts/codex_router.py
+- scripts/switch_runtime.py
 
 Object source of truth:
 - buddyswitch/objects/tracks/*.json

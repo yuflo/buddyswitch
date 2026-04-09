@@ -1,6 +1,15 @@
 ---
 name: write-prd
 description: Produce an MVP PRD from research and requirements, aligned with the PM contract.
+track_mode: required
+default_artifact_kind: prd
+auto_summary: true
+default: true
+triggers:
+  - prd
+  - mvp
+  - scope
+  - acceptance
 ---
 
 # write-prd

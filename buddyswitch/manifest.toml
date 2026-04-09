@@ -24,6 +24,13 @@ buddies = ["pm"]
 objects = ["track", "artifact"]
 
 [[skills]]
+id = "track-manager"
+path = "buddyswitch/skills/pm/track-manager/SKILL.md"
+description = "PM track lifecycle manager workflow."
+buddies = ["pm"]
+objects = ["track", "artifact"]
+
+[[skills]]
 id = "ia-spec"
 path = "buddyswitch/skills/design/ia-spec/SKILL.md"
 description = "Information architecture and interaction specification workflow."
@@ -55,7 +62,7 @@ permissions = ["track.read", "artifact.read", "artifact.create", "artifact.updat
 id = "pm"
 label = "PM"
 scope = "Own product iteration and track progression."
-skills = ["write-prd"]
+skills = ["write-prd", "track-manager"]
 permissions = [
   "track.read",
   "track.create",
