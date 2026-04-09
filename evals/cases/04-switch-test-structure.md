@@ -7,7 +7,7 @@ Validate that `switch test` returns a structured test report with pass/fail/bloc
 ## Prompt
 
 ```text
-switch test: Run smoke tests for onboarding changes in projects/app and write report to artifacts/test/onboarding-smoke-regression.md
+switch test: Run smoke tests for onboarding changes in projects/app and write report to artifacts/art-onboarding-smoke-regression--test.md
 ```
 
 ## Preconditions
@@ -31,10 +31,10 @@ switch test: Run smoke tests for onboarding changes in projects/app and write re
   - `reproduction_steps`
   - `overall_readiness_summary`
 - `passed_items`, `failed_items`, and `blocked_items` are all present as distinct sections.
-- Durable output is written to `artifacts/test/`.
+- Durable output is written to `artifacts/`.
 
 ## Fail Signals
 
 - Combined or missing pass/fail/blocked sections.
 - Missing reproduction steps when failures exist.
-- No durable report path under `artifacts/test/`.
+- No durable report path under `artifacts/`.

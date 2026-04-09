@@ -1,21 +1,25 @@
-# BuddySwitch v1 Regression Loop (Manual)
+# BuddySwitch Regression Loop (Manual)
 
 ## When To Run
 
 Run the 9-case suite after any change to:
 - `AGENTS.md`
-- `.codex/agents/*.toml`
+- `.codex/agents/router.toml`
 - `framework/contracts/**`
 - `framework/templates/**`
-- `.agents/skills/**/SKILL.md`
+- `buddyswitch/skills/**/SKILL.md`
 - `framework/docs/switch-spec.md`
 - `framework/docs/artifacts-runs-git-policy.md`
 - `framework/docs/interface-spec.md`
 - `framework/docs/track-registry.md`
 - `framework/console/**`
-- `artifacts/workspace-registry.json`
+- `buddyswitch/manifest.toml`
+- `buddyswitch/objects/**`
 - `scripts/cleanup_buddyswitch.sh`
-- `scripts/registry.py`
+- `scripts/env_manifest.py`
+- `scripts/env_tracks.py`
+- `scripts/env_artifacts.py`
+- `scripts/codex_router.py`
 - `scripts/serve_context_panel.py`
 - `scripts/workspace_data.py`
 

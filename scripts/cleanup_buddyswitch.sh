@@ -5,9 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
-VALID_AGENTS=("market" "pm" "design" "dev" "test")
 CONFIRM_PHRASE="DELETE_BUDDYSWITCH_DATA"
-REGISTRY_PATH="artifacts/workspace-registry.json"
 
 MODE_AGENT=""
 MODE_ALL_AGENTS=0
@@ -28,15 +26,15 @@ Usage:
   scripts/cleanup_buddyswitch.sh [target] [mode]
 
 Targets:
-  --agent <market|pm|design|dev|test>    Clean one agent's artifacts + runs
-  --all-agents                            Clean all agents' artifacts + runs
-  --project app                           Clean project runtime data (projects/app/.runtime)
-  --all-storage                           Clean all local storage data, including the Track Registry
+  --agent <buddy>                       Clean one buddy's runs and artifact objects/files
+  --all-agents                          Clean all buddies' runs and all artifact objects/files
+  --project app                         Clean project runtime data (projects/app/.runtime)
+  --all-storage                         Clean all local storage data, including env object dumps
 
 Modes:
-  --dry-run                               Preview only (default)
-  --execute                               Execute deletion (requires confirmation)
-  --force                                 Skip interactive confirmation (requires --execute)
+  --dry-run                             Preview only (default)
+  --execute                             Execute deletion (requires confirmation)
+  --force                               Skip interactive confirmation (requires --execute)
 
 Examples:
   scripts/cleanup_buddyswitch.sh --agent market
@@ -51,14 +49,30 @@ fail() {
   exit 1
 }
 
-is_valid_agent() {
+load_valid_buddies() {
+  python3 - <<'PY'
+import sys, tomllib
+from pathlib import Path
+manifest = Path("buddyswitch/manifest.toml")
+if not manifest.exists():
+    sys.exit(1)
+data = tomllib.loads(manifest.read_text(encoding="utf-8"))
+for buddy in data.get("buddies", []):
+    buddy_id = buddy.get("id")
+    if isinstance(buddy_id, str):
+        print(buddy_id)
+PY
+}
+
+is_valid_buddy() {
   local needle="$1"
-  local a
-  for a in "${VALID_AGENTS[@]}"; do
-    if [[ "${a}" == "${needle}" ]]; then
+  local buddy
+  while IFS= read -r buddy; do
+    [[ -z "${buddy}" ]] && continue
+    if [[ "${buddy}" == "${needle}" ]]; then
       return 0
     fi
-  done
+  done < <(load_valid_buddies || true)
   return 1
 }
 
@@ -73,15 +87,20 @@ add_target_dir() {
   TARGET_DIRS+=("${dir}")
 }
 
-agent_artifact_dir() {
-  local agent="$1"
-  case "${agent}" in
-    market) echo "artifacts/research" ;;
-    pm) echo "artifacts/prd" ;;
-    design) echo "artifacts/design" ;;
-    dev) echo "artifacts/build" ;;
-    test) echo "artifacts/test" ;;
-    *) fail "Unsupported agent: ${agent}" ;;
+rel_path() {
+  local p="$1"
+  echo "${p#${REPO_ROOT}/}"
+}
+
+is_safe_delete_path() {
+  local p="$1"
+  case "${p}" in
+    artifacts/*) return 0 ;;
+    runs/raw/*) return 0 ;;
+    runs/summaries/*) return 0 ;;
+    projects/app/.runtime/*) return 0 ;;
+    buddyswitch/objects/*) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
@@ -99,22 +118,6 @@ count_entries() {
   echo "${count}"
 }
 
-rel_path() {
-  local p="$1"
-  echo "${p#${REPO_ROOT}/}"
-}
-
-is_safe_delete_path() {
-  local p="$1"
-  case "${p}" in
-    artifacts/*) return 0 ;;
-    runs/raw/*) return 0 ;;
-    runs/summaries/*) return 0 ;;
-    projects/app/.runtime/*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 gather_delete_paths() {
   local dir path
   DELETE_PATHS=()
@@ -129,28 +132,24 @@ gather_delete_paths() {
   done
 }
 
-print_registry_plan() {
-  echo "Registry changes:"
+print_env_cleanup_plan() {
+  echo "Env object cleanup:"
   if [[ -n "${MODE_AGENT}" ]]; then
-    python3 scripts/registry.py remove-role-artifacts --role "${MODE_AGENT}" --drop-empty-tracks --dry-run
+    python3 scripts/env_artifacts.py cleanup-buddy --buddy "${MODE_AGENT}" --delete-files --dry-run
     return 0
   fi
-
   if [[ ${MODE_ALL_AGENTS} -eq 1 ]]; then
-    python3 scripts/registry.py clear --force --dry-run
-    return 0
-  fi
-
-  if [[ ${MODE_ALL_STORAGE} -eq 1 ]]; then
-    if [[ -f "${REGISTRY_PATH}" ]]; then
-      echo "Would delete: ${REGISTRY_PATH}"
-    else
-      echo "No registry file found."
+    python3 scripts/env_artifacts.py cleanup-all --delete-files --dry-run
+    if [[ -d "buddyswitch/objects/tracks" ]]; then
+      echo "Would delete track objects under buddyswitch/objects/tracks/"
     fi
     return 0
   fi
-
-  echo "No registry changes."
+  if [[ ${MODE_ALL_STORAGE} -eq 1 ]]; then
+    echo "Would delete all object dumps under buddyswitch/objects/"
+    return 0
+  fi
+  echo "No env object changes."
 }
 
 print_plan() {
@@ -171,24 +170,24 @@ print_plan() {
       echo "  - $(rel_path "${p}")"
     done
   fi
-  print_registry_plan
+  print_env_cleanup_plan
   echo
 }
 
 ensure_required_skeleton() {
   mkdir -p \
-    artifacts/research \
-    artifacts/prd \
-    artifacts/design \
-    artifacts/build \
-    artifacts/test \
+    artifacts \
     runs/raw \
     runs/summaries \
-    projects/app/.runtime
+    projects/app/.runtime \
+    buddyswitch/objects/tracks \
+    buddyswitch/objects/artifacts
 
   : > runs/raw/.gitkeep
   : > runs/summaries/.gitkeep
   : > projects/app/.runtime/.gitkeep
+  : > buddyswitch/objects/tracks/.gitkeep
+  : > buddyswitch/objects/artifacts/.gitkeep
 }
 
 parse_args() {
@@ -246,8 +245,8 @@ validate_modes() {
   [[ ${target_count} -eq 0 ]] && fail "No cleanup target provided"
   [[ ${target_count} -gt 1 ]] && fail "Conflicting targets. Choose one of --agent, --all-agents, --project, --all-storage"
 
-  if [[ -n "${MODE_AGENT}" ]] && ! is_valid_agent "${MODE_AGENT}"; then
-    fail "Invalid agent '${MODE_AGENT}'. Valid: market, pm, design, dev, test"
+  if [[ -n "${MODE_AGENT}" ]] && ! is_valid_buddy "${MODE_AGENT}"; then
+    fail "Invalid buddy '${MODE_AGENT}'. Check buddyswitch/manifest.toml"
   fi
 
   if [[ -n "${MODE_PROJECT}" ]] && [[ "${MODE_PROJECT}" != "app" ]]; then
@@ -260,20 +259,19 @@ validate_modes() {
 }
 
 build_targets() {
-  local agent
   if [[ -n "${MODE_AGENT}" ]]; then
-    add_target_dir "$(agent_artifact_dir "${MODE_AGENT}")"
     add_target_dir "runs/raw/${MODE_AGENT}"
     add_target_dir "runs/summaries/${MODE_AGENT}"
     return 0
   fi
 
   if [[ ${MODE_ALL_AGENTS} -eq 1 ]]; then
-    for agent in "${VALID_AGENTS[@]}"; do
-      add_target_dir "$(agent_artifact_dir "${agent}")"
-      add_target_dir "runs/raw/${agent}"
-      add_target_dir "runs/summaries/${agent}"
-    done
+    local buddy
+    while IFS= read -r buddy; do
+      [[ -z "${buddy}" ]] && continue
+      add_target_dir "runs/raw/${buddy}"
+      add_target_dir "runs/summaries/${buddy}"
+    done < <(load_valid_buddies || true)
     return 0
   fi
 
@@ -287,6 +285,8 @@ build_targets() {
     add_target_dir "runs/raw"
     add_target_dir "runs/summaries"
     add_target_dir "projects/app/.runtime"
+    add_target_dir "buddyswitch/objects/tracks"
+    add_target_dir "buddyswitch/objects/artifacts"
   fi
 }
 
@@ -323,14 +323,17 @@ run_delete() {
   done
 }
 
-update_registry_after_delete() {
+run_env_cleanup() {
   if [[ -n "${MODE_AGENT}" ]]; then
-    python3 scripts/registry.py remove-role-artifacts --role "${MODE_AGENT}" --drop-empty-tracks
+    python3 scripts/env_artifacts.py cleanup-buddy --buddy "${MODE_AGENT}" --delete-files
     return 0
   fi
 
   if [[ ${MODE_ALL_AGENTS} -eq 1 ]]; then
-    python3 scripts/registry.py clear --force
+    python3 scripts/env_artifacts.py cleanup-all --delete-files
+    if [[ -d "buddyswitch/objects/tracks" ]]; then
+      find "buddyswitch/objects/tracks" -mindepth 1 -type f ! -name ".gitkeep" -delete
+    fi
     return 0
   fi
 
@@ -351,7 +354,7 @@ main() {
 
   confirm_execute
   run_delete
-  update_registry_after_delete
+  run_env_cleanup
   ensure_required_skeleton
   echo "Cleanup completed."
 }

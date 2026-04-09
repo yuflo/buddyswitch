@@ -1,48 +1,38 @@
-# Case 09: Track Registry Lifecycle
+# Case 09: Track Object Lifecycle
 
 ## Intent
 
-Validate that agent artifact registration follows explicit Track Registry rules and does not create hidden workflow state.
-
-## Commands
-
-```text
-switch pm: 继续 onboarding-minimal track，写一版 PRD update 到 artifacts/prd/onboarding-minimal-update.md，并登记到 registry
-
-switch pm: 基于 artifacts/research/scheduling-tool-convenience-market-research.md 写 MVP PRD 到 artifacts/prd/scheduling-tool-mvp.md
-
-switch design: 将 artifacts/design/onboarding-minimal-spec.md 登记到 missing-track track
-
-switch pm: 将 artifacts/research/scheduling-tool-convenience-market-research.md 推进为新 track，并写 MVP PRD
-```
+Validate explicit track control by PM and artifact auto-register behavior.
 
 ## Preconditions
 
-- `scripts/registry.py` exists.
+- `scripts/env_tracks.py` exists.
+- `scripts/env_artifacts.py` exists.
 - `framework/docs/track-registry.md` exists.
-- `artifacts/workspace-registry.json` exists or can be created through `scripts/registry.py`.
-- Agent configs, contracts, and skills reference the Track Registry rule.
+- `buddyswitch/objects/tracks/` and `buddyswitch/objects/artifacts/` are writable.
 
 ## Manual Steps
 
-1. Review the commands above against `framework/docs/track-registry.md`.
-2. For command 1, confirm the agent uses `scripts/registry.py` to update registry state.
-3. For command 2, confirm the agent writes the PRD but does not update registry because Track/registry intent is absent.
-4. For command 3, confirm the agent blocks or asks clarification because `missing-track` does not exist and creation was not requested.
-5. For command 4, confirm a new Track can be created because the user explicitly says to promote into a new track, and PM registers only its own PRD artifact.
+1. PM creates track:
+   - `python3 scripts/env_tracks.py create demo-track --title "Demo Track" --actor pm`
+2. Non-PM artifact create with context track:
+   - `python3 scripts/env_artifacts.py create --artifact-id art-demo-market --title "Demo Market" --kind research --path artifacts/art-demo-market--demo-market.md --producer-buddy market --source-skill research-scan --context-track-id demo-track --actor market`
+3. Verify track shows attached artifact id:
+   - `python3 scripts/env_tracks.py show demo-track --actor pm`
+4. Verify non-PM cannot advance track:
+   - `python3 scripts/env_tracks.py advance demo-track --status done --actor market`
+5. Verify PM can advance track:
+   - `python3 scripts/env_tracks.py advance demo-track --status done --actor pm`
 
 ## Pass Criteria
 
-- Explicit Track/registry prompts use `scripts/registry.py` rather than direct JSON edits.
-- Explicit existing Track prompts register only the current agent's artifact role/type/path entry.
-- Non-Track artifact prompts do not update registry automatically.
-- Missing Track registration does not create a Track unless the user explicitly asks to create/promote.
-- New Track creation uses `state: "active"` and records the derived or user-provided `track_id`.
-- Final responses list registry changes under deliverables or changed files.
+- PM can create and advance tracks.
+- Non-PM artifact with `context_track_id` auto-registers into `artifact_ids`.
+- Non-PM direct track advance is rejected.
+- Object files are persisted under `buddyswitch/objects/`.
 
 ## Fail Signals
 
-- Agent creates or associates a Track based only on its own judgment.
-- Agent updates registry when no Track/registry/register/promote intent was present.
-- Agent rewrites unrelated role entries in a Track.
-- Agent omits registry changes from the final response.
+- Non-PM can mutate track lifecycle fields.
+- Artifact `context_track_id` does not attach to track.
+- Track state depends on legacy registry script.

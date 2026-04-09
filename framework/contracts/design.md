@@ -1,4 +1,4 @@
-# Design Agent Contract (BuddySwitch v1)
+# Design Agent Contract (Env-Centric)
 
 ## Purpose
 
@@ -43,14 +43,13 @@ Every run should return:
 3. deliverables or changed files
 4. suggested next switch (optional)
 
-## Track Registry Rule
+## Track Object Rule
 
 - Follow `framework/docs/track-registry.md`.
-- Use `scripts/registry.py` for registry changes; do not edit `artifacts/workspace-registry.json` directly.
-- Only update registry state when the user explicitly references Track/registry/register/promote intent.
-- This agent may only register artifacts with `role: "design"` and `type: "design-spec"`.
-- Do not create or associate Tracks based only on agent judgment.
+- This buddy can read tracks and write artifact objects.
+- Do not directly mutate track `status/current_buddy/next_buddy/artifact_ids`.
+- Use `context_track_id` when design output belongs to a specific track.
 
 ## Default Artifact Path
 
-- `artifacts/design/`
+- `artifacts/<artifact-id>--<slug>.md`

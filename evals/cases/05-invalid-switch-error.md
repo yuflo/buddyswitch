@@ -1,8 +1,8 @@
-# Case 05: Invalid Switch Rejection
+# Case 05: Invalid Switch Rejection (Manifest-Backed)
 
 ## Intent
 
-Validate that invalid switch directives are rejected clearly with no intent guessing.
+Validate that invalid switch directives are rejected clearly and buddy validation comes from manifest.
 
 ## Prompt
 
@@ -13,23 +13,23 @@ switch potato: do something
 ## Preconditions
 
 - `framework/docs/switch-spec.md` exists.
-- Minimal parser is available at `scripts/parse_switch.py`.
+- Parser exists at `scripts/parse_switch.py`.
+- Manifest exists at `buddyswitch/manifest.toml`.
 
 ## Manual Steps
 
-1. Run the prompt in a BuddySwitch session.
-2. Optionally verify parser behavior directly:
+1. Run:
    - `python3 scripts/parse_switch.py "switch potato: do something"`
+2. Confirm `valid_agents` list is derived from manifest entries.
 
 ## Pass Criteria
 
-- Response returns clear unknown-agent error.
-- Valid agents are shown (`market`, `pm`, `design`, `dev`, `test`).
-- Expected syntax `switch <agent>: <task>` is shown.
-- No silent reroute to another agent.
+- Unknown-buddy error is explicit.
+- Expected syntax `switch <buddy>: <task>` is shown.
+- Current valid buddies from manifest are shown.
+- No silent reroute.
 
 ## Fail Signals
 
+- Hardcoded buddy list mismatch with manifest.
 - Agent guess or auto-correction without user confirmation.
-- Missing valid-agent guidance.
-- Missing syntax guidance.

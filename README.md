@@ -1,126 +1,68 @@
-# BuddySwitch v1 Workspace
+# BuddySwitch Workspace (Env-Centric)
 
-This repository is the BuddySwitch v1 reference workspace.
+BuddySwitch now uses `buddyswitch/` env as the single source of truth.
 
 ## Quick Start
 
-1. Read `AGENTS.md` first.
-2. Ask Codex: `Read AGENTS.md and explain how this repository's BuddySwitch framework works.`
-3. Run one switch command, for example:
-   - `switch design: Produce IA and core flows from artifacts/prd/onboarding-minimal.md and write to artifacts/design/onboarding-minimal-v2.md`
-4. Inspect outputs:
-   - Durable artifacts in `artifacts/`
-   - Optional summaries in `runs/summaries/`
-   - Raw dumps in `runs/raw/`
-5. Run minimal evals from `evals/cases/` when framework instructions change.
+1. Read `AGENTS.md`.
+2. Validate parser and router:
+   - `python3 scripts/parse_switch.py "switch pm: create track"`
+   - `python3 scripts/codex_router.py "switch pm: create track"`
+3. Start Context Panel:
+   - `python3 scripts/serve_context_panel.py`
+4. Open:
+   - `http://127.0.0.1:8765/`
 
-## Core Idea
+## Canonical UI
 
-- One workspace repository
-- One explicit switch protocol: `switch <agent>: <task>`
-- Five specialist agents: `market`, `pm`, `design`, `dev`, `test`
-- Durable artifacts in `artifacts/`
-- Raw dumps in `runs/raw/`
-- Compact run summaries in `runs/summaries/`
+`switch <buddy>: <task>`
 
-## Key Locations
+Buddy list, scope, skills, and permissions are loaded from `buddyswitch/manifest.toml`.
 
-- `AGENTS.md`: root usage contract
-- `.codex/config.toml`: Codex project configuration
-- `.codex/agents/`: BuddySwitch custom agent definitions
-- `.agents/skills/`: repo-local skills
-- `framework/agent-registry.md`: canonical v1 agent roster and boundaries
-- `framework/contracts/`: role output contracts
-- `framework/templates/`: reusable templates
-- `framework/docs/switch-spec.md`: switch syntax and error handling rules
-- `framework/docs/artifacts-runs-git-policy.md`: durable output and Git rules
-- `framework/console/`: read-only context panel for registry tracks, untracked artifacts, and copyable commands
-- `artifacts/workspace-registry.json`: local dump backend for explicit Track Registry state
-- `scripts/registry.py`: temporary registry operation adapter
-- `projects/app/`: application code area
-- `projects/app/.runtime/`: project runtime-only data (temporary, cleanup-safe)
-- `evals/`: lightweight evaluation cases and rubrics
+## Core Storage
 
-## Git Boundary (Single Repo)
+- Env manifest: `buddyswitch/manifest.toml`
+- Track objects: `buddyswitch/objects/tracks/*.json`
+- Artifact objects: `buddyswitch/objects/artifacts/*.json`
+- Artifact markdown files: `artifacts/*.md` (flat root)
+- Run summaries: `runs/summaries/`
+- Raw dumps: `runs/raw/`
 
-- Keep one workspace repository for framework, app code, artifacts, and evals.
-- Commit durable outputs in `artifacts/` and compact summaries in `runs/summaries/`.
-- Do not commit raw dumps or scratch output in `runs/raw/`.
+## Env APIs
+
+- Manifest inspection: `scripts/env_manifest.py`
+- Track CRUD/advance: `scripts/env_tracks.py`
+- Artifact CRUD/auto-register: `scripts/env_artifacts.py`
+- Codex routing: `scripts/codex_router.py`
+
+Example commands:
+
+- `python3 scripts/env_tracks.py create onboarding-minimal --title "Onboarding Minimal" --actor pm`
+- `python3 scripts/env_artifacts.py create --artifact-id art-onboarding-prd --title "Onboarding PRD" --kind prd --producer-buddy pm --source-skill write-prd --context-track-id onboarding-minimal --actor pm`
+- `python3 scripts/env_tracks.py advance onboarding-minimal --next-buddy design --actor pm`
 
 ## Context Panel
 
-BuddySwitch includes a local read-only context panel for browsing explicit tracks, untracked artifacts, summaries, suggested switch commands, and cleanup commands.
+The panel is read-only and serves live data from `/api/workspace`:
 
-- `Tracks` are product iteration records declared through the registry adapter and currently stored in `artifacts/workspace-registry.json`.
-- `Artifact Inbox` entries are local dump files not registered to any Track. They are diagnostics, not a product queue.
-- Track creation and artifact association should be explicit user intent, not automatic inference.
-- Use `scripts/registry.py` for registry writes; the JSON file is a temporary local dump backend, not the final storage architecture.
+- tracks from `buddyswitch/objects/tracks/*.json`
+- artifacts from `buddyswitch/objects/artifacts/*.json`
+- artifact inbox from untracked `artifacts/*.md`
+- run summaries from `runs/summaries/`
 
-Run the local Context Panel server:
+No static snapshot or fallback file is required.
 
-- `python3 scripts/serve_context_panel.py`
-- If port `8765` is busy: `python3 scripts/serve_context_panel.py --port 8766`
+## Cleanup
 
-Open:
-
-- `http://127.0.0.1:8765/`
-
-Use the page's `Refresh workspace` button to rescan current local dump data through the server. This reads from `artifacts/`, `runs/summaries/`, and `artifacts/workspace-registry.json`.
-
-Interface boundary:
-
-- It does not call agents.
-- It does not call Codex, Claude Code, or Gemini CLI.
-- It does not execute cleanup commands.
-- It generates copyable commands for the user to run manually in the CLI.
-- The local server dynamically serves current workspace data through `/api/workspace`.
-
-## Manual Cleanup
-
-BuddySwitch provides a manual cleanup script for storage data outside the framework logic.
-Use it to reset experiments or clean state before regression runs.
-
-Script:
+Manual cleanup script:
 
 - `scripts/cleanup_buddyswitch.sh`
 
-Safety model:
-
-- default is dry-run (preview only)
-- add `--execute` to actually delete
-- interactive confirmation is required for execute mode
-- use `--force` with `--execute` only when you intentionally want non-interactive execution
+Defaults to dry-run. Add `--execute` to apply deletion.
 
 Examples:
 
-- Clean one agent data (artifacts + runs):
-  - `scripts/cleanup_buddyswitch.sh --agent market`
-- Clean all agent data:
-  - `scripts/cleanup_buddyswitch.sh --all-agents`
-- Clean project runtime data:
-  - `scripts/cleanup_buddyswitch.sh --project app`
-- Clean all storage data (`artifacts`, `runs`, `projects/app/.runtime`, and registry):
-  - `scripts/cleanup_buddyswitch.sh --all-storage`
-- Execute mode:
-  - `scripts/cleanup_buddyswitch.sh --all-agents --execute`
-  - `scripts/cleanup_buddyswitch.sh --all-storage --execute --force`
-
-Important notes:
-
-- Run `git status` before cleanup if you may want to keep generated files.
-- Agent cleanup updates registry state through `scripts/registry.py` so the Context Panel does not keep old artifact links.
-- `--all-storage` removes `artifacts/workspace-registry.json` because it resets all local BuddySwitch storage.
-- Agent-target cleanup relies on path conventions (`runs/raw/<agent>`, `runs/summaries/<agent>`), not regex guessing.
-- Legacy files placed directly under `runs/summaries/` root are not covered by agent-target cleanup and are only removed by `--all-storage`.
-
-## Registry Adapter
-
-The v1 registry adapter is a temporary local operation layer for Track state:
-
-- `python3 scripts/registry.py validate`
-- `python3 scripts/registry.py list-tracks`
-- `python3 scripts/registry.py show-track <track-id>`
-- `python3 scripts/registry.py create-track <track-id> --title "<title>"`
-- `python3 scripts/registry.py add-artifact <track-id> --role pm --type prd --path artifacts/prd/example.md`
-
-Agents should use this adapter when the user explicitly asks to create, continue, promote, register, or associate work with a Track.
+- `scripts/cleanup_buddyswitch.sh --agent market`
+- `scripts/cleanup_buddyswitch.sh --all-agents`
+- `scripts/cleanup_buddyswitch.sh --project app`
+- `scripts/cleanup_buddyswitch.sh --all-storage`

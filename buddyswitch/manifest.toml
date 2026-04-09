@@ -1,0 +1,91 @@
+schema_version = 1
+
+[env]
+id = "buddyswitch"
+label = "BuddySwitch Env"
+
+[[adapters]]
+id = "codex"
+path = "scripts/codex_router.py"
+description = "Resolve `switch <buddy>: <task>` with env-backed buddy scope, skills, and object permissions."
+
+[[skills]]
+id = "research-scan"
+path = "buddyswitch/skills/market/research-scan/SKILL.md"
+description = "Browser-first market research scan workflow."
+buddies = ["market"]
+objects = ["artifact"]
+
+[[skills]]
+id = "write-prd"
+path = "buddyswitch/skills/pm/write-prd/SKILL.md"
+description = "PM PRD authoring and scope shaping workflow."
+buddies = ["pm"]
+objects = ["track", "artifact"]
+
+[[skills]]
+id = "ia-spec"
+path = "buddyswitch/skills/design/ia-spec/SKILL.md"
+description = "Information architecture and interaction specification workflow."
+buddies = ["design"]
+objects = ["artifact"]
+
+[[skills]]
+id = "implement-task"
+path = "buddyswitch/skills/dev/implement-task/SKILL.md"
+description = "Scoped implementation workflow for project code."
+buddies = ["dev"]
+objects = ["artifact"]
+
+[[skills]]
+id = "smoke-test"
+path = "buddyswitch/skills/test/smoke-test/SKILL.md"
+description = "Smoke validation workflow with structured outcomes."
+buddies = ["test"]
+objects = ["artifact"]
+
+[[buddies]]
+id = "market"
+label = "Market"
+scope = "Research demand, users, and competition."
+skills = ["research-scan"]
+permissions = ["track.read", "artifact.read", "artifact.create", "artifact.update"]
+
+[[buddies]]
+id = "pm"
+label = "PM"
+scope = "Own product iteration and track progression."
+skills = ["write-prd"]
+permissions = [
+  "track.read",
+  "track.create",
+  "track.update",
+  "track.advance",
+  "track.attach_artifact",
+  "track.detach_artifact",
+  "artifact.read",
+  "artifact.create",
+  "artifact.update",
+  "artifact.delete",
+]
+
+[[buddies]]
+id = "design"
+label = "Design"
+scope = "Define IA and UX flow specifications."
+skills = ["ia-spec"]
+permissions = ["track.read", "artifact.read", "artifact.create", "artifact.update"]
+
+[[buddies]]
+id = "dev"
+label = "Dev"
+scope = "Implement approved scope in project code."
+skills = ["implement-task"]
+permissions = ["track.read", "artifact.read", "artifact.create", "artifact.update"]
+
+[[buddies]]
+id = "test"
+label = "Test"
+scope = "Validate behavior and report pass/fail/blocked outcomes."
+skills = ["smoke-test"]
+permissions = ["track.read", "artifact.read", "artifact.create", "artifact.update"]

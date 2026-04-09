@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal parser for BuddySwitch v1 switch directives."""
+"""Parser for BuddySwitch switch directives backed by env manifest."""
 
 from __future__ import annotations
 
@@ -7,10 +7,12 @@ import argparse
 import json
 import re
 import sys
+from pathlib import Path
 
-VALID_AGENTS = ("market", "pm", "design", "dev", "test")
-SYNTAX = "switch <agent>: <task>"
-EXAMPLE = "switch pm: Draft an MVP PRD from artifacts/research/live-space.md"
+from env_manifest import DEFAULT_MANIFEST, ManifestError, buddies_by_id, load_manifest
+
+SYNTAX = "switch <buddy>: <task>"
+EXAMPLE = "switch pm: Draft an MVP PRD from artifacts/art-live-space--research.md"
 
 
 def error(code: str, message: str, extra: dict | None = None) -> dict:
@@ -26,7 +28,7 @@ def error(code: str, message: str, extra: dict | None = None) -> dict:
     return payload
 
 
-def parse_switch(text: str) -> dict:
+def parse_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict:
     raw = text.strip()
     if not raw:
         return error(
@@ -53,12 +55,14 @@ def parse_switch(text: str) -> dict:
     agent = match.group(1)
     task = match.group(2).strip()
 
-    if agent not in VALID_AGENTS:
+    manifest = load_manifest(manifest_path)
+    valid_agents = sorted(buddies_by_id(manifest).keys())
+    if agent not in valid_agents:
         return error(
             "E_UNKNOWN_AGENT",
-            f"Unknown agent '{agent}'.",
+            f"Unknown buddy '{agent}'.",
             {
-                "valid_agents": list(VALID_AGENTS),
+                "valid_agents": valid_agents,
                 "expected_syntax": SYNTAX,
                 "example": EXAMPLE,
             },
@@ -71,16 +75,24 @@ def parse_switch(text: str) -> dict:
             {"expected_syntax": SYNTAX, "example": EXAMPLE},
         )
 
-    return {"ok": True, "agent": agent, "task": task}
+    return {"ok": True, "agent": agent, "buddy": agent, "task": task}
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Parse BuddySwitch v1 switch directive.")
-    parser.add_argument("text", nargs="?", help="Directive text, e.g. 'switch pm: Draft PRD'")
+    parser = argparse.ArgumentParser(description="Parse BuddySwitch switch directive.")
+    parser.add_argument("text", nargs="?", help="Directive text, e.g. 'switch pm: continue track'")
+    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     args = parser.parse_args()
 
     text = args.text if args.text is not None else sys.stdin.read()
-    result = parse_switch(text)
+    try:
+        result = parse_switch(text, manifest_path=args.manifest)
+    except ManifestError as exc:
+        result = error(
+            "E_ENV_MANIFEST",
+            str(exc),
+            {"expected_syntax": SYNTAX, "example": EXAMPLE},
+        )
     print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0 if result.get("ok") else 1
 

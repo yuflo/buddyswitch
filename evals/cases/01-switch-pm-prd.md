@@ -7,7 +7,7 @@ Validate that `switch pm` produces a PRD-shaped output aligned with the PM contr
 ## Prompt
 
 ```text
-switch pm: Draft an MVP PRD from artifacts/research/live-space.md and write to artifacts/prd/live-space-mvp.md
+switch pm: Draft an MVP PRD from artifacts/art-live-space--research.md and write to artifacts/art-live-space-mvp--prd.md
 ```
 
 ## Preconditions
@@ -20,7 +20,7 @@ switch pm: Draft an MVP PRD from artifacts/research/live-space.md and write to a
 
 1. Run the prompt in a BuddySwitch session.
 2. Capture chat output and written file path.
-3. Open generated PRD file under `artifacts/prd/`.
+3. Open generated PRD file under `artifacts/`.
 
 ## Pass Criteria
 
@@ -33,11 +33,11 @@ switch pm: Draft an MVP PRD from artifacts/research/live-space.md and write to a
   - `acceptance_criteria`
   - `risks`
   - `open_questions`
-- Durable output is written to `artifacts/prd/`.
+- Durable output is written to `artifacts/`.
 - No code implementation is performed.
 
 ## Fail Signals
 
 - Missing one or more required fields.
-- PRD written outside `artifacts/prd/`.
+- PRD written outside `artifacts/`.
 - Agent drifts into implementation.

@@ -2,7 +2,7 @@
 
 ## Intent
 
-Validate that the BuddySwitch interface is a read-only context panel, not an agent orchestrator.
+Validate that context panel is read-only and reads from env object store.
 
 ## Commands
 
@@ -15,42 +15,29 @@ python3 scripts/serve_context_panel.py
 - `framework/console/index.html` exists.
 - `scripts/serve_context_panel.py` exists.
 - `scripts/workspace_data.py` exists.
+- `buddyswitch/manifest.toml` exists.
 
 ## Manual Steps
 
-1. Run the local server command.
+1. Run local server.
 2. Open `http://127.0.0.1:8765/`.
-3. Inspect the Tracks list, artifact timeline, Artifact Inbox diagnostics, run summaries, suggested switch commands, and cleanup commands.
-4. Click `Refresh workspace` and confirm the page reloads current workspace data from the server.
-5. Review generated cleanup commands.
-6. Review `framework/docs/interface-spec.md`.
+3. Confirm tracks, artifact timeline, artifact inbox, summaries, and command suggestions are visible.
+4. Click `Refresh workspace` and verify data is re-fetched from `/api/workspace`.
+5. Review `framework/docs/interface-spec.md`.
 
 ## Pass Criteria
 
-- Local server serves `/api/workspace` from current workspace state.
-- Workspace data includes `tracks`, `untracked_artifacts`, and `summaries`.
-- Workspace data does not include `research_inbox`.
-- Tracks come from `artifacts/workspace-registry.json`, not filename-based product inference.
-- Registry-declared tracks appear under Tracks when registry data exists.
-- Files under `artifacts/` that are not registry-referenced appear under Artifact Inbox.
-- If registry and artifacts are absent after full cleanup, Tracks and Artifact Inbox are empty.
-- The console shows:
-  - Tracks list
-  - artifact timeline
-  - Artifact Inbox diagnostics
-  - run summaries
-  - suggested `switch ...` commands
-  - cleanup commands
-- Cleanup commands do not include `--execute` or `--force` by default.
-- The interface does not execute shell commands.
-- The interface does not invoke any agent or LLM.
-- The interface does not write repo files from the browser.
-- `framework/docs/interface-spec.md` documents the read-only boundary.
+- `/api/workspace` returns live data.
+- Payload includes `tracks`, `artifacts`, `untracked_artifacts`, and `summaries`.
+- Tracks come from `buddyswitch/objects/tracks/*.json`.
+- Artifact metadata comes from `buddyswitch/objects/artifacts/*.json`.
+- Artifact inbox comes from untracked `artifacts/*.md`.
+- UI does not execute cleanup or switch commands.
+- UI does not call any agent or LLM.
+- UI does not write files.
 
 ## Fail Signals
 
-- The UI directly runs cleanup or agent commands.
-- The UI stores hidden agent state.
-- The UI displays a Research Inbox.
-- The UI cannot refresh current workspace data through the local server.
-- Cleanup commands default to destructive execution.
+- UI relies on static snapshot fallback.
+- UI mutates workspace state.
+- UI cannot refresh live data.

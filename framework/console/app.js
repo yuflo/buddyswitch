@@ -2,18 +2,14 @@
 
 const emptyWorkspace = {
   generated_at: null,
+  manifest_path: null,
+  objects_root: null,
+  buddies: [],
   tracks: [],
+  artifacts: [],
   untracked_artifacts: [],
   summaries: [],
 };
-
-const roles = [
-  { key: "market", label: "Market" },
-  { key: "pm", label: "PM" },
-  { key: "design", label: "Design" },
-  { key: "dev", label: "Dev" },
-  { key: "test", label: "Test" },
-];
 
 const generatedAt = document.getElementById("generatedAt");
 const trackCount = document.getElementById("trackCount");
@@ -31,29 +27,34 @@ const cleanupCommands = document.getElementById("cleanupCommands");
 const refreshButton = document.getElementById("refreshButton");
 const dataStatus = document.getElementById("dataStatus");
 
-let data = normalizeWorkspaceData(emptyWorkspace);
-let tracks = data.tracks;
-let untrackedArtifacts = data.untracked_artifacts;
-let summaries = data.summaries;
-let selectedTrack = tracks[0] || null;
+let workspace = normalizeWorkspaceData(emptyWorkspace);
+let selectedTrack = null;
 
 function normalizeWorkspaceData(rawData) {
   return {
     ...emptyWorkspace,
     ...(rawData || {}),
+    buddies: Array.isArray(rawData?.buddies) ? rawData.buddies : [],
     tracks: Array.isArray(rawData?.tracks) ? rawData.tracks : [],
+    artifacts: Array.isArray(rawData?.artifacts) ? rawData.artifacts : [],
     untracked_artifacts: Array.isArray(rawData?.untracked_artifacts) ? rawData.untracked_artifacts : [],
     summaries: Array.isArray(rawData?.summaries) ? rawData.summaries : [],
   };
 }
 
-function applyWorkspaceData(nextData) {
+function buddyLabelMap() {
+  return new Map(workspace.buddies.map((buddy) => [buddy.id, buddy.label]));
+}
+
+function buddyLabel(buddyId) {
+  const labels = buddyLabelMap();
+  return labels.get(buddyId) || buddyId || "unknown";
+}
+
+function applyWorkspaceData(nextWorkspace) {
   const selectedTrackId = selectedTrack?.id || null;
-  data = normalizeWorkspaceData(nextData);
-  tracks = data.tracks;
-  untrackedArtifacts = data.untracked_artifacts;
-  summaries = data.summaries;
-  selectedTrack = tracks.find((track) => track.id === selectedTrackId) || tracks[0] || null;
+  workspace = normalizeWorkspaceData(nextWorkspace);
+  selectedTrack = workspace.tracks.find((track) => track.id === selectedTrackId) || workspace.tracks[0] || null;
 }
 
 function canFetchLiveWorkspace() {
@@ -68,23 +69,6 @@ function setDataStatus(message, state = "neutral") {
   dataStatus.dataset.state = state;
 }
 
-function latestExistingArtifact(track, role) {
-  const artifacts = track.artifacts?.[role] || [];
-  return artifacts.find((artifact) => !artifact.missing) || null;
-}
-
-function artifactPath(track, role) {
-  return latestExistingArtifact(track, role)?.path || null;
-}
-
-function artifactCount(track) {
-  return roles.reduce((total, role) => total + (track.artifacts?.[role.key]?.length || 0), 0);
-}
-
-function setText(el, value) {
-  el.textContent = value;
-}
-
 function createEl(tag, className, text) {
   const el = document.createElement(tag);
   if (className) {
@@ -94,6 +78,12 @@ function createEl(tag, className, text) {
     el.textContent = text;
   }
   return el;
+}
+
+function setText(el, value) {
+  if (el) {
+    el.textContent = value;
+  }
 }
 
 async function copyText(text, button) {
@@ -118,61 +108,21 @@ function renderCommand(parent, command) {
   parent.append(row);
 }
 
-function suggestedTrackSwitches(track) {
-  const trackId = track.id;
-  const market = artifactPath(track, "market");
-  const prd = artifactPath(track, "pm");
-  const design = artifactPath(track, "design");
-  const build = artifactPath(track, "dev");
-  const suggestions = [];
-
-  if (!market) {
-    suggestions.push(`switch market: 为 ${trackId} track 补充调研，并通过 registry adapter 登记`);
-  }
-
-  if (!prd) {
-    const source = market ? `，基于 ${market}` : "";
-    suggestions.push(`switch pm: 继续 ${trackId} track${source}，写 MVP PRD 并登记到 registry`);
-  }
-
-  if (prd && !design) {
-    suggestions.push(`switch design: 继续 ${trackId} track，基于 ${prd} 做 IA 和交互 spec 并登记到 registry`);
-  }
-
-  if (prd && design && !build) {
-    suggestions.push(`switch dev: 继续 ${trackId} track，基于 ${prd} 和 ${design} 在 projects/app 实现最小版本并登记到 registry`);
-  }
-
-  if ((build || design) && !artifactPath(track, "test")) {
-    suggestions.push(`switch test: 继续 ${trackId} track，对 projects/app 的改动做 smoke test 并登记到 registry`);
-  }
-
-  if (suggestions.length === 0) {
-    suggestions.push(`switch pm: 继续 ${trackId} track，检查是否需要更新 PRD 或拆分下一轮需求`);
-  }
-
-  return suggestions;
-}
-
-function cleanupSuggestions(track) {
-  const presentAgents = roles
-    .filter((role) => (track.artifacts?.[role.key] || []).some((artifact) => !artifact.missing))
-    .map((role) => role.key);
-
-  const commands = [...new Set(presentAgents)].map((agent) => `scripts/cleanup_buddyswitch.sh --agent ${agent}`);
-  commands.push("scripts/cleanup_buddyswitch.sh --all-agents");
-  commands.push("scripts/cleanup_buddyswitch.sh --project app");
-  commands.push("scripts/cleanup_buddyswitch.sh --all-storage");
-  return commands;
+function artifactCount(track) {
+  return Array.isArray(track.artifacts) ? track.artifacts.length : 0;
 }
 
 function renderTrackButton(track) {
   const button = createEl("button", "topic-button");
   button.type = "button";
   button.classList.toggle("is-active", selectedTrack?.id === track.id);
+  const flow = track.next_buddy
+    ? `${buddyLabel(track.current_buddy)} -> ${buddyLabel(track.next_buddy)}`
+    : `${buddyLabel(track.current_buddy)} -> (no next)`;
   button.append(
     createEl("strong", "", track.title),
-    createEl("em", "", track.state || "active"),
+    createEl("em", "", track.status || "active"),
+    createEl("span", "", flow),
     createEl("span", "", `${artifactCount(track)} artifact(s)`),
     createEl("span", "", track.updated_at || "no timestamp"),
   );
@@ -185,26 +135,32 @@ function renderTrackButton(track) {
 
 function renderTracks() {
   trackList.replaceChildren();
-  trackCount.textContent = String(tracks.length);
+  trackCount.textContent = String(workspace.tracks.length);
 
-  if (tracks.length === 0) {
-    trackList.append(createEl("p", "note", "No tracks found. Register a product iteration with scripts/registry.py."));
+  if (workspace.tracks.length === 0) {
+    trackList.append(
+      createEl(
+        "p",
+        "note",
+        "No tracks found. PM can create one with scripts/env_tracks.py create <track-id> --title \"...\".",
+      ),
+    );
     return;
   }
 
-  tracks.forEach(renderTrackButton);
+  workspace.tracks.forEach(renderTrackButton);
 }
 
 function renderSummaries() {
   summaryList.replaceChildren();
-  summaryCount.textContent = String(summaries.length);
+  summaryCount.textContent = String(workspace.summaries.length);
 
-  if (summaries.length === 0) {
+  if (workspace.summaries.length === 0) {
     summaryList.append(createEl("p", "note", "No run summaries found."));
     return;
   }
 
-  summaries.slice(0, 8).forEach((summary) => {
+  workspace.summaries.slice(0, 8).forEach((summary) => {
     const item = createEl("div", "summary-item");
     item.append(
       createEl("strong", "", summary.title),
@@ -217,54 +173,88 @@ function renderSummaries() {
 
 function renderTimeline(track) {
   timeline.replaceChildren();
+  const artifacts = Array.isArray(track.artifacts) ? track.artifacts : [];
 
-  roles.forEach((role) => {
-    const artifacts = track.artifacts?.[role.key] || [];
-    if (artifacts.length === 0) {
+  if (artifacts.length === 0) {
+    timeline.append(createEl("p", "note", "No artifact objects attached to this track."));
+  }
+
+  artifacts.forEach((artifact) => {
+    const artifactEl = createEl("div", artifact.missing ? "artifact missing" : "artifact");
+    const row = createEl("div", "artifact-row");
+    row.append(
+      createEl("span", "artifact-title", artifact.title),
+      createEl("span", "role-tag", `${buddyLabel(artifact.producer_buddy)} / ${artifact.kind}`),
+    );
+    artifactEl.append(
+      row,
+      createEl("code", "artifact-path", artifact.path),
+      createEl("span", "artifact-path", artifact.missing ? "missing file" : artifact.updated_at),
+    );
+    timeline.append(artifactEl);
+  });
+
+  if (Array.isArray(track.missing_artifact_ids) && track.missing_artifact_ids.length > 0) {
+    track.missing_artifact_ids.forEach((artifactId) => {
       const missing = createEl("div", "artifact missing");
       const row = createEl("div", "artifact-row");
-      row.append(createEl("strong", "", role.label), createEl("span", "role-tag", "not registered"));
-      missing.append(row);
-      timeline.append(missing);
-      return;
-    }
-
-    artifacts.forEach((artifact) => {
-      const artifactEl = createEl("div", artifact.missing ? "artifact missing" : "artifact");
-      const row = createEl("div", "artifact-row");
-      row.append(
-        createEl("span", "artifact-title", artifact.title),
-        createEl("span", "role-tag", `${role.label} / ${artifact.type}`),
-      );
-      artifactEl.append(
+      row.append(createEl("span", "artifact-title", artifactId), createEl("span", "role-tag", "object missing"));
+      missing.append(
         row,
-        createEl("code", "artifact-path", artifact.path),
-        createEl("span", "artifact-path", artifact.missing ? "missing file" : artifact.updated_at),
+        createEl("code", "artifact-path", `missing artifact object: ${artifactId}`),
       );
-      timeline.append(artifactEl);
+      timeline.append(missing);
     });
+  }
+}
+
+function suggestedTrackSwitches(track) {
+  const suggestions = [];
+  if (track.next_buddy) {
+    suggestions.push(`switch ${track.next_buddy}: 继续 ${track.id} track，基于当前上下文推进并产出需要的 artifact`);
+  } else if (track.status === "done" || track.status === "archived") {
+    suggestions.push(`switch pm: 复核 ${track.id} track 是否需要 reopen 或拆分下一条 track`);
+  } else {
+    suggestions.push(`switch ${track.current_buddy}: 继续 ${track.id} track，补充当前阶段的交付`);
+  }
+  suggestions.push(`switch pm: 继续 ${track.id} track，更新 status/current_buddy/next_buddy 并收口`);
+  return suggestions;
+}
+
+function cleanupSuggestions(track) {
+  const seen = new Set();
+  const commands = [];
+  (track.artifacts || []).forEach((artifact) => {
+    if (artifact.producer_buddy && !seen.has(artifact.producer_buddy)) {
+      seen.add(artifact.producer_buddy);
+      commands.push(`scripts/cleanup_buddyswitch.sh --agent ${artifact.producer_buddy}`);
+    }
   });
+  commands.push("scripts/cleanup_buddyswitch.sh --all-agents");
+  commands.push("scripts/cleanup_buddyswitch.sh --project app");
+  commands.push("scripts/cleanup_buddyswitch.sh --all-storage");
+  return commands;
 }
 
 function registerCommand(artifact) {
-  return `switch ${artifact.role}: 将 ${artifact.path} 显式登记到 <track-id> track，并说明下一步处理`;
+  return `switch pm: 将 ${artifact.path} 关联到 <track-id>，并决定下一步 buddy`;
 }
 
 function renderUntrackedArtifacts() {
   untrackedList.replaceChildren();
-  untrackedCount.textContent = String(untrackedArtifacts.length);
+  untrackedCount.textContent = String(workspace.untracked_artifacts.length);
 
-  if (untrackedArtifacts.length === 0) {
-    untrackedList.append(createEl("p", "note", "No artifacts waiting in the inbox."));
+  if (workspace.untracked_artifacts.length === 0) {
+    untrackedList.append(createEl("p", "note", "No files waiting in artifact inbox."));
     return;
   }
 
-  untrackedArtifacts.forEach((artifact) => {
+  workspace.untracked_artifacts.forEach((artifact) => {
     const item = createEl("div", "summary-item");
     item.append(
       createEl("strong", "", artifact.title),
-      createEl("span", "", `${artifact.role} / ${artifact.type}`),
       createEl("code", "artifact-path", artifact.path),
+      createEl("span", "", artifact.updated_at || "no timestamp"),
     );
     renderCommand(item, registerCommand(artifact));
     untrackedList.append(item);
@@ -282,9 +272,12 @@ function renderSelectedTrack() {
     return;
   }
 
-  setText(selectedType, "Selected track");
+  setText(selectedType, `Track (${selectedTrack.status})`);
   setText(topicTitle, selectedTrack.title);
-  setText(topicSlug, selectedTrack.id);
+  const flow = selectedTrack.next_buddy
+    ? `${selectedTrack.id} | ${selectedTrack.current_buddy} -> ${selectedTrack.next_buddy}`
+    : `${selectedTrack.id} | ${selectedTrack.current_buddy}`;
+  setText(topicSlug, flow);
   renderTimeline(selectedTrack);
 
   switchCommands.replaceChildren();
@@ -295,7 +288,7 @@ function renderSelectedTrack() {
 }
 
 function render() {
-  generatedAt.textContent = data.generated_at || "not generated";
+  setText(generatedAt, workspace.generated_at || "not generated");
   renderTracks();
   renderSummaries();
   renderSelectedTrack();
@@ -304,7 +297,7 @@ function render() {
 
 async function refreshWorkspaceData({ silent = false } = {}) {
   if (!canFetchLiveWorkspace()) {
-    setDataStatus("Start the local server with python3 scripts/serve_context_panel.py.", "warning");
+    setDataStatus("Start local server: python3 scripts/serve_context_panel.py", "warning");
     return false;
   }
 
@@ -319,11 +312,9 @@ async function refreshWorkspaceData({ silent = false } = {}) {
       cache: "no-store",
       headers: { Accept: "application/json" },
     });
-
     if (!response.ok) {
       throw new Error(`Workspace API returned ${response.status}`);
     }
-
     applyWorkspaceData(await response.json());
     render();
     setDataStatus("Live workspace data", "live");
@@ -332,10 +323,7 @@ async function refreshWorkspaceData({ silent = false } = {}) {
     if (!silent) {
       console.warn("Unable to refresh live workspace data.", error);
     }
-    setDataStatus(
-      "Unable to read workspace data. Run python3 scripts/serve_context_panel.py.",
-      "warning",
-    );
+    setDataStatus("Unable to read /api/workspace. Run python3 scripts/serve_context_panel.py.", "warning");
     return false;
   } finally {
     if (refreshButton) {

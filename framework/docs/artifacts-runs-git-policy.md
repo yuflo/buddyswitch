@@ -1,25 +1,29 @@
-# BuddySwitch v1 Artifacts, Runs, and Git Policy
+# BuddySwitch Artifacts, Runs, and Git Policy
 
 ## 1. Scope
 
-This document defines where execution outputs go in BuddySwitch v1 and what should be committed to Git.
+This document defines where execution outputs go and what should be committed to Git.
 
-Model constraints for v1:
+Model constraints:
 - one workspace repository
 - no extra storage system
 - no multi-repo split
 
 ## 2. Output Boundary
 
-### `artifacts/` (durable outputs)
+### `artifacts/` (durable markdown outputs)
 
-Use `artifacts/` for outputs that are reusable and worth preserving as project memory:
+Use flat `artifacts/` (`artifacts/*.md`) for outputs that are reusable and worth preserving as project memory:
 - research reports
 - PRDs
 - design specs
 - implementation reports
 - test reports
-- `workspace-registry.json`, the v1 local dump backend for the explicit Track Registry
+- markdown content files referenced by artifact objects
+
+Object metadata source of truth is not in markdown filenames:
+- tracks: `buddyswitch/objects/tracks/*.json`
+- artifacts: `buddyswitch/objects/artifacts/*.json`
 
 ### `runs/raw/` (raw execution dumps)
 
@@ -53,8 +57,8 @@ Do not write these files into `projects/app/` source folders.
 
 - `AGENTS.md`
 - `.codex/config.toml`
-- `.codex/agents/*.toml`
-- `.agents/skills/**/SKILL.md`
+- `.codex/agents/router.toml`
+- `buddyswitch/skills/**/SKILL.md`
 - `framework/**`
 - `projects/app/**`
 - `artifacts/**`

@@ -1,6 +1,13 @@
-# BuddySwitch v1 Docs Pack
+# BuddySwitch Legacy v1 Docs Pack
 
-This folder contains the first version of the product and implementation docs for **BuddySwitch**.
+This folder contains historical v1 planning docs.
+
+Current source of truth is env-centric and lives in:
+
+- `AGENTS.md`
+- `README.md`
+- `buddyswitch/manifest.toml`
+- `framework/docs/`
 
 BuddySwitch is a **project-level agent framework** designed primarily for **Codex CLI MVP validation**.
 It lets a user enter a workspace, ask Codex to read the framework, and then use a simple switch directive

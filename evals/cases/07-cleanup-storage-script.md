@@ -2,7 +2,7 @@
 
 ## Intent
 
-Validate that BuddySwitch cleanup is manual, safe by default, and scoped to framework-external storage data only.
+Validate cleanup is manual, dry-run by default, and scoped to storage paths.
 
 ## Commands
 
@@ -18,45 +18,37 @@ scripts/cleanup_buddyswitch.sh --all-storage --force
 ## Preconditions
 
 - `scripts/cleanup_buddyswitch.sh` exists and is executable.
-- `scripts/registry.py` exists.
 - `projects/app/.runtime/.gitkeep` exists.
 - `README.md` includes manual cleanup usage.
 
 ## Manual Steps
 
 1. Run each command above.
-2. Confirm default mode is dry-run (no file deletion).
-3. Confirm error commands return explicit and actionable error messages.
-4. Optionally run a safe execute path:
+2. Confirm default mode is dry-run.
+3. Confirm invalid commands fail explicitly.
+4. Optionally run execute path:
    - `scripts/cleanup_buddyswitch.sh --project app --execute --force`
-5. Confirm cleanup scope does not include framework or source-code paths.
+5. Confirm cleanup does not target framework/source-code directories.
 
 ## Pass Criteria
 
-- Script supports required targets:
-  - `--agent <market|pm|design|dev|test>`
+- Required targets are supported:
+  - `--agent <buddy>`
   - `--all-agents`
   - `--project app`
   - `--all-storage`
 - Default behavior is preview-only.
 - `--force` without `--execute` is rejected.
-- Invalid agent and conflicting targets are rejected with clear messages.
-- Cleanup plan and deletion candidates are limited to:
+- Cleanup scope is limited to:
   - `artifacts/**`
   - `runs/raw/**`
   - `runs/summaries/**`
   - `projects/app/.runtime/**`
-- `--agent <agent>` reports the matching registry role cleanup through `scripts/registry.py`.
-- `--all-agents` reports registry track clearing through `scripts/registry.py`.
-- `--project app` reports no registry changes.
-- `--all-storage` targets `artifacts/workspace-registry.json` and does not rebuild derived console data.
-- `framework/`, `.codex/`, `.agents/`, `evals/`, and `projects/app` source files are not targeted.
+  - `buddyswitch/objects/**`
+- Agent/all-agent cleanup can remove artifact objects/files through `scripts/env_artifacts.py`.
 
 ## Fail Signals
 
-- Any deletion occurs without `--execute`.
-- Agent cleanup leaves old registry artifact links in the Context Panel.
-- `--all-storage` preserves `artifacts/workspace-registry.json`.
-- Cleanup target set includes framework or source-code files.
-- Missing required target modes.
-- Errors are ambiguous or silently ignored.
+- Deletion happens without `--execute`.
+- Cleanup targets framework/source-code paths.
+- Env object store remains stale after execute cleanup.

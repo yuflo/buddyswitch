@@ -1,4 +1,4 @@
-# PM Agent Contract (BuddySwitch v1)
+# PM Agent Contract (Env-Centric)
 
 ## Purpose
 
@@ -46,14 +46,13 @@ Every run should return:
 3. deliverables or changed files
 4. suggested next switch (optional)
 
-## Track Registry Rule
+## Track Object Rule
 
 - Follow `framework/docs/track-registry.md`.
-- Use `scripts/registry.py` for registry changes; do not edit `artifacts/workspace-registry.json` directly.
-- Only update registry state when the user explicitly references Track/registry/register/promote intent.
-- This agent may only register artifacts with `role: "pm"` and `type: "prd"`.
-- Do not create or associate Tracks based only on agent judgment.
+- PM owns track lifecycle: create/update/advance/attach/detach.
+- PM can write artifact objects and set `context_track_id`.
+- Track state changes should remain explicit in task intent.
 
 ## Default Artifact Path
 
-- `artifacts/prd/`
+- `artifacts/<artifact-id>--<slug>.md`

@@ -7,14 +7,14 @@ Validate that `switch design` output includes explicit state coverage, especiall
 ## Prompt
 
 ```text
-switch design: Produce IA and core flows for onboarding from artifacts/prd/onboarding-minimal.md and ensure state coverage includes loading, empty, and error states. Write to artifacts/design/onboarding-state-spec.md
+switch design: Produce IA and core flows for onboarding from artifacts/art-onboarding-minimal--prd.md and ensure state coverage includes loading, empty, and error states. Write to artifacts/art-onboarding-state-spec--design.md
 ```
 
 ## Preconditions
 
 - `framework/contracts/design.md` exists.
 - `framework/templates/design-spec.md` exists.
-- Input PRD exists at `artifacts/prd/onboarding-minimal.md`.
+- Input PRD exists at `artifacts/art-onboarding-minimal--prd.md`.
 
 ## Manual Steps
 
@@ -35,7 +35,7 @@ switch design: Produce IA and core flows for onboarding from artifacts/prd/onboa
   - loading
   - empty
   - error
-- Durable output is written to `artifacts/design/`.
+- Durable output is written to `artifacts/`.
 
 ## Fail Signals
 

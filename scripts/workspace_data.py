@@ -1,26 +1,18 @@
 #!/usr/bin/env python3
-"""Build the BuddySwitch Context Panel workspace read model."""
+"""Build BuddySwitch Context Panel data from env objects."""
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from env_manifest import DEFAULT_MANIFEST, load_manifest
+from env_store import ROOT, list_artifacts, list_tracks
 
-ROOT = Path(__file__).resolve().parents[1]
-REGISTRY = ROOT / "artifacts" / "workspace-registry.json"
 
-ROLE_ORDER = ("market", "pm", "design", "dev", "test")
-
-ARTIFACT_DIRS = {
-    "research": {"path": ROOT / "artifacts" / "research", "role": "market", "type": "research"},
-    "prd": {"path": ROOT / "artifacts" / "prd", "role": "pm", "type": "prd"},
-    "design": {"path": ROOT / "artifacts" / "design", "role": "design", "type": "design-spec"},
-    "build": {"path": ROOT / "artifacts" / "build", "role": "dev", "type": "implementation-report"},
-    "test": {"path": ROOT / "artifacts" / "test", "role": "test", "type": "smoke-test"},
-}
+ARTIFACTS_ROOT = ROOT / "artifacts"
+SUMMARIES_ROOT = ROOT / "runs" / "summaries"
 
 
 def iso_time(path: Path) -> str:
@@ -29,13 +21,6 @@ def iso_time(path: Path) -> str:
 
 def rel(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
-
-
-def normalize_registry_path(raw_path: str) -> str:
-    path = Path(raw_path)
-    if path.is_absolute() or ".." in path.parts:
-        raise ValueError(f"Registry artifact path must be repo-relative: {raw_path}")
-    return path.as_posix()
 
 
 def title_from_markdown(path: Path) -> str:
@@ -48,145 +33,85 @@ def title_from_markdown(path: Path) -> str:
     return path.stem
 
 
-def empty_artifacts() -> dict[str, list[dict[str, Any]]]:
-    return {role: [] for role in ROLE_ORDER}
-
-
-def artifact_defaults(path: str) -> dict[str, str]:
-    for source_dir, config in ARTIFACT_DIRS.items():
-        prefix = f"artifacts/{source_dir}/"
-        if path.startswith(prefix):
-            return {"source_dir": source_dir, "role": config["role"], "type": config["type"]}
-    return {"source_dir": "unknown", "role": "unknown", "type": "unknown"}
-
-
-def artifact_metadata(path: str, role: str | None = None, artifact_type: str | None = None) -> dict[str, Any]:
-    normalized = normalize_registry_path(path)
-    defaults = artifact_defaults(normalized)
-    resolved = ROOT / normalized
+def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
+    resolved = ROOT / artifact["path"]
     exists = resolved.exists()
-
     return {
-        "role": role or defaults["role"],
-        "type": artifact_type or defaults["type"],
-        "source_dir": defaults["source_dir"],
-        "path": normalized,
-        "file_name": Path(normalized).name,
-        "title": title_from_markdown(resolved) if exists else Path(normalized).stem,
-        "updated_at": iso_time(resolved) if exists else None,
+        **artifact,
+        "file_name": Path(artifact["path"]).name,
         "missing": not exists,
+        "file_updated_at": iso_time(resolved) if exists else None,
     }
 
 
-def load_registry() -> dict[str, Any]:
-    if not REGISTRY.exists():
-        project_id = ROOT.name
-        project_name = "BuddySwitch" if project_id == "buddyswitch" else project_id.replace("-", " ").title()
-        return {
-            "schema_version": 1,
-            "project": {"id": project_id, "name": project_name},
-            "tracks": [],
-        }
+def build_track_views(
+    tracks: list[dict[str, Any]], artifact_map: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for track in tracks:
+        artifacts: list[dict[str, Any]] = []
+        missing_artifact_ids: list[str] = []
+        latest = track["updated_at"]
 
-    try:
-        registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON in {rel(REGISTRY)}: {exc}") from exc
+        for artifact_id in track.get("artifact_ids", []):
+            artifact = artifact_map.get(artifact_id)
+            if artifact is None:
+                missing_artifact_ids.append(artifact_id)
+                continue
+            artifacts.append(artifact)
+            if artifact.get("updated_at", "") > latest:
+                latest = artifact["updated_at"]
 
-    if registry.get("schema_version") != 1:
-        raise ValueError("Registry schema_version must be 1.")
-    if not isinstance(registry.get("tracks"), list):
-        raise ValueError("Registry tracks must be a list.")
-    return registry
-
-
-def build_tracks(registry: dict[str, Any]) -> tuple[list[dict[str, Any]], set[str]]:
-    tracks: list[dict[str, Any]] = []
-    registered_paths: set[str] = set()
-
-    for raw_track in registry["tracks"]:
-        if not isinstance(raw_track, dict):
-            raise ValueError("Each registry track must be an object.")
-
-        track_id = raw_track.get("id")
-        if not isinstance(track_id, str) or not track_id:
-            raise ValueError("Each registry track must include a non-empty id.")
-
-        artifacts = empty_artifacts()
-        missing_artifacts: list[str] = []
-        updated_at: str | None = None
-
-        raw_artifacts = raw_track.get("artifacts", [])
-        if not isinstance(raw_artifacts, list):
-            raise ValueError(f"Track {track_id} artifacts must be a list.")
-
-        for ref in raw_artifacts:
-            if not isinstance(ref, dict):
-                raise ValueError(f"Track {track_id} has an artifact entry that is not an object.")
-
-            raw_path = ref.get("path")
-            if not isinstance(raw_path, str) or not raw_path:
-                raise ValueError(f"Track {track_id} has an artifact without a path.")
-
-            role = ref.get("role")
-            if role not in ROLE_ORDER:
-                raise ValueError(f"Track {track_id} has an artifact with invalid role: {role}")
-
-            metadata = artifact_metadata(raw_path, role=role, artifact_type=ref.get("type"))
-            registered_paths.add(metadata["path"])
-            artifacts[role].append(metadata)
-
-            if metadata["missing"]:
-                missing_artifacts.append(metadata["path"])
-            elif updated_at is None or metadata["updated_at"] > updated_at:
-                updated_at = metadata["updated_at"]
-
-        for role_artifacts in artifacts.values():
-            role_artifacts.sort(key=lambda item: item["updated_at"] or "", reverse=True)
-
-        tracks.append(
+        artifacts.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
+        rows.append(
             {
-                "id": track_id,
-                "title": raw_track.get("title") or track_id.replace("-", " ").title(),
-                "state": raw_track.get("state") or "active",
+                "id": track["id"],
+                "title": track["title"],
+                "status": track["status"],
+                "current_buddy": track["current_buddy"],
+                "next_buddy": track["next_buddy"],
+                "artifact_ids": track["artifact_ids"],
+                "summary": track.get("summary", ""),
+                "updated_at": latest,
                 "artifacts": artifacts,
-                "updated_at": updated_at,
-                "missing_artifacts": missing_artifacts,
-                "registry_path": rel(REGISTRY),
+                "missing_artifact_ids": missing_artifact_ids,
             }
         )
-
-    tracks.sort(key=lambda item: (item["updated_at"] or "", item["id"]), reverse=True)
-    return tracks, registered_paths
-
-
-def scan_artifact_files() -> list[dict[str, Any]]:
-    artifacts = []
-    for source_dir, config in ARTIFACT_DIRS.items():
-        directory = config["path"]
-        if not directory.exists():
-            continue
-        for path in sorted(directory.glob("*.md")):
-            if path.name == ".gitkeep":
-                continue
-            artifacts.append(artifact_metadata(rel(path), role=config["role"], artifact_type=config["type"]))
-    return sorted(artifacts, key=lambda item: (item["updated_at"] or "", item["path"]), reverse=True)
+    rows.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
+    return rows
 
 
 def scan_untracked_artifacts(registered_paths: set[str]) -> list[dict[str, Any]]:
-    return [artifact for artifact in scan_artifact_files() if artifact["path"] not in registered_paths]
+    if not ARTIFACTS_ROOT.exists():
+        return []
+
+    rows = []
+    for path in sorted(ARTIFACTS_ROOT.glob("*.md")):
+        if path.name == ".gitkeep":
+            continue
+        relative_path = rel(path)
+        if relative_path in registered_paths:
+            continue
+        rows.append(
+            {
+                "title": title_from_markdown(path),
+                "path": relative_path,
+                "updated_at": iso_time(path),
+            }
+        )
+    rows.sort(key=lambda item: (item["updated_at"], item["path"]), reverse=True)
+    return rows
 
 
 def scan_summaries() -> list[dict[str, Any]]:
-    directory = ROOT / "runs" / "summaries"
-    if not directory.exists():
+    if not SUMMARIES_ROOT.exists():
         return []
 
-    summaries = []
-    for path in sorted(directory.glob("*.md")):
+    rows = []
+    for path in sorted(SUMMARIES_ROOT.glob("**/*.md")):
         if path.name == ".gitkeep":
             continue
-        summaries.append(
+        rows.append(
             {
                 "path": rel(path),
                 "file_name": path.name,
@@ -194,17 +119,27 @@ def scan_summaries() -> list[dict[str, Any]]:
                 "updated_at": iso_time(path),
             }
         )
-    return sorted(summaries, key=lambda item: item["updated_at"], reverse=True)
+    rows.sort(key=lambda item: item["updated_at"], reverse=True)
+    return rows
 
 
 def build_workspace_data() -> dict[str, Any]:
-    registry = load_registry()
-    tracks, registered_paths = build_tracks(registry)
+    manifest = load_manifest(DEFAULT_MANIFEST)
+    artifacts = [build_artifact_view(artifact) for artifact in list_artifacts()]
+    artifact_map = {artifact["id"]: artifact for artifact in artifacts}
+    tracks = build_track_views(list_tracks(), artifact_map)
+    registered_paths = {artifact["path"] for artifact in artifacts}
+
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "registry_path": rel(REGISTRY),
-        "project": registry.get("project", {}),
+        "manifest_path": rel(DEFAULT_MANIFEST),
+        "objects_root": "buddyswitch/objects",
+        "buddies": [
+            {"id": buddy["id"], "label": buddy["label"], "scope": buddy["scope"]}
+            for buddy in manifest.get("buddies", [])
+        ],
         "tracks": tracks,
+        "artifacts": artifacts,
         "untracked_artifacts": scan_untracked_artifacts(registered_paths),
         "summaries": scan_summaries(),
     }

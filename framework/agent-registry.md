@@ -1,19 +1,25 @@
-# BuddySwitch v1 Agent Registry
+# Buddy Registry (Env Source)
 
-This registry defines the only supported specialist agents for BuddySwitch v1.
+BuddySwitch no longer uses a separate hardcoded agent registry.
 
-Invocation model:
-- User explicitly selects one agent via `switch <agent>: <task>`.
-- No team lead role.
-- No hidden workflow rerouting.
-- No implicit parallel orchestration.
+## Source Of Truth
 
-## Registered Agents
+All buddy definitions come from `buddyswitch/manifest.toml`:
 
-| Agent | Purpose | Contract | Default Artifact Path | Starter Skill |
-| --- | --- | --- | --- | --- |
-| `market` | demand and competitor research | `framework/contracts/market.md` | `artifacts/research/` | `research-scan` |
-| `pm` | PRD and product scope definition | `framework/contracts/pm.md` | `artifacts/prd/` | `write-prd` |
-| `design` | IA, flows, and interaction spec | `framework/contracts/design.md` | `artifacts/design/` | `ia-spec` |
-| `dev` | implementation in project code | `framework/contracts/dev.md` | `artifacts/build/` | `implement-task` |
-| `test` | validation and test reporting | `framework/contracts/test.md` | `artifacts/test/` | `smoke-test` |
+- `id`
+- `label`
+- `scope`
+- `skills`
+- `permissions`
+
+## Runtime Resolution
+
+- Parser validation: `scripts/parse_switch.py`
+- Codex routing: `scripts/codex_router.py`
+- Skill docs: `buddyswitch/skills/<buddy>/<skill>/SKILL.md`
+
+## Current Core Model
+
+- `pm` owns track lifecycle.
+- Other buddies read track context and produce artifacts.
+- Tracks and artifacts are persisted as object dumps under `buddyswitch/objects/`.

@@ -7,19 +7,19 @@ Validate that `switch market` follows browser-first deep research workflow with 
 ## Prompt
 
 ```text
-switch market: Research 2026 demand signals for AI onboarding copilots. Use browser-first collection with search assist, include x.com and reddit by default, and write the report to artifacts/research/onboarding-copilot-demand.md
+switch market: Research 2026 demand signals for AI onboarding copilots. Use browser-first collection with search assist, include x.com and reddit by default, and write the report to artifacts/art-onboarding-copilot-demand--research.md
 ```
 
 ## Preconditions
 
 - `framework/contracts/market.md` exists.
 - `framework/templates/research-report.md` exists.
-- `market` skill exists at `.agents/skills/market/research-scan/SKILL.md`.
+- `market` skill exists at `buddyswitch/skills/market/research-scan/SKILL.md`.
 
 ## Manual Steps
 
 1. Run the prompt in a BuddySwitch session.
-2. Open generated research file under `artifacts/research/`.
+2. Open generated research file under `artifacts/`.
 3. Inspect sections and evidence traceability.
 4. Verify channel coverage and round log.
 
@@ -46,7 +46,7 @@ switch market: Research 2026 demand signals for AI onboarding copilots. Use brow
   - `source_type`
   - `accessed_at`
   - `claim_excerpt`
-- Durable output is written to `artifacts/research/`.
+- Durable output is written to `artifacts/`.
 
 ## Scenario Checks
 
