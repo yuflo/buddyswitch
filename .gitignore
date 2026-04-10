@@ -1,10 +1,27 @@
-# BuddySwitch run noise (never commit raw execution output)
+# BuddySwitch run noise (keep repo skeleton only during rapid iteration)
+runs/summaries/**
+!runs/summaries/.gitkeep
+
 runs/raw/**
 !runs/raw/.gitkeep
+
+# BuddySwitch generated state and artifacts
+artifacts/**
+!artifacts/.gitkeep
+
+buddyswitch/objects/artifacts/**
+!buddyswitch/objects/artifacts/.gitkeep
+
+buddyswitch/objects/tracks/**
+!buddyswitch/objects/tracks/.gitkeep
 
 # Project runtime noise (keep only skeleton marker)
 projects/app/.runtime/**
 !projects/app/.runtime/.gitkeep
+
+# Test runner output
+test-results/
+playwright-report/
 
 # Temporary and local noise
 *.log

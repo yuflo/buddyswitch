@@ -3,70 +3,130 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BuddySwitch Onboarding Demo</title>
+  <title>AI Scheduler - Join Waitlist</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <main class="app-shell">
-    <header>
-      <h1>BuddySwitch Onboarding Demo</h1>
-      <p class="subtitle">A minimal 3-step onboarding flow for framework validation.</p>
-    </header>
+  <main class="page-shell">
+    <section class="hero section">
+      <p class="eyebrow">AI Scheduler</p>
+      <h1>Automatically Rebuild Your Day When Plans Change</h1>
+      <p class="lede">
+        Turn tasks and constraints into a schedule that keeps up with real work.
+        No manual reshuffling every time a meeting moves.
+      </p>
+      <a class="btn btn-primary" href="#waitlist" id="heroCta">Join Waitlist</a>
+    </section>
 
-    <section class="progress" aria-live="polite">
-      <div class="progress-label" id="progressLabel">Step 1 of 3</div>
-      <div class="progress-track" role="progressbar" aria-valuemin="1" aria-valuemax="3" aria-valuenow="1" id="progressTrack">
-        <div class="progress-fill" id="progressFill"></div>
+    <section class="how-it-works section" aria-labelledby="howItWorksTitle">
+      <h2 id="howItWorksTitle">How It Works</h2>
+      <ol>
+        <li><strong>Add tasks and constraints.</strong> Define priority, due dates, and focus windows.</li>
+        <li><strong>Auto-schedule your time.</strong> AI places work into your calendar plan.</li>
+        <li><strong>Auto-adjust when things change.</strong> New meetings and conflicts trigger smart reshuffling.</li>
+      </ol>
+    </section>
+
+    <section class="pricing section" id="pricing" aria-labelledby="pricingTitle">
+      <h2 id="pricingTitle">Pricing</h2>
+      <p class="pricing-copy">Choose a plan and reserve early pricing access.</p>
+      <div class="pricing-grid">
+        <article class="plan-card" aria-labelledby="planPersonalTitle">
+          <p class="plan-kicker">For solo operators</p>
+          <h3 id="planPersonalTitle">Personal</h3>
+          <p class="plan-price">$12<span>/month</span></p>
+          <ul class="plan-list">
+            <li>AI auto-scheduling for personal calendar</li>
+            <li>Priority-based task reshuffling</li>
+            <li>Email support</li>
+          </ul>
+          <button
+            type="button"
+            class="btn btn-primary pricing-cta"
+            data-plan="personal"
+            data-plan-name="Personal"
+            data-plan-price="$12/month"
+          >Reserve Personal</button>
+        </article>
+        <article class="plan-card plan-card-featured" aria-labelledby="planTeamTitle">
+          <p class="plan-badge">Recommended</p>
+          <p class="plan-kicker">For small teams</p>
+          <h3 id="planTeamTitle">Team</h3>
+          <p class="plan-price">$39<span>/month</span></p>
+          <ul class="plan-list">
+            <li>Everything in Personal</li>
+            <li>Team calendar conflict optimization</li>
+            <li>Priority onboarding support</li>
+          </ul>
+          <button
+            type="button"
+            class="btn btn-primary pricing-cta"
+            data-plan="team"
+            data-plan-name="Team"
+            data-plan-price="$39/month"
+          >Reserve Team</button>
+        </article>
       </div>
     </section>
 
-    <form id="onboardingForm" novalidate>
-      <section class="step is-active" data-step="0">
-        <h2>Welcome</h2>
-        <p>This onboarding captures two fields and confirms the setup.</p>
-        <button type="button" class="btn primary" data-action="next">Start</button>
-      </section>
-
-      <section class="step" data-step="1">
-        <h2>Profile Setup</h2>
-        <label for="name">Display Name</label>
-        <input id="name" name="name" type="text" placeholder="e.g. Alex" required>
-
-        <label for="goal">Primary Goal</label>
-        <select id="goal" name="goal" required>
-          <option value="">Choose one</option>
-          <option value="prototype">Ship a prototype</option>
-          <option value="learn">Learn the workflow</option>
-          <option value="collaborate">Collaborate with team</option>
-        </select>
-
-        <p class="error" id="formError" aria-live="polite"></p>
-        <div class="actions">
-          <button type="button" class="btn" data-action="back">Back</button>
-          <button type="button" class="btn primary" data-action="next">Continue</button>
+    <section class="waitlist section" id="waitlist" aria-labelledby="waitlistTitle">
+      <h2 id="waitlistTitle">Get Early Access</h2>
+      <p class="waitlist-copy">Join the waitlist and receive launch updates by email.</p>
+      <form id="waitlistForm" novalidate>
+        <label for="emailInput" class="sr-only">Email address</label>
+        <div class="form-row">
+          <input
+            id="emailInput"
+            name="email"
+            type="email"
+            inputmode="email"
+            autocomplete="email"
+            placeholder="name@company.com"
+            required
+          >
+          <button type="submit" class="btn btn-primary" id="submitBtn">Join Waitlist</button>
         </div>
-      </section>
-
-      <section class="step" data-step="2">
-        <h2>Confirm</h2>
-        <p>Review your onboarding details:</p>
-        <ul class="summary">
-          <li><strong>Name:</strong> <span id="summaryName">-</span></li>
-          <li><strong>Goal:</strong> <span id="summaryGoal">-</span></li>
-        </ul>
-        <div class="actions">
-          <button type="button" class="btn" data-action="back">Back</button>
-          <button type="button" class="btn primary" data-action="finish">Finish</button>
-        </div>
-      </section>
-    </form>
-
-    <section id="doneState" class="done" hidden>
-      <h2>Onboarding Complete</h2>
-      <p>Your profile setup is done for this demo flow.</p>
-      <button type="button" class="btn" id="restartBtn">Run Again</button>
+        <p class="form-message error" id="formError" aria-live="polite"></p>
+      </form>
+      <div class="success-panel" id="successPanel" hidden>
+        <h3>You are on the waitlist</h3>
+        <p>Thanks. We will email you about early access and rollout timing.</p>
+      </div>
     </section>
+
+    <footer class="section footer">
+      <a href="#" class="privacy-link" aria-label="Privacy notice">Privacy Notice</a>
+    </footer>
   </main>
+
+  <div class="modal-backdrop" id="paywallBackdrop" hidden>
+    <section class="paywall-modal" id="paywallModal" role="dialog" aria-modal="true" aria-labelledby="paywallTitle">
+      <button type="button" class="paywall-close" id="paywallCloseBtn" aria-label="Close paywall">Close</button>
+      <h2 id="paywallTitle">Reserve Early Pricing Access</h2>
+      <p class="paywall-plan" id="selectedPlanText">Selected plan</p>
+      <p class="paywall-copy">Leave your email and we will contact you when this plan is available.</p>
+      <form id="paywallForm" novalidate>
+        <label for="paywallEmailInput" class="sr-only">Email address</label>
+        <div class="form-row">
+          <input
+            id="paywallEmailInput"
+            name="paywall-email"
+            type="email"
+            inputmode="email"
+            autocomplete="email"
+            placeholder="name@company.com"
+            required
+          >
+          <button type="submit" class="btn btn-primary" id="paywallSubmitBtn">Reserve Spot</button>
+        </div>
+        <p class="form-message error" id="paywallError" aria-live="polite"></p>
+      </form>
+      <div class="success-panel" id="paywallSuccessPanel" hidden>
+        <h3>Pricing intent recorded</h3>
+        <p>Thanks. We will notify you when this plan opens for early access.</p>
+      </div>
+    </section>
+  </div>
 
   <script src="./main.js"></script>
 </body>
