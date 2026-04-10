@@ -11,12 +11,25 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from output_schema import OutputSchemaError, normalize_schema_path
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 _BUDDY_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _SKILL_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+\s*:")
 TRACK_MODES = {"optional", "required", "forbidden"}
+GUIDANCE_HEADINGS = {
+    "purpose": "purpose",
+    "use when": "use_when",
+    "do not use when": "do_not_use_when",
+    "inputs": "inputs",
+    "outputs": "outputs",
+    "verification": "verification",
+    "examples": "examples",
+    "counterexamples": "counterexamples",
+    "gotchas": "gotchas",
+}
 
 
 class ManifestError(ValueError):
@@ -134,12 +147,119 @@ def _parse_skill_front_matter(path: Path) -> dict[str, Any]:
     return data
 
 
+def _split_front_matter(path: Path) -> tuple[dict[str, Any], list[str]]:
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    if len(lines) < 3 or lines[0].strip() != "---":
+        raise ManifestError(f"{path.relative_to(ROOT)} must start with '---' front matter")
+
+    end = None
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            end = index
+            break
+    if end is None:
+        raise ManifestError(f"{path.relative_to(ROOT)} front matter is missing closing '---'")
+
+    block = lines[1:end]
+    data: dict[str, Any] = {}
+    i = 0
+    while i < len(block):
+        line = block[i]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            i += 1
+            continue
+
+        match = re.match(r"^([A-Za-z0-9_-]+)\s*:\s*(.*)$", stripped)
+        if not match:
+            raise ManifestError(f"Invalid front matter line in {path.relative_to(ROOT)}: {stripped}")
+        key = match.group(1)
+        value = match.group(2).strip()
+
+        if value:
+            data[key] = _parse_scalar(value, f"{path.relative_to(ROOT)}:{key}")
+            i += 1
+            continue
+
+        items: list[Any] = []
+        i += 1
+        while i < len(block):
+            next_line = block[i]
+            next_stripped = next_line.strip()
+            if not next_stripped:
+                i += 1
+                continue
+            if _SKILL_KEY_RE.match(next_stripped) and not next_stripped.startswith("-"):
+                break
+            item_match = re.match(r"^\s*-\s*(.+)\s*$", next_line)
+            if not item_match:
+                raise ManifestError(
+                    f"Invalid list item for '{key}' in {path.relative_to(ROOT)}: {next_stripped}"
+                )
+            items.append(_parse_scalar(item_match.group(1), f"{path.relative_to(ROOT)}:{key}"))
+            i += 1
+        data[key] = items
+
+    return data, lines[end + 1 :]
+
+
+def _normalize_section_lines(lines: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("- "):
+            cleaned.append(line[2:].strip())
+            continue
+        numbered = re.match(r"^\d+\.\s+(.*)$", line)
+        if numbered:
+            cleaned.append(numbered.group(1).strip())
+            continue
+        cleaned.append(line)
+    return cleaned
+
+
+def _parse_skill_guidance(path: Path, body_lines: list[str]) -> dict[str, list[str]]:
+    sections: dict[str, list[str]] = {value: [] for value in GUIDANCE_HEADINGS.values()}
+    current_key: str | None = None
+    buffer: list[str] = []
+
+    def flush() -> None:
+        nonlocal buffer
+        if current_key is None:
+            buffer = []
+            return
+        sections[current_key] = _normalize_section_lines(buffer)
+        buffer = []
+
+    for line in body_lines:
+        stripped = line.strip()
+        heading = re.match(r"^##\s+(.+?)\s*$", stripped)
+        if heading:
+            flush()
+            current_key = GUIDANCE_HEADINGS.get(heading.group(1).strip().lower())
+            continue
+        if current_key is not None:
+            buffer.append(line)
+
+    flush()
+
+    missing = [label for label, key in GUIDANCE_HEADINGS.items() if not sections[key]]
+    if missing:
+        raise ManifestError(
+            f"{path.relative_to(ROOT)} is missing required guidance section(s): {', '.join(missing)}"
+        )
+    return sections
+
+
 def _load_skill_runtime(path: Path, skill_id: str) -> dict[str, Any]:
     if not path.exists():
         raise ManifestError(f"Skill file not found: {path.relative_to(ROOT)}")
-    front = _parse_skill_front_matter(path)
+    front, body_lines = _split_front_matter(path)
 
-    required = ("name", "description", "track_mode", "default_artifact_kind", "auto_summary", "triggers")
+    required = ("name", "description", "track_mode", "default_artifact_kind", "auto_summary", "output_schema")
     missing = [key for key in required if key not in front]
     if missing:
         raise ManifestError(
@@ -172,15 +292,39 @@ def _load_skill_runtime(path: Path, skill_id: str) -> dict[str, Any]:
     if not isinstance(auto_summary, bool):
         raise ManifestError(f"{path.relative_to(ROOT)}:auto_summary must be true or false")
 
-    triggers = front["triggers"]
-    if not isinstance(triggers, list) or not triggers:
-        raise ManifestError(f"{path.relative_to(ROOT)}:triggers must be a non-empty list")
-    if any(not isinstance(trigger, str) or not trigger.strip() for trigger in triggers):
-        raise ManifestError(f"{path.relative_to(ROOT)}:triggers must contain non-empty strings")
+    output_schema = front["output_schema"]
+    if not isinstance(output_schema, str) or not output_schema.strip():
+        raise ManifestError(f"{path.relative_to(ROOT)}:output_schema must be a non-empty string")
+    try:
+        normalized_schema = normalize_schema_path(output_schema.strip())
+    except OutputSchemaError as exc:
+        raise ManifestError(f"{path.relative_to(ROOT)}:output_schema invalid: {exc}") from exc
+    if not (ROOT / normalized_schema).exists():
+        raise ManifestError(f"{path.relative_to(ROOT)}:output_schema file not found: {normalized_schema}")
 
-    default = front.get("default", False)
-    if not isinstance(default, bool):
-        raise ManifestError(f"{path.relative_to(ROOT)}:default must be true or false when provided")
+    version = front.get("version")
+    if version is not None and (not isinstance(version, str) or not version.strip()):
+        raise ManifestError(f"{path.relative_to(ROOT)}:version must be a non-empty string when provided")
+
+    side_effect_level = front.get("side_effect_level")
+    if side_effect_level is not None and (not isinstance(side_effect_level, str) or not side_effect_level.strip()):
+        raise ManifestError(
+            f"{path.relative_to(ROOT)}:side_effect_level must be a non-empty string when provided"
+        )
+
+    optional_lists: dict[str, list[str]] = {}
+    for key in ("required_tools", "required_env", "produces", "consumes"):
+        raw = front.get(key, [])
+        if not isinstance(raw, list):
+            raise ManifestError(f"{path.relative_to(ROOT)}:{key} must be a list when provided")
+        cleaned: list[str] = []
+        for item in raw:
+            if not isinstance(item, str) or not item.strip():
+                raise ManifestError(f"{path.relative_to(ROOT)}:{key} must contain non-empty strings")
+            cleaned.append(item.strip())
+        optional_lists[key] = cleaned
+
+    guidance = _parse_skill_guidance(path, body_lines)
 
     return {
         "name": name.strip(),
@@ -188,8 +332,14 @@ def _load_skill_runtime(path: Path, skill_id: str) -> dict[str, Any]:
         "track_mode": track_mode,
         "default_artifact_kind": artifact_kind.strip(),
         "auto_summary": auto_summary,
-        "triggers": [trigger.strip() for trigger in triggers],
-        "default": default,
+        "output_schema": normalized_schema,
+        "version": version.strip() if isinstance(version, str) else None,
+        "side_effect_level": side_effect_level.strip() if isinstance(side_effect_level, str) else None,
+        "required_tools": optional_lists["required_tools"],
+        "required_env": optional_lists["required_env"],
+        "produces": optional_lists["produces"],
+        "consumes": optional_lists["consumes"],
+        "guidance": guidance,
     }
 
 
@@ -319,6 +469,7 @@ def buddy_skill_docs(manifest: dict[str, Any], buddy_id: str) -> list[dict[str, 
                 "description": skill["description"],
                 "objects": skill["objects"],
                 "runtime": dict(skill.get("runtime", {})),
+                "guidance": dict(skill.get("runtime", {}).get("guidance", {})),
             }
         )
     return docs

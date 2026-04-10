@@ -1,33 +1,46 @@
 ---
 name: research-scan
 description: Run browser-first deep market research with iterative query refinement and strong source traceability.
+version: "2.0"
 track_mode: optional
 default_artifact_kind: research
 auto_summary: true
-triggers:
-  - market
-  - research
-  - demand
-  - competitor
+output_schema: framework/schemas/market/research-scan.json
+side_effect_level: medium
+produces:
+  - research-report
+  - evidence-log
+consumes:
+  - research-question
+  - links
+  - prior-artifacts
 ---
 
 # research-scan
 
-## Agent
+## Purpose
+- Produce evidence-backed market research with explicit source traceability and a clear synthesis of patterns, risks, and conclusions.
 
-- `market`
+## Use when
+- The task is about market demand, competitor behavior, user sentiment, category analysis, or source-backed external research.
+- The user wants browsing, evidence capture, and a research artifact as the main deliverable.
+- The prompt references demand, trends, competitors, audience behavior, or validating a market hypothesis.
 
-## Contract And Template
-
-- Contract: `framework/contracts/market.md`
-- Template: `framework/templates/research-report.md`
+## Do Not Use When
+- The main outcome should be a PRD, design spec, implementation change, or smoke-test report.
+- The task is asking for unverified opinion or product strategy without research.
+- The user has already supplied enough evidence and is really asking PM to scope a solution.
 
 ## Inputs
-
 - Research question or hypothesis.
 - Target market and user context.
-- Provided sources, links, or prior artifacts.
-- Optional output file path.
+- Provided links, prior artifacts, or required channels.
+- Optional output path.
+
+## Outputs
+- A research artifact with evidence, source traceability, patterns, caveats, and conclusion.
+- A run summary in `runs/summaries/market/` when default runtime persistence is used.
+- Explicit notes when login, paywall, or anti-bot constraints degrade evidence quality.
 
 ## Research Defaults
 
@@ -74,6 +87,11 @@ For each round, run this fixed loop:
 5. Map key claims and conclusions to source IDs.
 6. Write the final report using the research template.
 
+## Verification
+- Confirm every material conclusion can be traced back to captured evidence.
+- Confirm blocking conditions and evidence quality downgrades are documented.
+- Confirm the report separates observed evidence from inference.
+
 ## Track/Object Handling
 
 - Follow `framework/docs/track-registry.md`.
@@ -105,3 +123,17 @@ For each round, run this fixed loop:
 - Do not invent evidence.
 - Do not skip required channels unless user explicitly excludes them.
 - Do not continue past login-required sources without user confirmation.
+
+## Examples
+- `switch market: Research demand for AI companion live spaces`
+- `switch market: Compare creator monetization products and capture evidence`
+- `switch market: Validate whether playlist collaboration is becoming a standard expectation`
+
+## Counterexamples
+- `switch pm: Write the MVP PRD for playlist collaboration`
+- `switch dev: Implement playlist collaboration in projects/app`
+- `switch test: Run smoke checks on the playlist collaboration release candidate`
+
+## Gotchas
+- Source snippets are not final evidence; browse and validate pages directly.
+- Research wording often includes product ideas, but this skill should not turn them into requirements artifacts.

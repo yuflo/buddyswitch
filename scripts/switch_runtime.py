@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""BuddySwitch switch runtime: resolve and execute switch directives."""
+"""BuddySwitch runtime: resolve switch context and persist structured results."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shutil
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,18 +17,25 @@ from typing import Any
 from env_manifest import DEFAULT_MANIFEST, ManifestError, buddy_skill_docs, load_manifest, require_buddy
 from env_store import (
     ROOT,
+    advance_track,
+    artifact_content_path,
     artifact_markdown_path,
+    attach_artifact,
     create_artifact,
     create_track,
-    get_artifact,
+    detach_artifact,
     get_track,
     list_artifacts,
     list_tracks,
     normalize_artifact_file_path,
+    normalize_summary_file_path,
     now_iso,
+    save_artifact_content,
+    save_run_content,
     slugify,
     update_track,
 )
+from output_schema import OutputSchemaError, load_output_schema, validate_output_payload
 from parse_switch import EXAMPLE, SYNTAX, parse_switch
 
 
@@ -46,16 +56,6 @@ def runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) 
     if extra:
         payload["error"].update(extra)
     return payload
-
-
-def _normalize_summary_path(raw_path: str) -> str:
-    path = Path(raw_path)
-    if path.is_absolute() or ".." in path.parts:
-        raise ValueError(f"summary path must be repo-relative: {raw_path}")
-    normalized = path.as_posix()
-    if not normalized.startswith("runs/summaries/") or not normalized.endswith(".md"):
-        raise ValueError("summary path must be under runs/summaries/ and end with .md")
-    return normalized
 
 
 def _write_file(repo_path: str, content: str) -> None:
@@ -179,60 +179,20 @@ def _extract_summary_text(task: str) -> str | None:
     return None
 
 
-def _first_trigger_match(skill: dict[str, Any], task_lower: str) -> tuple[int, int] | None:
-    def _trigger_position(text: str, trigger: str) -> int:
-        token = trigger.lower()
-        if re.search(r"[A-Za-z0-9]", token):
-            pattern = rf"(?<![a-z0-9-]){re.escape(token)}(?![a-z0-9-])"
-            match = re.search(pattern, text)
-            return -1 if match is None else match.start()
-        return text.find(token)
-
-    triggers = skill["runtime"].get("triggers", [])
-    for trigger_index, trigger in enumerate(triggers):
-        position = _trigger_position(task_lower, trigger)
-        if position >= 0:
-            return position, trigger_index
-    return None
-
-
-def _pick_skill(buddy_id: str, task: str, manifest: dict[str, Any]) -> dict[str, Any]:
-    skills = buddy_skill_docs(manifest, buddy_id)
-    if not skills:
-        raise ValueError(f"buddy '{buddy_id}' has no skills configured")
-    if len(skills) == 1:
-        return skills[0]
-
-    task_lower = task.lower()
-    matches: list[tuple[int, int, int, dict[str, Any]]] = []
-    for skill_index, skill in enumerate(skills):
-        match = _first_trigger_match(skill, task_lower)
-        if match is None:
-            continue
-        position, trigger_index = match
-        matches.append((position, trigger_index, skill_index, skill))
-
-    if matches:
-        matches.sort(key=lambda item: (item[0], item[1], item[2]))
-        best_position = matches[0][0]
-        best = [row for row in matches if row[0] == best_position]
-        if len(best) == 1:
-            return best[0][3]
-        raise ValueError(
-            "Multiple skills matched at the same trigger position: "
-            + ", ".join(row[3]["id"] for row in best)
-            + ". Add clearer intent keywords."
-        )
-
-    defaults = [skill for skill in skills if skill["runtime"].get("default") is True]
-    if len(defaults) == 1:
-        return defaults[0]
-    if len(defaults) > 1:
-        raise ValueError("Multiple default skills configured: " + ", ".join(skill["id"] for skill in defaults))
-    raise ValueError(
-        "No skill trigger matched and no default skill configured for buddy "
-        f"'{buddy_id}'."
-    )
+def _extract_task_hints(task: str, valid_buddies: set[str]) -> dict[str, Any]:
+    output_path = _extract_output_path(task)
+    summary_path = _extract_summary_path(task)
+    return {
+        "explicit_track_id": _extract_track_id(task),
+        "explicit_artifact_id": _extract_artifact_id(task),
+        "output_path": normalize_artifact_file_path(output_path) if output_path else None,
+        "summary_path": normalize_summary_file_path(summary_path) if summary_path else None,
+        "action_hint": _extract_action(task),
+        "status_hint": _extract_status(task),
+        "current_buddy_hint": _extract_buddy(task, valid_buddies, "current_buddy"),
+        "next_buddy_hint": _extract_buddy(task, valid_buddies, "next_buddy"),
+        "summary_hint": _extract_summary_text(task),
+    }
 
 
 def _resolve_track_context(task: str, track_mode: str, *, allow_missing_explicit: bool = False) -> dict[str, Any]:
@@ -287,6 +247,18 @@ def _resolve_track_context(task: str, track_mode: str, *, allow_missing_explicit
     }
 
 
+def _evaluate_runtime_requirements(skill: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    runtime = skill["runtime"]
+    for env_name in runtime.get("required_env", []):
+        if env_name not in os.environ:
+            reasons.append(f"missing env var '{env_name}'")
+    for tool_name in runtime.get("required_tools", []):
+        if shutil.which(tool_name) is None:
+            reasons.append(f"missing tool in PATH '{tool_name}'")
+    return reasons
+
+
 def _next_unique(base: str, existing: set[str]) -> str:
     if base not in existing:
         return base
@@ -298,11 +270,11 @@ def _next_unique(base: str, existing: set[str]) -> str:
         index += 1
 
 
-def _derive_artifact_title(buddy: str, skill: str, task: str) -> str:
+def _derive_artifact_title(buddy: str, skill_id: str, task: str) -> str:
     snippet = " ".join(task.split()[:8]).strip()
     if snippet:
-        return f"{buddy.upper()} {skill} - {snippet}"
-    return f"{buddy.upper()} {skill}"
+        return f"{buddy.upper()} {skill_id} - {snippet}"
+    return f"{buddy.upper()} {skill_id}"
 
 
 def _derive_artifact_defaults(
@@ -310,22 +282,60 @@ def _derive_artifact_defaults(
     skill: dict[str, Any],
     task: str,
     track_id: str | None,
+    task_hints: dict[str, Any],
 ) -> dict[str, Any]:
     existing_ids = {artifact["id"] for artifact in list_artifacts()}
     kind = skill["runtime"]["default_artifact_kind"]
     base = f"art-{slugify((track_id or buddy) + '-' + kind)}"
     artifact_id = _next_unique(base, existing_ids)
     title = _derive_artifact_title(buddy, skill["id"], task)
-    explicit_path = _extract_output_path(task)
-    artifact_path = normalize_artifact_file_path(explicit_path) if explicit_path else artifact_markdown_path(artifact_id, title)
-    summary_path = _extract_summary_path(task) or f"runs/summaries/{buddy}/{artifact_id}.md"
-    summary_path = _normalize_summary_path(summary_path)
+    artifact_path = task_hints["output_path"] or artifact_markdown_path(artifact_id, title)
+    summary_path = task_hints["summary_path"] or f"runs/summaries/{buddy}/{artifact_id}.md"
     return {
         "id": artifact_id,
         "title": title,
         "kind": kind,
-        "path": artifact_path,
-        "summary_path": summary_path,
+        "path": normalize_artifact_file_path(artifact_path),
+        "summary_path": normalize_summary_file_path(summary_path),
+    }
+
+
+def _derive_track_summary_defaults(buddy: str, task: str, task_hints: dict[str, Any]) -> dict[str, Any]:
+    if task_hints["summary_path"]:
+        summary_path = task_hints["summary_path"]
+    else:
+        seed = task_hints["explicit_track_id"] or slugify(task) or "track-operation"
+        summary_path = normalize_summary_file_path(f"runs/summaries/{buddy}/{seed}--track-manager.md")
+    return {"enabled": True, "path": summary_path}
+
+
+def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
+    runtime = skill["runtime"]
+    guidance = runtime.get("guidance", {})
+    return {
+        "id": skill["id"],
+        "path": skill["path"],
+        "description": skill["description"],
+        "objects": skill["objects"],
+        "track_mode": runtime["track_mode"],
+        "default_artifact_kind": runtime["default_artifact_kind"],
+        "auto_summary": runtime["auto_summary"],
+        "output_schema": runtime["output_schema"],
+        "version": runtime.get("version"),
+        "side_effect_level": runtime.get("side_effect_level"),
+        "required_tools": runtime.get("required_tools", []),
+        "required_env": runtime.get("required_env", []),
+        "produces": runtime.get("produces", []),
+        "consumes": runtime.get("consumes", []),
+        "purpose": guidance.get("purpose", []),
+        "use_when": guidance.get("use_when", []),
+        "do_not_use_when": guidance.get("do_not_use_when", []),
+        "inputs": guidance.get("inputs", []),
+        "outputs": guidance.get("outputs", []),
+        "verification": guidance.get("verification", []),
+        "examples": guidance.get("examples", []),
+        "counterexamples": guidance.get("counterexamples", []),
+        "gotchas": guidance.get("gotchas", []),
     }
 
 
@@ -338,84 +348,224 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
     buddy_id = parsed["buddy"]
     task = parsed["task"]
     buddy = require_buddy(manifest, buddy_id)
-    skill = _pick_skill(buddy_id, task, manifest)
-    action = _extract_action(task) if skill["id"] == "track-manager" else None
-    track = _resolve_track_context(
-        task,
-        skill["runtime"]["track_mode"],
-        allow_missing_explicit=bool(skill["id"] == "track-manager" and action == "create"),
-    )
-    valid_buddies = sorted(b.get("id") for b in manifest["buddies"])
-    resolved: dict[str, Any] = {
+    valid_buddies = {row["id"] for row in manifest["buddies"]}
+    task_hints = _extract_task_hints(task, valid_buddies)
+
+    eligible_skill_ids: list[str] = []
+    skill_cards: list[dict[str, Any]] = []
+    rejected_skills: list[dict[str, str]] = []
+    track_context_by_skill: dict[str, Any] = {}
+    artifact_defaults_by_skill: dict[str, Any] = {}
+    summary_defaults_by_skill: dict[str, Any] = {}
+    required_output_schema_by_skill: dict[str, str] = {}
+
+    for skill in buddy_skill_docs(manifest, buddy_id):
+        reasons = _evaluate_runtime_requirements(skill)
+        allow_missing_explicit = bool(skill["id"] == "track-manager" and task_hints["action_hint"] == "create")
+        try:
+            track_context = _resolve_track_context(
+                task,
+                skill["runtime"]["track_mode"],
+                allow_missing_explicit=allow_missing_explicit,
+            )
+        except ValueError as exc:
+            track_context = {
+                "track_mode": skill["runtime"]["track_mode"],
+                "track_id": None,
+                "reason": "ineligible",
+                "explicit_track_id": task_hints["explicit_track_id"],
+                "active_track_ids": [track["id"] for track in list_tracks() if track.get("status") == "active"],
+                "error": str(exc),
+            }
+            reasons.append(str(exc))
+
+        track_context_by_skill[skill["id"]] = track_context
+        required_output_schema_by_skill[skill["id"]] = skill["runtime"]["output_schema"]
+
+        if reasons:
+            rejected_skills.append({"id": skill["id"], "reason": "; ".join(reasons)})
+            continue
+
+        eligible_skill_ids.append(skill["id"])
+        skill_cards.append(_build_skill_card(skill))
+        if skill["id"] == "track-manager":
+            summary_defaults_by_skill[skill["id"]] = _derive_track_summary_defaults(buddy_id, task, task_hints)
+        else:
+            artifact_defaults = _derive_artifact_defaults(
+                buddy_id,
+                skill,
+                task,
+                track_context["track_id"],
+                task_hints,
+            )
+            artifact_defaults_by_skill[skill["id"]] = artifact_defaults
+            summary_defaults_by_skill[skill["id"]] = {
+                "enabled": bool(skill["runtime"]["auto_summary"]),
+                "path": artifact_defaults["summary_path"],
+            }
+
+    if not eligible_skill_ids:
+        reasons = ", ".join(f"{item['id']}: {item['reason']}" for item in rejected_skills) or "none"
+        raise ValueError(f"No eligible skills remain for buddy '{buddy_id}'. Rejections: {reasons}")
+
+    implicit_skill_id = eligible_skill_ids[0] if len(eligible_skill_ids) == 1 else None
+    return {
         "ok": True,
         "switch": {"buddy": buddy_id, "task": task},
-        "valid_buddies": valid_buddies,
         "profile": {
             "buddy": {"id": buddy["id"], "label": buddy["label"], "scope": buddy["scope"]},
             "permissions": buddy.get("permissions", []),
-            "skill": skill,
         },
-        "track": track,
+        "task_hints": task_hints,
+        "eligible_skills": eligible_skill_ids,
+        "skill_cards": skill_cards,
+        "rejected_skills": rejected_skills,
+        "implicit_skill_id": implicit_skill_id,
+        "track_context_by_skill": track_context_by_skill,
+        "artifact_defaults_by_skill": artifact_defaults_by_skill,
+        "summary_defaults_by_skill": summary_defaults_by_skill,
+        "required_output_schema_by_skill": required_output_schema_by_skill,
+        "run_instructions": {
+            "host": "codex",
+            "selection_rule": "Choose exactly one skill_id from eligible_skills. Multi-skill buddies are never auto-selected by the runtime.",
+            "execution_rule": "The host Codex session runs the selected skill workflow and produces a structured result that matches required_output_schema_by_skill[skill_id].",
+            "persistence_rule": "Call persist with the resolved payload, selected skill_id, and structured result when the run should become BuddySwitch state.",
+        },
     }
 
-    if skill["id"] == "track-manager":
-        resolved["track_operation"] = {
-            "action": action,
-            "artifact_id": _extract_artifact_id(task),
-            "status": _extract_status(task),
-            "current_buddy": _extract_buddy(task, set(valid_buddies), "current_buddy"),
-            "next_buddy": _extract_buddy(task, set(valid_buddies), "next_buddy"),
-            "summary": _extract_summary_text(task),
-        }
+
+def _read_json_input(source: str, *, stdin_text: str | None = None) -> dict[str, Any]:
+    if source == "-":
+        if stdin_text is None:
+            raise ValueError("stdin payload was requested but no stdin text was supplied")
+        raw = stdin_text
     else:
-        resolved["artifact"] = _derive_artifact_defaults(buddy_id, skill, task, track["track_id"])
-        resolved["summary"] = {
-            "enabled": bool(skill["runtime"]["auto_summary"]),
-            "path": resolved["artifact"]["summary_path"],
-        }
-    return resolved
+        raw = Path(source).read_text(encoding="utf-8")
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("JSON payload must be an object")
+    return payload
 
 
-def _write_summary(path: str, buddy: str, task: str, artifact_path: str | None = None) -> None:
+def _pick_skill_id(resolved: dict[str, Any], requested_skill_id: str | None) -> str:
+    if requested_skill_id:
+        return requested_skill_id
+    implicit_skill_id = resolved.get("implicit_skill_id")
+    if isinstance(implicit_skill_id, str) and implicit_skill_id:
+        return implicit_skill_id
+    raise ValueError("skill_id is required for multi-skill buddies. Choose one from eligible_skills first.")
+
+
+def _render_scalar(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _render_value(value: Any, indent: int = 0) -> list[str]:
+    prefix = " " * indent
+    if isinstance(value, dict):
+        lines: list[str] = []
+        for key, child in value.items():
+            if isinstance(child, (dict, list)):
+                lines.append(f"{prefix}- {key}:")
+                lines.extend(_render_value(child, indent + 2))
+            else:
+                lines.append(f"{prefix}- {key}: {_render_scalar(child)}")
+        return lines or [f"{prefix}-"]
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            if isinstance(item, (dict, list)):
+                lines.append(f"{prefix}-")
+                lines.extend(_render_value(item, indent + 2))
+            else:
+                lines.append(f"{prefix}- {_render_scalar(item)}")
+        return lines or [f"{prefix}-"]
+    return [f"{prefix}{_render_scalar(value)}"]
+
+
+def _render_artifact_markdown(
+    artifact: dict[str, Any],
+    *,
+    buddy: str,
+    skill_id: str,
+    task: str,
+    artifact_content: dict[str, Any],
+    schema: dict[str, Any],
+) -> str:
+    section_order = list(schema.get("properties", {}).get("artifact_content", {}).get("properties", {}).keys())
+    if not section_order:
+        section_order = list(artifact_content.keys())
+
+    lines = [
+        f"# {artifact['title']}",
+        "",
+        f"- buddy: {buddy}",
+        f"- skill: {skill_id}",
+        f"- generated_at: {now_iso()}",
+        f"- task: {task}",
+    ]
+    if artifact.get("context_track_id"):
+        lines.append(f"- context_track_id: {artifact['context_track_id']}")
+
+    for section in section_order:
+        if section not in artifact_content:
+            continue
+        lines.extend(["", f"## {section}", ""])
+        lines.extend(_render_value(artifact_content[section]))
+
+    return "\n".join(lines) + "\n"
+
+
+def _render_summary_markdown(
+    *,
+    buddy: str,
+    skill_id: str,
+    task: str,
+    result: dict[str, Any],
+    artifact_path: str | None = None,
+) -> str:
     lines = [
         f"# {buddy.upper()} Run Summary",
         "",
         f"- generated_at: {datetime.now().astimezone().isoformat(timespec='seconds')}",
         f"- task: {task}",
+        f"- skill: {skill_id}",
     ]
     if artifact_path:
         lines.append(f"- artifact: {artifact_path}")
-    lines.extend(
-        [
-            "",
-            "## execution summary",
-            "- completed by switch runtime scaffold",
-            "",
-            "## working notes",
-            "- replace scaffold with task-specific notes",
-            "",
-            "## deliverables or changed files",
-            "- artifact and summary persisted",
-        ]
+
+    sections = (
+        ("execution_summary", result.get("execution_summary")),
+        ("working_notes", result.get("working_notes")),
+        ("deliverables_or_changed_files", result.get("deliverables_or_changed_files")),
     )
-    _write_file(path, "\n".join(lines) + "\n")
+    for label, value in sections:
+        if value in (None, "", []):
+            continue
+        lines.extend(["", f"## {label}", ""])
+        lines.extend(_render_value(value))
+
+    if result.get("track_operation"):
+        lines.extend(["", "## track_operation", ""])
+        lines.extend(_render_value(result["track_operation"]))
+
+    suggested = result.get("suggested_next_switch")
+    if suggested not in (None, ""):
+        lines.extend(["", "## suggested_next_switch", "", suggested])
+
+    return "\n".join(lines) + "\n"
 
 
-def _write_artifact_stub(path: str, title: str, buddy: str, skill_id: str, task: str) -> None:
-    lines = [
-        f"# {title}",
-        "",
-        f"- buddy: {buddy}",
-        f"- skill: {skill_id}",
-        f"- generated_at: {now_iso()}",
-        "",
-        "## task",
-        task,
-        "",
-        "## notes",
-        "- replace scaffold with real content.",
-    ]
-    _write_file(path, "\n".join(lines) + "\n")
+def _validate_buddy_value(value: str | None, field: str, valid_buddies: set[str]) -> str | None:
+    if value is None:
+        return None
+    if value not in valid_buddies:
+        raise ValueError(f"{field} must be one of: {', '.join(sorted(valid_buddies))}")
+    return value
 
 
 def _ensure_track_target(track_id: str | None) -> str:
@@ -439,215 +589,300 @@ def _derive_create_track_id(task: str) -> str:
     return _next_unique(candidate, existing)
 
 
-def _validate_buddy_value(value: str | None, field: str, valid_buddies: set[str]) -> str | None:
-    if value is None:
-        return None
-    if value not in valid_buddies:
-        raise ValueError(f"{field} must be one of: {', '.join(sorted(valid_buddies))}")
-    return value
-
-
-def _execute_track_manager(resolved: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    op = dict(resolved.get("track_operation") or {})
-    task = resolved["switch"]["task"]
-    action = (args.action or op.get("action") or "").lower()
+def _persist_track_manager(
+    resolved: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    manifest: dict[str, Any],
+    summary_path: str,
+    run_id: str,
+) -> dict[str, Any]:
+    op = dict(result.get("track_operation") or {})
+    action = str(op.get("action") or "").lower()
     if action not in TRACK_ACTIONS:
-        raise ValueError("track-manager action unresolved. Include create/read/list/update/advance/attach/detach/archive.")
-    valid_buddies = set(resolved.get("valid_buddies", []))
+        raise ValueError("track_operation.action must be one of create/read/list/update/advance/attach/detach/archive")
 
-    track_id = args.track_id or resolved["track"]["track_id"] or resolved["track"].get("explicit_track_id")
-    artifact_id = args.artifact_id or op.get("artifact_id")
+    task = resolved["switch"]["task"]
+    task_hints = resolved.get("task_hints", {})
+    valid_buddies = {row["id"] for row in manifest["buddies"]}
+
+    track_id = op.get("track_id") or task_hints.get("explicit_track_id")
+    artifact_id = op.get("artifact_id") or task_hints.get("explicit_artifact_id")
+    track_payload: dict[str, Any]
 
     if action == "list":
-        return {"ok": True, "action": "list", "tracks": list_tracks()}
+        track_payload = {"action": "list", "tracks": list_tracks()}
+        _write_file(summary_path, _render_summary_markdown(buddy="pm", skill_id="track-manager", task=task, result=result))
+        run_content_path_value = save_run_content(run_id, {"switch": resolved["switch"], "skill_id": "track-manager", "result": result, "track_result": track_payload})
+        return {
+            "ok": True,
+            "switch": resolved["switch"],
+            "skill": {"id": "track-manager"},
+            "track": track_payload,
+            "summary": {"path": summary_path},
+            "run": {"id": run_id, "content_path": run_content_path_value},
+        }
 
     if action == "create":
-        new_id = _next_unique(args.track_id, {track["id"] for track in list_tracks()}) if args.track_id else _derive_create_track_id(task)
-        title = args.title or new_id.replace("-", " ").title()
-        current_buddy = _validate_buddy_value(args.current_buddy or "pm", "current_buddy", valid_buddies) or "pm"
-        if args.next_buddy == "null":
-            next_buddy = None
+        explicit_track = op.get("track_id")
+        if explicit_track:
+            new_id = _next_unique(explicit_track, {track["id"] for track in list_tracks()})
         else:
-            next_buddy = _validate_buddy_value(args.next_buddy, "next_buddy", valid_buddies)
+            new_id = _derive_create_track_id(task)
+        title = op.get("title") or new_id.replace("-", " ").title()
+        current_buddy = _validate_buddy_value(op.get("current_buddy") or "pm", "current_buddy", valid_buddies) or "pm"
+        next_buddy = _validate_buddy_value(op.get("next_buddy"), "next_buddy", valid_buddies)
+        status = op.get("status") or "active"
+        if status not in STATUS_VALUES:
+            raise ValueError(f"track_operation.status must be one of {', '.join(STATUS_VALUES)}")
         track = create_track(
             new_id,
             title,
-            status=args.status or "active",
+            status=status,
             current_buddy=current_buddy,
             next_buddy=next_buddy,
-            summary=args.summary or "",
+            summary=op.get("summary") or "",
         )
-        summary_path = _normalize_summary_path(args.summary_path or f"runs/summaries/pm/{new_id}-create.md")
-        _write_summary(summary_path, "pm", task)
-        return {"ok": True, "action": "create", "track": track, "summary_path": summary_path}
-
-    track_id = _ensure_track_target(track_id)
-    track = get_track(track_id)
-    assert track is not None
-
-    if action == "read":
-        return {"ok": True, "action": "read", "track": track}
-
-    if action in {"update", "advance"}:
-        patch: dict[str, Any] = {}
-        status = args.status or op.get("status")
-        if status:
-            patch["status"] = status
-        current_buddy = _validate_buddy_value(args.current_buddy or op.get("current_buddy"), "current_buddy", valid_buddies)
-        if current_buddy:
-            patch["current_buddy"] = current_buddy
-        raw_next = args.next_buddy if args.next_buddy is not None else op.get("next_buddy")
-        if raw_next == "null":
-            patch["next_buddy"] = None
+        track_payload = {"action": "create", "track": track}
+    else:
+        target_track_id = _ensure_track_target(track_id)
+        if action == "read":
+            track = get_track(target_track_id)
+            assert track is not None
+            track_payload = {"action": "read", "track": track}
+        elif action in {"update", "advance"}:
+            patch: dict[str, Any] = {}
+            status = op.get("status")
+            if status is not None:
+                if status not in STATUS_VALUES:
+                    raise ValueError(f"track_operation.status must be one of {', '.join(STATUS_VALUES)}")
+                patch["status"] = status
+            current_buddy = _validate_buddy_value(op.get("current_buddy"), "current_buddy", valid_buddies)
+            if current_buddy is not None:
+                patch["current_buddy"] = current_buddy
+            if "next_buddy" in op:
+                patch["next_buddy"] = _validate_buddy_value(op.get("next_buddy"), "next_buddy", valid_buddies)
+            if op.get("summary") is not None:
+                patch["summary"] = op.get("summary")
+            if not patch:
+                raise ValueError("track_operation for update/advance must include at least one mutable field")
+            track = advance_track(target_track_id, **patch) if action == "advance" else update_track(target_track_id, patch)
+            track_payload = {"action": action, "track": track}
+        elif action == "archive":
+            track = update_track(target_track_id, {"status": "archived"})
+            track_payload = {"action": "archive", "track": track}
+        elif action == "attach":
+            if not artifact_id:
+                raise ValueError("track_operation.artifact_id is required for attach")
+            artifact = attach_artifact(target_track_id, artifact_id)
+            track_payload = {"action": "attach", "track": get_track(target_track_id), "artifact": artifact}
+        elif action == "detach":
+            if not artifact_id:
+                raise ValueError("track_operation.artifact_id is required for detach")
+            artifact = detach_artifact(target_track_id, artifact_id)
+            track_payload = {"action": "detach", "track": get_track(target_track_id), "artifact": artifact}
         else:
-            next_buddy = _validate_buddy_value(raw_next, "next_buddy", valid_buddies)
-            if next_buddy is not None:
-                patch["next_buddy"] = next_buddy
-        summary = args.summary or op.get("summary")
-        if summary:
-            patch["summary"] = summary
-        if not patch:
-            raise ValueError("update/advance requires at least one field (status/current_buddy/next_buddy/summary)")
-        updated = update_track(track_id, patch)
-        summary_path = _normalize_summary_path(args.summary_path or f"runs/summaries/pm/{track_id}-{action}.md")
-        _write_summary(summary_path, "pm", task)
-        return {"ok": True, "action": action, "track": updated, "summary_path": summary_path}
+            raise ValueError(f"Unsupported track action: {action}")
 
-    if action == "archive":
-        updated = update_track(track_id, {"status": "archived"})
-        summary_path = _normalize_summary_path(args.summary_path or f"runs/summaries/pm/{track_id}-archive.md")
-        _write_summary(summary_path, "pm", task)
-        return {"ok": True, "action": "archive", "track": updated, "summary_path": summary_path}
-
-    if action in {"attach", "detach"}:
-        if not artifact_id:
-            raise ValueError(f"{action} requires artifact id (e.g., art-xxx).")
-        artifact = get_artifact(artifact_id)
-        if artifact is None:
-            raise ValueError(f"artifact not found: {artifact_id}")
-        artifact_ids = list(track["artifact_ids"])
-        if action == "attach" and artifact_id not in artifact_ids:
-            artifact_ids.append(artifact_id)
-        if action == "detach":
-            artifact_ids = [item for item in artifact_ids if item != artifact_id]
-        patch = {"artifact_ids": artifact_ids}
-        if action == "attach":
-            patch["current_buddy"] = "pm"
-        updated = update_track(track_id, patch)
-        if action == "attach" and artifact.get("context_track_id") != track_id:
-            from env_store import update_artifact as _update_artifact  # local import to avoid cycle at module import.
-
-            _update_artifact(artifact_id, {"context_track_id": track_id}, auto_register=False)
-        if action == "detach" and artifact.get("context_track_id") == track_id:
-            from env_store import update_artifact as _update_artifact
-
-            _update_artifact(artifact_id, {"context_track_id": None}, auto_register=False)
-        summary_path = _normalize_summary_path(args.summary_path or f"runs/summaries/pm/{track_id}-{action}.md")
-        _write_summary(summary_path, "pm", task)
-        return {
-            "ok": True,
-            "action": action,
-            "track": updated,
-            "artifact_id": artifact_id,
+    _write_file(summary_path, _render_summary_markdown(buddy="pm", skill_id="track-manager", task=task, result=result))
+    run_content_path_value = save_run_content(
+        run_id,
+        {
+            "switch": resolved["switch"],
+            "skill_id": "track-manager",
+            "result": result,
+            "track_result": track_payload,
             "summary_path": summary_path,
-        }
+        },
+    )
+    return {
+        "ok": True,
+        "switch": resolved["switch"],
+        "skill": {"id": "track-manager"},
+        "track": track_payload,
+        "summary": {"path": summary_path},
+        "run": {"id": run_id, "content_path": run_content_path_value},
+    }
 
-    raise ValueError(f"Unsupported track-manager action: {action}")
 
-
-def execute_switch(text: str, args: argparse.Namespace) -> dict[str, Any]:
-    resolved = resolve_switch(text, manifest_path=args.manifest)
-    if not resolved.get("ok"):
-        return resolved
-
-    skill = resolved["profile"]["skill"]
+def _persist_artifact_skill(
+    resolved: dict[str, Any],
+    skill: dict[str, Any],
+    result: dict[str, Any],
+    schema: dict[str, Any],
+    *,
+    run_id: str,
+) -> dict[str, Any]:
     buddy = resolved["switch"]["buddy"]
     task = resolved["switch"]["task"]
+    skill_id = skill["id"]
+    artifact_defaults = resolved.get("artifact_defaults_by_skill", {}).get(skill_id)
+    if not isinstance(artifact_defaults, dict):
+        raise ValueError(f"resolve payload is missing artifact defaults for skill '{skill_id}'")
 
-    if skill["id"] == "track-manager":
-        return _execute_track_manager(resolved, args)
-
-    track_mode = skill["runtime"]["track_mode"]
-    if track_mode == "forbidden" and args.track_id:
-        raise ValueError("This skill forbids track linkage; remove --track-id.")
-
-    artifact_defaults = resolved["artifact"]
-    artifact_id = args.artifact_id or artifact_defaults["id"]
-    title = args.title or artifact_defaults["title"]
-    kind = args.kind or artifact_defaults["kind"]
-    path = normalize_artifact_file_path(args.output_path) if args.output_path else artifact_defaults["path"]
-    context_track_id = args.track_id if args.track_id is not None else resolved["track"]["track_id"]
+    artifact_id = artifact_defaults["id"]
+    content_path_value = artifact_content_path(artifact_id)
+    summary_defaults = resolved.get("summary_defaults_by_skill", {}).get(skill_id, {})
+    summary_path = summary_defaults.get("path") if summary_defaults.get("enabled") else None
+    track_context = resolved.get("track_context_by_skill", {}).get(skill_id, {})
 
     artifact = create_artifact(
         artifact_id=artifact_id,
-        title=title,
-        kind=kind,
-        path=path,
+        title=artifact_defaults["title"],
+        kind=artifact_defaults["kind"],
+        path=artifact_defaults["path"],
         producer_buddy=buddy,
-        source_skill=skill["id"],
-        context_track_id=context_track_id,
+        source_skill=skill_id,
+        context_track_id=track_context.get("track_id"),
+        content_path=content_path_value,
+        summary_path=summary_path,
         auto_register=True,
     )
 
-    _write_artifact_stub(path, title, buddy, skill["id"], task)
+    artifact_content = {
+        "artifact_id": artifact["id"],
+        "buddy": buddy,
+        "skill_id": skill_id,
+        "task": task,
+        "schema_path": skill["runtime"]["output_schema"],
+        "generated_at": now_iso(),
+        "content": result["artifact_content"],
+    }
+    saved_content_path = save_artifact_content(artifact["id"], artifact_content)
 
-    summary = resolved.get("summary", {})
-    summary_path = None
-    if summary.get("enabled"):
-        summary_path = _normalize_summary_path(args.summary_path or summary["path"])
-        _write_summary(summary_path, buddy, task, artifact_path=path)
+    artifact_markdown = _render_artifact_markdown(
+        artifact,
+        buddy=buddy,
+        skill_id=skill_id,
+        task=task,
+        artifact_content=result["artifact_content"],
+        schema=schema,
+    )
+    _write_file(artifact["path"], artifact_markdown)
+
+    if summary_path:
+        _write_file(
+            summary_path,
+            _render_summary_markdown(
+                buddy=buddy,
+                skill_id=skill_id,
+                task=task,
+                result=result,
+                artifact_path=artifact["path"],
+            ),
+        )
+
+    run_content_path_value = save_run_content(
+        run_id,
+        {
+            "switch": resolved["switch"],
+            "skill_id": skill_id,
+            "artifact_id": artifact["id"],
+            "artifact_path": artifact["path"],
+            "content_path": saved_content_path,
+            "summary_path": summary_path,
+            "result": result,
+        },
+    )
 
     return {
         "ok": True,
         "switch": resolved["switch"],
-        "skill": {"id": skill["id"], "track_mode": skill["runtime"]["track_mode"]},
-        "track": resolved["track"],
+        "skill": {"id": skill_id, "track_mode": skill["runtime"]["track_mode"]},
         "artifact": artifact,
         "summary": {"path": summary_path},
+        "run": {"id": run_id, "content_path": run_content_path_value},
     }
+
+
+def persist_switch(
+    resolved: dict[str, Any],
+    *,
+    skill_id: str | None,
+    result: dict[str, Any],
+    manifest_path: Path = DEFAULT_MANIFEST,
+) -> dict[str, Any]:
+    if not resolved.get("ok"):
+        raise ValueError("resolved payload must be successful before persist")
+
+    selected_skill_id = _pick_skill_id(resolved, skill_id)
+    eligible_skills = resolved.get("eligible_skills", [])
+    if selected_skill_id not in eligible_skills:
+        raise ValueError(
+            f"skill_id '{selected_skill_id}' is not eligible for this switch. Eligible: {', '.join(eligible_skills)}"
+        )
+
+    manifest = load_manifest(manifest_path)
+    buddy_id = resolved["switch"]["buddy"]
+    buddy = require_buddy(manifest, buddy_id)
+    if selected_skill_id not in buddy.get("skills", []):
+        raise ValueError(f"skill_id '{selected_skill_id}' is not declared for buddy '{buddy_id}'")
+
+    skill = next(skill for skill in buddy_skill_docs(manifest, buddy_id) if skill["id"] == selected_skill_id)
+    schema = load_output_schema(skill["runtime"]["output_schema"])
+    errors = validate_output_payload(result, schema)
+    if errors:
+        raise ValueError("result payload failed schema validation: " + "; ".join(errors))
+
+    run_id = f"run-{uuid.uuid4().hex[:10]}"
+    if selected_skill_id == "track-manager":
+        summary_defaults = resolved.get("summary_defaults_by_skill", {}).get("track-manager")
+        if not isinstance(summary_defaults, dict) or not summary_defaults.get("path"):
+            raise ValueError("resolve payload is missing track-manager summary defaults")
+        return _persist_track_manager(
+            resolved,
+            result,
+            manifest=manifest,
+            summary_path=summary_defaults["path"],
+            run_id=run_id,
+        )
+
+    return _persist_artifact_skill(resolved, skill, result, schema, run_id=run_id)
 
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
     try:
         payload = resolve_switch(args.text, manifest_path=args.manifest)
-    except (ManifestError, ValueError) as exc:
+    except (ManifestError, ValueError, OutputSchemaError) as exc:
         payload = runtime_error("E_RUNTIME_RESOLVE", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0 if payload.get("ok") else 1
 
 
-def _cmd_execute(args: argparse.Namespace) -> int:
+def _cmd_persist(args: argparse.Namespace) -> int:
     try:
-        payload = execute_switch(args.text, args)
-    except (ManifestError, ValueError) as exc:
-        payload = runtime_error("E_RUNTIME_EXECUTE", str(exc))
+        if args.resolved == "-" and args.result == "-":
+            raise ValueError("resolved and result cannot both read from stdin")
+        stdin_text = sys.stdin.read() if args.resolved == "-" or args.result == "-" else None
+        resolved = _read_json_input(args.resolved, stdin_text=stdin_text if args.resolved == "-" else None)
+        result = _read_json_input(args.result, stdin_text=stdin_text if args.result == "-" else None)
+        payload = persist_switch(resolved, skill_id=args.skill_id, result=result, manifest_path=args.manifest)
+    except (ManifestError, ValueError, OutputSchemaError, json.JSONDecodeError) as exc:
+        payload = runtime_error("E_RUNTIME_PERSIST", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0 if payload.get("ok") else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="BuddySwitch switch runtime.")
+    parser = argparse.ArgumentParser(description="BuddySwitch runtime.")
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    resolve_cmd = subparsers.add_parser("resolve", help="Resolve switch directive into execution context.")
+    resolve_cmd = subparsers.add_parser("resolve", help="Resolve switch directive into BuddySwitch preflight context.")
     resolve_cmd.add_argument("text", help="switch directive")
     resolve_cmd.set_defaults(func=_cmd_resolve)
 
-    exec_cmd = subparsers.add_parser("execute", help="Execute switch directive with default runtime actions.")
-    exec_cmd.add_argument("text", help="switch directive")
-    exec_cmd.add_argument("--track-id")
-    exec_cmd.add_argument("--artifact-id")
-    exec_cmd.add_argument("--title")
-    exec_cmd.add_argument("--kind")
-    exec_cmd.add_argument("--output-path")
-    exec_cmd.add_argument("--summary-path")
-    exec_cmd.add_argument("--action", choices=TRACK_ACTIONS)
-    exec_cmd.add_argument("--status", choices=STATUS_VALUES)
-    exec_cmd.add_argument("--current-buddy")
-    exec_cmd.add_argument("--next-buddy")
-    exec_cmd.add_argument("--summary")
-    exec_cmd.set_defaults(func=_cmd_execute)
+    persist_cmd = subparsers.add_parser("persist", help="Persist a structured BuddySwitch run result.")
+    persist_cmd.add_argument("--resolved", required=True, help="Resolved JSON payload file, or '-' for stdin")
+    persist_cmd.add_argument("--result", required=True, help="Structured result JSON file, or '-' for stdin")
+    persist_cmd.add_argument("--skill-id", help="Chosen skill id. Optional only when resolve returned implicit_skill_id.")
+    persist_cmd.set_defaults(func=_cmd_persist)
+
+    execute_cmd = subparsers.add_parser("execute", help="Deprecated alias for persist.")
+    execute_cmd.add_argument("--resolved", required=True, help="Resolved JSON payload file, or '-' for stdin")
+    execute_cmd.add_argument("--result", required=True, help="Structured result JSON file, or '-' for stdin")
+    execute_cmd.add_argument("--skill-id", help="Chosen skill id. Optional only when resolve returned implicit_skill_id.")
+    execute_cmd.set_defaults(func=_cmd_persist)
     return parser
 
 

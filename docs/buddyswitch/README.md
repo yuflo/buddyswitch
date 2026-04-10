@@ -26,14 +26,17 @@ Recommended reading order:
 
 1. `01-product-overview.md`
 2. `02-mvp-prd.md`
-3. `03-workspace-architecture.md`
-4. `04-switch-protocol.md`
-5. `05-agent-specs.md`
-6. `06-codex-first-implementation.md`
-7. `07-file-and-git-conventions.md`
-8. `08-evaluation-plan.md`
-9. `09-open-questions-and-notes.md`
-10. `12-track-registry-and-context-panel-plan.md`
+3. `04-switch-protocol.md`
+4. `05-agent-specs.md`
+5. `08-evaluation-plan.md`
+6. `09-open-questions-and-notes.md`
+7. `12-track-registry-and-context-panel-plan.md`
+
+Removed from the active legacy pack:
+
+- exploratory `.agents/skills` architecture notes
+- early Codex-first implementation notes
+- obsolete starter `AGENTS.md` draft
 
 ## Intended use with local Codex CLI
 

@@ -20,7 +20,8 @@ Examples:
 - Env manifest: `buddyswitch/manifest.toml`
 - Track objects: `buddyswitch/objects/tracks/*.json`
 - Artifact objects: `buddyswitch/objects/artifacts/*.json`
-- Artifact content files: `artifacts/*.md` (flat root)
+- Canonical structured content: `buddyswitch/content/**`
+- Artifact markdown files: `artifacts/*.md` (flat root)
 
 ## Required Behavior
 
@@ -28,14 +29,15 @@ When user sends `switch <buddy>: <task>`:
 
 1. Parse with strict syntax only.
 2. Validate buddy from `buddyswitch/manifest.toml`.
-3. Resolve skill runtime metadata from `buddyswitch/skills/**/SKILL.md` front matter.
+3. Resolve skill runtime metadata and guidance from `buddyswitch/skills/**/SKILL.md`.
 4. Enforce that buddy's scope, skills, and object permissions from manifest.
 5. Respect object authority:
    - `pm` controls track lifecycle (`create/read/list/update/advance/attach/detach/archive`)
    - other buddies can read tracks and create/update artifacts
-6. Execute through `scripts/switch_runtime.py` when you need default artifact/summary persistence.
-7. Use skill docs from `buddyswitch/skills/<buddy>/<skill>/SKILL.md`.
-8. Keep outputs explicit:
+6. Resolve through `scripts/switch_runtime.py resolve` to get `eligible_skills`, skill cards, context, defaults, and output schema paths.
+7. Let the host Codex session choose one `skill_id` from `eligible_skills`, then use `buddyswitch/skills/<buddy>/<skill>/SKILL.md`.
+8. Persist through `scripts/switch_runtime.py persist` when you need BuddySwitch state plus default artifact/summary persistence.
+9. Keep outputs explicit:
    - execution summary
    - working notes
    - deliverables or changed files
@@ -46,6 +48,7 @@ Default runtime behavior:
 - Artifact path: `artifacts/<artifact-id>--<slug>.md`
 - Summary path: `runs/summaries/<buddy>/<artifact-id>.md` when skill `auto_summary=true`
 - Users do not need to provide output file paths unless they want explicit overrides.
+- Current markdown artifacts and summaries remain the panel-facing compatibility layer.
 
 ## Switch Rules
 

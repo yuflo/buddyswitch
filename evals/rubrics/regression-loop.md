@@ -2,13 +2,15 @@
 
 ## When To Run
 
-Run the 9-case suite after any change to:
+Run the 10-case suite after any change to:
 - `AGENTS.md`
 - `.codex/agents/router.toml`
 - `framework/contracts/**`
 - `framework/templates/**`
+- `framework/schemas/**`
 - `buddyswitch/skills/**/SKILL.md`
 - `framework/docs/switch-spec.md`
+- `framework/docs/skill-architecture-best-practices.md`
 - `framework/docs/artifacts-runs-git-policy.md`
 - `framework/docs/interface-spec.md`
 - `framework/docs/track-registry.md`
@@ -19,6 +21,8 @@ Run the 9-case suite after any change to:
 - `scripts/env_manifest.py`
 - `scripts/env_tracks.py`
 - `scripts/env_artifacts.py`
+- `scripts/switch_runtime.py`
+- `scripts/output_schema.py`
 - `scripts/codex_router.py`
 - `scripts/serve_context_panel.py`
 - `scripts/workspace_data.py`
@@ -50,6 +54,7 @@ Run the 9-case suite after any change to:
 - 07-cleanup-storage-script: pass/fail
 - 08-interface-context-panel: pass/fail
 - 09-track-registry-lifecycle: pass/fail
+- 10-resolve-skill-candidates: pass/fail
 
 ## Regressions
 

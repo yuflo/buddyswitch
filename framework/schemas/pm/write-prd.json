@@ -1,0 +1,48 @@
+{
+  "type": "object",
+  "required": [
+    "execution_summary",
+    "working_notes",
+    "deliverables_or_changed_files",
+    "artifact_content"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "execution_summary": { "type": "string" },
+    "working_notes": { "type": "array", "items": { "type": "string" } },
+    "deliverables_or_changed_files": { "type": "array", "items": { "type": "string" } },
+    "suggested_next_switch": { "type": ["string", "null"] },
+    "artifact_content": {
+      "type": "object",
+      "required": [
+        "problem",
+        "goals",
+        "non_goals",
+        "users_and_scenarios",
+        "scope_p0_p1",
+        "acceptance_criteria",
+        "risks",
+        "open_questions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "problem": { "type": "string" },
+        "goals": { "type": "array", "items": { "type": "string" } },
+        "non_goals": { "type": "array", "items": { "type": "string" } },
+        "users_and_scenarios": { "type": "array", "items": { "type": "string" } },
+        "scope_p0_p1": {
+          "type": "object",
+          "required": ["p0", "p1"],
+          "additionalProperties": false,
+          "properties": {
+            "p0": { "type": "array", "items": { "type": "string" } },
+            "p1": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
+        "risks": { "type": "array", "items": { "type": "string" } },
+        "open_questions": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

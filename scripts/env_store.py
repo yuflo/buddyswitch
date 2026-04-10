@@ -17,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 OBJECTS_ROOT = ROOT / "buddyswitch" / "objects"
 TRACKS_DIR = OBJECTS_ROOT / "tracks"
 ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
+CONTENT_ROOT = ROOT / "buddyswitch" / "content"
+ARTIFACT_CONTENT_DIR = CONTENT_ROOT / "artifacts"
+RUN_CONTENT_DIR = CONTENT_ROOT / "runs"
 ARTIFACT_FILES_DIR = ROOT / "artifacts"
 VALID_TRACK_STATUS = ("active", "blocked", "done", "archived")
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -33,10 +36,14 @@ def rel(path: Path) -> str:
 def ensure_dirs() -> None:
     TRACKS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    ARTIFACT_CONTENT_DIR.mkdir(parents=True, exist_ok=True)
+    RUN_CONTENT_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_FILES_DIR.mkdir(parents=True, exist_ok=True)
     for marker in (
         TRACKS_DIR / ".gitkeep",
         ARTIFACT_OBJECTS_DIR / ".gitkeep",
+        ARTIFACT_CONTENT_DIR / ".gitkeep",
+        RUN_CONTENT_DIR / ".gitkeep",
     ):
         if not marker.exists():
             marker.write_text("", encoding="utf-8")
@@ -67,6 +74,36 @@ def normalize_artifact_file_path(raw_path: str) -> str:
     return normalized
 
 
+def normalize_summary_file_path(raw_path: str) -> str:
+    normalized = normalize_repo_path(raw_path)
+    path = Path(normalized)
+    if path.parts[:2] != ("runs", "summaries"):
+        raise ValueError("summary path must start with runs/summaries/")
+    if path.suffix.lower() != ".md":
+        raise ValueError("summary path must be a markdown file (*.md)")
+    return normalized
+
+
+def normalize_artifact_content_path(raw_path: str) -> str:
+    normalized = normalize_repo_path(raw_path)
+    path = Path(normalized)
+    if path.parts[:3] != ("buddyswitch", "content", "artifacts"):
+        raise ValueError("content path must start with buddyswitch/content/artifacts/")
+    if path.suffix.lower() != ".json":
+        raise ValueError("content path must be a JSON file (*.json)")
+    return normalized
+
+
+def normalize_run_content_path(raw_path: str) -> str:
+    normalized = normalize_repo_path(raw_path)
+    path = Path(normalized)
+    if path.parts[:3] != ("buddyswitch", "content", "runs"):
+        raise ValueError("run content path must start with buddyswitch/content/runs/")
+    if path.suffix.lower() != ".json":
+        raise ValueError("run content path must be a JSON file (*.json)")
+    return normalized
+
+
 def slugify(text: str) -> str:
     cleaned = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return cleaned or "artifact"
@@ -75,6 +112,14 @@ def slugify(text: str) -> str:
 def artifact_markdown_path(artifact_id: str, title: str) -> str:
     slug = slugify(title)
     return f"artifacts/{artifact_id}--{slug}.md"
+
+
+def artifact_content_path(artifact_id: str) -> str:
+    return f"buddyswitch/content/artifacts/{require_id(artifact_id, 'artifact id')}.json"
+
+
+def run_content_path(run_id: str) -> str:
+    return f"buddyswitch/content/runs/{require_id(run_id, 'run id')}.json"
 
 
 def track_file(track_id: str) -> Path:
@@ -149,6 +194,8 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     updated_at = artifact.get("updated_at")
     context_track_id = artifact.get("context_track_id")
     path = artifact.get("path")
+    content_path = artifact.get("content_path")
+    summary_path = artifact.get("summary_path")
 
     if not isinstance(title, str) or not title.strip():
         raise ValueError("artifact.title must be a non-empty string")
@@ -165,12 +212,24 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     if context_track_id is not None:
         require_id(context_track_id, "artifact.context_track_id")
     normalized_path = normalize_artifact_file_path(path)
+    normalized_content_path = None
+    if content_path is not None:
+        if not isinstance(content_path, str) or not content_path.strip():
+            raise ValueError("artifact.content_path must be a non-empty string or null")
+        normalized_content_path = normalize_artifact_content_path(content_path)
+    normalized_summary_path = None
+    if summary_path is not None:
+        if not isinstance(summary_path, str) or not summary_path.strip():
+            raise ValueError("artifact.summary_path must be a non-empty string or null")
+        normalized_summary_path = normalize_summary_file_path(summary_path)
 
     return {
         "id": artifact_id,
         "title": title.strip(),
         "kind": kind.strip(),
         "path": normalized_path,
+        "content_path": normalized_content_path,
+        "summary_path": normalized_summary_path,
         "producer_buddy": producer_buddy.strip(),
         "source_skill": source_skill.strip(),
         "context_track_id": context_track_id,
@@ -351,6 +410,8 @@ def create_artifact(
     producer_buddy: str,
     source_skill: str,
     context_track_id: str | None = None,
+    content_path: str | None = None,
+    summary_path: str | None = None,
     auto_register: bool = True,
 ) -> dict[str, Any]:
     ensure_dirs()
@@ -367,6 +428,8 @@ def create_artifact(
         "title": title,
         "kind": kind,
         "path": resolved_path,
+        "content_path": normalize_artifact_content_path(content_path) if content_path else None,
+        "summary_path": normalize_summary_file_path(summary_path) if summary_path else None,
         "producer_buddy": producer_buddy,
         "source_skill": source_skill,
         "context_track_id": context_track_id,
@@ -389,12 +452,25 @@ def update_artifact(
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
     old_track = artifact.get("context_track_id")
-    allowed = {"title", "kind", "path", "producer_buddy", "source_skill", "context_track_id"}
+    allowed = {
+        "title",
+        "kind",
+        "path",
+        "content_path",
+        "summary_path",
+        "producer_buddy",
+        "source_skill",
+        "context_track_id",
+    }
     for key, value in patch.items():
         if key not in allowed:
             raise ValueError(f"unsupported artifact field: {key}")
         if key == "path":
             artifact[key] = normalize_artifact_file_path(value)
+        elif key == "content_path":
+            artifact[key] = normalize_artifact_content_path(value) if value is not None else None
+        elif key == "summary_path":
+            artifact[key] = normalize_summary_file_path(value) if value is not None else None
         else:
             artifact[key] = value
     new_track = artifact.get("context_track_id")
@@ -424,6 +500,11 @@ def delete_artifact(artifact_id: str, *, delete_file: bool = False) -> dict[str,
         markdown_path = ROOT / artifact["path"]
         if markdown_path.exists():
             markdown_path.unlink()
+        content_path = artifact.get("content_path")
+        if content_path:
+            json_path = ROOT / content_path
+            if json_path.exists():
+                json_path.unlink()
     return artifact
 
 
@@ -448,3 +529,17 @@ def delete_all_artifacts(*, delete_files: bool = False, dry_run: bool = False) -
     for artifact in targets:
         delete_artifact(artifact["id"], delete_file=delete_files)
     return targets
+
+
+def save_artifact_content(artifact_id: str, payload: dict[str, Any]) -> str:
+    ensure_dirs()
+    path = ROOT / artifact_content_path(artifact_id)
+    _write_json(path, payload)
+    return rel(path)
+
+
+def save_run_content(run_id: str, payload: dict[str, Any]) -> str:
+    ensure_dirs()
+    path = ROOT / run_content_path(run_id)
+    _write_json(path, payload)
+    return rel(path)

@@ -25,5 +25,11 @@ Permission model:
 Skill source:
 - buddyswitch/skills/<buddy>/<skill>/SKILL.md
 
+Host responsibility:
+- Use `scripts/switch_runtime.py resolve` to get `eligible_skills`, compact skill cards, defaults, and output schema paths.
+- Choose one `skill_id` from `eligible_skills` inside the current Codex session.
+- Read the selected `buddyswitch/skills/.../SKILL.md` and execute that workflow in-session.
+- Use `scripts/switch_runtime.py persist` only to write BuddySwitch state and compatibility markdown outputs.
+
 Do not use retired registry flow (`scripts/registry.py`, `artifacts/workspace-registry.json`, `.codex/agents/<buddy>.toml`).
 """
