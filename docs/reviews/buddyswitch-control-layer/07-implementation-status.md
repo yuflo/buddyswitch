@@ -70,6 +70,16 @@
 - track/artifact debug APIs 会阻止写入 manifest 中不存在的 buddy 引用
 - 对象字段的最终合法性尽量统一下沉到 store 校验
 
+### 2.6 cleanup 已适配 canonical content 与 orphan handling
+
+当前实现已经满足：
+
+- `scripts/cleanup_buddyswitch.sh` 不再停留在旧的 markdown/raw/object 白名单模型
+- cleanup 会覆盖 `buddyswitch/content/artifacts/*.json` 与 `buddyswitch/content/runs/*.json`
+- `--agent` / `--all-agents` / `--all-storage` 都会处理命中范围内的 run content
+- orphan artifact content 会在 dry-run 中显式出现，并在 execute 时按命中范围自动删除
+- cleanup 主逻辑集中在单一 backend，而不是 bash、object helper、store 各维护一套删除规则
+
 ## 3. 已明确降级或不做
 
 ### 3.1 不做空格/标点洁癖式 parser gate

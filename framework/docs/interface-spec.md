@@ -51,3 +51,4 @@ Panel can show copyable commands only:
 - `scripts/cleanup_buddyswitch.sh --all-storage`
 
 Commands must not include `--execute` or `--force` by default.
+The cleanup command now covers canonical BuddySwitch content under `buddyswitch/content/**` in addition to compatibility markdown/runtime files.

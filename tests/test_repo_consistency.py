@@ -79,6 +79,18 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("structure-only", combined)
         self.assertIn("not a business-quality review", combined)
 
+    def test_cleanup_docs_reference_canonical_content_and_orphan_handling(self) -> None:
+        targets = (
+            ROOT / "README.md",
+            ROOT / "framework" / "docs" / "interface-spec.md",
+            ROOT / "docs" / "reviews" / "buddyswitch-control-layer" / "07-implementation-status.md",
+        )
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in targets).lower()
+
+        self.assertIn("buddyswitch/content/**", combined)
+        self.assertIn("orphan", combined)
+        self.assertIn("run content", combined)
+
 
 if __name__ == "__main__":
     unittest.main()

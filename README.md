@@ -92,3 +92,12 @@ Manual cleanup script:
 - `scripts/cleanup_buddyswitch.sh`
 
 Defaults to dry-run. Add `--execute` to apply deletion.
+
+Cleanup is storage-aware:
+
+- `--agent <buddy>` cleans that buddy's raw/summaries, artifact objects/files, canonical artifact content, and run content with `switch.buddy == <buddy>`
+- `--all-agents` clears BuddySwitch env state for all buddies, including canonical content under `buddyswitch/content/**`
+- `--project app` only clears `projects/app/.runtime/`
+- `--all-storage` clears the full local storage surface, including `buddyswitch/content/artifacts/*.json` and `buddyswitch/content/runs/*.json`
+
+Orphan canonical artifact content is reported in dry-run output and removed automatically during execute when it falls inside the selected cleanup scope.
