@@ -25,7 +25,10 @@ BuddySwitch runs as an orchestration layer inside the host Codex CLI session.
 
 `switch <buddy>: <task>`
 
-Buddy list, scope, skills, and permissions are loaded from `buddyswitch/manifest.toml`.
+This is the canonical form, not a brittle exact-match requirement. Minor CLI spacing variation around `:` can be normalized as long as `switch`, `buddy`, and `task` remain clear.
+
+Buddy list, scope, skills, and object authority metadata are loaded from `buddyswitch/manifest.toml`.
+`buddy -> skills` is the main runtime routing authority. Buddy `permissions` remain object-authority metadata for manual/debug mutation APIs.
 Users are not required to provide output paths in task text; runtime defaults are applied automatically.
 
 ## Core Storage
@@ -51,10 +54,11 @@ Users are not required to provide output paths in task text; runtime defaults ar
 
 - BuddySwitch skills are stored under `buddyswitch/skills/**/SKILL.md`.
 - BuddySwitch does not use Codex native `.agents/skills` semantics for these skills.
-- `resolve` returns `eligible_skills`, compact `skill_cards`, per-skill track context, artifact defaults, summary defaults, and output schema paths.
+- `required_tools` and `required_env` are advisory skill metadata for the host session. They stay visible in `skill_cards`, but they do not reject resolve candidates.
+- `resolve` returns `eligible_skills`, compact `skill_cards`, per-skill track context, artifact defaults, summary defaults, output schema paths, invocation details, and explicit next actions. `resolve` itself does not write BuddySwitch state.
 - Single-skill buddies may expose `implicit_skill_id`; multi-skill buddies never auto-select in runtime.
 - The host Codex session chooses `skill_id`, executes the selected skill, and emits structured output.
-- `persist` validates selected-skill identity and schema shape, writes canonical JSON under `buddyswitch/content/`, and renders compatibility markdown to `artifacts/*.md` and `runs/summaries/**`.
+- `persist` is a minimal technical gate: it validates selected-skill identity, schema shape, and safe state references, then writes canonical JSON under `buddyswitch/content/` and renders compatibility markdown to `artifacts/*.md` and `runs/summaries/**`.
 
 ## Framework Docs
 

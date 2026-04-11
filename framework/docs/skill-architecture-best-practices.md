@@ -24,7 +24,7 @@ Across current coding-agent ecosystems, the common pattern is:
 BuddySwitch follows that pattern, but keeps one extra control layer:
 
 - user chooses the buddy explicitly with `switch <buddy>: <task>`
-- BuddySwitch constrains the host model to that buddy's allowlisted skill set
+- BuddySwitch constrains the host model to that buddy's allowlisted skill set while keeping invocation parsing tolerant to minor CLI formatting variation
 
 ## Layer Responsibilities
 
@@ -39,11 +39,17 @@ BuddySwitch follows that pattern, but keeps one extra control layer:
 ### BuddySwitch
 
 - parse `switch <buddy>: <task>`
-- load manifest, buddy scope, permissions, and allowed skills
-- apply deterministic eligibility gates
+- load manifest, buddy scope, object authority metadata, and allowed skills
+- apply only the deterministic gates needed for safe resolution
 - resolve track context and default paths
 - validate structured outputs at persistence time
 - write track/artifact state and compatibility markdown files
+
+In this model:
+
+- `buddy -> skills` is the main runtime routing authority
+- `permissions` are object-authority metadata for manual/debug mutation APIs
+- `required_tools` and `required_env` are advisory metadata for the host session, not resolve gates
 
 ## Canonical Flow
 
@@ -77,6 +83,8 @@ Recommended front matter:
 - `produces`
 - `consumes`
 
+`required_tools` and `required_env` should be written as host-facing context. They are not a second control layer for rejecting skill candidates during `resolve`.
+
 Required body sections:
 
 - `Purpose`
@@ -102,6 +110,8 @@ Instead:
 
 This keeps structured state canonical while preserving the current human-readable workflow.
 
+`output_schema.py` is a structure validator only. It may reject malformed payloads, unsupported fields, or invalid enum/type combinations, but it must not become a business-quality or workflow-quality review layer.
+
 ## Deliberate Non-Goals
 
 BuddySwitch does not do these things in the production path:
@@ -119,7 +129,6 @@ It is a lightweight technical gate for:
 
 - selected skill identity
 - schema conformance
-- object authority
 - state/reference sanity
 
 Business quality stays in the host agent flow and the next buddy handoff, not in BuddySwitch persistence.

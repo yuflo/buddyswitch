@@ -48,6 +48,37 @@ class RepoConsistencyTests(unittest.TestCase):
 
         self.assertTrue(checked_files)
 
+    def test_active_docs_use_canonical_not_strict_switch_wording(self) -> None:
+        targets = (
+            ROOT / "AGENTS.md",
+            ROOT / "README.md",
+            ROOT / "framework" / "docs" / "switch-spec.md",
+            ROOT / "framework" / "docs" / "skill-architecture-best-practices.md",
+        )
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in targets)
+
+        self.assertNotIn("Use the strict directive:", combined)
+        self.assertNotIn("Parse with strict syntax only.", combined)
+        self.assertIn("canonical", combined.lower())
+        self.assertIn("minor cli spacing variation", combined.lower())
+        self.assertIn("advisory", combined.lower())
+        self.assertIn("manual/debug", combined.lower())
+
+    def test_control_docs_define_failure_actions_and_structure_only_schema_boundary(self) -> None:
+        targets = (
+            ROOT / "framework" / "docs" / "switch-spec.md",
+            ROOT / "framework" / "docs" / "skill-architecture-best-practices.md",
+            ROOT / "docs" / "reviews" / "buddyswitch-control-layer" / "07-implementation-status.md",
+        )
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in targets).lower()
+
+        self.assertIn("normalize", combined)
+        self.assertIn("warn", combined)
+        self.assertIn("ask", combined)
+        self.assertIn("reject", combined)
+        self.assertIn("structure-only", combined)
+        self.assertIn("not a business-quality review", combined)
+
 
 if __name__ == "__main__":
     unittest.main()

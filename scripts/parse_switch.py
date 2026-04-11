@@ -28,6 +28,17 @@ def error(code: str, message: str, extra: dict | None = None) -> dict:
     return payload
 
 
+def _build_invocation(raw_text: str, buddy: str, task: str) -> dict:
+    normalized_text = f"switch {buddy}: {task}"
+    return {
+        "intent": "switch",
+        "buddy": buddy,
+        "task": task,
+        "raw_text": raw_text,
+        "normalized_text": normalized_text,
+    }
+
+
 def parse_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict:
     raw = text.strip()
     if not raw:
@@ -75,7 +86,17 @@ def parse_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict:
             {"expected_syntax": SYNTAX, "example": EXAMPLE},
         )
 
-    return {"ok": True, "agent": agent, "buddy": agent, "task": task}
+    invocation = _build_invocation(text, agent, task)
+    return {
+        "ok": True,
+        "agent": agent,
+        "buddy": agent,
+        "task": task,
+        "intent": invocation["intent"],
+        "raw_text": invocation["raw_text"],
+        "normalized_text": invocation["normalized_text"],
+        "invocation": invocation,
+    }
 
 
 def main() -> int:

@@ -12,6 +12,7 @@ Rules:
 2. `<buddy>` must be one token.
 3. `:` is required.
 4. `<task>` must be non-empty.
+5. This is the canonical form. Parser and router may normalize minor CLI whitespace variation around `:` when buddy and task remain unambiguous.
 
 ## Buddy Validation
 
@@ -30,24 +31,51 @@ BuddySwitch uses four primitives:
 `parse`, `resolve`, and `persist` belong to BuddySwitch.
 `run` belongs to the host Codex session.
 
+## Failure Action Vocabulary
+
+Control-layer checks should map to exactly one of these actions:
+
+- `normalize`: keep going after canonicalizing input without changing user intent
+- `warn`: keep going and surface advisory information to the host session
+- `ask`: stop before mutation and ask the host/user for missing intent or an explicit choice
+- `reject`: stop because continuing would misroute work or write unsafe state
+
+Current control-layer expectations:
+
+- `parse`
+  - minor CLI spacing variation around `:` => `normalize`
+  - unknown buddy / empty task / non-switch input => `reject`
+- `resolve`
+  - advisory runtime metadata such as `required_tools` / `required_env` => `warn`
+  - multi-skill selection belongs to the host decision loop => `ask`
+  - missing required track context or unsafe explicit references => `reject`
+- `persist`
+  - invalid `skill_id`, schema mismatch, or unsafe state/reference writes => `reject`
+- manual/debug APIs
+  - actor permission failure or invalid object references => `reject`
+
 ## Runtime Resolution
 
 - Runtime entry: `scripts/switch_runtime.py`
 - Resolution order:
   1. parse switch
   2. load the selected buddy's skill catalog from `buddyswitch/skills/**/SKILL.md`
-  3. apply deterministic eligibility gates (`track_mode`, required env, required tools)
+  3. apply the minimal deterministic gates needed for safe resolution (`track_mode` and track context)
   4. resolve track context from `track_mode`
   5. derive default artifact/summary paths when needed
-  6. return `eligible_skills`, compact `skill_cards`, per-skill context, defaults, and output schema paths
+  6. return `eligible_skills`, compact `skill_cards`, per-skill context, defaults, output schema paths, invocation details, and explicit next actions
 
 Current runtime defaults:
 
 - single-skill buddies may expose `implicit_skill_id`
 - multi-skill buddies never auto-select in runtime
+- `buddy -> skills` is the main routing authority in runtime
+- buddy `permissions` stay as object-authority metadata for manual/debug mutation APIs
+- `required_tools` and `required_env` are advisory skill metadata for the host session
 - BuddySwitch skills are loaded from `buddyswitch/skills/**/SKILL.md`
 - BuddySwitch does not rely on Codex native `.agents/skills` discovery for these skills
 - output contracts are enforced through `framework/schemas/**`
+- output schema validation is structure-only; it does not score business quality, research quality, or workflow completeness
 - canonical structured payloads are written to `buddyswitch/content/**`
 - human-readable markdown artifacts and summaries remain for panel compatibility
 
@@ -70,7 +98,9 @@ It validates:
 - selected `skill_id` belongs to the resolved buddy
 - selected `skill_id` is still in `eligible_skills`
 - result payload matches the selected schema
-- lightweight authority/context consistency
+- basic state/reference safety
+
+Schema validation in this stage is structural only. It checks shape and allowed values, not whether the work itself is good enough.
 
 It writes:
 
@@ -79,6 +109,8 @@ It writes:
 - track objects under `buddyswitch/objects/tracks/*.json` when PM track-manager mutations are requested
 - compatibility markdown artifacts under `artifacts/*.md`
 - compatibility markdown summaries under `runs/summaries/**`
+
+`resolve` writes nothing. Its only job is to return enough context for the host Codex session to decide what to do next.
 
 ## Error Handling
 

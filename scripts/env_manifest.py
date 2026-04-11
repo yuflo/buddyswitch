@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Load and validate the BuddySwitch env manifest and skill runtime metadata."""
+"""Load and validate the BuddySwitch env manifest and skill runtime metadata.
+
+`required_tools` and `required_env` are advisory runtime metadata for the host
+session. Buddy `permissions` describe object authority for routing context and
+manual/debug mutation APIs; they are not a second runtime permission engine.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +24,8 @@ DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 _BUDDY_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _SKILL_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+\s*:")
 TRACK_MODES = {"optional", "required", "forbidden"}
+ADVISORY_RUNTIME_METADATA_POLICY = "advisory"
+DEBUG_API_PERMISSION_SCOPE = "manual_debug_apis"
 GUIDANCE_HEADINGS = {
     "purpose": "purpose",
     "use when": "use_when",
@@ -456,6 +463,19 @@ def buddy_permissions(manifest: dict[str, Any], buddy_id: str) -> set[str]:
     return set(buddy.get("permissions", []))
 
 
+def buddy_authority_profile(manifest: dict[str, Any], buddy_id: str) -> dict[str, Any]:
+    buddy = require_buddy(manifest, buddy_id)
+    return {
+        "routing_skills": list(buddy.get("skills", [])),
+        "object_permissions": list(buddy.get("permissions", [])),
+        "permission_scope": DEBUG_API_PERMISSION_SCOPE,
+        "runtime_note": (
+            "switch runtime uses buddy->skills as routing authority and leaves "
+            "object permission enforcement to manual/debug mutation APIs."
+        ),
+    }
+
+
 def buddy_skill_docs(manifest: dict[str, Any], buddy_id: str) -> list[dict[str, Any]]:
     buddy = require_buddy(manifest, buddy_id)
     lookup = skills_by_id(manifest)
@@ -492,6 +512,7 @@ def _cmd_show_buddy(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
     buddy = require_buddy(manifest, args.buddy_id)
     payload = dict(buddy)
+    payload["authority"] = buddy_authority_profile(manifest, args.buddy_id)
     payload["resolved_skills"] = buddy_skill_docs(manifest, args.buddy_id)
     print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0

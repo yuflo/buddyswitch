@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Track CRUD and advance operations for BuddySwitch env."""
+"""Track CRUD and advance operations for BuddySwitch env debug/manual APIs."""
 
 from __future__ import annotations
 
@@ -8,9 +8,8 @@ import json
 import sys
 from pathlib import Path
 
-from env_manifest import DEFAULT_MANIFEST, ManifestError, buddy_permissions, load_manifest
+from env_manifest import DEFAULT_MANIFEST, ManifestError, buddy_permissions, get_buddy, load_manifest
 from env_store import (
-    VALID_TRACK_STATUS,
     attach_artifact,
     create_track,
     detach_artifact,
@@ -24,6 +23,14 @@ def require_permission(manifest: dict, actor: str, permission: str) -> None:
     permissions = buddy_permissions(manifest, actor)
     if permission not in permissions:
         raise ValueError(f"buddy '{actor}' is not allowed to perform '{permission}'")
+
+
+def _validate_buddy_ref(manifest: dict, buddy_id: str | None, field: str) -> str | None:
+    if buddy_id is None:
+        return None
+    if get_buddy(manifest, buddy_id) is None:
+        raise ValueError(f"{field} must reference a known buddy")
+    return buddy_id
 
 
 def cmd_list(args: argparse.Namespace) -> int:
@@ -50,8 +57,8 @@ def cmd_create(args: argparse.Namespace) -> int:
         args.track_id,
         args.title,
         status=args.status,
-        current_buddy=args.current_buddy,
-        next_buddy=args.next_buddy,
+        current_buddy=_validate_buddy_ref(manifest, args.current_buddy, "current_buddy") or "pm",
+        next_buddy=_validate_buddy_ref(manifest, args.next_buddy, "next_buddy"),
         summary=args.summary or "",
     )
     print(json.dumps(track, ensure_ascii=True, indent=2))
@@ -67,9 +74,11 @@ def cmd_update(args: argparse.Namespace) -> int:
     if args.status is not None:
         patch["status"] = args.status
     if args.current_buddy is not None:
-        patch["current_buddy"] = args.current_buddy
+        patch["current_buddy"] = _validate_buddy_ref(manifest, args.current_buddy, "current_buddy")
     if args.next_buddy is not None:
-        patch["next_buddy"] = None if args.next_buddy == "null" else args.next_buddy
+        patch["next_buddy"] = None if args.next_buddy == "null" else _validate_buddy_ref(
+            manifest, args.next_buddy, "next_buddy"
+        )
     if args.summary is not None:
         patch["summary"] = args.summary
     if not patch:
@@ -84,9 +93,11 @@ def cmd_advance(args: argparse.Namespace) -> int:
     require_permission(manifest, args.actor, "track.advance")
     patch = {}
     if args.current_buddy is not None:
-        patch["current_buddy"] = args.current_buddy
+        patch["current_buddy"] = _validate_buddy_ref(manifest, args.current_buddy, "current_buddy")
     if args.next_buddy is not None:
-        patch["next_buddy"] = None if args.next_buddy == "null" else args.next_buddy
+        patch["next_buddy"] = None if args.next_buddy == "null" else _validate_buddy_ref(
+            manifest, args.next_buddy, "next_buddy"
+        )
     if args.status is not None:
         patch["status"] = args.status
     if args.summary is not None:
@@ -115,7 +126,9 @@ def cmd_detach(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Manage BuddySwitch track objects.")
+    parser = argparse.ArgumentParser(
+        description="Manage BuddySwitch track objects through manual/debug APIs. These commands enforce actor permissions and are not the switch runtime."
+    )
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -131,7 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
     cmd = subparsers.add_parser("create")
     cmd.add_argument("track_id")
     cmd.add_argument("--title", required=True)
-    cmd.add_argument("--status", default="active", choices=VALID_TRACK_STATUS)
+    cmd.add_argument("--status", default="active")
     cmd.add_argument("--current-buddy", default="pm")
     cmd.add_argument("--next-buddy")
     cmd.add_argument("--summary")
@@ -141,7 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
     cmd = subparsers.add_parser("update")
     cmd.add_argument("track_id")
     cmd.add_argument("--title")
-    cmd.add_argument("--status", choices=VALID_TRACK_STATUS)
+    cmd.add_argument("--status")
     cmd.add_argument("--current-buddy")
     cmd.add_argument("--next-buddy")
     cmd.add_argument("--summary")
@@ -152,7 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
     cmd.add_argument("track_id")
     cmd.add_argument("--current-buddy")
     cmd.add_argument("--next-buddy")
-    cmd.add_argument("--status", choices=VALID_TRACK_STATUS)
+    cmd.add_argument("--status")
     cmd.add_argument("--summary")
     cmd.add_argument("--actor", default="pm")
     cmd.set_defaults(func=cmd_advance)

@@ -4,7 +4,7 @@ This repository uses an env-centric BuddySwitch model.
 
 ## Canonical UI
 
-Use the strict directive:
+Use the canonical directive:
 
 `switch <buddy>: <task>`
 
@@ -27,10 +27,10 @@ Examples:
 
 When user sends `switch <buddy>: <task>`:
 
-1. Parse with strict syntax only.
+1. Parse the `switch` intent first. Treat `switch <buddy>: <task>` as the canonical form and tolerate minor CLI spacing variation when buddy and task remain clear.
 2. Validate buddy from `buddyswitch/manifest.toml`.
 3. Resolve skill runtime metadata and guidance from `buddyswitch/skills/**/SKILL.md`.
-4. Enforce that buddy's scope, skills, and object permissions from manifest.
+4. Use manifest scope, skills, and object authority as routing context. Treat `buddy -> skills` as the main runtime routing authority. Treat `permissions` as object-authority metadata for manual/debug mutation APIs. Keep runtime validation focused on successful resolution and safe persistence.
 5. Respect object authority:
    - `pm` controls track lifecycle (`create/read/list/update/advance/attach/detach/archive`)
    - other buddies can read tracks and create/update artifacts
@@ -52,7 +52,8 @@ Default runtime behavior:
 
 ## Switch Rules
 
-- Treat `switch <buddy>:` as a framework directive.
+- Treat `switch <buddy>:` as the canonical framework directive.
+- Normalize minor spacing variation before rejecting when buddy and task are still unambiguous.
 - Do not silently guess unknown buddy names.
 - Do not silently reroute to a different buddy.
 - Do not use multiple buddies unless the user explicitly asks.

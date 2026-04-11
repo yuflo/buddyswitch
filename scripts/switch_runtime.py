@@ -5,16 +5,22 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
-import shutil
 import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from env_manifest import DEFAULT_MANIFEST, ManifestError, buddy_skill_docs, load_manifest, require_buddy
+from env_manifest import (
+    ADVISORY_RUNTIME_METADATA_POLICY,
+    DEFAULT_MANIFEST,
+    ManifestError,
+    buddy_authority_profile,
+    buddy_skill_docs,
+    load_manifest,
+    require_buddy,
+)
 from env_store import (
     ROOT,
     advance_track,
@@ -247,18 +253,6 @@ def _resolve_track_context(task: str, track_mode: str, *, allow_missing_explicit
     }
 
 
-def _evaluate_runtime_requirements(skill: dict[str, Any]) -> list[str]:
-    reasons: list[str] = []
-    runtime = skill["runtime"]
-    for env_name in runtime.get("required_env", []):
-        if env_name not in os.environ:
-            reasons.append(f"missing env var '{env_name}'")
-    for tool_name in runtime.get("required_tools", []):
-        if shutil.which(tool_name) is None:
-            reasons.append(f"missing tool in PATH '{tool_name}'")
-    return reasons
-
-
 def _next_unique(base: str, existing: set[str]) -> str:
     if base not in existing:
         return base
@@ -312,6 +306,8 @@ def _derive_track_summary_defaults(buddy: str, task: str, task_hints: dict[str, 
 def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
     runtime = skill["runtime"]
     guidance = runtime.get("guidance", {})
+    required_tools = runtime.get("required_tools", [])
+    required_env = runtime.get("required_env", [])
     return {
         "id": skill["id"],
         "path": skill["path"],
@@ -323,8 +319,14 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
         "output_schema": runtime["output_schema"],
         "version": runtime.get("version"),
         "side_effect_level": runtime.get("side_effect_level"),
-        "required_tools": runtime.get("required_tools", []),
-        "required_env": runtime.get("required_env", []),
+        "required_tools": required_tools,
+        "required_env": required_env,
+        "runtime_requirements": {
+            "required_tools": required_tools,
+            "required_env": required_env,
+            "policy": ADVISORY_RUNTIME_METADATA_POLICY,
+            "note": "These fields inform the host session and do not reject resolve candidates.",
+        },
         "produces": runtime.get("produces", []),
         "consumes": runtime.get("consumes", []),
         "purpose": guidance.get("purpose", []),
@@ -336,6 +338,82 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
         "examples": guidance.get("examples", []),
         "counterexamples": guidance.get("counterexamples", []),
         "gotchas": guidance.get("gotchas", []),
+    }
+
+
+def _build_run_instructions(implicit_skill_id: str | None) -> dict[str, Any]:
+    if implicit_skill_id:
+        first_action = f"Use implicit_skill_id '{implicit_skill_id}' for this run."
+    else:
+        first_action = "Choose one skill_id from eligible_skills."
+
+    return {
+        "host": "codex",
+        "selection_rule": "Choose exactly one skill_id from eligible_skills. Multi-skill buddies are never auto-selected by the runtime.",
+        "execution_rule": "The host Codex session runs the selected skill workflow and produces a structured result that matches required_output_schema_by_skill[skill_id].",
+        "persistence_rule": "Call persist with the resolved payload, selected skill_id, and structured result when the run should become BuddySwitch state.",
+        "resolve_effects": [
+            "resolve parses the invocation, derives skill candidates and defaults, and does not write BuddySwitch state."
+        ],
+        "next_actions": [
+            first_action,
+            "Read the selected buddyswitch/skills/<buddy>/<skill>/SKILL.md in the current Codex CLI session.",
+            "Produce a structured result payload matching required_output_schema_by_skill[skill_id].",
+            "Call persist when you want BuddySwitch to write state, artifact content, summaries, and run metadata.",
+        ],
+        "persist_effects": [
+            "Artifact skills write artifact state under buddyswitch/objects/ and buddyswitch/content/, plus compatibility markdown under artifacts/ and runs/summaries/.",
+            "track-manager writes only the requested track or attachment state, plus the run summary and run metadata.",
+        ],
+    }
+
+
+def _build_track_manager_effects(
+    *,
+    action: str,
+    track_payload: dict[str, Any],
+    summary_path: str,
+    run_content_path_value: str,
+) -> dict[str, Any]:
+    writes = [summary_path, run_content_path_value]
+    if action in {"create", "update", "advance", "archive", "attach", "detach"}:
+        track = track_payload.get("track")
+        if isinstance(track, dict) and track.get("id"):
+            writes.insert(0, f"buddyswitch/objects/tracks/{track['id']}.json")
+    if action in {"attach", "detach"}:
+        artifact = track_payload.get("artifact")
+        if isinstance(artifact, dict) and artifact.get("id"):
+            writes.insert(1, f"buddyswitch/objects/artifacts/{artifact['id']}.json")
+
+    if action in {"list", "read"}:
+        summary = "persist validated the payload and wrote only summary/run metadata."
+    else:
+        summary = "persist validated the payload and wrote the requested BuddySwitch state changes."
+
+    return {"summary": summary, "writes": writes}
+
+
+def _build_artifact_effects(
+    *,
+    artifact: dict[str, Any],
+    content_path: str,
+    summary_path: str | None,
+    run_content_path_value: str,
+) -> dict[str, Any]:
+    writes = [
+        f"buddyswitch/objects/artifacts/{artifact['id']}.json",
+        content_path,
+        artifact["path"],
+        run_content_path_value,
+    ]
+    if summary_path:
+        writes.insert(3, summary_path)
+    if artifact.get("context_track_id"):
+        writes.insert(1, f"buddyswitch/objects/tracks/{artifact['context_track_id']}.json")
+
+    return {
+        "summary": "persist validated the payload and wrote BuddySwitch artifact state plus compatibility files.",
+        "writes": writes,
     }
 
 
@@ -360,7 +438,7 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
     required_output_schema_by_skill: dict[str, str] = {}
 
     for skill in buddy_skill_docs(manifest, buddy_id):
-        reasons = _evaluate_runtime_requirements(skill)
+        reasons: list[str] = []
         allow_missing_explicit = bool(skill["id"] == "track-manager" and task_hints["action_hint"] == "create")
         try:
             track_context = _resolve_track_context(
@@ -411,10 +489,24 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
     implicit_skill_id = eligible_skill_ids[0] if len(eligible_skill_ids) == 1 else None
     return {
         "ok": True,
+        "intent": parsed.get("intent", "switch"),
+        "raw_text": parsed.get("raw_text", text),
+        "normalized_text": parsed.get("normalized_text", f"switch {buddy_id}: {task}"),
+        "invocation": parsed.get(
+            "invocation",
+            {
+                "intent": "switch",
+                "buddy": buddy_id,
+                "task": task,
+                "raw_text": text,
+                "normalized_text": f"switch {buddy_id}: {task}",
+            },
+        ),
         "switch": {"buddy": buddy_id, "task": task},
         "profile": {
             "buddy": {"id": buddy["id"], "label": buddy["label"], "scope": buddy["scope"]},
             "permissions": buddy.get("permissions", []),
+            "authority": buddy_authority_profile(manifest, buddy_id),
         },
         "task_hints": task_hints,
         "eligible_skills": eligible_skill_ids,
@@ -425,12 +517,7 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
         "artifact_defaults_by_skill": artifact_defaults_by_skill,
         "summary_defaults_by_skill": summary_defaults_by_skill,
         "required_output_schema_by_skill": required_output_schema_by_skill,
-        "run_instructions": {
-            "host": "codex",
-            "selection_rule": "Choose exactly one skill_id from eligible_skills. Multi-skill buddies are never auto-selected by the runtime.",
-            "execution_rule": "The host Codex session runs the selected skill workflow and produces a structured result that matches required_output_schema_by_skill[skill_id].",
-            "persistence_rule": "Call persist with the resolved payload, selected skill_id, and structured result when the run should become BuddySwitch state.",
-        },
+        "run_instructions": _build_run_instructions(implicit_skill_id),
     }
 
 
@@ -620,6 +707,12 @@ def _persist_track_manager(
             "skill": {"id": "track-manager"},
             "track": track_payload,
             "summary": {"path": summary_path},
+            "effects": _build_track_manager_effects(
+                action=action,
+                track_payload=track_payload,
+                summary_path=summary_path,
+                run_content_path_value=run_content_path_value,
+            ),
             "run": {"id": run_id, "content_path": run_content_path_value},
         }
 
@@ -701,6 +794,12 @@ def _persist_track_manager(
         "skill": {"id": "track-manager"},
         "track": track_payload,
         "summary": {"path": summary_path},
+        "effects": _build_track_manager_effects(
+            action=action,
+            track_payload=track_payload,
+            summary_path=summary_path,
+            run_content_path_value=run_content_path_value,
+        ),
         "run": {"id": run_id, "content_path": run_content_path_value},
     }
 
@@ -791,6 +890,12 @@ def _persist_artifact_skill(
         "skill": {"id": skill_id, "track_mode": skill["runtime"]["track_mode"]},
         "artifact": artifact,
         "summary": {"path": summary_path},
+        "effects": _build_artifact_effects(
+            artifact=artifact,
+            content_path=saved_content_path,
+            summary_path=summary_path,
+            run_content_path_value=run_content_path_value,
+        ),
         "run": {"id": run_id, "content_path": run_content_path_value},
     }
 

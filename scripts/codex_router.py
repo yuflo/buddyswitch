@@ -8,7 +8,14 @@ import json
 import sys
 from pathlib import Path
 
-from env_manifest import DEFAULT_MANIFEST, ManifestError, buddy_skill_docs, load_manifest, require_buddy
+from env_manifest import (
+    DEFAULT_MANIFEST,
+    ManifestError,
+    buddy_authority_profile,
+    buddy_skill_docs,
+    load_manifest,
+    require_buddy,
+)
 from parse_switch import EXAMPLE, SYNTAX, parse_switch
 
 
@@ -25,13 +32,27 @@ def route_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict:
         "adapter": "codex",
         "syntax": SYNTAX,
         "example": EXAMPLE,
+        "intent": parsed.get("intent", "switch"),
         "buddy": buddy_id,
         "task": parsed["task"],
+        "raw_text": parsed.get("raw_text", text),
+        "normalized_text": parsed.get("normalized_text", f"switch {buddy_id}: {parsed['task']}"),
+        "invocation": parsed.get(
+            "invocation",
+            {
+                "intent": "switch",
+                "buddy": buddy_id,
+                "task": parsed["task"],
+                "raw_text": text,
+                "normalized_text": f"switch {buddy_id}: {parsed['task']}",
+            },
+        ),
         "profile": {
             "id": buddy["id"],
             "label": buddy["label"],
             "scope": buddy["scope"],
             "permissions": buddy["permissions"],
+            "authority": buddy_authority_profile(manifest, buddy_id),
             "skills": buddy_skill_docs(manifest, buddy_id),
         },
     }

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Load and validate BuddySwitch output schemas."""
+"""Load and validate BuddySwitch output schemas.
+
+This module validates structural contracts only. It does not evaluate business
+quality, research quality, or workflow completeness.
+"""
 
 from __future__ import annotations
 

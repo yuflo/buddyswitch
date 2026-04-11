@@ -95,12 +95,127 @@ class ResolveRuntimeTests(unittest.TestCase):
         )
 
         self.assertTrue(payload["ok"])
+        self.assertEqual(payload["intent"], "switch")
+        self.assertEqual(payload["invocation"]["buddy"], "dev")
         self.assertEqual(payload["eligible_skills"], ["implement-task"])
         self.assertEqual(payload["implicit_skill_id"], "implement-task")
+        self.assertEqual(payload["profile"]["authority"]["permission_scope"], "manual_debug_apis")
+        self.assertEqual(payload["skill_cards"][0]["runtime_requirements"]["policy"], "advisory")
+        self.assertIn("resolve parses the invocation", payload["run_instructions"]["resolve_effects"][0])
+        self.assertIn("Use implicit_skill_id 'implement-task'", payload["run_instructions"]["next_actions"][0])
         self.assertEqual(
             payload["required_output_schema_by_skill"]["implement-task"],
             "framework/schemas/dev/implement-task.json",
         )
+
+    def test_required_env_and_tools_remain_metadata_not_rejection_gates(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            temp_path = Path(temp_dir)
+            skill_path = temp_path / "SKILL.md"
+            skill_repo_path = skill_path.relative_to(ROOT).as_posix()
+            skill_path.write_text(
+                textwrap.dedent(
+                    f"""\
+                    ---
+                    name: demo-scan
+                    description: Demo resolve skill.
+                    version: "2.0"
+                    track_mode: optional
+                    default_artifact_kind: note
+                    auto_summary: true
+                    output_schema: framework/schemas/dev/implement-task.json
+                    side_effect_level: low
+                    required_tools:
+                      - tool-that-does-not-exist
+                    required_env:
+                      - BUDDYSWITCH_MISSING_ENV
+                    produces:
+                      - note
+                    consumes:
+                      - task
+                    ---
+
+                    # demo-scan
+
+                    ## Purpose
+                    - Resolve demo skill.
+
+                    ## Use when
+                    - A demo scan is enough.
+
+                    ## Do not use when
+                    - Another skill owns the task.
+
+                    ## Inputs
+                    - Task input.
+
+                    ## Outputs
+                    - Structured result.
+
+                    ## Verification
+                    - Verify the result.
+
+                    ## Examples
+                    - `switch demo: run a scan`
+
+                    ## Counterexamples
+                    - `switch other: do something else`
+
+                    ## Gotchas
+                    - Keep the demo simple.
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            manifest_path = temp_path / "manifest.toml"
+            manifest_path.write_text(
+                textwrap.dedent(
+                    f"""\
+                    schema_version = 1
+
+                    [env]
+                    id = "demo"
+                    label = "Demo Env"
+
+                    [[adapters]]
+                    id = "codex"
+                    path = "scripts/codex_router.py"
+                    description = "Demo adapter"
+
+                    [[skills]]
+                    id = "demo-scan"
+                    path = "{skill_repo_path}"
+                    description = "Demo scan skill"
+                    buddies = ["demo"]
+                    objects = ["artifact"]
+
+                    [[buddies]]
+                    id = "demo"
+                    label = "Demo"
+                    scope = "Demo scope"
+                    skills = ["demo-scan"]
+                    permissions = ["track.read", "artifact.read", "artifact.create", "artifact.update"]
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            payload = switch_runtime.resolve_switch("switch demo: Run the demo scan", manifest_path=manifest_path)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["eligible_skills"], ["demo-scan"])
+        self.assertEqual(payload["skill_cards"][0]["required_tools"], ["tool-that-does-not-exist"])
+        self.assertEqual(payload["skill_cards"][0]["required_env"], ["BUDDYSWITCH_MISSING_ENV"])
+        self.assertEqual(
+            payload["skill_cards"][0]["runtime_requirements"]["required_tools"],
+            ["tool-that-does-not-exist"],
+        )
+        self.assertEqual(
+            payload["skill_cards"][0]["runtime_requirements"]["required_env"],
+            ["BUDDYSWITCH_MISSING_ENV"],
+        )
+        self.assertEqual(payload["skill_cards"][0]["runtime_requirements"]["policy"], "advisory")
 
     def test_multi_skill_buddy_returns_candidates_without_auto_selection(self) -> None:
         def fake_track_context(task: str, track_mode: str, *, allow_missing_explicit: bool = False) -> dict[str, object]:
@@ -244,6 +359,10 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertIn('"artifact_id":', artifact_json)
         self.assertIn("## execution_summary", summary_markdown)
         self.assertIn("switch test: Run smoke checks", summary_markdown)
+        self.assertIn("effects", payload)
+        self.assertIn(f"buddyswitch/objects/artifacts/{artifact_id}.json", payload["effects"]["writes"])
+        self.assertIn(artifact["path"], payload["effects"]["writes"])
+        self.assertIn(run_content_path, payload["effects"]["writes"])
 
     def test_track_manager_persist_creates_track(self) -> None:
         track_id = f"track-test-{uuid.uuid4().hex[:6]}"
@@ -292,6 +411,8 @@ class PersistRuntimeTests(unittest.TestCase):
         track_json = (ROOT / f"buddyswitch/objects/tracks/{track_id}.json").read_text(encoding="utf-8")
         self.assertIn('"current_buddy": "pm"', track_json)
         self.assertIn('"next_buddy": "design"', track_json)
+        self.assertIn("effects", payload)
+        self.assertIn(f"buddyswitch/objects/tracks/{track_id}.json", payload["effects"]["writes"])
 
 
 if __name__ == "__main__":
