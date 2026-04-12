@@ -70,7 +70,6 @@ Required front matter:
 
 - `name`
 - `description`
-- `track_mode` (advisory metadata; not a resolve gate)
 - `default_artifact_kind`
 - `auto_summary`
 - `output_schema`

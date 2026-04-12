@@ -2,7 +2,6 @@
 name: write-prd
 description: Produce an MVP PRD from research and requirements, aligned with the PM contract.
 version: "2.0"
-track_mode: optional
 default_artifact_kind: prd
 auto_summary: true
 output_schema: framework/schemas/pm/write-prd.json

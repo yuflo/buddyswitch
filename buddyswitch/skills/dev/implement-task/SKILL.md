@@ -2,7 +2,6 @@
 name: implement-task
 description: Implement scoped product changes in project code and report verified outcomes.
 version: "2.0"
-track_mode: optional
 default_artifact_kind: implementation-report
 auto_summary: true
 output_schema: framework/schemas/dev/implement-task.json

@@ -26,7 +26,6 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 _BUDDY_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _SKILL_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+\s*:")
-TRACK_MODES = {"optional", "required", "forbidden"}
 ADVISORY_RUNTIME_METADATA_POLICY = "advisory"
 DEBUG_API_PERMISSION_SCOPE = "manual_debug_apis"
 GUIDANCE_HEADINGS = {
@@ -433,7 +432,12 @@ def _load_skill_runtime(path: Path, skill_id: str) -> dict[str, Any]:
         raise ManifestError(f"Skill file not found: {path.relative_to(ROOT)}")
     front, body_lines = _split_front_matter(path)
 
-    required = ("name", "description", "track_mode", "default_artifact_kind", "auto_summary", "output_schema")
+    if "track_mode" in front:
+        raise ManifestError(
+            f"{path.relative_to(ROOT)}:track_mode is retired; remove this front matter field"
+        )
+
+    required = ("name", "description", "default_artifact_kind", "auto_summary", "output_schema")
     missing = [key for key in required if key not in front]
     if missing:
         raise ManifestError(
@@ -451,12 +455,6 @@ def _load_skill_runtime(path: Path, skill_id: str) -> dict[str, Any]:
     description = front["description"]
     if not isinstance(description, str) or not description.strip():
         raise ManifestError(f"{path.relative_to(ROOT)}:description must be a non-empty string")
-
-    track_mode = front["track_mode"]
-    if not isinstance(track_mode, str) or track_mode not in TRACK_MODES:
-        raise ManifestError(
-            f"{path.relative_to(ROOT)}:track_mode must be one of {', '.join(sorted(TRACK_MODES))}"
-        )
 
     artifact_kind = front["default_artifact_kind"]
     if not isinstance(artifact_kind, str) or not artifact_kind.strip():
@@ -503,7 +501,6 @@ def _load_skill_runtime(path: Path, skill_id: str) -> dict[str, Any]:
     return {
         "name": name.strip(),
         "description": description.strip(),
-        "track_mode": track_mode,
         "default_artifact_kind": artifact_kind.strip(),
         "auto_summary": auto_summary,
         "output_schema": normalized_schema,

@@ -35,7 +35,6 @@ class ManifestSkillRuntimeTests(unittest.TestCase):
                     name: test-skill
                     description: Example test skill.
                     version: "2.0"
-                    track_mode: optional
                     default_artifact_kind: note
                     auto_summary: true
                     output_schema: framework/schemas/dev/implement-task.json
@@ -89,6 +88,57 @@ class ManifestSkillRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime["required_tools"], ["rg"])
         self.assertEqual(runtime["required_env"], ["BUDDYSWITCH_TEST_ENV"])
         self.assertIn("The demand matches the workflow.", runtime["guidance"]["use_when"])
+
+    def test_track_mode_front_matter_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            skill_path = Path(temp_dir) / "SKILL.md"
+            skill_path.write_text(
+                textwrap.dedent(
+                    """\
+                    ---
+                    name: test-skill
+                    description: Example test skill.
+                    track_mode: optional
+                    default_artifact_kind: note
+                    auto_summary: true
+                    output_schema: framework/schemas/dev/implement-task.json
+                    ---
+
+                    # test-skill
+
+                    ## Purpose
+                    - Explain the workflow purpose.
+
+                    ## Use when
+                    - The demand matches the workflow.
+
+                    ## Do not use when
+                    - The demand belongs to another buddy.
+
+                    ## Inputs
+                    - Task input.
+
+                    ## Outputs
+                    - Structured result.
+
+                    ## Verification
+                    - Verify the result.
+
+                    ## Examples
+                    - `switch demo: run the task`
+
+                    ## Counterexamples
+                    - `switch other: do something else`
+
+                    ## Gotchas
+                    - Beware of drift.
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(env_manifest.ManifestError, "track_mode is retired"):
+                env_manifest._load_skill_runtime(skill_path, "test-skill")
 
 
 class ResolveRuntimeTests(unittest.TestCase):

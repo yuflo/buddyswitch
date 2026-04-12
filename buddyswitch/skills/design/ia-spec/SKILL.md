@@ -2,7 +2,6 @@
 name: ia-spec
 description: Create IA and interaction specification artifacts aligned with the design contract.
 version: "2.0"
-track_mode: optional
 default_artifact_kind: design-spec
 auto_summary: true
 output_schema: framework/schemas/design/ia-spec.json

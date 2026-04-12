@@ -92,6 +92,25 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("legacy " + "artifact content", combined)
         self.assertNotIn("buddyswitch/content/" + "artifacts", combined)
 
+    def test_active_docs_and_skills_do_not_use_track_mode_field(self) -> None:
+        targets = (
+            ROOT / "README.md",
+            ROOT / "AGENTS.md",
+            ROOT / "framework" / "docs",
+            ROOT / "buddyswitch" / "skills",
+        )
+        checked_files: list[Path] = []
+        for target in targets:
+            if target.is_file():
+                paths = [target]
+            else:
+                paths = [path for path in target.rglob("*") if path.is_file() and path.suffix in TEXT_SUFFIXES]
+            for path in paths:
+                checked_files.append(path)
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("track_mode", text, msg=f"track_mode should not appear in {path.relative_to(ROOT)}")
+        self.assertTrue(checked_files)
+
 
 if __name__ == "__main__":
     unittest.main()

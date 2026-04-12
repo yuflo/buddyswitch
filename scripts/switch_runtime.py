@@ -147,7 +147,6 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
         "path": skill["path"],
         "description": skill["description"],
         "objects": skill["objects"],
-        "track_mode": runtime["track_mode"],
         "default_artifact_kind": runtime["default_artifact_kind"],
         "auto_summary": runtime["auto_summary"],
         "output_schema": runtime["output_schema"],

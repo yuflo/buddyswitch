@@ -2,7 +2,6 @@
 name: smoke-test
 description: Run focused smoke checks and produce structured pass/fail/blocked reports.
 version: "2.0"
-track_mode: optional
 default_artifact_kind: smoke-test
 auto_summary: true
 output_schema: framework/schemas/test/smoke-test.json

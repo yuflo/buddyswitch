@@ -1,5 +1,7 @@
 # 03. 校验与失败动作矩阵
 
+注：本文件中涉及 `track_mode` gate 的条目属于 Phase 2 历史审查语境。当前 Phase 3 runtime 已移除该 gate，并将 `track_mode` 作为 retired field 处理。
+
 ## 1. 使用说明
 
 本矩阵只记录控制层里当前可见的显式校验，不评价业务质量。

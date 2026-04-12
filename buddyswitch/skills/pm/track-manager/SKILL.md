@@ -2,7 +2,6 @@
 name: track-manager
 description: Manage track lifecycle operations for product iteration control.
 version: "2.0"
-track_mode: optional
 default_artifact_kind: track-event
 auto_summary: true
 output_schema: framework/schemas/pm/track-manager.json
