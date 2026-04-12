@@ -55,6 +55,14 @@ consumes:
 - Confirm the output is product-definition content rather than design or implementation detail.
 - Confirm scope is split clearly enough for downstream buddies to act on it.
 
+## Execution Summary Rule
+
+- `execution_summary` persists as `artifact.summary`.
+- Keep it selection-ready for downstream buddies:
+  - artifact role
+  - key resolved outcome
+  - downstream relevance
+
 ## Track/Object Handling
 
 - Follow `framework/docs/track-registry.md`.

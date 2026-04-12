@@ -73,8 +73,10 @@ Current control-layer expectations:
   3. validate explicit task id, explicit track id, and task ownership when supplied
   4. derive task resolution (`create` or `reuse`) and effective track id
   5. build task context and optional track context from canonical objects
-  6. reject explicit requests for retired markdown outputs under `artifacts/*.md` or `runs/summaries/**`
-  7. return `eligible_skills`, compact `skill_cards`, task context, track context, output schema paths, invocation details, and explicit next actions
+  6. build `track_artifact_index` from canonical `track -> task -> artifact` links when a track is present
+  7. reject explicit requests for retired markdown outputs under `artifacts/*.md` or `runs/summaries/**`
+  8. run deterministic artifact selection from `track_artifact_index` (when present) and return `artifact_selection`
+  9. return `eligible_skills`, compact `skill_cards`, task context, track context, `track_artifact_index`, output schema paths, invocation details, and explicit next actions
 
 Current runtime defaults:
 
@@ -101,6 +103,13 @@ After `resolve`:
 3. execute the workflow in-session
 4. produce a structured result payload matching `required_output_schema_by_skill[skill_id]`
 5. call `scripts/switch_runtime.py persist`
+
+Recommended fixed host flow for track-bound work:
+1. resolve switch
+2. read `track_artifact_index` and `artifact_selection`
+3. read selected artifacts by id (from `artifact_selection.selected_artifact_ids` or `run_instructions.artifact_read_commands`)
+4. execute selected skill
+5. persist result
 
 ## Persist Behavior
 

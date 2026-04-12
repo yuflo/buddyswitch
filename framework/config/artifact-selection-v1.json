@@ -1,0 +1,26 @@
+{
+  "selection_mode": "deterministic-v1",
+  "default_buddy_upstream": {
+    "design": ["market", "pm"],
+    "dev": ["pm", "design"],
+    "test": ["dev", "pm", "design"],
+    "pm": ["market"]
+  },
+  "continuation_buddies": ["design", "dev", "test", "pm"],
+  "history_hints": [
+    "history",
+    "previous",
+    "prior",
+    "earlier",
+    "older",
+    "compare",
+    "evolution",
+    "historical",
+    "历史",
+    "之前",
+    "上一版",
+    "回看",
+    "演进"
+  ],
+  "max_default_items": 4
+}

@@ -48,6 +48,21 @@ Terminal final output must follow `Receipt -> Commands -> Summary`:
 - `Commands` shows one `Template` and one `Recommended`
 - `Summary` keeps 1-2 lines, with up to 4 open questions
 
+## Execution Summary Rule
+
+- `execution_summary` is persisted as `artifact.summary` for artifact-producing runs.
+- Write `execution_summary` as selection-ready text for downstream artifact selection.
+- Each summary should include:
+  - artifact role
+  - key resolved outcome
+  - downstream relevance
+
+Good example:
+- "Smoke-test summary for onboarding CTA fixes, confirming pass/fail outcomes and readiness signals that PM can use for release decisions."
+
+Bad example:
+- "Looks good."
+
 ## Track Object Rule
 
 - Follow `framework/docs/track-registry.md`.

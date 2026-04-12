@@ -91,6 +91,14 @@ For each round, run this fixed loop:
 - Confirm blocking conditions and evidence quality downgrades are documented.
 - Confirm the report separates observed evidence from inference.
 
+## Execution Summary Rule
+
+- `execution_summary` persists as `artifact.summary`.
+- Keep it selection-ready for downstream buddies:
+  - artifact role
+  - key resolved outcome
+  - downstream relevance
+
 ## Track/Object Handling
 
 - Follow `framework/docs/track-registry.md`.

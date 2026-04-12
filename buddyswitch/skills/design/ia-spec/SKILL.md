@@ -56,6 +56,14 @@ consumes:
 - Confirm key states and transitions are covered for the main flows.
 - Confirm unresolved design risks are called out explicitly.
 
+## Execution Summary Rule
+
+- `execution_summary` persists as `artifact.summary`.
+- Keep it selection-ready for downstream buddies:
+  - artifact role
+  - key resolved outcome
+  - downstream relevance
+
 ## Track/Object Handling
 
 - Follow `framework/docs/track-registry.md`.

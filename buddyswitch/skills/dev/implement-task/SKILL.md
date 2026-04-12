@@ -55,6 +55,14 @@ consumes:
 - Confirm the implementation stays within the approved scope.
 - Report known limitations or blocked validation explicitly.
 
+## Execution Summary Rule
+
+- `execution_summary` persists as `artifact.summary`.
+- Keep it selection-ready for downstream buddies:
+  - artifact role
+  - key resolved outcome
+  - downstream relevance
+
 ## Track/Object Handling
 
 - Follow `framework/docs/track-registry.md`.

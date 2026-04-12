@@ -66,6 +66,11 @@ def cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_get(args: argparse.Namespace) -> int:
+    # Alias for read-by-id usage in task flows.
+    return cmd_show(args)
+
+
 def cmd_create(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
     require_permission(manifest, args.actor, "artifact.create")
@@ -143,6 +148,11 @@ def build_parser() -> argparse.ArgumentParser:
     cmd.add_argument("artifact_id")
     cmd.add_argument("--actor", default="pm")
     cmd.set_defaults(func=cmd_show)
+
+    cmd = subparsers.add_parser("get")
+    cmd.add_argument("artifact_id")
+    cmd.add_argument("--actor", default="pm")
+    cmd.set_defaults(func=cmd_get)
 
     cmd = subparsers.add_parser("create")
     cmd.add_argument("--artifact-id")

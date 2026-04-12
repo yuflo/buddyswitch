@@ -55,6 +55,14 @@ consumes:
 - Confirm failures and blocked states include actionable detail.
 - Confirm the readiness summary is grounded in observed results.
 
+## Execution Summary Rule
+
+- `execution_summary` persists as `artifact.summary`.
+- Keep it selection-ready for downstream buddies:
+  - artifact role
+  - key resolved outcome
+  - downstream relevance
+
 ## Track/Object Handling
 
 - Follow `framework/docs/track-registry.md`.

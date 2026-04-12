@@ -284,6 +284,75 @@ def list_artifacts() -> list[dict[str, Any]]:
     return rows
 
 
+def _task_artifacts_from_map(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = [artifact_map[item] for item in task.get("artifact_ids", []) if item in artifact_map]
+    rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
+    return rows
+
+
+def list_task_artifacts(task_id: str) -> list[dict[str, Any]]:
+    task = get_task(task_id)
+    if task is None:
+        raise ValueError(f"task not found: {task_id}")
+    artifact_map = {artifact["id"]: artifact for artifact in list_artifacts()}
+    return _task_artifacts_from_map(task, artifact_map)
+
+
+def build_track_artifact_index(track_id: str | None) -> dict[str, Any] | None:
+    if not track_id:
+        return None
+    track = get_track(track_id)
+    if track is None:
+        return None
+
+    artifact_map = {artifact["id"]: artifact for artifact in list_artifacts()}
+    track_updated_at = track.get("updated_at", "")
+    task_rows: list[dict[str, Any]] = []
+    for task_id in track.get("task_ids", []):
+        task = get_task(task_id)
+        if task is None:
+            continue
+        task_updated_at = task.get("updated_at", "")
+        if task_updated_at > track_updated_at:
+            track_updated_at = task_updated_at
+        artifacts = _task_artifacts_from_map(task, artifact_map)
+        artifact_rows: list[dict[str, Any]] = []
+        latest_artifact_id = task.get("latest_artifact_id")
+        for artifact in artifacts:
+            artifact_updated_at = artifact.get("updated_at", "")
+            if artifact_updated_at > track_updated_at:
+                track_updated_at = artifact_updated_at
+            artifact_rows.append(
+                {
+                    "artifact_id": artifact["id"],
+                    "title": artifact["title"],
+                    "summary": artifact.get("summary", ""),
+                    "skill_id": artifact.get("skill_id", ""),
+                    "updated_at": artifact_updated_at,
+                    "is_latest": artifact["id"] == latest_artifact_id,
+                }
+            )
+
+        task_rows.append(
+            {
+                "task_id": task["id"],
+                "buddy": task["buddy"],
+                "task_title": task["title"],
+                "task_summary": task.get("summary", ""),
+                "latest_artifact_id": latest_artifact_id,
+                "artifacts": artifact_rows,
+            }
+        )
+
+    return {
+        "track_id": track["id"],
+        "track_title": track["title"],
+        "track_summary": track.get("summary", ""),
+        "updated_at": track_updated_at,
+        "tasks": task_rows,
+    }
+
+
 def get_track(track_id: str) -> dict[str, Any] | None:
     path = track_file(track_id)
     if not path.exists():

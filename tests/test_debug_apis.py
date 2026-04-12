@@ -154,6 +154,21 @@ class DebugApiPermissionTests(unittest.TestCase):
             auto_register=False,
         )
 
+    def test_artifact_get_command_alias_reads_by_id(self) -> None:
+        parser = env_artifacts.build_parser()
+        args = parser.parse_args(["get", "art-debug-get", "--actor", "pm"])
+        artifact = {"id": "art-debug-get", "title": "Debug Artifact"}
+        buffer = io.StringIO()
+
+        with patch.object(env_artifacts, "get_artifact", return_value=artifact) as mocked:
+            with redirect_stdout(buffer):
+                result = args.func(args)
+
+        self.assertEqual(result, 0)
+        mocked.assert_called_once_with("art-debug-get")
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["id"], "art-debug-get")
+
 
 class AdminCleanupCommandTests(unittest.TestCase):
     def test_cleanup_buddy_runs_as_admin_helper(self) -> None:

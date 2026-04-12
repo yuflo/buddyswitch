@@ -128,6 +128,33 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("continue_current_task", combined)
         self.assertIn("debug", combined)
 
+    def test_contracts_and_skills_define_summary_selection_semantics(self) -> None:
+        contracts = (
+            ROOT / "framework" / "contracts" / "market.md",
+            ROOT / "framework" / "contracts" / "pm.md",
+            ROOT / "framework" / "contracts" / "design.md",
+            ROOT / "framework" / "contracts" / "dev.md",
+            ROOT / "framework" / "contracts" / "test.md",
+        )
+        skills = (
+            ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "design" / "ia-spec" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "SKILL.md",
+        )
+
+        for path in contracts:
+            text = path.read_text(encoding="utf-8").lower()
+            self.assertIn("execution_summary", text, msg=f"missing execution_summary rule in {path.relative_to(ROOT)}")
+            self.assertIn("artifact.summary", text, msg=f"missing artifact.summary rule in {path.relative_to(ROOT)}")
+            self.assertIn("selection-ready", text, msg=f"missing selection-ready wording in {path.relative_to(ROOT)}")
+
+        for path in skills:
+            text = path.read_text(encoding="utf-8").lower()
+            self.assertIn("execution summary rule", text, msg=f"missing execution summary section in {path.relative_to(ROOT)}")
+            self.assertIn("artifact.summary", text, msg=f"missing artifact.summary rule in {path.relative_to(ROOT)}")
+
 
 if __name__ == "__main__":
     unittest.main()

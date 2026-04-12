@@ -22,7 +22,7 @@ if str(SCRIPTS) not in sys.path:
 import env_manifest  # noqa: E402
 import switch_runtime  # noqa: E402
 import workspace_data  # noqa: E402
-from env_store import create_task, create_track, get_track, validate_artifact, validate_track  # noqa: E402
+from env_store import create_artifact, create_task, create_track, get_track, validate_artifact, validate_track  # noqa: E402
 
 
 class ManifestSkillRuntimeTests(unittest.TestCase):
@@ -202,8 +202,12 @@ class ResolveRuntimeTests(unittest.TestCase):
         self.assertRegex(payload["task_resolution"]["task_id"], r"^task-dev-[a-z0-9-]+-[0-9a-f]{6}$")
         self.assertLess(len(payload["task_resolution"]["task_id"]), 64)
         self.assertIsNone(payload["effective_track_id"])
+        self.assertIsNone(payload["track_artifact_index"])
+        self.assertIsNone(payload["artifact_selection"])
         self.assertEqual(payload["eligible_skills"], ["implement-task"])
         self.assertEqual(payload["implicit_skill_id"], "implement-task")
+        self.assertEqual(payload["run_instructions"]["selected_artifact_ids"], [])
+        self.assertEqual(payload["run_instructions"]["artifact_read_commands"], [])
 
     def test_resolve_reuses_explicit_task(self) -> None:
         task = create_task(
@@ -238,6 +242,96 @@ class ResolveRuntimeTests(unittest.TestCase):
             switch_runtime.resolve_switch(
                 "switch dev: Implement onboarding and write to artifacts/demo.md"
             )
+
+    def test_resolve_includes_track_artifact_index_with_history(self) -> None:
+        track = create_track("track-index-resolve", "Track Index Resolve")
+        task = create_task(
+            "task-pm-index-resolve",
+            "PM Index Resolve",
+            buddy="pm",
+            track_id=track["id"],
+            initial_run_id="run-seed-index-resolve",
+        )
+        first_artifact = create_artifact(
+            artifact_id="art-task-pm-index-resolve-prd",
+            title="PM PRD V1",
+            buddy="pm",
+            skill_id="write-prd",
+            task_id=task["id"],
+            source_run_id="run-index-resolve-v1",
+            summary="First requirement summary.",
+            content={"problem": "v1"},
+        )
+        second_artifact = create_artifact(
+            artifact_id="art-task-pm-index-resolve-prd-2",
+            title="PM PRD V2",
+            buddy="pm",
+            skill_id="write-prd",
+            task_id=task["id"],
+            source_run_id="run-index-resolve-v2",
+            summary="Second requirement summary.",
+            content={"problem": "v2"},
+        )
+        self._remember(f"buddyswitch/objects/tracks/{track['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{task['id']}.json")
+        self._remember(f"buddyswitch/objects/artifacts/{first_artifact['id']}.json")
+        self._remember(f"buddyswitch/objects/artifacts/{second_artifact['id']}.json")
+
+        payload = switch_runtime.resolve_switch(
+            "switch design -> track-index-resolve: continue design handoff based on pm requirements"
+        )
+
+        self.assertTrue(payload["ok"])
+        self.assertIn("track_artifact_index", payload)
+        index = payload["track_artifact_index"]
+        self.assertIsInstance(index, dict)
+        assert isinstance(index, dict)
+        self.assertEqual(index["track_id"], "track-index-resolve")
+        self.assertEqual(len(index["tasks"]), 1)
+        task_row = index["tasks"][0]
+        self.assertEqual(task_row["task_id"], "task-pm-index-resolve")
+        self.assertEqual(task_row["latest_artifact_id"], "art-task-pm-index-resolve-prd-2")
+        self.assertEqual(
+            [item["artifact_id"] for item in task_row["artifacts"]],
+            ["art-task-pm-index-resolve-prd-2", "art-task-pm-index-resolve-prd"],
+        )
+        self.assertEqual([item["is_latest"] for item in task_row["artifacts"]], [True, False])
+        self.assertEqual(payload["artifact_selection"]["selected_artifact_ids"], ["art-task-pm-index-resolve-prd-2"])
+        self.assertEqual(payload["artifact_selection"]["selection_mode"], "deterministic-v1")
+        self.assertEqual(payload["run_instructions"]["selected_artifact_ids"], ["art-task-pm-index-resolve-prd-2"])
+        self.assertEqual(
+            payload["run_instructions"]["artifact_read_commands"],
+            ["python3 scripts/env_artifacts.py get art-task-pm-index-resolve-prd-2"],
+        )
+
+    def test_resolve_track_index_includes_task_without_artifacts(self) -> None:
+        track = create_track("track-empty-artifacts", "Track Empty Artifacts")
+        task = create_task(
+            "task-design-empty-artifacts",
+            "Design Empty Artifacts",
+            buddy="design",
+            track_id=track["id"],
+            initial_run_id="run-seed-empty-artifacts",
+        )
+        self._remember(f"buddyswitch/objects/tracks/{track['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{task['id']}.json")
+
+        payload = switch_runtime.resolve_switch(
+            "switch dev -> track-empty-artifacts: implement according to current track inputs"
+        )
+
+        self.assertTrue(payload["ok"])
+        index = payload["track_artifact_index"]
+        self.assertIsInstance(index, dict)
+        assert isinstance(index, dict)
+        self.assertEqual(index["track_id"], "track-empty-artifacts")
+        self.assertEqual(len(index["tasks"]), 1)
+        self.assertEqual(index["tasks"][0]["task_id"], "task-design-empty-artifacts")
+        self.assertEqual(index["tasks"][0]["latest_artifact_id"], None)
+        self.assertEqual(index["tasks"][0]["artifacts"], [])
+        self.assertEqual(payload["artifact_selection"]["selected_artifact_ids"], [])
+        self.assertEqual(payload["run_instructions"]["selected_artifact_ids"], [])
+        self.assertEqual(payload["run_instructions"]["artifact_read_commands"], [])
 
 
 class WorkspaceDataTests(unittest.TestCase):

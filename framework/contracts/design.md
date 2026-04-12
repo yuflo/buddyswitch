@@ -48,6 +48,21 @@ Terminal final output must follow `Receipt -> Commands -> Summary`:
 - `Commands` shows one `Template` and one `Recommended`
 - `Summary` keeps 1-2 lines, with up to 4 open questions
 
+## Execution Summary Rule
+
+- `execution_summary` is persisted as `artifact.summary` for artifact-producing runs.
+- Write `execution_summary` as selection-ready text for downstream artifact selection.
+- Each summary should include:
+  - artifact role
+  - key resolved outcome
+  - downstream relevance
+
+Good example:
+- "Design IA summary for the onboarding flow, locking section order and state handling rules that dev should implement directly."
+
+Bad example:
+- "Updated design."
+
 ## Track Object Rule
 
 - Follow `framework/docs/track-registry.md`.

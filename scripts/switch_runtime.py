@@ -23,6 +23,7 @@ from env_manifest import (
 from env_store import (
     ROOT,
     add_run_to_task,
+    build_track_artifact_index,
     create_artifact,
     create_task,
     create_track,
@@ -41,6 +42,7 @@ from env_store import (
 )
 from output_schema import OutputSchemaError, load_output_schema, validate_output_payload
 from parse_switch import EXAMPLE, SYNTAX, parse_switch
+from artifact_selection import select_artifacts_for_run
 
 
 TRACK_ACTIONS = ("create", "read", "list", "update", "advance", "archive")
@@ -205,11 +207,39 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_run_instructions(implicit_skill_id: str | None) -> dict[str, Any]:
+def _build_run_instructions(
+    implicit_skill_id: str | None,
+    artifact_selection: dict[str, Any] | None,
+) -> dict[str, Any]:
+    selected_artifact_ids: list[str] = []
+    if isinstance(artifact_selection, dict):
+        raw_ids = artifact_selection.get("selected_artifact_ids")
+        if isinstance(raw_ids, list):
+            selected_artifact_ids = [item for item in raw_ids if isinstance(item, str) and item]
+
     if implicit_skill_id:
         first_action = f"Use implicit_skill_id '{implicit_skill_id}' for this run."
     else:
         first_action = "Choose one skill_id from eligible_skills."
+
+    next_actions = [
+        first_action,
+        "When track_artifact_index is present, select relevant artifact_ids before running the skill.",
+    ]
+    if selected_artifact_ids:
+        joined_ids = ", ".join(selected_artifact_ids)
+        next_actions.append(f"Read selected artifacts by id: {joined_ids}.")
+    next_actions.extend(
+        [
+            "Read the selected buddyswitch/skills/<buddy>/<skill>/SKILL.md in the current Codex CLI session.",
+            "Produce a structured result payload matching required_output_schema_by_skill[skill_id].",
+            "Call persist when you want BuddySwitch to write task/artifact/track state and run audit metadata.",
+        ]
+    )
+
+    artifact_read_commands = [
+        f"python3 scripts/env_artifacts.py get {artifact_id}" for artifact_id in selected_artifact_ids
+    ]
     return {
         "host": "codex",
         "selection_rule": "Choose exactly one skill_id from eligible_skills. Multi-skill buddies are never auto-selected by the runtime.",
@@ -218,12 +248,9 @@ def _build_run_instructions(implicit_skill_id: str | None) -> dict[str, Any]:
         "resolve_notes": [
             "resolve parses the invocation, derives candidates and context, and does not write BuddySwitch state."
         ],
-        "next_actions": [
-            first_action,
-            "Read the selected buddyswitch/skills/<buddy>/<skill>/SKILL.md in the current Codex CLI session.",
-            "Produce a structured result payload matching required_output_schema_by_skill[skill_id].",
-            "Call persist when you want BuddySwitch to write task/artifact/track state and run audit metadata.",
-        ],
+        "selected_artifact_ids": selected_artifact_ids,
+        "artifact_read_commands": artifact_read_commands,
+        "next_actions": next_actions,
     }
 
 
@@ -346,6 +373,23 @@ def _build_track_context(track_id: str | None) -> dict[str, Any] | None:
     }
 
 
+def _build_artifact_selection_context(
+    *,
+    buddy_id: str,
+    demand: str,
+    task_id: str,
+    track_artifact_index: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if track_artifact_index is None:
+        return None
+    return select_artifacts_for_run(
+        current_buddy=buddy_id,
+        demand=demand,
+        track_artifact_index=track_artifact_index,
+        current_task_id=task_id,
+    )
+
+
 def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
     parsed = parse_switch(text, manifest_path=manifest_path)
@@ -421,6 +465,15 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
         "normalized_text": normalized_text,
     }
 
+    track_context = _build_track_context(effective_track_id)
+    track_artifact_index = build_track_artifact_index(effective_track_id)
+    artifact_selection = _build_artifact_selection_context(
+        buddy_id=buddy_id,
+        demand=demand,
+        task_id=resolved_task_id,
+        track_artifact_index=track_artifact_index,
+    )
+
     return {
         "ok": True,
         "intent": parsed.get("intent", "switch"),
@@ -436,12 +489,14 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
         "task_resolution": task_resolution,
         "effective_track_id": effective_track_id,
         "task_context": _build_task_context(existing_task),
-        "track_context": _build_track_context(effective_track_id),
+        "track_context": track_context,
+        "track_artifact_index": track_artifact_index,
+        "artifact_selection": artifact_selection,
         "eligible_skills": eligible_skill_ids,
         "skill_cards": skill_cards,
         "implicit_skill_id": implicit_skill_id,
         "required_output_schema_by_skill": required_output_schema_by_skill,
-        "run_instructions": _build_run_instructions(implicit_skill_id),
+        "run_instructions": _build_run_instructions(implicit_skill_id, artifact_selection),
     }
 
 
