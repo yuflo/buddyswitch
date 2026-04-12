@@ -3,130 +3,311 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI Scheduler - Join Waitlist</title>
+  <title>DayFlow | Personal Schedule Manager</title>
+  <meta
+    name="description"
+    content="DayFlow is a personal schedule manager that helps you start free, stay on top of tasks and reminders, and upgrade to smarter planning when you need more."
+  >
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%231f2330'/%3E%3Cpath d='M18 18h12c10.5 0 18 5.9 18 14.2S40.5 46 30 46H18V18Zm12 22c6.7 0 11.2-3 11.2-7.8S36.7 24.4 30 24.4h-4.8V40H30Z' fill='%23f5efe3'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <main class="page-shell">
-    <section class="hero section">
-      <p class="eyebrow">AI Scheduler</p>
-      <h1>Automatically Rebuild Your Day When Plans Change</h1>
-      <p class="lede">
-        Turn tasks and constraints into a schedule that keeps up with real work.
-        No manual reshuffling every time a meeting moves.
-      </p>
-      <a class="btn btn-primary" href="#waitlist" id="heroCta">Join Waitlist</a>
-    </section>
+    <header class="topbar">
+      <a class="brand" href="#hero" aria-label="DayFlow home">
+        <span class="brand-mark">DF</span>
+        <span class="brand-text">
+          <strong>DayFlow</strong>
+          <span>Personal schedule manager</span>
+        </span>
+      </a>
+      <nav class="topnav" aria-label="Page sections">
+        <a href="#features">Features</a>
+        <a href="#plans">Free vs Pro</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+    </header>
 
-    <section class="how-it-works section" aria-labelledby="howItWorksTitle">
-      <h2 id="howItWorksTitle">How It Works</h2>
-      <ol>
-        <li><strong>Add tasks and constraints.</strong> Define priority, due dates, and focus windows.</li>
-        <li><strong>Auto-schedule your time.</strong> AI places work into your calendar plan.</li>
-        <li><strong>Auto-adjust when things change.</strong> New meetings and conflicts trigger smart reshuffling.</li>
-      </ol>
-    </section>
-
-    <section class="pricing section" id="pricing" aria-labelledby="pricingTitle">
-      <h2 id="pricingTitle">Pricing</h2>
-      <p class="pricing-copy">Choose a plan and reserve early pricing access.</p>
-      <div class="pricing-grid">
-        <article class="plan-card" aria-labelledby="planPersonalTitle">
-          <p class="plan-kicker">For solo operators</p>
-          <h3 id="planPersonalTitle">Personal</h3>
-          <p class="plan-price">$12<span>/month</span></p>
-          <ul class="plan-list">
-            <li>AI auto-scheduling for personal calendar</li>
-            <li>Priority-based task reshuffling</li>
-            <li>Email support</li>
-          </ul>
-          <button
-            type="button"
-            class="btn btn-primary pricing-cta"
-            data-plan="personal"
-            data-plan-name="Personal"
-            data-plan-price="$12/month"
-          >Reserve Personal</button>
-        </article>
-        <article class="plan-card plan-card-featured" aria-labelledby="planTeamTitle">
-          <p class="plan-badge">Recommended</p>
-          <p class="plan-kicker">For small teams</p>
-          <h3 id="planTeamTitle">Team</h3>
-          <p class="plan-price">$39<span>/month</span></p>
-          <ul class="plan-list">
-            <li>Everything in Personal</li>
-            <li>Team calendar conflict optimization</li>
-            <li>Priority onboarding support</li>
-          </ul>
-          <button
-            type="button"
-            class="btn btn-primary pricing-cta"
-            data-plan="team"
-            data-plan-name="Team"
-            data-plan-price="$39/month"
-          >Reserve Team</button>
-        </article>
-      </div>
-    </section>
-
-    <section class="waitlist section" id="waitlist" aria-labelledby="waitlistTitle">
-      <h2 id="waitlistTitle">Get Early Access</h2>
-      <p class="waitlist-copy">Join the waitlist and receive launch updates by email.</p>
-      <form id="waitlistForm" novalidate>
-        <label for="emailInput" class="sr-only">Email address</label>
-        <div class="form-row">
-          <input
-            id="emailInput"
-            name="email"
-            type="email"
-            inputmode="email"
-            autocomplete="email"
-            placeholder="name@company.com"
-            required
-          >
-          <button type="submit" class="btn btn-primary" id="submitBtn">Join Waitlist</button>
+    <section class="hero section" id="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">For personal planning, not team overhead</p>
+        <h1>Own your day without rebuilding it every hour.</h1>
+        <p class="lede">
+          DayFlow keeps tasks, reminders, and calendar blocks aligned in one calm view,
+          so you can start free today and upgrade only when you want smarter planning.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary primary-cta" href="#signup" data-cta-location="hero">Start Free</a>
+          <p class="hero-note">No card required. Pro unlocks deeper planning for $12/month or $96/year.</p>
         </div>
-        <p class="form-message error" id="formError" aria-live="polite"></p>
-      </form>
-      <div class="success-panel" id="successPanel" hidden>
-        <h3>You are on the waitlist</h3>
-        <p>Thanks. We will email you about early access and rollout timing.</p>
+        <ul class="hero-points" aria-label="Quick benefits">
+          <li>See today clearly</li>
+          <li>Keep reminders and tasks together</li>
+          <li>Upgrade when your routine gets heavier</li>
+        </ul>
+      </div>
+
+      <div class="hero-visual" aria-hidden="true">
+        <div class="planner-window">
+          <div class="planner-window-top">
+            <span class="planner-dots"></span>
+            <span class="planner-dots"></span>
+            <span class="planner-dots"></span>
+            <p>Monday plan</p>
+            <span class="planner-badge">Auto-adjusted</span>
+          </div>
+          <div class="planner-body">
+            <div class="planner-timeline">
+              <div class="time-row">
+                <span>8:00</span>
+                <div class="time-block focus">Deep work block</div>
+              </div>
+              <div class="time-row">
+                <span>10:30</span>
+                <div class="time-block admin">Admin + follow-ups</div>
+              </div>
+              <div class="time-row">
+                <span>1:00</span>
+                <div class="time-block errands">Lunch and errands</div>
+              </div>
+              <div class="time-row">
+                <span>3:30</span>
+                <div class="time-block review">Review tomorrow</div>
+              </div>
+            </div>
+            <aside class="planner-side">
+              <div class="side-card">
+                <p class="side-label">Today</p>
+                <strong>4 priorities</strong>
+                <span>2 reminders synced</span>
+              </div>
+              <div class="side-card">
+                <p class="side-label">Pro preview</p>
+                <strong>Flexible routines</strong>
+                <span>Focus windows + smarter nudges</span>
+              </div>
+            </aside>
+          </div>
+        </div>
       </div>
     </section>
 
-    <footer class="section footer">
+    <section class="section value-band" aria-labelledby="valueTitle">
+      <div class="section-heading">
+        <p class="section-kicker">Core value</p>
+        <h2 id="valueTitle">Make planning feel lighter, not stricter.</h2>
+        <p class="section-copy">
+          When meetings move or your energy shifts, DayFlow keeps your personal plan readable
+          instead of forcing you to manually rebuild the day from scratch.
+        </p>
+      </div>
+      <div class="value-grid">
+        <article class="value-card">
+          <h3>One place for daily clarity</h3>
+          <p>Tasks, time blocks, and reminders stay connected so your plan still makes sense at a glance.</p>
+        </article>
+        <article class="value-card">
+          <h3>Easy free entry</h3>
+          <p>Start with the essentials for free and decide later whether your routine needs the Pro layer.</p>
+        </article>
+        <article class="value-card">
+          <h3>Upgrade for smoother planning</h3>
+          <p>Pro is built for people who want deeper visibility, stronger routines, and smarter nudges.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section features" id="features" aria-labelledby="featuresTitle">
+      <div class="section-heading">
+        <p class="section-kicker">Key features</p>
+        <h2 id="featuresTitle">Three reasons it feels easier to stay on top of your week.</h2>
+      </div>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <p class="feature-index">01</p>
+          <h3>Daily schedule view</h3>
+          <p>See your calendar blocks, priorities, and reminders in one clean personal planning surface.</p>
+        </article>
+        <article class="feature-card">
+          <p class="feature-index">02</p>
+          <h3>Reminder rhythm</h3>
+          <p>Keep deadlines and routines visible without overloading yourself with noisy notifications.</p>
+        </article>
+        <article class="feature-card">
+          <p class="feature-index">03</p>
+          <h3>Pro planning tools</h3>
+          <p>Unlock stronger planning views, smarter nudges, and more complete day management when you need them.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section plans" id="plans" aria-labelledby="plansTitle">
+      <div class="section-heading">
+        <p class="section-kicker">Free vs Pro</p>
+        <h2 id="plansTitle">Start with the basics for free, then step into Pro when your routine gets fuller.</h2>
+        <p class="section-copy">
+          The free plan covers everyday schedule management. Pro adds the extra planning support that makes busy weeks easier to hold.
+        </p>
+      </div>
+
+      <div class="plan-toggle-row" role="tablist" aria-label="Plan details">
+        <button
+          type="button"
+          class="plan-toggle is-active"
+          role="tab"
+          aria-selected="true"
+          aria-controls="planPanel"
+          id="freePlanTab"
+          data-plan-target="free"
+        >
+          Free plan
+        </button>
+        <button
+          type="button"
+          class="plan-toggle"
+          role="tab"
+          aria-selected="false"
+          aria-controls="planPanel"
+          id="proPlanTab"
+          data-plan-target="pro"
+        >
+          Pro plan
+        </button>
+      </div>
+
+      <div class="plan-layout">
+        <div class="plan-card-grid">
+          <article class="plan-card is-active" data-plan-card="free" aria-labelledby="freePlanTitle">
+            <p class="plan-label">Free</p>
+            <h3 id="freePlanTitle">Good for everyday planning</h3>
+            <p class="plan-price">$0 <span>/ forever</span></p>
+            <p class="plan-summary">A calm starting point for personal schedules, reminders, and priorities.</p>
+            <ul class="plan-list">
+              <li>Daily task and schedule overview</li>
+              <li>Basic reminders and routines</li>
+              <li>Simple planning clarity without commitment</li>
+            </ul>
+            <button type="button" class="plan-detail-btn" data-plan-focus="free">Explore Free</button>
+          </article>
+
+          <article class="plan-card plan-card-pro" data-plan-card="pro" aria-labelledby="proPlanTitle">
+            <p class="plan-label plan-label-pro">Pro</p>
+            <h3 id="proPlanTitle">Built for heavier routines</h3>
+            <p class="plan-price">$12 <span>/ month</span></p>
+            <p class="plan-annual">Or $96/year</p>
+            <p class="plan-summary">Upgrade when you want more complete planning support and a stronger view of your time.</p>
+            <ul class="plan-list">
+              <li>Richer planning views and stronger day structure</li>
+              <li>Smarter reminders and routine support</li>
+              <li>More complete personal management experience</li>
+            </ul>
+            <button type="button" class="plan-detail-btn" data-plan-focus="pro">See Pro Value</button>
+          </article>
+        </div>
+
+        <aside class="plan-panel" id="planPanel" aria-live="polite">
+          <p class="plan-panel-kicker" id="planPanelKicker">Free plan</p>
+          <h3 id="planPanelTitle">Keep your everyday plan frictionless.</h3>
+          <p id="planPanelCopy">
+            Start with the essentials and get a clean view of tasks, reminders, and calendar blocks without paying upfront.
+          </p>
+          <ul class="plan-panel-list" id="planPanelList">
+            <li>One home for tasks, reminders, and time blocks</li>
+            <li>Easy entry for students, freelancers, and creators</li>
+            <li>Clear upgrade path when your schedule gets more demanding</li>
+          </ul>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section use-cases" aria-labelledby="useCasesTitle">
+      <div class="section-heading">
+        <p class="section-kicker">Use cases</p>
+        <h2 id="useCasesTitle">Built for personal routines that change shape during the week.</h2>
+      </div>
+      <div class="use-case-grid">
+        <article class="use-case-card">
+          <h3>Students</h3>
+          <p>Balance classes, deadlines, and study windows without losing sight of what matters today.</p>
+        </article>
+        <article class="use-case-card">
+          <h3>Freelancers</h3>
+          <p>Keep client work, admin time, and personal boundaries visible in one steady schedule.</p>
+        </article>
+        <article class="use-case-card">
+          <h3>Creators</h3>
+          <p>Plan publishing, deep work, and recovery time with enough structure to keep momentum up.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section faq" id="faq" aria-labelledby="faqTitle">
+      <div class="section-heading">
+        <p class="section-kicker">FAQ</p>
+        <h2 id="faqTitle">Questions people ask before they start free.</h2>
+      </div>
+      <div class="faq-list">
+        <details class="faq-item">
+          <summary>Is DayFlow for teams?</summary>
+          <p>No. This page is for a personal schedule management product focused on individuals.</p>
+        </details>
+        <details class="faq-item">
+          <summary>What does the free plan cover?</summary>
+          <p>The free plan is for core schedule management: daily planning, reminders, and a simple personal overview.</p>
+        </details>
+        <details class="faq-item">
+          <summary>Why would I upgrade to Pro?</summary>
+          <p>Pro is for people who want deeper planning support, richer views, smarter nudges, and a more complete routine system.</p>
+        </details>
+        <details class="faq-item">
+          <summary>Do I need a card to start?</summary>
+          <p>No. The primary flow is free start first, then upgrade later only if the extra planning support feels worth it.</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="section signup" id="signup" aria-labelledby="signupTitle">
+      <div class="signup-copy">
+        <p class="section-kicker">Footer CTA</p>
+        <h2 id="signupTitle">Start free and build a steadier week.</h2>
+        <p>
+          Enter your email to begin the free signup flow. When you are ready for deeper planning support,
+          Pro is already mapped to a simple $12/month or $96/year upgrade.
+        </p>
+        <a class="btn btn-primary primary-cta" href="#signupForm" data-cta-location="footer">Start Free</a>
+      </div>
+
+      <div class="signup-card">
+        <form id="signupForm" novalidate>
+          <label for="emailInput" class="sr-only">Email address</label>
+          <div class="form-row">
+            <input
+              id="emailInput"
+              name="email"
+              type="email"
+              inputmode="email"
+              autocomplete="email"
+              placeholder="you@example.com"
+              required
+            >
+            <button type="submit" class="btn btn-secondary" id="submitBtn">Create Free Account</button>
+          </div>
+          <p class="form-note">No card required for the free plan.</p>
+          <p class="form-message error" id="formError" aria-live="polite"></p>
+        </form>
+
+        <div class="success-panel" id="successPanel" hidden>
+          <h3>Free signup captured</h3>
+          <p>Thanks. Your email has been recorded for the free start flow.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <p>DayFlow for personal schedule management.</p>
       <a href="#" class="privacy-link" aria-label="Privacy notice">Privacy Notice</a>
     </footer>
   </main>
-
-  <div class="modal-backdrop" id="paywallBackdrop" hidden>
-    <section class="paywall-modal" id="paywallModal" role="dialog" aria-modal="true" aria-labelledby="paywallTitle">
-      <button type="button" class="paywall-close" id="paywallCloseBtn" aria-label="Close paywall">Close</button>
-      <h2 id="paywallTitle">Reserve Early Pricing Access</h2>
-      <p class="paywall-plan" id="selectedPlanText">Selected plan</p>
-      <p class="paywall-copy">Leave your email and we will contact you when this plan is available.</p>
-      <form id="paywallForm" novalidate>
-        <label for="paywallEmailInput" class="sr-only">Email address</label>
-        <div class="form-row">
-          <input
-            id="paywallEmailInput"
-            name="paywall-email"
-            type="email"
-            inputmode="email"
-            autocomplete="email"
-            placeholder="name@company.com"
-            required
-          >
-          <button type="submit" class="btn btn-primary" id="paywallSubmitBtn">Reserve Spot</button>
-        </div>
-        <p class="form-message error" id="paywallError" aria-live="polite"></p>
-      </form>
-      <div class="success-panel" id="paywallSuccessPanel" hidden>
-        <h3>Pricing intent recorded</h3>
-        <p>Thanks. We will notify you when this plan opens for early access.</p>
-      </div>
-    </section>
-  </div>
 
   <script src="./main.js"></script>
 </body>

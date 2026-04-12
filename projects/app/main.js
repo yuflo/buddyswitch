@@ -1,50 +1,81 @@
 "use strict";
 
-const form = document.getElementById("waitlistForm");
+const signupForm = document.getElementById("signupForm");
 const emailInput = document.getElementById("emailInput");
 const submitBtn = document.getElementById("submitBtn");
 const formError = document.getElementById("formError");
 const successPanel = document.getElementById("successPanel");
-const heroCta = document.getElementById("heroCta");
-const pricingSection = document.getElementById("pricing");
-const pricingCtas = Array.from(document.querySelectorAll(".pricing-cta"));
-const paywallBackdrop = document.getElementById("paywallBackdrop");
-const paywallCloseBtn = document.getElementById("paywallCloseBtn");
-const paywallForm = document.getElementById("paywallForm");
-const paywallEmailInput = document.getElementById("paywallEmailInput");
-const paywallSubmitBtn = document.getElementById("paywallSubmitBtn");
-const paywallError = document.getElementById("paywallError");
-const paywallSuccessPanel = document.getElementById("paywallSuccessPanel");
-const selectedPlanText = document.getElementById("selectedPlanText");
+const primaryCtas = Array.from(document.querySelectorAll(".primary-cta"));
+const plansSection = document.getElementById("plans");
+const planToggles = Array.from(document.querySelectorAll(".plan-toggle"));
+const planDetailButtons = Array.from(document.querySelectorAll(".plan-detail-btn"));
+const planCards = Array.from(document.querySelectorAll("[data-plan-card]"));
+const planPanelKicker = document.getElementById("planPanelKicker");
+const planPanelTitle = document.getElementById("planPanelTitle");
+const planPanelCopy = document.getElementById("planPanelCopy");
+const planPanelList = document.getElementById("planPanelList");
 
-const WAITLIST_ENDPOINT = "";
-const PAYWALL_INTENT_ENDPOINT = "";
-const ANALYTICS_KEY = "__ultraliteWaitlistEvents";
-const WAITLIST_STORAGE_KEY = "__ultraliteWaitlistLeads";
-const PAYWALL_STORAGE_KEY = "__ultralitePaywallIntents";
-let waitlistSubmitting = false;
-let paywallSubmitting = false;
-let pricingViewed = false;
-let selectedPlan = null;
-let lastPaywallTrigger = null;
+const SIGNUP_ENDPOINT = "";
+const ANALYTICS_KEY = "__dayflowLandingEvents";
+const LEAD_STORAGE_KEY = "__dayflowLandingLeads";
 
-function setWaitlistError(message) {
-  formError.textContent = "";
-  if (message) {
-    formError.textContent = message;
+const PLAN_CONTENT = {
+  free: {
+    kicker: "Free plan",
+    title: "Keep your everyday plan frictionless.",
+    copy: "Start with the essentials and get a clean view of tasks, reminders, and calendar blocks without paying upfront.",
+    points: [
+      "One home for tasks, reminders, and time blocks",
+      "Easy entry for students, freelancers, and creators",
+      "Clear upgrade path when your schedule gets more demanding",
+    ],
+  },
+  pro: {
+    kicker: "Pro plan",
+    title: "Upgrade when you want stronger planning support.",
+    copy: "Pro is for people who need richer planning views, smarter nudges, and a more complete way to manage a busy week.",
+    points: [
+      "More complete visibility into your day and week",
+      "Smarter routine support when plans shift",
+      "Clear value at $12/month or $96/year for heavier schedules",
+    ],
+  },
+};
+
+let signupSubmitting = false;
+let plansViewed = false;
+let activePlanId = "free";
+
+function readStorage(key) {
+  try {
+    return JSON.parse(window.localStorage.getItem(key) || "[]");
+  } catch {
+    return [];
   }
 }
 
-function setPaywallError(message) {
-  paywallError.textContent = "";
-  if (message) {
-    paywallError.textContent = message;
+function writeStorage(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    return;
   }
+}
+
+function setFormError(message) {
+  formError.textContent = message || "";
+}
+
+function setSubmittingState(isSubmitting) {
+  signupSubmitting = isSubmitting;
+  submitBtn.disabled = isSubmitting;
+  submitBtn.textContent = isSubmitting ? "Creating..." : "Create Free Account";
 }
 
 function getEmailValidationMessage(value) {
   const email = value.trim().toLowerCase();
   const basicEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
   if (!email) {
     return "Email is required.";
   }
@@ -54,46 +85,30 @@ function getEmailValidationMessage(value) {
   return "";
 }
 
-function setWaitlistSubmittingState(isSubmitting) {
-  waitlistSubmitting = isSubmitting;
-  submitBtn.disabled = isSubmitting;
-  submitBtn.textContent = isSubmitting ? "Submitting..." : "Join Waitlist";
-}
-
-function setPaywallSubmittingState(isSubmitting) {
-  paywallSubmitting = isSubmitting;
-  paywallSubmitBtn.disabled = isSubmitting;
-  paywallSubmitBtn.textContent = isSubmitting ? "Submitting..." : "Reserve Spot";
-}
-
 function trackEvent(eventName, payload = {}) {
   const event = {
     event: eventName,
     payload,
     at: new Date().toISOString(),
   };
-  window[ANALYTICS_KEY] = window[ANALYTICS_KEY] || [];
-  window[ANALYTICS_KEY].push(event);
+  const existing = readStorage(ANALYTICS_KEY);
+  existing.push(event);
+  writeStorage(ANALYTICS_KEY, existing);
+
   if (typeof window.console !== "undefined" && typeof window.console.info === "function") {
     window.console.info("[analytics]", event);
   }
 }
 
 function persistLeadLocally(email) {
-  const existing = JSON.parse(window.localStorage.getItem(WAITLIST_STORAGE_KEY) || "[]");
+  const existing = readStorage(LEAD_STORAGE_KEY);
   existing.push({ email, at: new Date().toISOString() });
-  window.localStorage.setItem(WAITLIST_STORAGE_KEY, JSON.stringify(existing));
-}
-
-function persistPaywallIntentLocally(email, planId) {
-  const existing = JSON.parse(window.localStorage.getItem(PAYWALL_STORAGE_KEY) || "[]");
-  existing.push({ email, planId, at: new Date().toISOString() });
-  window.localStorage.setItem(PAYWALL_STORAGE_KEY, JSON.stringify(existing));
+  writeStorage(LEAD_STORAGE_KEY, existing);
 }
 
 async function submitLead(email) {
-  if (WAITLIST_ENDPOINT) {
-    const response = await fetch(WAITLIST_ENDPOINT, {
+  if (SIGNUP_ENDPOINT) {
+    const response = await fetch(SIGNUP_ENDPOINT, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email }),
@@ -106,153 +121,73 @@ async function submitLead(email) {
   persistLeadLocally(email);
 }
 
-async function submitPaywallIntent(email, plan) {
-  if (PAYWALL_INTENT_ENDPOINT) {
-    const response = await fetch(PAYWALL_INTENT_ENDPOINT, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email, plan }),
-    });
-    if (!response.ok) {
-      throw new Error("endpoint_rejected");
-    }
-    return;
-  }
-  persistPaywallIntentLocally(email, plan.id);
-}
-
-function handleSuccess(email) {
-  form.hidden = true;
+function handleSignupSuccess(email) {
+  signupForm.hidden = true;
   successPanel.hidden = false;
-  trackEvent("waitlist_submit_success", { emailDomain: email.split("@")[1] || "" });
+  trackEvent("signup_submit_success", {
+    emailDomain: email.split("@")[1] || "",
+  });
 }
 
-function prefillPaywallEmail() {
-  const candidate = emailInput.value.trim().toLowerCase();
-  if (!getEmailValidationMessage(candidate)) {
-    paywallEmailInput.value = candidate;
+function renderPlanPanel(planId) {
+  const plan = PLAN_CONTENT[planId];
+  if (!plan) {
     return;
   }
 
-  const stored = JSON.parse(window.localStorage.getItem(WAITLIST_STORAGE_KEY) || "[]");
-  if (stored.length > 0 && stored[stored.length - 1].email) {
-    paywallEmailInput.value = String(stored[stored.length - 1].email);
-  }
-}
+  activePlanId = planId;
+  planPanelKicker.textContent = plan.kicker;
+  planPanelTitle.textContent = plan.title;
+  planPanelCopy.textContent = plan.copy;
+  planPanelList.innerHTML = "";
 
-function openPaywall(plan, triggerElement) {
-  selectedPlan = plan;
-  lastPaywallTrigger = triggerElement;
-  selectedPlanText.textContent = `${plan.name} · ${plan.price}`;
-  paywallForm.hidden = false;
-  paywallSuccessPanel.hidden = true;
-  paywallForm.reset();
-  prefillPaywallEmail();
-  setPaywallError("");
-  setPaywallSubmittingState(false);
-  paywallBackdrop.hidden = false;
-  document.body.classList.add("has-modal");
-  paywallEmailInput.focus();
-  trackEvent("paywall_open", { plan: plan.id });
-}
-
-function closePaywall() {
-  if (paywallBackdrop.hidden) {
-    return;
+  for (const point of plan.points) {
+    const item = document.createElement("li");
+    item.textContent = point;
+    planPanelList.appendChild(item);
   }
-  paywallBackdrop.hidden = true;
-  document.body.classList.remove("has-modal");
-  setPaywallError("");
-  setPaywallSubmittingState(false);
-  paywallForm.hidden = false;
-  paywallSuccessPanel.hidden = true;
-  if (lastPaywallTrigger instanceof HTMLElement) {
-    lastPaywallTrigger.focus();
+
+  for (const toggle of planToggles) {
+    const isActive = toggle.dataset.planTarget === planId;
+    toggle.classList.toggle("is-active", isActive);
+    toggle.setAttribute("aria-selected", isActive ? "true" : "false");
+  }
+
+  for (const card of planCards) {
+    card.classList.toggle("is-active", card.dataset.planCard === planId);
   }
 }
 
-async function handleSubmit(event) {
-  event.preventDefault();
-  if (waitlistSubmitting) {
+function setActivePlan(planId, source) {
+  if (!PLAN_CONTENT[planId]) {
     return;
   }
-
-  const email = emailInput.value.trim().toLowerCase();
-  const validationMessage = getEmailValidationMessage(email);
-  if (validationMessage) {
-    setWaitlistError(validationMessage);
-    emailInput.focus();
-    return;
-  }
-
-  setWaitlistSubmittingState(true);
-  setWaitlistError("");
-  try {
-    await submitLead(email);
-    handleSuccess(email);
-  } catch {
-    setWaitlistError("Submission failed. Please try again.");
-  } finally {
-    setWaitlistSubmittingState(false);
-  }
+  renderPlanPanel(planId);
+  trackEvent("plan_interest_click", { plan: planId, source });
 }
 
-async function handlePaywallSubmit(event) {
-  event.preventDefault();
-  if (paywallSubmitting) {
+function trackPlansViewOnce() {
+  if (plansViewed) {
     return;
   }
-  if (!selectedPlan) {
-    setPaywallError("No plan selected. Please choose a plan again.");
-    return;
-  }
-
-  const email = paywallEmailInput.value.trim().toLowerCase();
-  const validationMessage = getEmailValidationMessage(email);
-  if (validationMessage) {
-    setPaywallError(validationMessage);
-    paywallEmailInput.focus();
-    return;
-  }
-
-  setPaywallSubmittingState(true);
-  setPaywallError("");
-  try {
-    await submitPaywallIntent(email, selectedPlan);
-    paywallForm.hidden = true;
-    paywallSuccessPanel.hidden = false;
-    trackEvent("paywall_submit_intent_success", {
-      plan: selectedPlan.id,
-      emailDomain: email.split("@")[1] || "",
-    });
-  } catch {
-    setPaywallError("Submission failed. Please try again.");
-  } finally {
-    setPaywallSubmittingState(false);
-  }
+  plansViewed = true;
+  trackEvent("plan_section_view", { activePlan: activePlanId });
 }
 
-function trackPricingViewOnce() {
-  if (pricingViewed) {
-    return;
-  }
-  pricingViewed = true;
-  trackEvent("pricing_view", { plans: pricingCtas.length });
-}
-
-function bindPricingViewTracking() {
-  if (!pricingSection) {
+function bindPlanViewTracking() {
+  if (!plansSection) {
     return;
   }
   if (typeof window.IntersectionObserver !== "function") {
-    trackPricingViewOnce();
+    trackPlansViewOnce();
     return;
   }
+
   const observer = new window.IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
         if (entry.isIntersecting) {
-          trackPricingViewOnce();
+          trackPlansViewOnce();
           observer.disconnect();
           break;
         }
@@ -260,48 +195,76 @@ function bindPricingViewTracking() {
     },
     { threshold: 0.35 }
   );
-  observer.observe(pricingSection);
+  observer.observe(plansSection);
 }
 
-form.addEventListener("submit", handleSubmit);
+async function handleSubmit(event) {
+  event.preventDefault();
+  if (signupSubmitting) {
+    return;
+  }
+
+  const email = emailInput.value.trim().toLowerCase();
+  const validationMessage = getEmailValidationMessage(email);
+  if (validationMessage) {
+    setFormError(validationMessage);
+    emailInput.focus();
+    return;
+  }
+
+  setFormError("");
+  setSubmittingState(true);
+
+  try {
+    await submitLead(email);
+    handleSignupSuccess(email);
+  } catch {
+    setFormError("Signup failed. Please try again.");
+  } finally {
+    setSubmittingState(false);
+  }
+}
+
+function prefillRecentEmail() {
+  const leads = readStorage(LEAD_STORAGE_KEY);
+  if (leads.length === 0) {
+    return;
+  }
+
+  const latestLead = leads[leads.length - 1];
+  if (latestLead && latestLead.email) {
+    emailInput.value = String(latestLead.email);
+  }
+}
+
+signupForm.addEventListener("submit", handleSubmit);
 emailInput.addEventListener("input", () => {
   if (formError.textContent) {
-    const validationMessage = getEmailValidationMessage(emailInput.value);
-    setWaitlistError(validationMessage);
+    setFormError(getEmailValidationMessage(emailInput.value));
   }
 });
-heroCta.addEventListener("click", () => trackEvent("hero_cta_click"));
 
-for (const cta of pricingCtas) {
+for (const cta of primaryCtas) {
   cta.addEventListener("click", () => {
-    const plan = {
-      id: cta.dataset.plan || "unknown",
-      name: cta.dataset.planName || "Unknown",
-      price: cta.dataset.planPrice || "N/A",
-    };
-    trackEvent("pricing_cta_click", { plan: plan.id });
-    openPaywall(plan, cta);
+    trackEvent("primary_cta_click", {
+      location: cta.dataset.ctaLocation || "unknown",
+    });
   });
 }
 
-paywallForm.addEventListener("submit", handlePaywallSubmit);
-paywallEmailInput.addEventListener("input", () => {
-  if (paywallError.textContent) {
-    const validationMessage = getEmailValidationMessage(paywallEmailInput.value);
-    setPaywallError(validationMessage);
-  }
-});
-paywallCloseBtn.addEventListener("click", closePaywall);
-paywallBackdrop.addEventListener("click", (event) => {
-  if (event.target === paywallBackdrop) {
-    closePaywall();
-  }
-});
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !paywallBackdrop.hidden) {
-    closePaywall();
-  }
-});
+for (const toggle of planToggles) {
+  toggle.addEventListener("click", () => {
+    setActivePlan(toggle.dataset.planTarget || "free", "tab");
+  });
+}
 
-bindPricingViewTracking();
-trackEvent("page_view", { page: "ultra_lite_landing_with_pricing" });
+for (const button of planDetailButtons) {
+  button.addEventListener("click", () => {
+    setActivePlan(button.dataset.planFocus || "free", "detail_button");
+  });
+}
+
+renderPlanPanel("free");
+bindPlanViewTracking();
+prefillRecentEmail();
+trackEvent("page_view", { page: "dayflow_consumer_landing" });

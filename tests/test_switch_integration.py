@@ -66,6 +66,8 @@ class SwitchFlowIntegrationTests(unittest.TestCase):
         self.assertTrue(persisted["ok"])
         self.assertEqual(persisted["skill_id"], "implement-task")
         self.assertEqual(persisted["artifact_ids"], [persisted["artifact_id"]])
+        self.assertIn("recommended_switch", persisted)
+        self.assertEqual(persisted["related_run_ids"], [])
 
         self._remember(persisted["paths"]["artifacts"][0])
         self._remember(persisted["paths"]["task"])

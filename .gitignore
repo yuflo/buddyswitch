@@ -12,6 +12,9 @@ artifacts/**
 buddyswitch/objects/artifacts/**
 !buddyswitch/objects/artifacts/.gitkeep
 
+buddyswitch/objects/tasks/**
+!buddyswitch/objects/tasks/.gitkeep
+
 buddyswitch/objects/tracks/**
 !buddyswitch/objects/tracks/.gitkeep
 

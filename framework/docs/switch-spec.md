@@ -130,16 +130,26 @@ Successful persist receipts and run audits also include:
   - `continue_current_task`
   - `continue_current_task_in_track` (when track exists)
   - `handoff_to_next_buddy` (when track has `next_buddy`)
+- `related_run_ids` (up to 2 run ids linked to the same task, excluding the current run)
+- `recommended_switch` (host-ready command chosen with precedence:
+  `handoff_to_next_buddy` > `continue_current_task_in_track` > `continue_current_task`)
 
 Host terminal rendering contract:
 
-- Render a concise receipt block first, in this order:
+- Render exactly three sections in order: `Receipt`, `Commands`, `Summary`.
+- `Receipt` order:
   - `Persisted`
   - `Task` (`task_title` + `task_id`)
-  - `Track` (`track_title` + `track_id`, or `none`)
-  - `Artifact`
+  - `Track` (`track_title` + `track_id`) only when a track exists
+  - `Artifact` (`artifact_id` or `none`)
   - `Run`
-- Render available `reference_switches` immediately after the receipt block for copy-first operations.
+  - `Related Runs` only when `related_run_ids` is non-empty
+- `Commands` order:
+  - one `Template` command from `reference_switches` (`continue_current_task_in_track` preferred over `continue_current_task`)
+  - one `Recommended` command from `recommended_switch`
+- `Summary` constraints:
+  - execution summary in 1-2 lines
+  - open questions up to 4 items
 - Keep full object paths as optional debug output, not the primary summary surface.
 
 `resolve` writes nothing. Its only job is to return enough context for the host Codex session to decide what to do next.

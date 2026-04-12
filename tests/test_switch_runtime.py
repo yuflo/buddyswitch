@@ -294,6 +294,8 @@ class WorkspaceDataTests(unittest.TestCase):
                     "reference_switches": {
                         "continue_current_task": "switch dev(task-dev-audit-123abc): <demand>"
                     },
+                    "related_run_ids": ["run-prior-a", "run-prior-b"],
+                    "recommended_switch": "switch dev(task-dev-audit-123abc): <demand>",
                     "execution_summary": "ok",
                 },
                 ensure_ascii=True,
@@ -313,6 +315,8 @@ class WorkspaceDataTests(unittest.TestCase):
             row["reference_switches"]["continue_current_task"],
             "switch dev(task-dev-audit-123abc): <demand>",
         )
+        self.assertEqual(row["related_run_ids"], ["run-prior-a", "run-prior-b"])
+        self.assertEqual(row["recommended_switch"], "switch dev(task-dev-audit-123abc): <demand>")
 
 
 class PersistRuntimeTests(unittest.TestCase):
@@ -376,6 +380,8 @@ class PersistRuntimeTests(unittest.TestCase):
             payload["reference_switches"]["continue_current_task"],
             f"switch dev({payload['task_id']}): <demand>",
         )
+        self.assertEqual(payload["related_run_ids"], [])
+        self.assertEqual(payload["recommended_switch"], payload["reference_switches"]["continue_current_task"])
         self._remember_persisted_paths(payload)
 
         artifact_json = json.loads((ROOT / payload["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
@@ -392,6 +398,8 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertEqual(run_json["task_title"], payload["task_title"])
         self.assertEqual(run_json["track_title"], payload["track_title"])
         self.assertEqual(run_json["reference_switches"], payload["reference_switches"])
+        self.assertEqual(run_json["related_run_ids"], payload["related_run_ids"])
+        self.assertEqual(run_json["recommended_switch"], payload["recommended_switch"])
         self.assertNotIn("artifact_content", run_json)
 
     def test_persist_reuses_task_and_binds_to_track(self) -> None:
@@ -410,6 +418,7 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["track_title"], "Track Binding")
         self.assertIn("continue_current_task_in_track", payload["reference_switches"])
         self.assertNotIn("handoff_to_next_buddy", payload["reference_switches"])
+        self.assertEqual(payload["recommended_switch"], payload["reference_switches"]["continue_current_task_in_track"])
         track_after = get_track("track-dev-binding")
         self.assertIsNotNone(track_after)
         self.assertIn("task-dev-binding", track_after["task_ids"])
@@ -443,8 +452,24 @@ class PersistRuntimeTests(unittest.TestCase):
             payload["reference_switches"]["handoff_to_next_buddy"],
             "switch design -> track-task-manager-create: <demand>",
         )
+        self.assertEqual(payload["recommended_switch"], payload["reference_switches"]["handoff_to_next_buddy"])
         track_json = json.loads((ROOT / payload["paths"]["track"]).read_text(encoding="utf-8"))
         self.assertIn(payload["task_id"], track_json["task_ids"])
+
+    def test_persist_related_runs_surface_previous_task_runs(self) -> None:
+        first_resolved = switch_runtime.resolve_switch(
+            "switch dev: Implement the approved onboarding improvements in projects/app"
+        )
+        first_payload = switch_runtime.persist_switch(first_resolved, skill_id=None, result=self._artifact_result())
+        self._remember_persisted_paths(first_payload)
+
+        second_resolved = switch_runtime.resolve_switch(
+            f"switch dev({first_payload['task_id']}): continue onboarding improvements"
+        )
+        second_payload = switch_runtime.persist_switch(second_resolved, skill_id=None, result=self._artifact_result())
+        self._remember_persisted_paths(second_payload)
+
+        self.assertIn(first_payload["run_id"], second_payload["related_run_ids"])
 
     def test_execute_alias_is_not_registered(self) -> None:
         parser = switch_runtime.build_parser()

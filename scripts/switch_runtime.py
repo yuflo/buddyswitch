@@ -160,6 +160,14 @@ def _build_reference_switches(
     return references
 
 
+def _pick_recommended_switch(reference_switches: dict[str, str]) -> str:
+    for key in ("handoff_to_next_buddy", "continue_current_task_in_track", "continue_current_task"):
+        command = reference_switches.get(key)
+        if command:
+            return command
+    return ""
+
+
 def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
     runtime = skill["runtime"]
     guidance = runtime.get("guidance", {})
@@ -260,6 +268,19 @@ def _scan_task_recent_runs(task_id: str, *, limit: int = 3) -> list[dict[str, An
         )
     rows.sort(key=lambda row: (row.get("timestamp") or "", row.get("run_id") or ""), reverse=True)
     return rows[:limit]
+
+
+def _related_run_ids_for_task(task_id: str, current_run_id: str, *, limit: int = 2) -> list[str]:
+    rows = _scan_task_recent_runs(task_id, limit=max(limit + 1, 3))
+    related_run_ids: list[str] = []
+    for row in rows:
+        run_id = row.get("run_id")
+        if not isinstance(run_id, str) or not run_id or run_id == current_run_id:
+            continue
+        related_run_ids.append(run_id)
+        if len(related_run_ids) >= limit:
+            break
+    return related_run_ids
 
 
 def _build_task_context(task: dict[str, Any] | None) -> dict[str, Any]:
@@ -485,6 +506,8 @@ def _build_run_audit(
     task_title: str,
     track_title: str | None,
     reference_switches: dict[str, str],
+    related_run_ids: list[str],
+    recommended_switch: str,
 ) -> dict[str, Any]:
     audit = {
         "run_id": run_id,
@@ -500,6 +523,8 @@ def _build_run_audit(
         "task_title": task_title,
         "track_title": track_title,
         "reference_switches": reference_switches,
+        "related_run_ids": related_run_ids,
+        "recommended_switch": recommended_switch,
     }
     audit.update(_strip_run_fields(result))
     return audit
@@ -600,12 +625,14 @@ def _persist_track_manager(
 
     run_content_path_value = run_content_path(run_id)
     artifact_ids: list[str] = []
+    related_run_ids = _related_run_ids_for_task(task["id"], run_id, limit=2)
     reference_switches = _build_reference_switches(
         buddy_id=resolved["switch"]["buddy"],
         task_id=task["id"],
         track_id=persisted_track_id,
         next_buddy=next_buddy,
     )
+    recommended_switch = _pick_recommended_switch(reference_switches)
     paths = _receipt_paths(
         run_content_path_value=run_content_path_value,
         task_id=task["id"],
@@ -629,6 +656,8 @@ def _persist_track_manager(
             task_title=task["title"],
             track_title=persisted_track_title,
             reference_switches=reference_switches,
+            related_run_ids=related_run_ids,
+            recommended_switch=recommended_switch,
         ),
     )
     return {
@@ -641,6 +670,8 @@ def _persist_track_manager(
         "task_title": task["title"],
         "track_title": persisted_track_title,
         "reference_switches": reference_switches,
+        "related_run_ids": related_run_ids,
+        "recommended_switch": recommended_switch,
         "artifact_ids": artifact_ids,
         "run_id": run_id,
         "paths": paths,
@@ -677,6 +708,7 @@ def _persist_artifact_skill(
 
     run_content_path_value = run_content_path(run_id)
     artifact_ids = [artifact["id"]]
+    related_run_ids = _related_run_ids_for_task(task["id"], run_id, limit=2)
     track_title: str | None = None
     next_buddy: str | None = None
     if effective_track_id:
@@ -690,6 +722,7 @@ def _persist_artifact_skill(
         track_id=effective_track_id,
         next_buddy=next_buddy,
     )
+    recommended_switch = _pick_recommended_switch(reference_switches)
     paths = _receipt_paths(
         run_content_path_value=run_content_path_value,
         task_id=task["id"],
@@ -716,6 +749,8 @@ def _persist_artifact_skill(
             task_title=task["title"],
             track_title=track_title,
             reference_switches=reference_switches,
+            related_run_ids=related_run_ids,
+            recommended_switch=recommended_switch,
         ),
     )
     return {
@@ -729,6 +764,8 @@ def _persist_artifact_skill(
         "task_title": task["title"],
         "track_title": track_title,
         "reference_switches": reference_switches,
+        "related_run_ids": related_run_ids,
+        "recommended_switch": recommended_switch,
         "run_id": run_id,
         "paths": paths,
         "writes": writes,

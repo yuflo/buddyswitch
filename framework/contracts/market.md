@@ -83,6 +83,11 @@ Every run should return:
 3. deliverables or changed files
 4. suggested next switch (optional)
 
+Terminal final output must follow `Receipt -> Commands -> Summary`:
+- `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`)
+- `Commands` shows one `Template` and one `Recommended`
+- `Summary` keeps 1-2 lines, with up to 4 open questions
+
 ## Track Object Rule
 
 - Follow `framework/docs/track-registry.md`.

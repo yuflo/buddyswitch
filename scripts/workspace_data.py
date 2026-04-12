@@ -144,6 +144,10 @@ def scan_run_audits() -> list[dict[str, Any]]:
                 "reference_switches": payload.get("reference_switches")
                 if isinstance(payload.get("reference_switches"), dict)
                 else {},
+                "related_run_ids": payload.get("related_run_ids")
+                if isinstance(payload.get("related_run_ids"), list)
+                else [],
+                "recommended_switch": payload.get("recommended_switch"),
                 "updated_at": payload.get("timestamp") or iso_time(path),
                 "status": "ok",
             }
