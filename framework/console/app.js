@@ -163,12 +163,31 @@ function renderRunAudits() {
     const label = audit.track_action
       ? `${audit.skill_id || "unknown"} / ${audit.track_action}`
       : audit.skill_id || "unknown";
+    const taskLabel = audit.task_title
+      ? `${audit.task_title} (${audit.task_id || "task-unknown"})`
+      : `${audit.task_id || "task-unknown"}`;
+    const trackLabel = audit.track_id
+      ? `${audit.track_title || "track"} (${audit.track_id})`
+      : null;
     item.append(
       createEl("strong", "", label),
       createEl("span", "", audit.demand || audit.path || "No demand"),
       createEl("span", "", audit.execution_summary || audit.status || "No summary"),
-      createEl("span", "", `${audit.task_id || "task-unknown"} | ${audit.updated_at || "no timestamp"}`),
+      createEl("span", "", `${taskLabel} | ${audit.updated_at || "no timestamp"}`),
     );
+    if (trackLabel) {
+      item.append(createEl("span", "", trackLabel));
+    }
+    const references =
+      audit.reference_switches && typeof audit.reference_switches === "object"
+        ? audit.reference_switches
+        : {};
+    ["continue_current_task", "continue_current_task_in_track", "handoff_to_next_buddy"].forEach((key) => {
+      const command = references[key];
+      if (typeof command === "string" && command) {
+        renderCommand(item, command);
+      }
+    });
     runAuditList.append(item);
   });
 }

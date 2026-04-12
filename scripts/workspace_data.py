@@ -132,13 +132,18 @@ def scan_run_audits() -> list[dict[str, Any]]:
                 "path": rel(path),
                 "buddy": switch_payload.get("buddy"),
                 "task_id": payload.get("resolved_task_id") or switch_payload.get("task_id"),
+                "task_title": payload.get("task_title"),
                 "demand": switch_payload.get("demand"),
                 "skill_id": payload.get("skill_id"),
                 "artifact_ids": payload.get("artifact_ids") or [],
                 "track_id": payload.get("effective_track_id") or switch_payload.get("track_id"),
+                "track_title": payload.get("track_title"),
                 "track_action": payload.get("track_action"),
                 "execution_summary": payload.get("execution_summary"),
                 "suggested_next_switch": payload.get("suggested_next_switch"),
+                "reference_switches": payload.get("reference_switches")
+                if isinstance(payload.get("reference_switches"), dict)
+                else {},
                 "updated_at": payload.get("timestamp") or iso_time(path),
                 "status": "ok",
             }

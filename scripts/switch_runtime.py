@@ -89,8 +89,14 @@ def _next_unique(base: str, existing: set[str]) -> str:
 
 def _derive_task_id(buddy: str, demand: str) -> str:
     existing = {row["id"] for row in list_tasks()}
-    base = f"task-{slugify(f'{buddy}-{demand}')}"
-    return _next_unique(base, existing)
+    tokens = [token for token in slugify(demand).split("-") if token]
+    if not tokens:
+        tokens = ["task"]
+    short_slug = "-".join(token[:10] for token in tokens[:4]).strip("-") or "task"
+    while True:
+        candidate = f"task-{buddy}-{short_slug}-{uuid.uuid4().hex[:6]}"
+        if candidate not in existing:
+            return candidate
 
 
 def _derive_track_id(demand: str) -> str:
@@ -135,6 +141,23 @@ def _derive_artifact_id(task_id: str, kind: str) -> str:
     existing = {artifact["id"] for artifact in list_artifacts()}
     base = f"art-{slugify(f'{task_id}-{kind}')}"
     return _next_unique(base, existing)
+
+
+def _build_reference_switches(
+    *,
+    buddy_id: str,
+    task_id: str,
+    track_id: str | None,
+    next_buddy: str | None,
+) -> dict[str, str]:
+    references: dict[str, str] = {
+        "continue_current_task": f"switch {buddy_id}({task_id}): <demand>",
+    }
+    if track_id:
+        references["continue_current_task_in_track"] = f"switch {buddy_id}({task_id}) -> {track_id}: <demand>"
+        if next_buddy:
+            references["handoff_to_next_buddy"] = f"switch {next_buddy} -> {track_id}: <demand>"
+    return references
 
 
 def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
@@ -459,6 +482,9 @@ def _build_run_audit(
     paths: dict[str, Any],
     writes: list[str],
     result: dict[str, Any],
+    task_title: str,
+    track_title: str | None,
+    reference_switches: dict[str, str],
 ) -> dict[str, Any]:
     audit = {
         "run_id": run_id,
@@ -471,6 +497,9 @@ def _build_run_audit(
         "track_action": track_action,
         "paths": paths,
         "writes": writes,
+        "task_title": task_title,
+        "track_title": track_title,
+        "reference_switches": reference_switches,
     }
     audit.update(_strip_run_fields(result))
     return audit
@@ -509,9 +538,15 @@ def _persist_track_manager(
 
     writes = [_task_object_path(task["id"])]
     persisted_track_id = effective_track_id
+    persisted_track_title: str | None = None
+    next_buddy: str | None = None
 
     if action == "list":
-        pass
+        if persisted_track_id:
+            track = get_track(persisted_track_id)
+            if track:
+                persisted_track_title = track["title"]
+                next_buddy = track.get("next_buddy")
     elif action == "create":
         new_id = op.get("track_id") or _derive_track_id(resolved["switch"]["demand"])
         title = op.get("title") or new_id.replace("-", " ").title()
@@ -528,6 +563,8 @@ def _persist_track_manager(
         )
         register_task_to_track(track["id"], task["id"])
         persisted_track_id = track["id"]
+        persisted_track_title = track["title"]
+        next_buddy = track.get("next_buddy")
         writes.extend([_track_object_path(track["id"]), _task_object_path(task["id"])])
     else:
         target_track_id = op.get("track_id") or effective_track_id
@@ -537,6 +574,8 @@ def _persist_track_manager(
         if track is None:
             raise ValueError(f"Track not found: {target_track_id}")
         persisted_track_id = target_track_id
+        persisted_track_title = track["title"]
+        next_buddy = track.get("next_buddy")
 
         if action in {"update", "advance"}:
             patch: dict[str, Any] = {}
@@ -548,15 +587,25 @@ def _persist_track_manager(
             if "status" in patch and patch["status"] not in STATUS_VALUES:
                 raise ValueError(f"track_operation.status must be one of {', '.join(STATUS_VALUES)}")
             track = update_track(target_track_id, patch)
+            persisted_track_title = track["title"]
+            next_buddy = track.get("next_buddy")
             writes.append(_track_object_path(track["id"]))
         elif action == "archive":
             track = update_track(target_track_id, {"status": "archived"})
+            persisted_track_title = track["title"]
+            next_buddy = track.get("next_buddy")
             writes.append(_track_object_path(track["id"]))
 
     add_run_to_task(task["id"], run_id, summary=str(result.get("execution_summary") or ""))
 
     run_content_path_value = run_content_path(run_id)
     artifact_ids: list[str] = []
+    reference_switches = _build_reference_switches(
+        buddy_id=resolved["switch"]["buddy"],
+        task_id=task["id"],
+        track_id=persisted_track_id,
+        next_buddy=next_buddy,
+    )
     paths = _receipt_paths(
         run_content_path_value=run_content_path_value,
         task_id=task["id"],
@@ -577,6 +626,9 @@ def _persist_track_manager(
             paths=paths,
             writes=writes,
             result=result,
+            task_title=task["title"],
+            track_title=persisted_track_title,
+            reference_switches=reference_switches,
         ),
     )
     return {
@@ -586,6 +638,9 @@ def _persist_track_manager(
         "track_action": action,
         "task_id": task["id"],
         "track_id": persisted_track_id,
+        "task_title": task["title"],
+        "track_title": persisted_track_title,
+        "reference_switches": reference_switches,
         "artifact_ids": artifact_ids,
         "run_id": run_id,
         "paths": paths,
@@ -622,6 +677,19 @@ def _persist_artifact_skill(
 
     run_content_path_value = run_content_path(run_id)
     artifact_ids = [artifact["id"]]
+    track_title: str | None = None
+    next_buddy: str | None = None
+    if effective_track_id:
+        track = get_track(effective_track_id)
+        if track:
+            track_title = track["title"]
+            next_buddy = track.get("next_buddy")
+    reference_switches = _build_reference_switches(
+        buddy_id=buddy,
+        task_id=task["id"],
+        track_id=effective_track_id,
+        next_buddy=next_buddy,
+    )
     paths = _receipt_paths(
         run_content_path_value=run_content_path_value,
         task_id=task["id"],
@@ -645,6 +713,9 @@ def _persist_artifact_skill(
             paths=paths,
             writes=writes,
             result=result,
+            task_title=task["title"],
+            track_title=track_title,
+            reference_switches=reference_switches,
         ),
     )
     return {
@@ -655,6 +726,9 @@ def _persist_artifact_skill(
         "artifact_id": artifact["id"],
         "artifact_ids": artifact_ids,
         "track_id": effective_track_id,
+        "task_title": task["title"],
+        "track_title": track_title,
+        "reference_switches": reference_switches,
         "run_id": run_id,
         "paths": paths,
         "writes": writes,

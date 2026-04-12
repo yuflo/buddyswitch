@@ -122,6 +122,26 @@ It writes:
 - run audit payloads under `buddyswitch/content/runs/**`
 - track objects under `buddyswitch/objects/tracks/*.json` when task binding or PM track-manager mutations are requested
 
+Successful persist receipts and run audits also include:
+
+- `task_title`
+- `track_title` (nullable)
+- `reference_switches` with copy-ready command templates:
+  - `continue_current_task`
+  - `continue_current_task_in_track` (when track exists)
+  - `handoff_to_next_buddy` (when track has `next_buddy`)
+
+Host terminal rendering contract:
+
+- Render a concise receipt block first, in this order:
+  - `Persisted`
+  - `Task` (`task_title` + `task_id`)
+  - `Track` (`track_title` + `track_id`, or `none`)
+  - `Artifact`
+  - `Run`
+- Render available `reference_switches` immediately after the receipt block for copy-first operations.
+- Keep full object paths as optional debug output, not the primary summary surface.
+
 `resolve` writes nothing. Its only job is to return enough context for the host Codex session to decide what to do next.
 
 ## Error Handling

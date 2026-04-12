@@ -68,7 +68,14 @@ Users are not required to provide output paths in demand text; runtime defaults 
 - Single-skill buddies may expose `implicit_skill_id`; multi-skill buddies never auto-select in runtime.
 - The host Codex session chooses `skill_id`, executes the selected skill, and emits structured output.
 - `persist` is a minimal technical gate: it validates selected-skill identity, schema shape, and safe state references, then writes task objects, artifact objects with canonical content, optional track references through tasks, and run audit JSON under `buddyswitch/content/runs/`.
+- Successful `persist` receipts include `task_title`, nullable `track_title`, and `reference_switches` so hosts and the context panel can render copy-ready follow-up commands.
 - Explicit requests to write BuddySwitch outputs into `artifacts/*.md` or `runs/summaries/**` are rejected. Derived markdown outputs are retired.
+
+Default terminal summary contract:
+
+- Start with a concise receipt block, in this order: `Persisted`, `Task`, `Track`, `Artifact`, `Run`.
+- Show copy-ready switch references from `reference_switches` immediately after the receipt block.
+- Keep object paths as debug details; do not lead with long path lists in normal summaries.
 
 ## Framework Docs
 

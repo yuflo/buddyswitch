@@ -9,6 +9,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+import uuid
 from contextlib import redirect_stderr
 from pathlib import Path
 
@@ -198,7 +199,8 @@ class ResolveRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["invocation"]["buddy"], "dev")
         self.assertEqual(payload["switch"]["demand"], "Implement the approved onboarding improvements in projects/app")
         self.assertEqual(payload["task_resolution"]["mode"], "create")
-        self.assertTrue(payload["task_resolution"]["task_id"].startswith("task-dev-"))
+        self.assertRegex(payload["task_resolution"]["task_id"], r"^task-dev-[a-z0-9-]+-[0-9a-f]{6}$")
+        self.assertLess(len(payload["task_resolution"]["task_id"]), 64)
         self.assertIsNone(payload["effective_track_id"])
         self.assertEqual(payload["eligible_skills"], ["implement-task"])
         self.assertEqual(payload["implicit_skill_id"], "implement-task")
@@ -239,6 +241,17 @@ class ResolveRuntimeTests(unittest.TestCase):
 
 
 class WorkspaceDataTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.created_paths: list[Path] = []
+
+    def tearDown(self) -> None:
+        for path in sorted(self.created_paths, reverse=True):
+            if path.exists():
+                path.unlink()
+
+    def _remember(self, repo_path: str) -> None:
+        self.created_paths.append(ROOT / repo_path)
+
     def test_artifact_view_uses_object_path_only(self) -> None:
         artifact = {
             "id": "art-task-centric",
@@ -256,6 +269,50 @@ class WorkspaceDataTests(unittest.TestCase):
         view = workspace_data.build_artifact_view(artifact)
         self.assertFalse(view["missing"])
         self.assertEqual(view["object_path"], "buddyswitch/objects/artifacts/art-task-centric.json")
+
+    def test_scan_run_audits_includes_reference_switches(self) -> None:
+        run_id = f"run-workspace-audit-{uuid.uuid4().hex[:8]}"
+        run_path = ROOT / f"buddyswitch/content/runs/{run_id}.json"
+        run_path.parent.mkdir(parents=True, exist_ok=True)
+        run_path.write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "timestamp": "2026-04-12T20:10:00+08:00",
+                    "switch": {
+                        "buddy": "dev",
+                        "task_id": "task-dev-audit-123abc",
+                        "track_id": "track-audit",
+                        "demand": "implement scope",
+                    },
+                    "resolved_task_id": "task-dev-audit-123abc",
+                    "effective_track_id": "track-audit",
+                    "skill_id": "implement-task",
+                    "artifact_ids": ["art-audit"],
+                    "task_title": "Audit Task Title",
+                    "track_title": "Audit Track Title",
+                    "reference_switches": {
+                        "continue_current_task": "switch dev(task-dev-audit-123abc): <demand>"
+                    },
+                    "execution_summary": "ok",
+                },
+                ensure_ascii=True,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        self._remember(f"buddyswitch/content/runs/{run_id}.json")
+
+        rows = workspace_data.scan_run_audits()
+        row = next((item for item in rows if item.get("run_id") == run_id), None)
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row["task_title"], "Audit Task Title")
+        self.assertEqual(row["track_title"], "Audit Track Title")
+        self.assertEqual(
+            row["reference_switches"]["continue_current_task"],
+            "switch dev(task-dev-audit-123abc): <demand>",
+        )
 
 
 class PersistRuntimeTests(unittest.TestCase):
@@ -312,6 +369,13 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["skill_id"], "implement-task")
         self.assertEqual(payload["task_id"], resolved["task_resolution"]["task_id"])
         self.assertEqual(payload["artifact_ids"], [payload["artifact_id"]])
+        self.assertIn("task_title", payload)
+        self.assertIsNone(payload["track_title"])
+        self.assertIn("reference_switches", payload)
+        self.assertEqual(
+            payload["reference_switches"]["continue_current_task"],
+            f"switch dev({payload['task_id']}): <demand>",
+        )
         self._remember_persisted_paths(payload)
 
         artifact_json = json.loads((ROOT / payload["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
@@ -325,6 +389,9 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertEqual(run_json["resolved_task_id"], payload["task_id"])
         self.assertEqual(run_json["artifact_ids"], [payload["artifact_id"]])
         self.assertEqual(run_json["switch"]["demand"], resolved["switch"]["demand"])
+        self.assertEqual(run_json["task_title"], payload["task_title"])
+        self.assertEqual(run_json["track_title"], payload["track_title"])
+        self.assertEqual(run_json["reference_switches"], payload["reference_switches"])
         self.assertNotIn("artifact_content", run_json)
 
     def test_persist_reuses_task_and_binds_to_track(self) -> None:
@@ -340,6 +407,9 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["task_id"], "task-dev-binding")
         self.assertEqual(payload["track_id"], "track-dev-binding")
+        self.assertEqual(payload["track_title"], "Track Binding")
+        self.assertIn("continue_current_task_in_track", payload["reference_switches"])
+        self.assertNotIn("handoff_to_next_buddy", payload["reference_switches"])
         track_after = get_track("track-dev-binding")
         self.assertIsNotNone(track_after)
         self.assertIn("task-dev-binding", track_after["task_ids"])
@@ -367,6 +437,12 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["skill_id"], "track-manager")
         self.assertEqual(payload["track_action"], "create")
         self.assertEqual(payload["track_id"], "track-task-manager-create")
+        self.assertEqual(payload["track_title"], "Track Task Manager Create")
+        self.assertIn("handoff_to_next_buddy", payload["reference_switches"])
+        self.assertEqual(
+            payload["reference_switches"]["handoff_to_next_buddy"],
+            "switch design -> track-task-manager-create: <demand>",
+        )
         track_json = json.loads((ROOT / payload["paths"]["track"]).read_text(encoding="utf-8"))
         self.assertIn(payload["task_id"], track_json["task_ids"])
 

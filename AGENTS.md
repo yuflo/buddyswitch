@@ -47,11 +47,15 @@ When user sends `switch <buddy>...: <demand>`:
 6. Resolve through `scripts/switch_runtime.py resolve` to get `eligible_skills`, skill cards, context, defaults, and output schema paths.
 7. Let the host Codex session choose one `skill_id` from `eligible_skills`, then use `buddyswitch/skills/<buddy>/<skill>/SKILL.md`.
 8. Persist through `scripts/switch_runtime.py persist` when you need BuddySwitch state and canonical run audit persistence.
-9. Keep outputs explicit:
-   - execution summary
-   - working notes
-   - deliverables or changed files
-   - suggested next switch (optional)
+9. Render terminal final output with the default concise receipt template first:
+   - `Persisted: ok`
+   - `Task: <task_title> [<task_id>]`
+   - `Track: <track_title> [<track_id>]` (or `none`)
+   - `Artifact: <artifact_id|none>`
+   - `Run: <run_id>`
+   - `Continue task:` followed by `reference_switches.continue_current_task`
+   - Optionally include `Continue task in track:` and `Handoff in track:` when those reference switches exist.
+10. After the concise receipt block, optional details may include execution summary, working notes, deliverables, and suggested next switch.
 
 Default runtime behavior:
 
@@ -59,6 +63,7 @@ Default runtime behavior:
 - Artifact object path: `buddyswitch/objects/artifacts/<artifact-id>.json`
 - Run audit path: `buddyswitch/content/runs/<run-id>.json`
 - Users do not need to provide output file paths.
+- Default terminal summaries should show IDs and copy-ready switch references first; full object paths are debug details.
 - Requests to write BuddySwitch-managed outputs into `artifacts/*.md` or `runs/summaries/**` must be rejected.
 
 ## Switch Rules

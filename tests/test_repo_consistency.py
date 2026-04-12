@@ -111,6 +111,19 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("track_mode", text, msg=f"track_mode should not appear in {path.relative_to(ROOT)}")
         self.assertTrue(checked_files)
 
+    def test_active_docs_define_concise_receipt_and_reference_switch_contract(self) -> None:
+        targets = (
+            ROOT / "AGENTS.md",
+            ROOT / "README.md",
+            ROOT / "framework" / "docs" / "switch-spec.md",
+        )
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in targets).lower()
+
+        self.assertIn("concise receipt", combined)
+        self.assertIn("reference_switches", combined)
+        self.assertIn("continue_current_task", combined)
+        self.assertIn("object paths as", combined)
+
 
 if __name__ == "__main__":
     unittest.main()
