@@ -15,6 +15,9 @@ buddyswitch/objects/artifacts/**
 buddyswitch/objects/tracks/**
 !buddyswitch/objects/tracks/.gitkeep
 
+buddyswitch/content/runs/**
+!buddyswitch/content/runs/.gitkeep
+
 # Project runtime noise (keep only skeleton marker)
 projects/app/.runtime/**
 !projects/app/.runtime/.gitkeep

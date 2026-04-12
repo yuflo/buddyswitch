@@ -34,6 +34,21 @@ def _validate_buddy_ref(manifest: dict, buddy_id: str | None, field: str) -> str
     return buddy_id
 
 
+def _load_content_arg(args: argparse.Namespace) -> dict | None:
+    content_json = getattr(args, "content_json", None)
+    content_file = getattr(args, "content_file", None)
+    if content_json and content_file:
+        raise ValueError("use only one of --content-json or --content-file")
+    if not content_json and not content_file:
+        return None
+
+    raw = Path(content_file).read_text(encoding="utf-8") if content_file else content_json
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("artifact content must be a JSON object")
+    return payload
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
     require_permission(manifest, args.actor, "artifact.read")
@@ -54,14 +69,15 @@ def cmd_show(args: argparse.Namespace) -> int:
 def cmd_create(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
     require_permission(manifest, args.actor, "artifact.create")
+    content = _load_content_arg(args)
     artifact = create_artifact(
         artifact_id=args.artifact_id,
         title=args.title,
-        kind=args.kind,
-        path=args.path,
-        producer_buddy=_validate_buddy_ref(manifest, args.producer_buddy, "producer_buddy") or args.producer_buddy,
-        source_skill=args.source_skill,
-        context_track_id=args.context_track_id,
+        buddy=_validate_buddy_ref(manifest, args.buddy, "buddy") or args.buddy,
+        skill_id=args.skill_id,
+        track_id=args.track_id,
+        summary=args.summary or "",
+        content=content,
         auto_register=not args.no_auto_register,
     )
     print(json.dumps(artifact, ensure_ascii=True, indent=2))
@@ -72,15 +88,18 @@ def cmd_update(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
     require_permission(manifest, args.actor, "artifact.update")
     patch = {}
-    for field in ("title", "kind", "path", "producer_buddy", "source_skill"):
+    for field in ("title", "buddy", "skill_id", "summary"):
         value = getattr(args, field)
         if value is not None:
-            if field == "producer_buddy":
+            if field == "buddy":
                 patch[field] = _validate_buddy_ref(manifest, value, field)
             else:
                 patch[field] = value
-    if args.context_track_id is not None:
-        patch["context_track_id"] = None if args.context_track_id == "null" else args.context_track_id
+    if args.track_id is not None:
+        patch["track_id"] = None if args.track_id == "null" else args.track_id
+    content = _load_content_arg(args)
+    if content is not None:
+        patch["content"] = content
     if not patch:
         raise ValueError("update requires at least one field")
     artifact = update_artifact(args.artifact_id, patch, auto_register=not args.no_auto_register)
@@ -127,11 +146,12 @@ def build_parser() -> argparse.ArgumentParser:
     cmd = subparsers.add_parser("create")
     cmd.add_argument("--artifact-id")
     cmd.add_argument("--title", required=True)
-    cmd.add_argument("--kind", required=True)
-    cmd.add_argument("--path")
-    cmd.add_argument("--producer-buddy", required=True)
-    cmd.add_argument("--source-skill", required=True)
-    cmd.add_argument("--context-track-id")
+    cmd.add_argument("--buddy", required=True)
+    cmd.add_argument("--skill-id", required=True)
+    cmd.add_argument("--track-id")
+    cmd.add_argument("--summary")
+    cmd.add_argument("--content-json", help="Structured artifact content as a JSON object")
+    cmd.add_argument("--content-file", help="Path to a JSON object file for structured artifact content")
     cmd.add_argument("--no-auto-register", action="store_true")
     cmd.add_argument("--actor", default="pm")
     cmd.set_defaults(func=cmd_create)
@@ -139,11 +159,12 @@ def build_parser() -> argparse.ArgumentParser:
     cmd = subparsers.add_parser("update")
     cmd.add_argument("artifact_id")
     cmd.add_argument("--title")
-    cmd.add_argument("--kind")
-    cmd.add_argument("--path")
-    cmd.add_argument("--producer-buddy")
-    cmd.add_argument("--source-skill")
-    cmd.add_argument("--context-track-id")
+    cmd.add_argument("--buddy")
+    cmd.add_argument("--skill-id")
+    cmd.add_argument("--track-id")
+    cmd.add_argument("--summary")
+    cmd.add_argument("--content-json", help="Structured artifact content as a JSON object")
+    cmd.add_argument("--content-file", help="Path to a JSON object file for structured artifact content")
     cmd.add_argument("--no-auto-register", dest="no_auto_register", action="store_true")
     cmd.add_argument("--actor", default="pm")
     cmd.set_defaults(func=cmd_update)

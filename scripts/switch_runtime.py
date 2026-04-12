@@ -24,8 +24,6 @@ from env_manifest import (
 from env_store import (
     ROOT,
     advance_track,
-    artifact_content_path,
-    artifact_markdown_path,
     attach_artifact,
     create_artifact,
     create_track,
@@ -33,10 +31,8 @@ from env_store import (
     get_track,
     list_artifacts,
     list_tracks,
-    normalize_artifact_file_path,
-    normalize_summary_file_path,
     now_iso,
-    save_artifact_content,
+    run_content_path,
     save_run_content,
     slugify,
     update_track,
@@ -47,6 +43,9 @@ from parse_switch import EXAMPLE, SYNTAX, parse_switch
 
 TRACK_ACTIONS = ("create", "read", "list", "update", "advance", "attach", "detach", "archive")
 STATUS_VALUES = ("active", "blocked", "done", "archived")
+LEGACY_OUTPUT_ERROR = (
+    "Derived markdown outputs are retired. Persist BuddySwitch state to artifact objects and run audits only."
+)
 
 
 def runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -62,12 +61,6 @@ def runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) 
     if extra:
         payload["error"].update(extra)
     return payload
-
-
-def _write_file(repo_path: str, content: str) -> None:
-    path = ROOT / repo_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
 
 
 def _extract_output_path(task: str) -> str | None:
@@ -188,11 +181,13 @@ def _extract_summary_text(task: str) -> str | None:
 def _extract_task_hints(task: str, valid_buddies: set[str]) -> dict[str, Any]:
     output_path = _extract_output_path(task)
     summary_path = _extract_summary_path(task)
+    if output_path:
+        raise ValueError(f"{LEGACY_OUTPUT_ERROR} Rejecting requested output path '{output_path}'.")
+    if summary_path:
+        raise ValueError(f"{LEGACY_OUTPUT_ERROR} Rejecting requested summary path '{summary_path}'.")
     return {
         "explicit_track_id": _extract_track_id(task),
         "explicit_artifact_id": _extract_artifact_id(task),
-        "output_path": normalize_artifact_file_path(output_path) if output_path else None,
-        "summary_path": normalize_summary_file_path(summary_path) if summary_path else None,
         "action_hint": _extract_action(task),
         "status_hint": _extract_status(task),
         "current_buddy_hint": _extract_buddy(task, valid_buddies, "current_buddy"),
@@ -279,28 +274,20 @@ def _derive_artifact_defaults(
     task_hints: dict[str, Any],
 ) -> dict[str, Any]:
     existing_ids = {artifact["id"] for artifact in list_artifacts()}
-    kind = skill["runtime"]["default_artifact_kind"]
-    base = f"art-{slugify((track_id or buddy) + '-' + kind)}"
+    artifact_kind = skill["runtime"]["default_artifact_kind"]
+    base = f"art-{slugify((track_id or buddy) + '-' + artifact_kind)}"
     artifact_id = _next_unique(base, existing_ids)
     title = _derive_artifact_title(buddy, skill["id"], task)
-    artifact_path = task_hints["output_path"] or artifact_markdown_path(artifact_id, title)
-    summary_path = task_hints["summary_path"] or f"runs/summaries/{buddy}/{artifact_id}.md"
     return {
         "id": artifact_id,
         "title": title,
-        "kind": kind,
-        "path": normalize_artifact_file_path(artifact_path),
-        "summary_path": normalize_summary_file_path(summary_path),
+        "summary": result_summary_hint(task_hints),
     }
 
 
-def _derive_track_summary_defaults(buddy: str, task: str, task_hints: dict[str, Any]) -> dict[str, Any]:
-    if task_hints["summary_path"]:
-        summary_path = task_hints["summary_path"]
-    else:
-        seed = task_hints["explicit_track_id"] or slugify(task) or "track-operation"
-        summary_path = normalize_summary_file_path(f"runs/summaries/{buddy}/{seed}--track-manager.md")
-    return {"enabled": True, "path": summary_path}
+def result_summary_hint(task_hints: dict[str, Any]) -> str:
+    summary_hint = task_hints.get("summary_hint")
+    return summary_hint.strip() if isinstance(summary_hint, str) else ""
 
 
 def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
@@ -352,69 +339,74 @@ def _build_run_instructions(implicit_skill_id: str | None) -> dict[str, Any]:
         "selection_rule": "Choose exactly one skill_id from eligible_skills. Multi-skill buddies are never auto-selected by the runtime.",
         "execution_rule": "The host Codex session runs the selected skill workflow and produces a structured result that matches required_output_schema_by_skill[skill_id].",
         "persistence_rule": "Call persist with the resolved payload, selected skill_id, and structured result when the run should become BuddySwitch state.",
-        "resolve_effects": [
+        "resolve_notes": [
             "resolve parses the invocation, derives skill candidates and defaults, and does not write BuddySwitch state."
         ],
         "next_actions": [
             first_action,
             "Read the selected buddyswitch/skills/<buddy>/<skill>/SKILL.md in the current Codex CLI session.",
             "Produce a structured result payload matching required_output_schema_by_skill[skill_id].",
-            "Call persist when you want BuddySwitch to write state, artifact content, summaries, and run metadata.",
+            "Call persist when you want BuddySwitch to write state, canonical artifact content, and run audit metadata.",
         ],
-        "persist_effects": [
-            "Artifact skills write artifact state under buddyswitch/objects/ and buddyswitch/content/, plus compatibility markdown under artifacts/ and runs/summaries/.",
-            "track-manager writes only the requested track or attachment state, plus the run summary and run metadata.",
+        "persist_notes": [
+            "Artifact skills write artifact objects under buddyswitch/objects/ and run audits under buddyswitch/content/runs/.",
+            "track-manager writes the requested track or attachment state plus the run audit.",
         ],
     }
 
 
-def _build_track_manager_effects(
+def _track_object_path(track_id: str) -> str:
+    return f"buddyswitch/objects/tracks/{track_id}.json"
+
+
+def _artifact_object_path(artifact_id: str) -> str:
+    return f"buddyswitch/objects/artifacts/{artifact_id}.json"
+
+
+def _build_track_manager_writes(
     *,
     action: str,
     track_payload: dict[str, Any],
-    summary_path: str,
     run_content_path_value: str,
-) -> dict[str, Any]:
-    writes = [summary_path, run_content_path_value]
+) -> list[str]:
+    writes = [run_content_path_value]
     if action in {"create", "update", "advance", "archive", "attach", "detach"}:
         track = track_payload.get("track")
         if isinstance(track, dict) and track.get("id"):
-            writes.insert(0, f"buddyswitch/objects/tracks/{track['id']}.json")
+            writes.insert(0, _track_object_path(track["id"]))
     if action in {"attach", "detach"}:
         artifact = track_payload.get("artifact")
         if isinstance(artifact, dict) and artifact.get("id"):
-            writes.insert(1, f"buddyswitch/objects/artifacts/{artifact['id']}.json")
-
-    if action in {"list", "read"}:
-        summary = "persist validated the payload and wrote only summary/run metadata."
-    else:
-        summary = "persist validated the payload and wrote the requested BuddySwitch state changes."
-
-    return {"summary": summary, "writes": writes}
+            writes.insert(1, _artifact_object_path(artifact["id"]))
+    return writes
 
 
-def _build_artifact_effects(
+def _build_artifact_writes(
     *,
     artifact: dict[str, Any],
-    content_path: str,
-    summary_path: str | None,
     run_content_path_value: str,
-) -> dict[str, Any]:
+) -> list[str]:
     writes = [
-        f"buddyswitch/objects/artifacts/{artifact['id']}.json",
-        content_path,
-        artifact["path"],
+        _artifact_object_path(artifact["id"]),
         run_content_path_value,
     ]
-    if summary_path:
-        writes.insert(3, summary_path)
-    if artifact.get("context_track_id"):
-        writes.insert(1, f"buddyswitch/objects/tracks/{artifact['context_track_id']}.json")
+    if artifact.get("track_id"):
+        writes.insert(1, _track_object_path(artifact["track_id"]))
+    return writes
 
-    return {
-        "summary": "persist validated the payload and wrote BuddySwitch artifact state plus compatibility files.",
-        "writes": writes,
-    }
+
+def _receipt_paths(
+    *,
+    run_content_path_value: str,
+    artifact_id: str | None = None,
+    track_id: str | None = None,
+) -> dict[str, str | None]:
+    paths: dict[str, str | None] = {"run": run_content_path_value}
+    if artifact_id:
+        paths["artifact"] = _artifact_object_path(artifact_id)
+    if track_id:
+        paths["track"] = _track_object_path(track_id)
+    return paths
 
 
 def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
@@ -433,8 +425,6 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
     skill_cards: list[dict[str, Any]] = []
     rejected_skills: list[dict[str, str]] = []
     track_context_by_skill: dict[str, Any] = {}
-    artifact_defaults_by_skill: dict[str, Any] = {}
-    summary_defaults_by_skill: dict[str, Any] = {}
     required_output_schema_by_skill: dict[str, str] = {}
 
     for skill in buddy_skill_docs(manifest, buddy_id):
@@ -466,21 +456,6 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
 
         eligible_skill_ids.append(skill["id"])
         skill_cards.append(_build_skill_card(skill))
-        if skill["id"] == "track-manager":
-            summary_defaults_by_skill[skill["id"]] = _derive_track_summary_defaults(buddy_id, task, task_hints)
-        else:
-            artifact_defaults = _derive_artifact_defaults(
-                buddy_id,
-                skill,
-                task,
-                track_context["track_id"],
-                task_hints,
-            )
-            artifact_defaults_by_skill[skill["id"]] = artifact_defaults
-            summary_defaults_by_skill[skill["id"]] = {
-                "enabled": bool(skill["runtime"]["auto_summary"]),
-                "path": artifact_defaults["summary_path"],
-            }
 
     if not eligible_skill_ids:
         reasons = ", ".join(f"{item['id']}: {item['reason']}" for item in rejected_skills) or "none"
@@ -514,8 +489,6 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
         "rejected_skills": rejected_skills,
         "implicit_skill_id": implicit_skill_id,
         "track_context_by_skill": track_context_by_skill,
-        "artifact_defaults_by_skill": artifact_defaults_by_skill,
-        "summary_defaults_by_skill": summary_defaults_by_skill,
         "required_output_schema_by_skill": required_output_schema_by_skill,
         "run_instructions": _build_run_instructions(implicit_skill_id),
     }
@@ -543,108 +516,40 @@ def _pick_skill_id(resolved: dict[str, Any], requested_skill_id: str | None) -> 
     raise ValueError("skill_id is required for multi-skill buddies. Choose one from eligible_skills first.")
 
 
-def _render_scalar(value: Any) -> str:
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
+def _strip_run_fields(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "execution_summary": result.get("execution_summary"),
+        "working_notes": result.get("working_notes") or [],
+        "deliverables_or_changed_files": result.get("deliverables_or_changed_files") or [],
+        "suggested_next_switch": result.get("suggested_next_switch"),
+    }
 
 
-def _render_value(value: Any, indent: int = 0) -> list[str]:
-    prefix = " " * indent
-    if isinstance(value, dict):
-        lines: list[str] = []
-        for key, child in value.items():
-            if isinstance(child, (dict, list)):
-                lines.append(f"{prefix}- {key}:")
-                lines.extend(_render_value(child, indent + 2))
-            else:
-                lines.append(f"{prefix}- {key}: {_render_scalar(child)}")
-        return lines or [f"{prefix}-"]
-    if isinstance(value, list):
-        lines = []
-        for item in value:
-            if isinstance(item, (dict, list)):
-                lines.append(f"{prefix}-")
-                lines.extend(_render_value(item, indent + 2))
-            else:
-                lines.append(f"{prefix}- {_render_scalar(item)}")
-        return lines or [f"{prefix}-"]
-    return [f"{prefix}{_render_scalar(value)}"]
-
-
-def _render_artifact_markdown(
-    artifact: dict[str, Any],
+def _build_run_audit(
     *,
-    buddy: str,
+    resolved: dict[str, Any],
     skill_id: str,
-    task: str,
-    artifact_content: dict[str, Any],
-    schema: dict[str, Any],
-) -> str:
-    section_order = list(schema.get("properties", {}).get("artifact_content", {}).get("properties", {}).keys())
-    if not section_order:
-        section_order = list(artifact_content.keys())
-
-    lines = [
-        f"# {artifact['title']}",
-        "",
-        f"- buddy: {buddy}",
-        f"- skill: {skill_id}",
-        f"- generated_at: {now_iso()}",
-        f"- task: {task}",
-    ]
-    if artifact.get("context_track_id"):
-        lines.append(f"- context_track_id: {artifact['context_track_id']}")
-
-    for section in section_order:
-        if section not in artifact_content:
-            continue
-        lines.extend(["", f"## {section}", ""])
-        lines.extend(_render_value(artifact_content[section]))
-
-    return "\n".join(lines) + "\n"
-
-
-def _render_summary_markdown(
-    *,
-    buddy: str,
-    skill_id: str,
-    task: str,
+    run_id: str,
+    paths: dict[str, str | None],
+    writes: list[str],
     result: dict[str, Any],
-    artifact_path: str | None = None,
-) -> str:
-    lines = [
-        f"# {buddy.upper()} Run Summary",
-        "",
-        f"- generated_at: {datetime.now().astimezone().isoformat(timespec='seconds')}",
-        f"- task: {task}",
-        f"- skill: {skill_id}",
-    ]
-    if artifact_path:
-        lines.append(f"- artifact: {artifact_path}")
-
-    sections = (
-        ("execution_summary", result.get("execution_summary")),
-        ("working_notes", result.get("working_notes")),
-        ("deliverables_or_changed_files", result.get("deliverables_or_changed_files")),
-    )
-    for label, value in sections:
-        if value in (None, "", []):
-            continue
-        lines.extend(["", f"## {label}", ""])
-        lines.extend(_render_value(value))
-
-    if result.get("track_operation"):
-        lines.extend(["", "## track_operation", ""])
-        lines.extend(_render_value(result["track_operation"]))
-
-    suggested = result.get("suggested_next_switch")
-    if suggested not in (None, ""):
-        lines.extend(["", "## suggested_next_switch", "", suggested])
-
-    return "\n".join(lines) + "\n"
+    artifact_id: str | None = None,
+    track_id: str | None = None,
+    track_action: str | None = None,
+) -> dict[str, Any]:
+    audit = {
+        "run_id": run_id,
+        "timestamp": now_iso(),
+        "switch": resolved["switch"],
+        "skill_id": skill_id,
+        "artifact_id": artifact_id,
+        "track_id": track_id,
+        "track_action": track_action,
+        "paths": paths,
+        "writes": writes,
+    }
+    audit.update(_strip_run_fields(result))
+    return audit
 
 
 def _validate_buddy_value(value: str | None, field: str, valid_buddies: set[str]) -> str | None:
@@ -681,7 +586,6 @@ def _persist_track_manager(
     result: dict[str, Any],
     *,
     manifest: dict[str, Any],
-    summary_path: str,
     run_id: str,
 ) -> dict[str, Any]:
     op = dict(result.get("track_operation") or {})
@@ -699,24 +603,7 @@ def _persist_track_manager(
 
     if action == "list":
         track_payload = {"action": "list", "tracks": list_tracks()}
-        _write_file(summary_path, _render_summary_markdown(buddy="pm", skill_id="track-manager", task=task, result=result))
-        run_content_path_value = save_run_content(run_id, {"switch": resolved["switch"], "skill_id": "track-manager", "result": result, "track_result": track_payload})
-        return {
-            "ok": True,
-            "switch": resolved["switch"],
-            "skill": {"id": "track-manager"},
-            "track": track_payload,
-            "summary": {"path": summary_path},
-            "effects": _build_track_manager_effects(
-                action=action,
-                track_payload=track_payload,
-                summary_path=summary_path,
-                run_content_path_value=run_content_path_value,
-            ),
-            "run": {"id": run_id, "content_path": run_content_path_value},
-        }
-
-    if action == "create":
+    elif action == "create":
         explicit_track = op.get("track_id")
         if explicit_track:
             new_id = _next_unique(explicit_track, {track["id"] for track in list_tracks()})
@@ -777,30 +664,45 @@ def _persist_track_manager(
         else:
             raise ValueError(f"Unsupported track action: {action}")
 
-    _write_file(summary_path, _render_summary_markdown(buddy="pm", skill_id="track-manager", task=task, result=result))
-    run_content_path_value = save_run_content(
+    track = track_payload.get("track")
+    persisted_track_id = track.get("id") if isinstance(track, dict) else None
+    artifact = track_payload.get("artifact")
+    persisted_artifact_id = artifact.get("id") if isinstance(artifact, dict) else None
+    run_content_path_value = run_content_path(run_id)
+    writes = _build_track_manager_writes(
+        action=action,
+        track_payload=track_payload,
+        run_content_path_value=run_content_path_value,
+    )
+    paths = _receipt_paths(
+        run_content_path_value=run_content_path_value,
+        artifact_id=persisted_artifact_id,
+        track_id=persisted_track_id,
+    )
+    save_run_content(
         run_id,
-        {
-            "switch": resolved["switch"],
-            "skill_id": "track-manager",
-            "result": result,
-            "track_result": track_payload,
-            "summary_path": summary_path,
-        },
+        _build_run_audit(
+            resolved=resolved,
+            skill_id="track-manager",
+            run_id=run_id,
+            paths=paths,
+            writes=writes,
+            result=result,
+            artifact_id=persisted_artifact_id,
+            track_id=persisted_track_id,
+            track_action=action,
+        ),
     )
     return {
         "ok": True,
         "switch": resolved["switch"],
-        "skill": {"id": "track-manager"},
-        "track": track_payload,
-        "summary": {"path": summary_path},
-        "effects": _build_track_manager_effects(
-            action=action,
-            track_payload=track_payload,
-            summary_path=summary_path,
-            run_content_path_value=run_content_path_value,
-        ),
-        "run": {"id": run_id, "content_path": run_content_path_value},
+        "skill_id": "track-manager",
+        "track_action": action,
+        "track_id": persisted_track_id,
+        "artifact_id": persisted_artifact_id,
+        "run_id": run_id,
+        "paths": paths,
+        "writes": writes,
     }
 
 
@@ -808,95 +710,69 @@ def _persist_artifact_skill(
     resolved: dict[str, Any],
     skill: dict[str, Any],
     result: dict[str, Any],
-    schema: dict[str, Any],
     *,
     run_id: str,
 ) -> dict[str, Any]:
     buddy = resolved["switch"]["buddy"]
     task = resolved["switch"]["task"]
     skill_id = skill["id"]
-    artifact_defaults = resolved.get("artifact_defaults_by_skill", {}).get(skill_id)
-    if not isinstance(artifact_defaults, dict):
-        raise ValueError(f"resolve payload is missing artifact defaults for skill '{skill_id}'")
+    track_context = resolved.get("track_context_by_skill", {}).get(skill_id, {})
+    task_hints = resolved.get("task_hints", {})
+    artifact_defaults = _derive_artifact_defaults(
+        buddy,
+        skill,
+        task,
+        track_context.get("track_id"),
+        task_hints,
+    )
 
     artifact_id = artifact_defaults["id"]
-    content_path_value = artifact_content_path(artifact_id)
-    summary_defaults = resolved.get("summary_defaults_by_skill", {}).get(skill_id, {})
-    summary_path = summary_defaults.get("path") if summary_defaults.get("enabled") else None
-    track_context = resolved.get("track_context_by_skill", {}).get(skill_id, {})
+    artifact_summary = str(result.get("execution_summary") or artifact_defaults["summary"] or "")
 
     artifact = create_artifact(
         artifact_id=artifact_id,
         title=artifact_defaults["title"],
-        kind=artifact_defaults["kind"],
-        path=artifact_defaults["path"],
-        producer_buddy=buddy,
-        source_skill=skill_id,
-        context_track_id=track_context.get("track_id"),
-        content_path=content_path_value,
-        summary_path=summary_path,
+        buddy=buddy,
+        skill_id=skill_id,
+        track_id=track_context.get("track_id"),
+        summary=artifact_summary,
+        content=result["artifact_content"],
         auto_register=True,
     )
 
-    artifact_content = {
-        "artifact_id": artifact["id"],
-        "buddy": buddy,
-        "skill_id": skill_id,
-        "task": task,
-        "schema_path": skill["runtime"]["output_schema"],
-        "generated_at": now_iso(),
-        "content": result["artifact_content"],
-    }
-    saved_content_path = save_artifact_content(artifact["id"], artifact_content)
-
-    artifact_markdown = _render_artifact_markdown(
-        artifact,
-        buddy=buddy,
-        skill_id=skill_id,
-        task=task,
-        artifact_content=result["artifact_content"],
-        schema=schema,
+    run_content_path_value = run_content_path(run_id)
+    writes = _build_artifact_writes(
+        artifact=artifact,
+        run_content_path_value=run_content_path_value,
     )
-    _write_file(artifact["path"], artifact_markdown)
-
-    if summary_path:
-        _write_file(
-            summary_path,
-            _render_summary_markdown(
-                buddy=buddy,
-                skill_id=skill_id,
-                task=task,
-                result=result,
-                artifact_path=artifact["path"],
-            ),
-        )
-
-    run_content_path_value = save_run_content(
+    paths = _receipt_paths(
+        run_content_path_value=run_content_path_value,
+        artifact_id=artifact["id"],
+        track_id=artifact.get("track_id"),
+    )
+    save_run_content(
         run_id,
-        {
-            "switch": resolved["switch"],
-            "skill_id": skill_id,
-            "artifact_id": artifact["id"],
-            "artifact_path": artifact["path"],
-            "content_path": saved_content_path,
-            "summary_path": summary_path,
-            "result": result,
-        },
+        _build_run_audit(
+            resolved=resolved,
+            skill_id=skill_id,
+            run_id=run_id,
+            paths=paths,
+            writes=writes,
+            result=result,
+            artifact_id=artifact["id"],
+            track_id=artifact.get("track_id"),
+        ),
     )
 
     return {
         "ok": True,
         "switch": resolved["switch"],
-        "skill": {"id": skill_id, "track_mode": skill["runtime"]["track_mode"]},
-        "artifact": artifact,
-        "summary": {"path": summary_path},
-        "effects": _build_artifact_effects(
-            artifact=artifact,
-            content_path=saved_content_path,
-            summary_path=summary_path,
-            run_content_path_value=run_content_path_value,
-        ),
-        "run": {"id": run_id, "content_path": run_content_path_value},
+        "skill_id": skill_id,
+        "artifact_id": artifact["id"],
+        "track_id": artifact.get("track_id"),
+        "run_id": run_id,
+        "paths": paths,
+        "writes": writes,
     }
 
 
@@ -931,18 +807,14 @@ def persist_switch(
 
     run_id = f"run-{uuid.uuid4().hex[:10]}"
     if selected_skill_id == "track-manager":
-        summary_defaults = resolved.get("summary_defaults_by_skill", {}).get("track-manager")
-        if not isinstance(summary_defaults, dict) or not summary_defaults.get("path"):
-            raise ValueError("resolve payload is missing track-manager summary defaults")
         return _persist_track_manager(
             resolved,
             result,
             manifest=manifest,
-            summary_path=summary_defaults["path"],
             run_id=run_id,
         )
 
-    return _persist_artifact_skill(resolved, skill, result, schema, run_id=run_id)
+    return _persist_artifact_skill(resolved, skill, result, run_id=run_id)
 
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
@@ -983,11 +855,6 @@ def build_parser() -> argparse.ArgumentParser:
     persist_cmd.add_argument("--skill-id", help="Chosen skill id. Optional only when resolve returned implicit_skill_id.")
     persist_cmd.set_defaults(func=_cmd_persist)
 
-    execute_cmd = subparsers.add_parser("execute", help="Deprecated alias for persist.")
-    execute_cmd.add_argument("--resolved", required=True, help="Resolved JSON payload file, or '-' for stdin")
-    execute_cmd.add_argument("--result", required=True, help="Structured result JSON file, or '-' for stdin")
-    execute_cmd.add_argument("--skill-id", help="Chosen skill id. Optional only when resolve returned implicit_skill_id.")
-    execute_cmd.set_defaults(func=_cmd_persist)
     return parser
 
 

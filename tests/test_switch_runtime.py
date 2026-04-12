@@ -8,6 +8,9 @@ import tempfile
 import textwrap
 import unittest
 import uuid
+import io
+import json
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,6 +22,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_manifest  # noqa: E402
 import switch_runtime  # noqa: E402
+import workspace_data  # noqa: E402
 
 
 class ManifestSkillRuntimeTests(unittest.TestCase):
@@ -101,7 +105,8 @@ class ResolveRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["implicit_skill_id"], "implement-task")
         self.assertEqual(payload["profile"]["authority"]["permission_scope"], "manual_debug_apis")
         self.assertEqual(payload["skill_cards"][0]["runtime_requirements"]["policy"], "advisory")
-        self.assertIn("resolve parses the invocation", payload["run_instructions"]["resolve_effects"][0])
+        self.assertIn("resolve parses the invocation", payload["run_instructions"]["resolve_notes"][0])
+        self.assertIn("Artifact skills write artifact objects", payload["run_instructions"]["persist_notes"][0])
         self.assertIn("Use implicit_skill_id 'implement-task'", payload["run_instructions"]["next_actions"][0])
         self.assertEqual(
             payload["required_output_schema_by_skill"]["implement-task"],
@@ -243,8 +248,35 @@ class ResolveRuntimeTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["eligible_skills"], ["write-prd", "track-manager"])
         self.assertIsNone(payload["implicit_skill_id"])
-        self.assertIn("write-prd", payload["artifact_defaults_by_skill"])
-        self.assertNotIn("track-manager", payload["artifact_defaults_by_skill"])
+        self.assertNotIn("artifact_defaults_by_skill", payload)
+        self.assertNotIn("summary_defaults_by_skill", payload)
+
+    def test_resolve_rejects_legacy_markdown_output_requests(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Derived markdown outputs are retired"):
+            switch_runtime.resolve_switch(
+                "switch dev: Implement the approved onboarding improvements and write to artifacts/demo.md"
+            )
+
+
+class WorkspaceDataTests(unittest.TestCase):
+    def test_artifact_view_uses_object_path_only(self) -> None:
+        artifact = {
+            "id": "art-missing-markdown",
+            "title": "Missing Markdown",
+            "track_id": None,
+            "buddy": "dev",
+            "skill_id": "implement-task",
+            "summary": "Canonical summary",
+            "content": {"task_summary": "ok"},
+            "created_at": "2026-04-12T10:00:00+08:00",
+            "updated_at": "2026-04-12T10:00:00+08:00",
+        }
+
+        view = workspace_data.build_artifact_view(artifact)
+
+        self.assertFalse(view["missing"])
+        self.assertEqual(view["object_path"], "buddyswitch/objects/artifacts/art-missing-markdown.json")
+        self.assertNotIn("markdown_exists", view)
 
 
 class PersistRuntimeTests(unittest.TestCase):
@@ -259,24 +291,13 @@ class PersistRuntimeTests(unittest.TestCase):
     def _remember(self, repo_path: str) -> None:
         self.created_paths.append(ROOT / repo_path)
 
-    def _dev_resolved_payload(self, artifact_id: str) -> dict[str, object]:
-        artifact_path = f"artifacts/{artifact_id}--test.md"
-        summary_path = f"runs/summaries/dev/{artifact_id}.md"
+    def _dev_resolved_payload(self) -> dict[str, object]:
         return {
             "ok": True,
             "switch": {"buddy": "dev", "task": "Implement the approved onboarding improvements in projects/app"},
             "eligible_skills": ["implement-task"],
             "implicit_skill_id": "implement-task",
-            "artifact_defaults_by_skill": {
-                "implement-task": {
-                    "id": artifact_id,
-                    "title": "DEV implement-task - test",
-                    "kind": "implementation-report",
-                    "path": artifact_path,
-                    "summary_path": summary_path,
-                }
-            },
-            "summary_defaults_by_skill": {"implement-task": {"enabled": True, "path": summary_path}},
+            "task_hints": {},
             "track_context_by_skill": {
                 "implement-task": {
                     "track_mode": "optional",
@@ -289,7 +310,7 @@ class PersistRuntimeTests(unittest.TestCase):
         }
 
     def test_persist_rejects_invalid_skill_id(self) -> None:
-        resolved = self._dev_resolved_payload(f"art-test-invalid-skill-{uuid.uuid4().hex[:6]}")
+        resolved = self._dev_resolved_payload()
         result = {
             "execution_summary": "Implemented the requested change.",
             "working_notes": ["Kept the scope localized."],
@@ -307,7 +328,7 @@ class PersistRuntimeTests(unittest.TestCase):
             switch_runtime.persist_switch(resolved, skill_id="write-prd", result=result)
 
     def test_persist_rejects_schema_invalid_payload(self) -> None:
-        resolved = self._dev_resolved_payload(f"art-test-invalid-schema-{uuid.uuid4().hex[:6]}")
+        resolved = self._dev_resolved_payload()
         result = {
             "execution_summary": "Implemented the requested change.",
             "working_notes": ["Kept the scope localized."],
@@ -320,9 +341,8 @@ class PersistRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "schema validation"):
             switch_runtime.persist_switch(resolved, skill_id="implement-task", result=result)
 
-    def test_persist_writes_structured_content_and_markdown(self) -> None:
-        artifact_id = f"art-test-persist-{uuid.uuid4().hex[:6]}"
-        resolved = self._dev_resolved_payload(artifact_id)
+    def test_persist_writes_structured_content_and_run_audit_only(self) -> None:
+        resolved = self._dev_resolved_payload()
         result = {
             "execution_summary": "Implemented the requested change and verified the core path.",
             "working_notes": ["Scoped the edits to onboarding CTA behavior."],
@@ -340,44 +360,41 @@ class PersistRuntimeTests(unittest.TestCase):
         payload = switch_runtime.persist_switch(resolved, skill_id="implement-task", result=result)
 
         self.assertTrue(payload["ok"])
-        artifact = payload["artifact"]
-        summary_path = payload["summary"]["path"]
-        run_content_path = payload["run"]["content_path"]
+        self.assertEqual(payload["skill_id"], "implement-task")
+        artifact_id = payload["artifact_id"]
+        artifact_object_path = payload["paths"]["artifact"]
+        run_content_path = payload["paths"]["run"]
 
-        self._remember(artifact["path"])
-        self._remember(artifact["content_path"])
-        self._remember(summary_path)
+        self._remember(artifact_object_path)
         self._remember(run_content_path)
-        self._remember(f"buddyswitch/objects/artifacts/{artifact_id}.json")
 
-        artifact_markdown = (ROOT / artifact["path"]).read_text(encoding="utf-8")
-        artifact_json = (ROOT / artifact["content_path"]).read_text(encoding="utf-8")
-        summary_markdown = (ROOT / summary_path).read_text(encoding="utf-8")
+        artifact_json = (ROOT / artifact_object_path).read_text(encoding="utf-8")
+        run_json = (ROOT / run_content_path).read_text(encoding="utf-8")
 
-        self.assertIn("## task_summary", artifact_markdown)
-        self.assertIn("Implemented onboarding improvements.", artifact_markdown)
-        self.assertIn('"artifact_id":', artifact_json)
-        self.assertIn("## execution_summary", summary_markdown)
-        self.assertIn("switch test: Run smoke checks", summary_markdown)
-        self.assertIn("effects", payload)
-        self.assertIn(f"buddyswitch/objects/artifacts/{artifact_id}.json", payload["effects"]["writes"])
-        self.assertIn(artifact["path"], payload["effects"]["writes"])
-        self.assertIn(run_content_path, payload["effects"]["writes"])
+        self.assertEqual(artifact_id, payload["artifact_id"])
+        self.assertIn('"id":', artifact_json)
+        self.assertIn('"content":', artifact_json)
+        self.assertIn('"summary": "Implemented the requested change and verified the core path."', artifact_json)
+        self.assertIn('"execution_summary": "Implemented the requested change and verified the core path."', run_json)
+        self.assertNotIn('"result":', run_json)
+        self.assertNotIn('"artifact_content":', run_json)
+        self.assertNotIn('"artifact_markdown"', json.dumps(payload))
+        self.assertNotIn('"summary"', json.dumps(payload["paths"]))
+        self.assertIn(artifact_object_path, payload["writes"])
+        self.assertIn(run_content_path, payload["writes"])
+        self.assertFalse(any(path.startswith("artifacts/") for path in payload["writes"]))
+        self.assertFalse(any(path.startswith("runs/summaries/") for path in payload["writes"]))
 
     def test_track_manager_persist_creates_track(self) -> None:
         track_id = f"track-test-{uuid.uuid4().hex[:6]}"
-        summary_path = f"runs/summaries/pm/{track_id}--track-manager.md"
         resolved = {
             "ok": True,
             "switch": {"buddy": "pm", "task": f"create {track_id} track"},
             "eligible_skills": ["track-manager"],
             "implicit_skill_id": "track-manager",
-            "summary_defaults_by_skill": {"track-manager": {"enabled": True, "path": summary_path}},
             "task_hints": {
                 "explicit_track_id": track_id,
                 "explicit_artifact_id": None,
-                "output_path": None,
-                "summary_path": None,
                 "action_hint": "create",
                 "status_hint": None,
                 "current_buddy_hint": None,
@@ -404,15 +421,24 @@ class PersistRuntimeTests(unittest.TestCase):
         payload = switch_runtime.persist_switch(resolved, skill_id="track-manager", result=result)
 
         self.assertTrue(payload["ok"])
-        self._remember(f"buddyswitch/objects/tracks/{track_id}.json")
-        self._remember(payload["summary"]["path"])
-        self._remember(payload["run"]["content_path"])
+        self.assertEqual(payload["skill_id"], "track-manager")
+        self.assertEqual(payload["track_id"], track_id)
+        self._remember(payload["paths"]["track"])
+        self._remember(payload["paths"]["run"])
 
         track_json = (ROOT / f"buddyswitch/objects/tracks/{track_id}.json").read_text(encoding="utf-8")
+        run_json = (ROOT / payload["paths"]["run"]).read_text(encoding="utf-8")
         self.assertIn('"current_buddy": "pm"', track_json)
         self.assertIn('"next_buddy": "design"', track_json)
-        self.assertIn("effects", payload)
-        self.assertIn(f"buddyswitch/objects/tracks/{track_id}.json", payload["effects"]["writes"])
+        self.assertIn('"track_action": "create"', run_json)
+        self.assertNotIn('"result":', run_json)
+        self.assertIn(f"buddyswitch/objects/tracks/{track_id}.json", payload["writes"])
+
+    def test_execute_alias_is_not_registered(self) -> None:
+        parser = switch_runtime.build_parser()
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parser.parse_args(["execute", "--resolved", "resolved.json", "--result", "result.json"])
 
 
 if __name__ == "__main__":

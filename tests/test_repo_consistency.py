@@ -79,7 +79,7 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("structure-only", combined)
         self.assertIn("not a business-quality review", combined)
 
-    def test_cleanup_docs_reference_canonical_content_and_orphan_handling(self) -> None:
+    def test_cleanup_docs_reference_run_content_without_legacy_artifact_content(self) -> None:
         targets = (
             ROOT / "README.md",
             ROOT / "framework" / "docs" / "interface-spec.md",
@@ -87,9 +87,10 @@ class RepoConsistencyTests(unittest.TestCase):
         )
         combined = "\n".join(path.read_text(encoding="utf-8") for path in targets).lower()
 
-        self.assertIn("buddyswitch/content/**", combined)
-        self.assertIn("orphan", combined)
+        self.assertIn("buddyswitch/content/runs", combined)
         self.assertIn("run content", combined)
+        self.assertNotIn("legacy " + "artifact content", combined)
+        self.assertNotIn("buddyswitch/content/" + "artifacts", combined)
 
 
 if __name__ == "__main__":

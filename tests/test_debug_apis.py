@@ -69,22 +69,78 @@ class DebugApiPermissionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not allowed"):
             env_artifacts.require_permission(self.manifest, "market", "artifact.delete")
 
-    def test_artifact_debug_api_rejects_unknown_producer_buddy(self) -> None:
+    def test_artifact_debug_api_rejects_unknown_buddy(self) -> None:
         args = Namespace(
             manifest=env_artifacts.DEFAULT_MANIFEST,
             actor="pm",
             artifact_id="art-debug-ref",
             title="Debug Ref",
-            kind="note",
-            path="artifacts/art-debug-ref--debug-ref.md",
-            producer_buddy="unknown",
-            source_skill="track-manager",
-            context_track_id=None,
+            buddy="unknown",
+            skill_id="track-manager",
+            track_id=None,
+            summary=None,
             no_auto_register=True,
+            content_json=None,
+            content_file=None,
         )
 
-        with self.assertRaisesRegex(ValueError, "producer_buddy must reference a known buddy"):
+        with self.assertRaisesRegex(ValueError, "buddy must reference a known buddy"):
             env_artifacts.cmd_create(args)
+
+    def test_artifact_debug_create_accepts_structured_content(self) -> None:
+        args = Namespace(
+            manifest=env_artifacts.DEFAULT_MANIFEST,
+            actor="market",
+            artifact_id="art-debug-content",
+            title="Debug Content",
+            buddy="market",
+            skill_id="research-scan",
+            track_id=None,
+            summary="created",
+            content_json='{"summary":"created"}',
+            content_file=None,
+            no_auto_register=True,
+        )
+        artifact = {"id": "art-debug-content", "content": {"summary": "created"}}
+        buffer = io.StringIO()
+
+        with patch.object(env_artifacts, "create_artifact", return_value=artifact) as mocked:
+            with redirect_stdout(buffer):
+                result = env_artifacts.cmd_create(args)
+
+        self.assertEqual(result, 0)
+        mocked.assert_called_once()
+        self.assertEqual(mocked.call_args.kwargs["content"], {"summary": "created"})
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["content"], {"summary": "created"})
+
+    def test_artifact_debug_update_accepts_structured_content_only_patch(self) -> None:
+        args = Namespace(
+            manifest=env_artifacts.DEFAULT_MANIFEST,
+            actor="market",
+            artifact_id="art-debug-content",
+            title=None,
+            buddy=None,
+            skill_id=None,
+            track_id=None,
+            summary=None,
+            content_json='{"summary":"updated"}',
+            content_file=None,
+            no_auto_register=True,
+        )
+        artifact = {"id": "art-debug-content", "content": {"summary": "updated"}}
+        buffer = io.StringIO()
+
+        with patch.object(env_artifacts, "update_artifact", return_value=artifact) as mocked:
+            with redirect_stdout(buffer):
+                result = env_artifacts.cmd_update(args)
+
+        self.assertEqual(result, 0)
+        mocked.assert_called_once_with(
+            "art-debug-content",
+            {"content": {"summary": "updated"}},
+            auto_register=False,
+        )
 
 
 class AdminCleanupCommandTests(unittest.TestCase):

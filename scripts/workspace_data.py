@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
-"""Build BuddySwitch Context Panel data from env objects."""
+"""Build BuddySwitch Context Panel data from canonical BuddySwitch objects."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+import json
 
 from env_manifest import DEFAULT_MANIFEST, load_manifest
 from env_store import ROOT, list_artifacts, list_tracks
-
-
-ARTIFACTS_ROOT = ROOT / "artifacts"
-SUMMARIES_ROOT = ROOT / "runs" / "summaries"
 
 
 def iso_time(path: Path) -> str:
@@ -23,24 +20,16 @@ def rel(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
 
 
-def title_from_markdown(path: Path) -> str:
-    try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if line.startswith("# "):
-                return line[2:].strip()
-    except UnicodeDecodeError:
-        return path.stem
-    return path.stem
+def artifact_object_path(artifact_id: str) -> str:
+    return f"buddyswitch/objects/artifacts/{artifact_id}.json"
 
 
 def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
-    resolved = ROOT / artifact["path"]
-    exists = resolved.exists()
     return {
         **artifact,
-        "file_name": Path(artifact["path"]).name,
-        "missing": not exists,
-        "file_updated_at": iso_time(resolved) if exists else None,
+        "object_path": artifact_object_path(artifact["id"]),
+        "file_name": Path(artifact_object_path(artifact["id"])).name,
+        "missing": False,
     }
 
 
@@ -81,45 +70,58 @@ def build_track_views(
     return rows
 
 
-def scan_untracked_artifacts(registered_paths: set[str]) -> list[dict[str, Any]]:
-    if not ARTIFACTS_ROOT.exists():
+def scan_run_audits() -> list[dict[str, Any]]:
+    run_root = ROOT / "buddyswitch" / "content" / "runs"
+    if not run_root.exists():
         return []
 
     rows = []
-    for path in sorted(ARTIFACTS_ROOT.glob("*.md")):
+    for path in sorted(run_root.glob("*.json")):
         if path.name == ".gitkeep":
             continue
-        relative_path = rel(path)
-        if relative_path in registered_paths:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            rows.append(
+                {
+                    "run_id": path.stem,
+                    "path": rel(path),
+                    "status": "invalid",
+                    "updated_at": iso_time(path),
+                }
+            )
             continue
+
+        if not isinstance(payload, dict):
+            rows.append(
+                {
+                    "run_id": path.stem,
+                    "path": rel(path),
+                    "status": "invalid",
+                    "updated_at": iso_time(path),
+                }
+            )
+            continue
+
+        switch = payload.get("switch")
+        switch_payload = switch if isinstance(switch, dict) else {}
         rows.append(
             {
-                "title": title_from_markdown(path),
-                "path": relative_path,
-                "updated_at": iso_time(path),
-            }
-        )
-    rows.sort(key=lambda item: (item["updated_at"], item["path"]), reverse=True)
-    return rows
-
-
-def scan_summaries() -> list[dict[str, Any]]:
-    if not SUMMARIES_ROOT.exists():
-        return []
-
-    rows = []
-    for path in sorted(SUMMARIES_ROOT.glob("**/*.md")):
-        if path.name == ".gitkeep":
-            continue
-        rows.append(
-            {
+                "run_id": payload.get("run_id", path.stem),
                 "path": rel(path),
-                "file_name": path.name,
-                "title": title_from_markdown(path),
-                "updated_at": iso_time(path),
+                "buddy": switch_payload.get("buddy"),
+                "task": switch_payload.get("task"),
+                "skill_id": payload.get("skill_id"),
+                "artifact_id": payload.get("artifact_id"),
+                "track_id": payload.get("track_id"),
+                "track_action": payload.get("track_action"),
+                "execution_summary": payload.get("execution_summary"),
+                "suggested_next_switch": payload.get("suggested_next_switch"),
+                "updated_at": payload.get("timestamp") or iso_time(path),
+                "status": "ok",
             }
         )
-    rows.sort(key=lambda item: item["updated_at"], reverse=True)
+    rows.sort(key=lambda item: (item.get("updated_at", ""), item.get("run_id", "")), reverse=True)
     return rows
 
 
@@ -128,7 +130,6 @@ def build_workspace_data() -> dict[str, Any]:
     artifacts = [build_artifact_view(artifact) for artifact in list_artifacts()]
     artifact_map = {artifact["id"]: artifact for artifact in artifacts}
     tracks = build_track_views(list_tracks(), artifact_map)
-    registered_paths = {artifact["path"] for artifact in artifacts}
 
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -140,6 +141,5 @@ def build_workspace_data() -> dict[str, Any]:
         ],
         "tracks": tracks,
         "artifacts": artifacts,
-        "untracked_artifacts": scan_untracked_artifacts(registered_paths),
-        "summaries": scan_summaries(),
+        "run_audits": scan_run_audits(),
     }

@@ -63,19 +63,15 @@ class SwitchFlowIntegrationTests(unittest.TestCase):
         persisted = switch_runtime.persist_switch(resolved, skill_id=None, result=result)
 
         self.assertTrue(persisted["ok"])
-        self.assertEqual(persisted["skill"]["id"], "implement-task")
-        self.assertIn("artifact", persisted["effects"]["summary"].lower())
+        self.assertEqual(persisted["skill_id"], "implement-task")
 
-        artifact = persisted["artifact"]
-        self._remember(f"buddyswitch/objects/artifacts/{artifact['id']}.json")
-        self._remember(artifact["content_path"])
-        self._remember(artifact["path"])
-        if persisted["summary"]["path"]:
-            self._remember(persisted["summary"]["path"])
-        self._remember(persisted["run"]["content_path"])
+        self._remember(persisted["paths"]["artifact"])
+        self._remember(persisted["paths"]["run"])
 
-        self.assertIn(artifact["path"], persisted["effects"]["writes"])
-        self.assertIn(persisted["run"]["content_path"], persisted["effects"]["writes"])
+        self.assertIn(persisted["paths"]["artifact"], persisted["writes"])
+        self.assertIn(persisted["paths"]["run"], persisted["writes"])
+        self.assertNotIn("artifact_markdown", persisted["paths"])
+        self.assertNotIn("summary", persisted["paths"])
 
 
 if __name__ == "__main__":

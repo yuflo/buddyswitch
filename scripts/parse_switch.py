@@ -12,7 +12,7 @@ from pathlib import Path
 from env_manifest import DEFAULT_MANIFEST, ManifestError, buddies_by_id, load_manifest
 
 SYNTAX = "switch <buddy>: <task>"
-EXAMPLE = "switch pm: Draft an MVP PRD from artifacts/art-live-space--research.md"
+EXAMPLE = "switch pm: Continue track-live-space track and draft the MVP PRD"
 
 
 def error(code: str, message: str, extra: dict | None = None) -> dict:

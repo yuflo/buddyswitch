@@ -17,12 +17,8 @@ DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 CONFIRM_PHRASE = "DELETE_BUDDYSWITCH_DATA"
 CATEGORY_ORDER = (
     "artifact_objects",
-    "artifact_markdown",
-    "artifact_content",
-    "orphan_artifact_content",
     "run_content",
     "run_raw",
-    "run_summaries",
     "track_objects",
     "project_runtime",
 )
@@ -74,7 +70,6 @@ def new_plan(scope: str, *, buddy: str | None = None) -> dict[str, Any]:
         "delete_paths": [],
         "artifact_object_ids": [],
         "run_ids": [],
-        "orphan_content_paths": [],
         "warnings": [],
         "counts_by_category": counts,
         "artifact_records": [],
@@ -94,10 +89,6 @@ def add_path(plan: dict[str, Any], path: Path, category: str) -> None:
         plan["_path_categories"][relative] = category
         plan["delete_paths"].append(relative)
         plan["counts_by_category"][category] += 1
-    elif category == "orphan_artifact_content" and plan["_path_categories"][relative] != "orphan_artifact_content":
-        plan["counts_by_category"]["orphan_artifact_content"] += 1
-    if category == "orphan_artifact_content" and relative not in plan["orphan_content_paths"]:
-        plan["orphan_content_paths"].append(relative)
 
 
 def discover_artifact_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -112,48 +103,21 @@ def discover_artifact_objects(root: Path) -> tuple[list[dict[str, Any]], list[di
             continue
 
         artifact_id = payload.get("id")
-        producer_buddy = payload.get("producer_buddy")
+        producer_buddy = payload.get("buddy")
         if not isinstance(artifact_id, str) or not artifact_id:
             invalid.append({"path": relative, "reason": "artifact object is missing id"})
             continue
         if not isinstance(producer_buddy, str) or not producer_buddy:
-            invalid.append({"path": relative, "reason": f"artifact '{artifact_id}' is missing producer_buddy"})
+            invalid.append({"path": relative, "reason": f"artifact '{artifact_id}' is missing buddy"})
             continue
 
         record = {
             "id": artifact_id,
             "producer_buddy": producer_buddy,
-            "context_track_id": payload.get("context_track_id"),
+            "track_id": payload.get("track_id"),
             "object_path": relative,
-            "markdown_path": payload.get("path"),
-            "content_path": payload.get("content_path"),
         }
         valid.append(record)
-    return valid, invalid
-
-
-def discover_artifact_content(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    valid: list[dict[str, Any]] = []
-    invalid: list[dict[str, Any]] = []
-    for path in iter_files(root, "buddyswitch/content/artifacts"):
-        relative = rel(root, path)
-        try:
-            payload = read_json(path)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            invalid.append({"path": relative, "reason": f"invalid artifact content JSON: {exc}"})
-            continue
-
-        buddy = payload.get("buddy")
-        if not isinstance(buddy, str) or not buddy:
-            invalid.append({"path": relative, "reason": "artifact content is missing buddy"})
-            continue
-        valid.append(
-            {
-                "path": relative,
-                "artifact_id": payload.get("artifact_id"),
-                "buddy": buddy,
-            }
-        )
     return valid, invalid
 
 
@@ -197,18 +161,6 @@ def add_indexed_artifact(plan: dict[str, Any], record: dict[str, Any]) -> None:
     object_path = root / record["object_path"]
     add_path(plan, object_path, "artifact_objects")
 
-    for raw_path, category in (
-        (record.get("markdown_path"), "artifact_markdown"),
-        (record.get("content_path"), "artifact_content"),
-    ):
-        if not isinstance(raw_path, str) or not raw_path:
-            continue
-        resolved = repo_path(root, raw_path)
-        if resolved is None:
-            add_warning(plan, f"Artifact '{record['id']}' has unsafe {category} path '{raw_path}'; skipping file cleanup.")
-            continue
-        add_path(plan, resolved, category)
-
 
 def add_run_content(plan: dict[str, Any], record: dict[str, Any]) -> None:
     root = Path(plan["repo_root"])
@@ -219,15 +171,6 @@ def add_run_content(plan: dict[str, Any], record: dict[str, Any]) -> None:
     if resolved is not None:
         add_path(plan, resolved, "run_content")
         plan["direct_delete_paths"].append(record["path"])
-
-
-def add_orphan_artifact_content(plan: dict[str, Any], relative_path: str) -> None:
-    root = Path(plan["repo_root"])
-    resolved = repo_path(root, relative_path)
-    if resolved is not None:
-        add_path(plan, resolved, "orphan_artifact_content")
-        if relative_path not in plan["direct_delete_paths"]:
-            plan["direct_delete_paths"].append(relative_path)
 
 
 def delete_relative_path(root: Path, relative_path: str) -> None:
@@ -262,13 +205,10 @@ def detach_artifact_from_track(root: Path, track_id: str | None, artifact_id: st
 
 def ensure_required_skeleton(root: Path) -> None:
     for relative_dir in (
-        "artifacts",
         "runs/raw",
-        "runs/summaries",
         "projects/app/.runtime",
         "buddyswitch/objects/tracks",
         "buddyswitch/objects/artifacts",
-        "buddyswitch/content/artifacts",
         "buddyswitch/content/runs",
     ):
         directory = root / relative_dir
@@ -296,33 +236,16 @@ def build_cleanup_plan(
     plan["_path_categories"] = {}
 
     artifact_objects, invalid_artifact_objects = discover_artifact_objects(repo_root)
-    indexed_content_paths = {
-        record["content_path"]
-        for record in artifact_objects
-        if isinstance(record.get("content_path"), str) and record["content_path"]
-    }
-    artifact_content, invalid_artifact_content = discover_artifact_content(repo_root)
     run_content, invalid_run_content = discover_run_content(repo_root)
 
     if scope == "agent":
         add_dir_files(plan, f"runs/raw/{buddy}", "run_raw")
-        add_dir_files(plan, f"runs/summaries/{buddy}", "run_summaries")
         for record in artifact_objects:
             if record["producer_buddy"] == buddy:
                 add_indexed_artifact(plan, record)
         for record in run_content:
             if record["buddy"] == buddy:
                 add_run_content(plan, record)
-        for item in artifact_content:
-            if item["path"] in indexed_content_paths:
-                continue
-            if item["buddy"] == buddy:
-                add_orphan_artifact_content(plan, item["path"])
-        for item in invalid_artifact_content:
-            add_warning(
-                plan,
-                f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
-            )
         for item in invalid_run_content:
             add_warning(
                 plan,
@@ -336,22 +259,15 @@ def build_cleanup_plan(
 
     elif scope == "all-agents":
         add_dir_files(plan, "runs/raw", "run_raw")
-        add_dir_files(plan, "runs/summaries", "run_summaries")
         add_dir_files(plan, "buddyswitch/objects/tracks", "track_objects")
         for record in artifact_objects:
             add_indexed_artifact(plan, record)
         for record in run_content:
             add_run_content(plan, record)
-        for item in artifact_content:
-            if item["path"] not in indexed_content_paths:
-                add_orphan_artifact_content(plan, item["path"])
         for item in invalid_artifact_objects:
             add_warning(plan, f"Deleting malformed artifact object during all-agents cleanup: {item['path']} ({item['reason']}).")
             add_path(plan, repo_root / item["path"], "artifact_objects")
             plan["direct_delete_paths"].append(item["path"])
-        for item in invalid_artifact_content:
-            add_warning(plan, f"Deleting malformed artifact content during all-agents cleanup: {item['path']} ({item['reason']}).")
-            add_orphan_artifact_content(plan, item["path"])
         for item in invalid_run_content:
             add_warning(plan, f"Deleting malformed run content during all-agents cleanup: {item['path']} ({item['reason']}).")
             add_run_content(plan, {"path": item["path"], "run_id": item["run_id"], "buddy": None})
@@ -360,13 +276,10 @@ def build_cleanup_plan(
         add_dir_files(plan, "projects/app/.runtime", "project_runtime")
 
     elif scope == "all-storage":
-        add_dir_files(plan, "artifacts", "artifact_markdown")
         add_dir_files(plan, "runs/raw", "run_raw")
-        add_dir_files(plan, "runs/summaries", "run_summaries")
         add_dir_files(plan, "projects/app/.runtime", "project_runtime")
         add_dir_files(plan, "buddyswitch/objects/tracks", "track_objects")
         add_dir_files(plan, "buddyswitch/objects/artifacts", "artifact_objects")
-        add_dir_files(plan, "buddyswitch/content/artifacts", "artifact_content")
         add_dir_files(plan, "buddyswitch/content/runs", "run_content")
         for record in artifact_objects:
             if record["id"] not in plan["artifact_object_ids"]:
@@ -376,18 +289,11 @@ def build_cleanup_plan(
             if record["run_id"] not in plan["run_ids"]:
                 plan["run_ids"].append(record["run_id"])
                 plan["run_records"].append(record)
-        for item in artifact_content:
-            if item["path"] not in indexed_content_paths:
-                add_orphan_artifact_content(plan, item["path"])
-        for item in invalid_artifact_content:
-            add_orphan_artifact_content(plan, item["path"])
         for item in invalid_run_content:
             if item["run_id"] not in plan["run_ids"]:
                 plan["run_ids"].append(item["run_id"])
         for item in invalid_artifact_objects:
             add_warning(plan, f"All-storage cleanup will delete malformed artifact object: {item['path']} ({item['reason']}).")
-        for item in invalid_artifact_content:
-            add_warning(plan, f"All-storage cleanup will delete malformed artifact content: {item['path']} ({item['reason']}).")
         for item in invalid_run_content:
             add_warning(plan, f"All-storage cleanup will delete malformed run content: {item['path']} ({item['reason']}).")
     else:
@@ -396,7 +302,6 @@ def build_cleanup_plan(
     plan["delete_paths"].sort()
     plan["artifact_object_ids"].sort()
     plan["run_ids"].sort()
-    plan["orphan_content_paths"].sort()
     plan["direct_delete_paths"] = sorted(set(plan["direct_delete_paths"]))
     plan["warnings"].sort()
     plan.pop("_path_categories", None)
@@ -409,14 +314,11 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
 
     if plan["scope"] == "agent":
         for record in plan["artifact_records"]:
-            detach_artifact_from_track(root, record.get("context_track_id"), record["id"])
+            detach_artifact_from_track(root, record.get("track_id"), record["id"])
 
     indexed_artifact_paths = set()
     for record in plan["artifact_records"]:
         indexed_artifact_paths.add(record["object_path"])
-        for raw_path in (record.get("markdown_path"), record.get("content_path")):
-            if isinstance(raw_path, str) and raw_path:
-                indexed_artifact_paths.add(raw_path)
 
     for relative_path in sorted(indexed_artifact_paths):
         delete_relative_path(root, relative_path)

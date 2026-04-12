@@ -18,9 +18,7 @@ OBJECTS_ROOT = ROOT / "buddyswitch" / "objects"
 TRACKS_DIR = OBJECTS_ROOT / "tracks"
 ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
 CONTENT_ROOT = ROOT / "buddyswitch" / "content"
-ARTIFACT_CONTENT_DIR = CONTENT_ROOT / "artifacts"
 RUN_CONTENT_DIR = CONTENT_ROOT / "runs"
-ARTIFACT_FILES_DIR = ROOT / "artifacts"
 VALID_TRACK_STATUS = ("active", "blocked", "done", "archived")
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -36,13 +34,10 @@ def rel(path: Path) -> str:
 def ensure_dirs() -> None:
     TRACKS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
-    ARTIFACT_CONTENT_DIR.mkdir(parents=True, exist_ok=True)
     RUN_CONTENT_DIR.mkdir(parents=True, exist_ok=True)
-    ARTIFACT_FILES_DIR.mkdir(parents=True, exist_ok=True)
     for marker in (
         TRACKS_DIR / ".gitkeep",
         ARTIFACT_OBJECTS_DIR / ".gitkeep",
-        ARTIFACT_CONTENT_DIR / ".gitkeep",
         RUN_CONTENT_DIR / ".gitkeep",
     ):
         if not marker.exists():
@@ -62,38 +57,6 @@ def normalize_repo_path(raw_path: str) -> str:
     return path.as_posix()
 
 
-def normalize_artifact_file_path(raw_path: str) -> str:
-    normalized = normalize_repo_path(raw_path)
-    path = Path(normalized)
-    if path.parts[:1] != ("artifacts",):
-        raise ValueError("artifact path must start with artifacts/")
-    if len(path.parts) != 2:
-        raise ValueError("artifact path must be flat under artifacts/ root")
-    if path.suffix.lower() != ".md":
-        raise ValueError("artifact path must be a markdown file (*.md)")
-    return normalized
-
-
-def normalize_summary_file_path(raw_path: str) -> str:
-    normalized = normalize_repo_path(raw_path)
-    path = Path(normalized)
-    if path.parts[:2] != ("runs", "summaries"):
-        raise ValueError("summary path must start with runs/summaries/")
-    if path.suffix.lower() != ".md":
-        raise ValueError("summary path must be a markdown file (*.md)")
-    return normalized
-
-
-def normalize_artifact_content_path(raw_path: str) -> str:
-    normalized = normalize_repo_path(raw_path)
-    path = Path(normalized)
-    if path.parts[:3] != ("buddyswitch", "content", "artifacts"):
-        raise ValueError("content path must start with buddyswitch/content/artifacts/")
-    if path.suffix.lower() != ".json":
-        raise ValueError("content path must be a JSON file (*.json)")
-    return normalized
-
-
 def normalize_run_content_path(raw_path: str) -> str:
     normalized = normalize_repo_path(raw_path)
     path = Path(normalized)
@@ -107,15 +70,6 @@ def normalize_run_content_path(raw_path: str) -> str:
 def slugify(text: str) -> str:
     cleaned = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return cleaned or "artifact"
-
-
-def artifact_markdown_path(artifact_id: str, title: str) -> str:
-    slug = slugify(title)
-    return f"artifacts/{artifact_id}--{slug}.md"
-
-
-def artifact_content_path(artifact_id: str) -> str:
-    return f"buddyswitch/content/artifacts/{require_id(artifact_id, 'artifact id')}.json"
 
 
 def run_content_path(run_id: str) -> str:
@@ -187,52 +141,39 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
 def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     artifact_id = require_id(artifact.get("id", ""), "artifact.id")
     title = artifact.get("title")
-    kind = artifact.get("kind")
-    producer_buddy = artifact.get("producer_buddy")
-    source_skill = artifact.get("source_skill")
+    buddy = artifact.get("buddy")
+    skill_id = artifact.get("skill_id")
     created_at = artifact.get("created_at")
     updated_at = artifact.get("updated_at")
-    context_track_id = artifact.get("context_track_id")
-    path = artifact.get("path")
-    content_path = artifact.get("content_path")
-    summary_path = artifact.get("summary_path")
+    track_id = artifact.get("track_id")
+    summary = artifact.get("summary")
+    content = artifact.get("content", {})
 
     if not isinstance(title, str) or not title.strip():
         raise ValueError("artifact.title must be a non-empty string")
-    if not isinstance(kind, str) or not kind.strip():
-        raise ValueError("artifact.kind must be a non-empty string")
-    if not isinstance(producer_buddy, str) or not producer_buddy.strip():
-        raise ValueError("artifact.producer_buddy must be a non-empty string")
-    if not isinstance(source_skill, str) or not source_skill.strip():
-        raise ValueError("artifact.source_skill must be a non-empty string")
+    if not isinstance(buddy, str) or not buddy.strip():
+        raise ValueError("artifact.buddy must be a non-empty string")
+    if not isinstance(skill_id, str) or not skill_id.strip():
+        raise ValueError("artifact.skill_id must be a non-empty string")
     if not isinstance(created_at, str) or not created_at:
         raise ValueError("artifact.created_at must be a non-empty string")
     if not isinstance(updated_at, str) or not updated_at:
         raise ValueError("artifact.updated_at must be a non-empty string")
-    if context_track_id is not None:
-        require_id(context_track_id, "artifact.context_track_id")
-    normalized_path = normalize_artifact_file_path(path)
-    normalized_content_path = None
-    if content_path is not None:
-        if not isinstance(content_path, str) or not content_path.strip():
-            raise ValueError("artifact.content_path must be a non-empty string or null")
-        normalized_content_path = normalize_artifact_content_path(content_path)
-    normalized_summary_path = None
-    if summary_path is not None:
-        if not isinstance(summary_path, str) or not summary_path.strip():
-            raise ValueError("artifact.summary_path must be a non-empty string or null")
-        normalized_summary_path = normalize_summary_file_path(summary_path)
+    if track_id is not None:
+        require_id(track_id, "artifact.track_id")
+    if summary is not None and not isinstance(summary, str):
+        raise ValueError("artifact.summary must be a string or null")
+    if not isinstance(content, dict):
+        raise ValueError("artifact.content must be an object")
 
     return {
         "id": artifact_id,
         "title": title.strip(),
-        "kind": kind.strip(),
-        "path": normalized_path,
-        "content_path": normalized_content_path,
-        "summary_path": normalized_summary_path,
-        "producer_buddy": producer_buddy.strip(),
-        "source_skill": source_skill.strip(),
-        "context_track_id": context_track_id,
+        "track_id": track_id,
+        "buddy": buddy.strip(),
+        "skill_id": skill_id.strip(),
+        "summary": summary or "",
+        "content": content,
         "created_at": created_at,
         "updated_at": updated_at,
     }
@@ -372,8 +313,8 @@ def attach_artifact(track_id: str, artifact_id: str) -> dict[str, Any]:
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
     _attach_id_to_track(track_id, artifact_id)
-    if artifact.get("context_track_id") != track_id:
-        artifact["context_track_id"] = track_id
+    if artifact.get("track_id") != track_id:
+        artifact["track_id"] = track_id
         artifact["updated_at"] = now_iso()
         save_artifact(artifact)
         artifact = get_artifact(artifact_id) or artifact
@@ -385,33 +326,23 @@ def detach_artifact(track_id: str, artifact_id: str) -> dict[str, Any]:
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
     _detach_id_from_track(track_id, artifact_id)
-    if artifact.get("context_track_id") == track_id:
-        artifact["context_track_id"] = None
+    if artifact.get("track_id") == track_id:
+        artifact["track_id"] = None
         artifact["updated_at"] = now_iso()
         save_artifact(artifact)
         artifact = get_artifact(artifact_id) or artifact
     return artifact
 
 
-def find_artifact_by_path(path: str) -> dict[str, Any] | None:
-    normalized = normalize_artifact_file_path(path)
-    for artifact in list_artifacts():
-        if artifact["path"] == normalized:
-            return artifact
-    return None
-
-
 def create_artifact(
     *,
     artifact_id: str | None,
     title: str,
-    kind: str,
-    path: str | None,
-    producer_buddy: str,
-    source_skill: str,
-    context_track_id: str | None = None,
-    content_path: str | None = None,
-    summary_path: str | None = None,
+    buddy: str,
+    skill_id: str,
+    track_id: str | None = None,
+    summary: str = "",
+    content: dict[str, Any] | None = None,
     auto_register: bool = True,
 ) -> dict[str, Any]:
     ensure_dirs()
@@ -419,26 +350,23 @@ def create_artifact(
     require_id(resolved_id, "artifact id")
     if get_artifact(resolved_id):
         raise ValueError(f"artifact already exists: {resolved_id}")
-    resolved_path = normalize_artifact_file_path(path or artifact_markdown_path(resolved_id, title))
-    if context_track_id is not None and get_track(context_track_id) is None:
-        raise ValueError(f"context track not found: {context_track_id}")
+    if track_id is not None and get_track(track_id) is None:
+        raise ValueError(f"track not found: {track_id}")
     timestamp = now_iso()
     artifact = {
         "id": resolved_id,
         "title": title,
-        "kind": kind,
-        "path": resolved_path,
-        "content_path": normalize_artifact_content_path(content_path) if content_path else None,
-        "summary_path": normalize_summary_file_path(summary_path) if summary_path else None,
-        "producer_buddy": producer_buddy,
-        "source_skill": source_skill,
-        "context_track_id": context_track_id,
+        "track_id": track_id,
+        "buddy": buddy,
+        "skill_id": skill_id,
+        "summary": summary,
+        "content": content or {},
         "created_at": timestamp,
         "updated_at": timestamp,
     }
     artifact = save_artifact(artifact)
-    if auto_register and context_track_id:
-        _attach_id_to_track(context_track_id, resolved_id)
+    if auto_register and track_id:
+        _attach_id_to_track(track_id, resolved_id)
     return artifact
 
 
@@ -451,31 +379,31 @@ def update_artifact(
     artifact = get_artifact(artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
-    old_track = artifact.get("context_track_id")
+    old_track = artifact.get("track_id")
     allowed = {
         "title",
-        "kind",
-        "path",
-        "content_path",
-        "summary_path",
-        "producer_buddy",
-        "source_skill",
-        "context_track_id",
+        "track_id",
+        "buddy",
+        "skill_id",
+        "summary",
+        "content",
     }
     for key, value in patch.items():
         if key not in allowed:
             raise ValueError(f"unsupported artifact field: {key}")
-        if key == "path":
-            artifact[key] = normalize_artifact_file_path(value)
-        elif key == "content_path":
-            artifact[key] = normalize_artifact_content_path(value) if value is not None else None
-        elif key == "summary_path":
-            artifact[key] = normalize_summary_file_path(value) if value is not None else None
+        if key == "content":
+            if not isinstance(value, dict):
+                raise ValueError("artifact.content must be an object")
+            artifact[key] = value
+        elif key == "summary":
+            if value is not None and not isinstance(value, str):
+                raise ValueError("artifact.summary must be a string or null")
+            artifact[key] = value or ""
         else:
             artifact[key] = value
-    new_track = artifact.get("context_track_id")
+    new_track = artifact.get("track_id")
     if new_track is not None and get_track(new_track) is None:
-        raise ValueError(f"context track not found: {new_track}")
+        raise ValueError(f"track not found: {new_track}")
     artifact["updated_at"] = now_iso()
     artifact = save_artifact(artifact)
     if auto_register:
@@ -490,21 +418,12 @@ def delete_artifact(artifact_id: str, *, delete_file: bool = False) -> dict[str,
     artifact = get_artifact(artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
-    track_id = artifact.get("context_track_id")
+    track_id = artifact.get("track_id")
     if track_id:
         _detach_id_from_track(track_id, artifact_id)
     object_path = artifact_file(artifact_id)
     if object_path.exists():
         object_path.unlink()
-    if delete_file:
-        markdown_path = ROOT / artifact["path"]
-        if markdown_path.exists():
-            markdown_path.unlink()
-        content_path = artifact.get("content_path")
-        if content_path:
-            json_path = ROOT / content_path
-            if json_path.exists():
-                json_path.unlink()
     return artifact
 
 
@@ -514,7 +433,7 @@ def delete_artifacts_by_buddy(
     delete_files: bool = False,
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
-    targets = [artifact for artifact in list_artifacts() if artifact.get("producer_buddy") == buddy_id]
+    targets = [artifact for artifact in list_artifacts() if artifact.get("buddy") == buddy_id]
     if dry_run:
         return targets
     for artifact in targets:
@@ -529,13 +448,6 @@ def delete_all_artifacts(*, delete_files: bool = False, dry_run: bool = False) -
     for artifact in targets:
         delete_artifact(artifact["id"], delete_file=delete_files)
     return targets
-
-
-def save_artifact_content(artifact_id: str, payload: dict[str, Any]) -> str:
-    ensure_dirs()
-    path = ROOT / artifact_content_path(artifact_id)
-    _write_json(path, payload)
-    return rel(path)
 
 
 def save_run_content(run_id: str, payload: dict[str, Any]) -> str:

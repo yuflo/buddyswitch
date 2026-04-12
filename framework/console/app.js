@@ -7,17 +7,14 @@ const emptyWorkspace = {
   buddies: [],
   tracks: [],
   artifacts: [],
-  untracked_artifacts: [],
-  summaries: [],
+  run_audits: [],
 };
 
 const generatedAt = document.getElementById("generatedAt");
 const trackCount = document.getElementById("trackCount");
-const summaryCount = document.getElementById("summaryCount");
-const untrackedCount = document.getElementById("untrackedCount");
+const runAuditCount = document.getElementById("runAuditCount");
 const trackList = document.getElementById("trackList");
-const summaryList = document.getElementById("summaryList");
-const untrackedList = document.getElementById("untrackedList");
+const runAuditList = document.getElementById("runAuditList");
 const selectedType = document.getElementById("selectedType");
 const topicTitle = document.getElementById("topicTitle");
 const topicSlug = document.getElementById("topicSlug");
@@ -37,8 +34,7 @@ function normalizeWorkspaceData(rawData) {
     buddies: Array.isArray(rawData?.buddies) ? rawData.buddies : [],
     tracks: Array.isArray(rawData?.tracks) ? rawData.tracks : [],
     artifacts: Array.isArray(rawData?.artifacts) ? rawData.artifacts : [],
-    untracked_artifacts: Array.isArray(rawData?.untracked_artifacts) ? rawData.untracked_artifacts : [],
-    summaries: Array.isArray(rawData?.summaries) ? rawData.summaries : [],
+    run_audits: Array.isArray(rawData?.run_audits) ? rawData.run_audits : [],
   };
 }
 
@@ -151,24 +147,39 @@ function renderTracks() {
   workspace.tracks.forEach(renderTrackButton);
 }
 
-function renderSummaries() {
-  summaryList.replaceChildren();
-  summaryCount.textContent = String(workspace.summaries.length);
+function renderRunAudits() {
+  runAuditList.replaceChildren();
+  runAuditCount.textContent = String(workspace.run_audits.length);
 
-  if (workspace.summaries.length === 0) {
-    summaryList.append(createEl("p", "note", "No run summaries found."));
+  if (workspace.run_audits.length === 0) {
+    runAuditList.append(createEl("p", "note", "No run audits found."));
     return;
   }
 
-  workspace.summaries.slice(0, 8).forEach((summary) => {
+  workspace.run_audits.slice(0, 8).forEach((audit) => {
     const item = createEl("div", "summary-item");
+    const label = audit.track_action
+      ? `${audit.skill_id || "unknown"} / ${audit.track_action}`
+      : audit.skill_id || "unknown";
     item.append(
-      createEl("strong", "", summary.title),
-      createEl("span", "", summary.path),
-      createEl("span", "", summary.updated_at),
+      createEl("strong", "", label),
+      createEl("span", "", audit.task || audit.path || "No task"),
+      createEl("span", "", audit.execution_summary || audit.status || "No summary"),
+      createEl("span", "", audit.updated_at || "no timestamp"),
     );
-    summaryList.append(item);
+    runAuditList.append(item);
   });
+}
+
+function formatArtifactPreview(artifact) {
+  if (artifact.summary) {
+    return artifact.summary;
+  }
+  try {
+    return JSON.stringify(artifact.content || {}, null, 2);
+  } catch {
+    return "{}";
+  }
 }
 
 function renderTimeline(track) {
@@ -184,12 +195,13 @@ function renderTimeline(track) {
     const row = createEl("div", "artifact-row");
     row.append(
       createEl("span", "artifact-title", artifact.title),
-      createEl("span", "role-tag", `${buddyLabel(artifact.producer_buddy)} / ${artifact.kind}`),
+      createEl("span", "role-tag", `${buddyLabel(artifact.buddy)} / ${artifact.skill_id}`),
     );
     artifactEl.append(
       row,
-      createEl("code", "artifact-path", artifact.path),
-      createEl("span", "artifact-path", artifact.missing ? "missing file" : artifact.updated_at),
+      createEl("code", "artifact-path", artifact.object_path),
+      createEl("span", "artifact-path", artifact.updated_at || "no timestamp"),
+      createEl("pre", "artifact-path", formatArtifactPreview(artifact)),
     );
     timeline.append(artifactEl);
   });
@@ -225,40 +237,15 @@ function cleanupSuggestions(track) {
   const seen = new Set();
   const commands = [];
   (track.artifacts || []).forEach((artifact) => {
-    if (artifact.producer_buddy && !seen.has(artifact.producer_buddy)) {
-      seen.add(artifact.producer_buddy);
-      commands.push(`scripts/cleanup_buddyswitch.sh --agent ${artifact.producer_buddy}`);
+    if (artifact.buddy && !seen.has(artifact.buddy)) {
+      seen.add(artifact.buddy);
+      commands.push(`scripts/cleanup_buddyswitch.sh --agent ${artifact.buddy}`);
     }
   });
   commands.push("scripts/cleanup_buddyswitch.sh --all-agents");
   commands.push("scripts/cleanup_buddyswitch.sh --project app");
   commands.push("scripts/cleanup_buddyswitch.sh --all-storage");
   return commands;
-}
-
-function registerCommand(artifact) {
-  return `switch pm: 将 ${artifact.path} 关联到 <track-id>，并决定下一步 buddy`;
-}
-
-function renderUntrackedArtifacts() {
-  untrackedList.replaceChildren();
-  untrackedCount.textContent = String(workspace.untracked_artifacts.length);
-
-  if (workspace.untracked_artifacts.length === 0) {
-    untrackedList.append(createEl("p", "note", "No files waiting in artifact inbox."));
-    return;
-  }
-
-  workspace.untracked_artifacts.forEach((artifact) => {
-    const item = createEl("div", "summary-item");
-    item.append(
-      createEl("strong", "", artifact.title),
-      createEl("code", "artifact-path", artifact.path),
-      createEl("span", "", artifact.updated_at || "no timestamp"),
-    );
-    renderCommand(item, registerCommand(artifact));
-    untrackedList.append(item);
-  });
 }
 
 function renderSelectedTrack() {
@@ -290,9 +277,8 @@ function renderSelectedTrack() {
 function render() {
   setText(generatedAt, workspace.generated_at || "not generated");
   renderTracks();
-  renderSummaries();
+  renderRunAudits();
   renderSelectedTrack();
-  renderUntrackedArtifacts();
 }
 
 async function refreshWorkspaceData({ silent = false } = {}) {
