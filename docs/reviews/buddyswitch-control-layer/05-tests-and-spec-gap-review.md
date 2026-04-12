@@ -10,6 +10,8 @@
 
 如果这三者长期不一致，团队会不断在“想象中的系统”和“实际系统”之间切换，导致控制层复杂度持续上升。
 
+注：本文含 Phase 2 审查期术语（`switch <buddy>: <task>`）。当前 Phase 3 canonical 语法为 `switch <buddy>(<task-id>) -> <track-id>: <demand>`（支持简化形态）。
+
 ## 2. 当前测试覆盖现状
 
 ### 2.1 `tests/test_switch_runtime.py`
@@ -59,9 +61,9 @@
 
 ### 4.1 文档对“strict syntax”的强调强于系统所需
 
-当前规范文档多处强调：
+当前规范文档在早期版本多处强调：
 
-- `switch <buddy>: <task>` 的 canonical form
+- `switch <buddy>: <task>` 的 canonical form（旧术语）
 - “Parse with strict syntax only”
 - malformed syntax 要求用户重发
 

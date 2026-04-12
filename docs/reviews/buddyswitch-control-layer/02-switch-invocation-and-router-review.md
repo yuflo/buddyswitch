@@ -2,7 +2,8 @@
 
 ## 1. 当前角色定位
 
-BuddySwitch 当前把 `switch <buddy>: <task>` 作为顶层触发协议。
+本文件最初撰写于 Phase 2 审查阶段，当时用语是 `switch <buddy>: <task>`。
+当前 Phase 3 实现已升级为 `switch <buddy>(<task-id>) -> <track-id>: <demand>`（支持简化形态）。
 
 从产品意图看，它更像一个显式 tool invocation：
 
@@ -128,7 +129,7 @@ BuddySwitch 当前把 `switch <buddy>: <task>` 作为顶层触发协议。
 
 ### 5.2 需要收敛表达
 
-- `switch <buddy>: <task>` 应被定义为 canonical form，而不是格式洁癖入口
+- `switch <buddy>...: <demand>` 应被定义为 canonical 入口，而不是格式洁癖入口
 - parser 失败时应优先回答“是否真的无法识别意图”，而不是“是否符合某个格式习惯”
 - router 应更明确承担“把唤起结构暴露给 host”这一职责
 

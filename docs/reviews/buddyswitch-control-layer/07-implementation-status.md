@@ -11,13 +11,15 @@
 - 哪些项当前不做
 - 当前控制层边界到底是什么
 
+注：本页部分小节在 Phase 2 期间撰写，出现 `switch <buddy>: <task>` 旧术语。当前 Phase 3 canonical 语法为 `switch <buddy>(<task-id>) -> <track-id>: <demand>`（支持简化形态）。
+
 ## 2. 已完成
 
 ### 2.1 `switch` 入口已收敛为 canonical but tolerant
 
 当前实现已经满足：
 
-- `switch <buddy>: <task>` 是 canonical form
+- `switch <buddy>...: <demand>` 是 canonical 入口（支持 4 种形态）
 - parser/router 可以容忍 minor CLI spacing variation
 - parser/router 返回显式 invocation 结构
 - host/session 消费的是结构化结果，而不是再猜字符串细节
@@ -142,7 +144,7 @@
 
 - 识别 `switch`
 - 提取 `buddy`
-- 提取 `task`
+- 提取 `demand`（以及可选 `task_id` / `track_id`）
 - 做最小 normalize
 
 不负责：

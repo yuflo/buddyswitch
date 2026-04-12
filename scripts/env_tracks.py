@@ -10,9 +10,7 @@ from pathlib import Path
 
 from env_manifest import DEFAULT_MANIFEST, ManifestError, buddy_permissions, get_buddy, load_manifest
 from env_store import (
-    attach_artifact,
     create_track,
-    detach_artifact,
     get_track,
     list_tracks,
     update_track,
@@ -109,22 +107,6 @@ def cmd_advance(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_attach(args: argparse.Namespace) -> int:
-    manifest = load_manifest(args.manifest)
-    require_permission(manifest, args.actor, "track.attach_artifact")
-    artifact = attach_artifact(args.track_id, args.artifact_id)
-    print(json.dumps(artifact, ensure_ascii=True, indent=2))
-    return 0
-
-
-def cmd_detach(args: argparse.Namespace) -> int:
-    manifest = load_manifest(args.manifest)
-    require_permission(manifest, args.actor, "track.detach_artifact")
-    artifact = detach_artifact(args.track_id, args.artifact_id)
-    print(json.dumps(artifact, ensure_ascii=True, indent=2))
-    return 0
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Manage BuddySwitch track objects through manual/debug APIs. These commands enforce actor permissions and are not the switch runtime."
@@ -169,18 +151,6 @@ def build_parser() -> argparse.ArgumentParser:
     cmd.add_argument("--summary")
     cmd.add_argument("--actor", default="pm")
     cmd.set_defaults(func=cmd_advance)
-
-    cmd = subparsers.add_parser("attach-artifact")
-    cmd.add_argument("track_id")
-    cmd.add_argument("--artifact-id", required=True)
-    cmd.add_argument("--actor", default="pm")
-    cmd.set_defaults(func=cmd_attach)
-
-    cmd = subparsers.add_parser("detach-artifact")
-    cmd.add_argument("track_id")
-    cmd.add_argument("--artifact-id", required=True)
-    cmd.add_argument("--actor", default="pm")
-    cmd.set_defaults(func=cmd_detach)
     return parser
 
 

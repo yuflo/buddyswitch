@@ -68,8 +68,6 @@ permissions = [
   "track.create",
   "track.update",
   "track.advance",
-  "track.attach_artifact",
-  "track.detach_artifact",
   "task.read",
   "task.create",
   "task.update",

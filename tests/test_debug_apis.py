@@ -8,7 +8,7 @@ import json
 import sys
 import unittest
 from argparse import Namespace
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -63,6 +63,15 @@ class DebugApiPermissionTests(unittest.TestCase):
         self.assertEqual(args.status, "not-a-status")
         with self.assertRaisesRegex(ValueError, "track.status must be one of"):
             args.func(args)
+
+    def test_track_parser_does_not_expose_attach_or_detach_artifact_commands(self) -> None:
+        parser = env_tracks.build_parser()
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parser.parse_args(["attach-artifact", "track-debug", "--artifact-id", "art-debug"])
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parser.parse_args(["detach-artifact", "track-debug", "--artifact-id", "art-debug"])
 
     def test_artifact_debug_api_enforces_permissions(self) -> None:
         env_artifacts.require_permission(self.manifest, "market", "artifact.create")

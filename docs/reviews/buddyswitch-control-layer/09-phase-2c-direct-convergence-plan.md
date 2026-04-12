@@ -193,7 +193,8 @@ Artifact 正文只存在 artifact object 中。
 
 ## 6. Acceptance Criteria
 
-- 一次 `switch <buddy>: <task>` 持久化后，只产生或更新 artifact object、track object、run audit JSON。
+- （Phase 2 术语）一次 `switch <buddy>: <task>` 持久化后，只产生或更新 artifact object、track object、run audit JSON。
+- （当前 Phase 3）一次 `switch <buddy>...: <demand>` 持久化后，run 必须绑定 task，并产生或更新 task object、artifact object、（必要时）track object 与 run audit JSON。
 - Context Panel 能在没有 `artifacts/*.md` 和 `runs/summaries/**` 的情况下展示 workspace。
 - 仓库文档不再宣称 markdown artifacts 或 run summaries 是当前兼容层。
 - 测试覆盖新的对象化路径，并移除对 markdown 兼容输出的断言。

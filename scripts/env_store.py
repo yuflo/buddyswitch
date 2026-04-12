@@ -520,27 +520,6 @@ def remove_artifact_from_task(task_id: str, artifact_id: str) -> dict[str, Any]:
     return save_task(task)
 
 
-def attach_artifact(track_id: str, artifact_id: str) -> dict[str, Any]:
-    artifact = get_artifact(artifact_id)
-    if artifact is None:
-        raise ValueError(f"artifact not found: {artifact_id}")
-    register_task_to_track(track_id, artifact["task_id"])
-    return artifact
-
-
-def detach_artifact(track_id: str, artifact_id: str) -> dict[str, Any]:
-    artifact = get_artifact(artifact_id)
-    if artifact is None:
-        raise ValueError(f"artifact not found: {artifact_id}")
-    task = get_task(artifact["task_id"])
-    if task is None:
-        return artifact
-    if task.get("track_id") == track_id:
-        update_task(task["id"], {"track_id": None})
-        _unregister_task_id(track_id, task["id"])
-    return artifact
-
-
 def create_artifact(
     *,
     artifact_id: str | None,
