@@ -28,13 +28,13 @@
 |---|---|---|---|---|---|
 | `parse_switch` | 输入为空时报 `E_EMPTY_INPUT` | `reject` | 避免空输入继续流转 | 保留 | 合理的入口硬校验 |
 | `parse_switch` | 输入必须以 `switch` 开头 | `reject` | 避免把普通聊天误当 framework directive | 保留 | 这是最小入口识别门槛 |
-| `parse_switch` | 用正则 `^switch\\s+...\\s*:(.*)$` 抽取 `buddy/task` | `reject` | 结构提取 | 重定义 | 应从“文本格式正确”转为“能否稳定抽出结构” |
+| `parse_switch` | 用正则抽取 `buddy/task_id/track_id/demand`（容忍 minor spacing 变体） | `reject` | 结构提取 | 重定义 | 应从“文本格式正确”转为“能否稳定抽出结构” |
 | `parse_switch` | `buddy` 必须存在于 manifest | `reject` | 防止误路由 | 保留 | 合理的路由级硬校验 |
-| `parse_switch` | `task` 不能为空 | `reject` | 避免进入空任务工作流 | 保留 | 合理的入口硬校验 |
+| `parse_switch` | `demand` 不能为空 | `reject` | 避免进入空需求工作流 | 保留 | 合理的入口硬校验 |
 
 ### 结论
 
-- parser 中真正应保留的硬校验只有：`switch` 识别、`buddy` 存在、`task` 非空。
+- parser 中真正应保留的硬校验只有：`switch` 识别、`buddy` 存在、`demand` 非空。
 - 正则层面的“格式感”不应继续扩大职责。
 
 ## 3. `codex_router.py`
@@ -54,9 +54,9 @@
 | 位置 | 当前规则 | 当前失败动作 | 保护对象 | 审查判断 | 后续建议 |
 |---|---|---|---|---|---|
 | `_split_front_matter` | skill 文件必须存在且 front matter 完整 | `reject` | skill metadata 可加载性 | 保留 | 这是配置层硬约束 |
-| `_load_skill_runtime` | `name/description/track_mode/default_artifact_kind/auto_summary/output_schema` 必填 | `reject` | skill runtime 最小结构 | 保留 | 合理 |
+| `_load_skill_runtime` | `name/description/default_artifact_kind/auto_summary/output_schema` 必填 | `reject` | skill runtime 最小结构 | 保留 | 合理 |
 | `_load_skill_runtime` | `name` 必须与 manifest skill id 相同 | `reject` | 避免 skill 身份漂移 | 保留 | 合理 |
-| `_load_skill_runtime` | `track_mode` 必须属于集合 | `reject` | 运行时判定可计算 | 保留 | 合理 |
+| `_load_skill_runtime` | 若出现 `track_mode` 字段则拒绝（retired field） | `reject` | 避免历史字段回流 | 保留 | Phase 3 已硬退役 |
 | `_load_skill_runtime` | `output_schema` 路径合法且文件存在 | `reject` | persist 可执行性 | 保留 | 属于状态安全前置条件 |
 | `_load_skill_runtime` | `version/side_effect_level` 为可选但需是非空字符串 | `reject` | metadata 完整性 | 降级 | 这类说明型字段不应过度承担阻断职责 |
 | `_load_skill_runtime` | `required_tools/required_env/produces/consumes` 类型必须正确 | `reject` | metadata 完整性 | 重定义 | 若这些字段不承担实际动作，阻断价值有限 |
@@ -78,8 +78,8 @@
 |---|---|---|---|---|---|
 | `_extract_task_hints` | 用户给的 artifact/summary path 必须通过 normalize | `reject` | 路径安全 | 保留 | 路径越界必须阻断 |
 | `_resolve_track_context` | 显式引用的 track 不存在时报错 | `reject` | 状态引用安全 | 保留 | 合理 |
-| `_resolve_track_context` | `track_mode=forbidden` 时禁止引用 track | `reject` | skill contract 一致性 | 保留 | 合理 |
-| `_resolve_track_context` | `track_mode=required` 且无可用 track 时失败 | `reject` | 运行时最小前提 | 保留 | 合理 |
+| `_resolve_track_context` | （历史）`track_mode=forbidden` gate 已删除 | 无 | 历史语境 | 删除候选 | Phase 3 已移除 |
+| `_resolve_track_context` | （历史）`track_mode=required` gate 已删除 | 无 | 历史语境 | 删除候选 | Phase 3 已移除 |
 | `_resolve_track_context` | `optional` 且多个 active track 时不自动绑定 | `warn/continue` 风格，通过 `reason` 表达 | 防止误绑定 | 保留 | 是较好的非阻断设计 |
 | `_evaluate_runtime_requirements` | 缺少 `required_env` / `required_tools` 会让 skill 变为 rejected | `reject` | 运行环境准备度 | 删除候选 | 如果失败后没有明确补救协议，这更像复杂度而不是必要保护 |
 | `resolve_switch` | 没有 eligible skills 时整体失败 | `reject` | 避免 host 运行无效技能 | 保留 | 合理，但 rejected reason 应更清晰地面向 host |
@@ -87,8 +87,8 @@
 
 ### 结论
 
-- `track_mode` 相关 gate 属于合理的运行时最小门槛。
-- `required_env` / `required_tools` 是当前最典型的复杂度风险项，因为它们当前主要产生 `rejected_skills`，但缺少统一的恢复动作模型。
+- `track_mode` 相关 gate 已在 Phase 3 退役，当前以显式 task/track 引用与绑定一致性作为最小门槛。
+- `required_env` / `required_tools` 已降级为 advisory metadata，不再作为 `resolve` 的阻断 gate。
 
 ## 6. `switch_runtime.py persist`
 
@@ -103,7 +103,7 @@
 | `persist_switch` | `track-manager` 必须有 summary defaults | `reject` | 输出路径可执行性 | 保留 | 合理 |
 | `_persist_track_manager` | `track_operation.action` 必须合法 | `reject` | track state 变更安全 | 保留 | 合理 |
 | `_persist_track_manager` | create/update/advance 中的 buddy/status 值必须合法 | `reject` | track state 一致性 | 保留 | 合理 |
-| `_persist_track_manager` | attach/detach 必须带 `artifact_id` | `reject` | 引用完整性 | 保留 | 合理 |
+| `_persist_track_manager` | attach/detach artifact 操作已退役，不再接受该 action | `reject` | 避免回退旧对象关系 | 保留 | 与 task-centric 模型一致 |
 | `_persist_track_manager` | update/advance patch 不能为空 | `reject` | 避免空写 | 保留 | 合理 |
 | `_persist_artifact_skill` | 根据 resolved task hints / track context 推导 artifact defaults | `reject` | 持久化可执行性 | 保留 | 合理 |
 
@@ -123,9 +123,9 @@
 | `create_track` | track 已存在则失败 | `reject` | 唯一性 | 保留 | 合理 |
 | `update_track` | patch 字段必须在 allowlist 内 | `reject` | 避免隐式扩展状态 | 保留 | 合理 |
 | `advance_track` | 空 patch 不允许 | `reject` | 避免空操作 | 保留 | 合理 |
-| `attach_artifact` / `detach_artifact` | track/artifact 必须存在 | `reject` | 对象关系安全 | 保留 | 合理 |
-| `create_artifact` | artifact id 不可重复，context track 必须存在 | `reject` | artifact state 安全 | 保留 | 合理 |
-| `update_artifact` | patch 字段白名单、new track 必须存在 | `reject` | artifact state 安全 | 保留 | 合理 |
+| `add_artifact_to_task` / `remove_artifact_from_task` | task 必须存在 | `reject` | task-artifact 关系安全 | 保留 | 合理 |
+| `create_artifact` | artifact id 不可重复；`task_id` 必须存在且 `artifact.buddy` 必须匹配 task owner | `reject` | artifact state 安全 | 保留 | 合理 |
+| `update_artifact` | patch 字段白名单；`task_id` 必须存在且 `artifact.buddy` 必须匹配 task owner | `reject` | artifact state 安全 | 保留 | 合理 |
 | `delete_artifact` | artifact 不存在时报错 | `reject` | 删除语义明确性 | 保留 | 合理 |
 
 ### 结论

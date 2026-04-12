@@ -99,7 +99,7 @@
 已通过：
 
 - `PYTHONPYCACHEPREFIX=/tmp/buddyswitch-pycache python3 -m unittest discover -s tests`
-- 共 `46` 个测试，全通过。
+- 共 `49` 个测试，全通过。
 
 核心覆盖：
 

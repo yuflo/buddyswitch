@@ -21,7 +21,7 @@ if str(SCRIPTS) not in sys.path:
 import env_manifest  # noqa: E402
 import switch_runtime  # noqa: E402
 import workspace_data  # noqa: E402
-from env_store import create_task, create_track, get_track  # noqa: E402
+from env_store import create_task, create_track, get_track, validate_artifact, validate_track  # noqa: E402
 
 
 class ManifestSkillRuntimeTests(unittest.TestCase):
@@ -139,6 +139,42 @@ class ManifestSkillRuntimeTests(unittest.TestCase):
 
             with self.assertRaisesRegex(env_manifest.ManifestError, "track_mode is retired"):
                 env_manifest._load_skill_runtime(skill_path, "test-skill")
+
+
+class EnvStoreRetiredFieldTests(unittest.TestCase):
+    def test_validate_track_rejects_legacy_artifact_ids_field(self) -> None:
+        payload = {
+            "id": "track-legacy-field",
+            "title": "Legacy Field Track",
+            "status": "active",
+            "current_buddy": "pm",
+            "next_buddy": None,
+            "task_ids": [],
+            "artifact_ids": ["art-old-link"],
+            "summary": "",
+            "updated_at": "2026-04-12T10:00:00+08:00",
+        }
+
+        with self.assertRaisesRegex(ValueError, "track.artifact_ids is retired"):
+            validate_track(payload)
+
+    def test_validate_artifact_rejects_legacy_track_id_field(self) -> None:
+        payload = {
+            "id": "art-legacy-field",
+            "title": "Legacy Artifact",
+            "task_id": "task-dev-legacy",
+            "track_id": "track-legacy-field",
+            "buddy": "dev",
+            "skill_id": "implement-task",
+            "source_run_id": "run-legacy-field",
+            "summary": "",
+            "content": {},
+            "created_at": "2026-04-12T10:00:00+08:00",
+            "updated_at": "2026-04-12T10:00:00+08:00",
+        }
+
+        with self.assertRaisesRegex(ValueError, "artifact.track_id is retired"):
+            validate_artifact(payload)
 
 
 class ResolveRuntimeTests(unittest.TestCase):

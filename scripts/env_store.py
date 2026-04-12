@@ -112,6 +112,9 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def validate_track(track: dict[str, Any]) -> dict[str, Any]:
+    if "artifact_ids" in track:
+        raise ValueError("track.artifact_ids is retired; use track.task_ids")
+
     track_id = require_id(track.get("id", ""), "track.id")
     title = track.get("title")
     status = track.get("status")
@@ -209,6 +212,9 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
+    if "track_id" in artifact:
+        raise ValueError("artifact.track_id is retired; use artifact.task_id")
+
     artifact_id = require_id(artifact.get("id", ""), "artifact.id")
     title = artifact.get("title")
     task_id = artifact.get("task_id")
