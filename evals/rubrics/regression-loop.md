@@ -32,7 +32,7 @@ Run the 10-case suite after any change to:
 1. Execute each case prompt from `evals/cases/`.
 2. Check outputs against that case's pass criteria.
 3. Score each case using `evals/rubrics/base-rubric.md`.
-4. Write a compact result summary to `runs/summaries/`.
+4. Persist the result as canonical artifact/run-audit state.
 
 ## Minimal Regression Summary Template
 

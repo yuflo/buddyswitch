@@ -17,7 +17,7 @@
 
 ## 2. 本审查包与现有文档的关系
 
-- `docs/buddyswitch/`：历史产品规划文档，不作为当前控制层实现的唯一依据。
+- 历史 `docs/buddyswitch/` 产品规划包已移除，不再作为当前控制层依据。
 - `framework/docs/`：当前规范与实现说明，是本审查包的重要证据来源。
 - `README.md` / `AGENTS.md`：当前使用入口说明，是本审查包重点核对对象。
 
@@ -32,6 +32,7 @@
 5. [05-tests-and-spec-gap-review.md](./05-tests-and-spec-gap-review.md)
 6. [06-optimization-backlog.md](./06-optimization-backlog.md)
 7. [07-implementation-status.md](./07-implementation-status.md)
+8. [08-compatibility-debt-cleanup-plan.md](./08-compatibility-debt-cleanup-plan.md)
 
 ## 4. 核心结论摘要
 
@@ -73,6 +74,7 @@
 ### 4.4 审查包现在已经有对应的实施状态页
 
 - [07-implementation-status.md](./07-implementation-status.md) 记录了哪些结论已经落地、哪些被降级为 metadata、哪些明确不做
+- [08-compatibility-debt-cleanup-plan.md](./08-compatibility-debt-cleanup-plan.md) 记录兼容包袱清理的收口状态与与 09 的关系
 - 后续迭代应先看这份状态页，再决定是否继续修改控制层
 
 ## 5. 审查对象清单

@@ -35,11 +35,11 @@ consumes:
 - Research artifacts and product context.
 - Track context and existing artifact ids when relevant.
 - Constraints, assumptions, and requirements.
-- Optional explicit output path.
+- Optional track context hint.
 
 ## Outputs
-- A PRD artifact in `artifacts/<artifact-id>--<slug>.md` unless overridden.
-- A PM run summary in `runs/summaries/pm/` when default runtime persistence is used.
+- A PRD artifact object in `buddyswitch/objects/artifacts/`.
+- A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
 - Structured sections covering problem, goals, scenarios, scope, acceptance criteria, risks, and open questions.
 
 ## Steps
@@ -60,13 +60,13 @@ consumes:
 
 - Follow `framework/docs/track-registry.md`.
 - PM can create/update/advance tracks and attach/detach artifact IDs.
-- PM can create/update artifact objects and set `context_track_id`.
+- PM can create/update artifact objects and set `track_id`.
 - Track creation/progression should stay explicit with user intent.
 
 ## Output Path
 
-- Default: `artifacts/<artifact-id>--<slug>.md`
-- If user provides a path, use it as-is.
+- Default BuddySwitch state: `buddyswitch/objects/artifacts/<artifact-id>.json`
+- Do not request or rely on `artifacts/*.md` or `runs/summaries/**`.
 
 ## Required Output Fields
 

@@ -52,13 +52,13 @@ BuddySwitch 当前的状态写入主要分 3 层：
 - track id 必须唯一
 - artifact id 必须唯一
 - attach/detach 时目标对象必须存在
-- artifact 的 `context_track_id` 必须引用存在的 track
+- artifact 的 `track_id` 必须引用存在的 track
 
 ### 3.2 路径与 repo 边界
 
 - 路径必须是 repo-relative
 - 禁止 `..`
-- artifact / summary / content / run content 都有固定根目录
+- run content 有固定根目录；artifact object 路径由 object id 决定
 - 文件后缀必须匹配预期
 
 ### 3.3 最小结构一致性

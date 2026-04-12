@@ -30,7 +30,7 @@ Produce browser-driven, evidence-based market and demand analysis that can be ha
 - Research question or hypothesis.
 - Product context and target audience.
 - Any references, links, or prior artifacts.
-- Optional explicit output path.
+- Optional track context or summary hint.
 - Optional channel constraints (include/exclude targets).
 
 ## Required Output Structure
@@ -88,8 +88,9 @@ Every run should return:
 - Follow `framework/docs/track-registry.md`.
 - This buddy can read tracks and create/update artifact objects.
 - Do not directly mutate track status/current/next/artifact_ids.
-- If context requires attaching output to a track, write artifact with `context_track_id`.
+- If context requires attaching output to a track, write artifact with `track_id`.
 
-## Default Artifact Path
+## Default Artifact State
 
-- `artifacts/<artifact-id>--<slug>.md`
+- `buddyswitch/objects/artifacts/<artifact-id>.json`
+- `buddyswitch/content/runs/<run-id>.json`

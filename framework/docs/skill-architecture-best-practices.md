@@ -41,9 +41,9 @@ BuddySwitch follows that pattern, but keeps one extra control layer:
 - parse `switch <buddy>: <task>`
 - load manifest, buddy scope, object authority metadata, and allowed skills
 - apply only the deterministic gates needed for safe resolution
-- resolve track context and default paths
+- resolve track context and reject retired markdown output requests
 - validate structured outputs at persistence time
-- write track/artifact state and compatibility markdown files
+- write track/artifact state and run audit payloads
 
 In this model:
 
@@ -105,10 +105,11 @@ Instead:
 
 - `resolve` reports `required_output_schema_by_skill`
 - the host emits a structured payload that matches that schema
-- `persist` writes canonical JSON to `buddyswitch/content/**`
-- BuddySwitch renders markdown compatibility files for the current panel
+- `persist` writes canonical artifact content into artifact objects
+- `persist` writes run audit JSON to `buddyswitch/content/runs/**`
+- BuddySwitch does not maintain a derived markdown compatibility layer
 
-This keeps structured state canonical while preserving the current human-readable workflow.
+This keeps structured state canonical and removes duplicated runtime outputs.
 
 `output_schema.py` is a structure validator only. It may reject malformed payloads, unsupported fields, or invalid enum/type combinations, but it must not become a business-quality or workflow-quality review layer.
 

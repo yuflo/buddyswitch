@@ -50,7 +50,6 @@
 - `framework/docs/switch-spec.md`
 - `framework/docs/skill-architecture-best-practices.md`
 - `framework/docs/track-registry.md`
-- `docs/buddyswitch/04-switch-protocol.md`
 
 ### 3.3 测试
 

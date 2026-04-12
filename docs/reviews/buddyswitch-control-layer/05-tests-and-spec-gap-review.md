@@ -51,15 +51,9 @@
 - `framework/docs/skill-architecture-best-practices.md`
 - `framework/docs/track-registry.md`
 
-### 3.2 历史文档仍在提供心智影响
+### 3.2 历史文档心智影响已移除
 
-`docs/buddyswitch/` 虽已标记为 legacy pack，但仍保留：
-
-- `04-switch-protocol.md`
-- `05-agent-specs.md`
-- 其他 v1 产品文档
-
-这些文档中的表述有产品价值，但不一定与现行实现完全对齐。
+旧的 `docs/buddyswitch/` 产品规划包已移除，当前控制层以 `framework/docs/`、`README.md`、`AGENTS.md` 与本审查包为准。
 
 ## 4. 主要缺口
 

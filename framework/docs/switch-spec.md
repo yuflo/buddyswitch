@@ -62,8 +62,8 @@ Current control-layer expectations:
   2. load the selected buddy's skill catalog from `buddyswitch/skills/**/SKILL.md`
   3. apply the minimal deterministic gates needed for safe resolution (`track_mode` and track context)
   4. resolve track context from `track_mode`
-  5. derive default artifact/summary paths when needed
-  6. return `eligible_skills`, compact `skill_cards`, per-skill context, defaults, output schema paths, invocation details, and explicit next actions
+  5. reject explicit requests for retired markdown outputs under `artifacts/*.md` or `runs/summaries/**`
+  6. return `eligible_skills`, compact `skill_cards`, per-skill context, output schema paths, invocation details, and explicit next actions
 
 Current runtime defaults:
 
@@ -76,8 +76,9 @@ Current runtime defaults:
 - BuddySwitch does not rely on Codex native `.agents/skills` discovery for these skills
 - output contracts are enforced through `framework/schemas/**`
 - output schema validation is structure-only; it does not score business quality, research quality, or workflow completeness
-- canonical structured payloads are written to `buddyswitch/content/**`
-- human-readable markdown artifacts and summaries remain for panel compatibility
+- artifact objects include canonical structured artifact content
+- run audit payloads are written to `buddyswitch/content/runs/**`
+- derived markdown artifacts and run summaries are retired
 
 ## Host Codex Responsibilities
 
@@ -104,11 +105,9 @@ Schema validation in this stage is structural only. It checks shape and allowed 
 
 It writes:
 
-- canonical structured payloads under `buddyswitch/content/**`
-- artifact objects under `buddyswitch/objects/artifacts/*.json`
+- artifact objects with canonical structured content under `buddyswitch/objects/artifacts/*.json`
+- run audit payloads under `buddyswitch/content/runs/**`
 - track objects under `buddyswitch/objects/tracks/*.json` when PM track-manager mutations are requested
-- compatibility markdown artifacts under `artifacts/*.md`
-- compatibility markdown summaries under `runs/summaries/**`
 
 `resolve` writes nothing. Its only job is to return enough context for the host Codex session to decide what to do next.
 

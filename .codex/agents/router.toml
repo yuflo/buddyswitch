@@ -16,11 +16,12 @@ Routing source of truth:
 
 Object source of truth:
 - buddyswitch/objects/tracks/*.json
-- buddyswitch/objects/artifacts/*.json
+- buddyswitch/objects/artifacts/*.json, including structured artifact content
+- buddyswitch/content/runs/*.json for run audit payloads
 
 Permission model:
 - PM controls track lifecycle (create/update/advance/attach/detach).
-- Other buddies can read tracks and create/update artifacts with optional context_track_id.
+- Other buddies can read tracks and create/update artifacts with optional track_id.
 
 Skill source:
 - buddyswitch/skills/<buddy>/<skill>/SKILL.md
@@ -29,7 +30,7 @@ Host responsibility:
 - Use `scripts/switch_runtime.py resolve` to get `eligible_skills`, compact skill cards, defaults, and output schema paths.
 - Choose one `skill_id` from `eligible_skills` inside the current Codex session.
 - Read the selected `buddyswitch/skills/.../SKILL.md` and execute that workflow in-session.
-- Use `scripts/switch_runtime.py persist` only to write BuddySwitch state and compatibility markdown outputs.
+- Use `scripts/switch_runtime.py persist` only to write BuddySwitch object state and run audit payloads.
 
 Do not use retired registry flow (`scripts/registry.py`, `artifacts/workspace-registry.json`, `.codex/agents/<buddy>.toml`).
 """

@@ -40,9 +40,8 @@ scripts/cleanup_buddyswitch.sh --all-storage --force
 - Default behavior is preview-only.
 - `--force` without `--execute` is rejected.
 - Cleanup scope is limited to:
-  - `artifacts/**`
   - `runs/raw/**`
-  - `runs/summaries/**`
+  - `buddyswitch/content/runs/**`
   - `projects/app/.runtime/**`
   - `buddyswitch/objects/**`
 - Agent/all-agent cleanup can remove artifact objects/files through `scripts/env_artifacts.py`.

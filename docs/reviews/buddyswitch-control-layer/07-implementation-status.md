@@ -35,7 +35,7 @@
 - `resolve` 不写 BuddySwitch state
 - `resolve` 只做成功派发需要的最小确定性判断
 - `persist` 只做 skill identity、schema shape、state/reference safety
-- `persist` 明确返回 effects，说明本次写了什么
+- `persist` 明确返回 receipt，说明本次写了什么
 
 这意味着 runtime 不再承担：
 
@@ -70,14 +70,13 @@
 - track/artifact debug APIs 会阻止写入 manifest 中不存在的 buddy 引用
 - 对象字段的最终合法性尽量统一下沉到 store 校验
 
-### 2.6 cleanup 已适配 canonical content 与 orphan handling
+### 2.6 cleanup 已适配 run audit content handling
 
 当前实现已经满足：
 
 - `scripts/cleanup_buddyswitch.sh` 不再停留在旧的 markdown/raw/object 白名单模型
-- cleanup 会覆盖 `buddyswitch/content/artifacts/*.json` 与 `buddyswitch/content/runs/*.json`
+- cleanup 会覆盖 run audit `buddyswitch/content/runs/*.json`
 - `--agent` / `--all-agents` / `--all-storage` 都会处理命中范围内的 run content
-- orphan artifact content 会在 dry-run 中显式出现，并在 execute 时按命中范围自动删除
 - cleanup 主逻辑集中在单一 backend，而不是 bash、object helper、store 各维护一套删除规则
 
 ## 3. 已明确降级或不做
@@ -174,7 +173,7 @@
 - 验证 skill identity
 - 验证结构化 payload 与 schema 一致
 - 阻止 unsafe state/reference writes
-- 写 canonical content 与 compatibility files
+- 写 artifact object canonical content、track object 与 run audit content
 
 不负责：
 
@@ -203,3 +202,5 @@
 - 审查包与实现状态的对应关系还需要在后续迭代中持续更新
 
 这两项都不应推动新的 runtime gate 增长。
+
+兼容包袱清理与二阶段备忘见 [08-compatibility-debt-cleanup-plan.md](./08-compatibility-debt-cleanup-plan.md)。

@@ -57,8 +57,7 @@ BuddySwitch 当前把 `switch <buddy>: <task>` 作为顶层触发协议。
 - `eligible_skills`
 - `skill_cards`
 - `track_context_by_skill`
-- `artifact_defaults_by_skill`
-- `summary_defaults_by_skill`
+- `task_hints`
 - `required_output_schema_by_skill`
 
 ## 3. 当前问题判断

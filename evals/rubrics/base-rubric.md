@@ -36,4 +36,4 @@ For each failed case, record:
 
 ## Suggested Result File
 
-- `runs/summaries/eval-<date>-buddyswitch-v1.md`
+- `buddyswitch/content/runs/run-<id>.json`

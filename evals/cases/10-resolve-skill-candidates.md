@@ -29,7 +29,7 @@ switch pm: continue track-demo track and define the MVP scope with acceptance cr
 - `skill_cards` includes compact routing guidance for both candidates.
 - `required_output_schema_by_skill` includes both schema paths.
 - `artifact_defaults_by_skill.write-prd` exists.
-- `summary_defaults_by_skill.track-manager` exists.
+- `resolve` does not return markdown summary defaults.
 
 ## Fail Signals
 

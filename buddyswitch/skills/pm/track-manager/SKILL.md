@@ -23,7 +23,7 @@ consumes:
 ## Use when
 - The task is explicitly about creating, listing, reading, updating, advancing, attaching, detaching, or archiving tracks.
 - The user wants to change `current_buddy`, `next_buddy`, `status`, `summary`, or the artifact linkage on a track.
-- The task needs a durable track-operation summary under `runs/summaries/pm/`.
+- The task needs a durable track-operation audit in BuddySwitch state.
 
 ## Do Not Use When
 - The primary deliverable is a PRD, design spec, implementation change, research report, or test report.
@@ -38,14 +38,14 @@ consumes:
 ## Outputs
 - Updated track objects in `buddyswitch/objects/tracks/`.
 - Optional artifact linkage updates.
-- An execution summary file under `runs/summaries/pm/`.
+- A run audit under `buddyswitch/content/runs/`.
 
 ## Steps
 1. Identify the intended track operation from the user task.
 2. Resolve the target track or derive a new track id for creation.
 3. Validate referenced buddy ids, artifact ids, and lifecycle fields.
 4. Apply the track mutation or linkage change through the env store.
-5. Persist a summary describing the operation and outcome.
+5. Persist a run audit describing the operation and outcome.
 
 ## Verification
 - Confirm the requested action is one of `create`, `read`, `list`, `update`, `advance`, `attach`, `detach`, or `archive`.

@@ -35,11 +35,9 @@ Users are not required to provide output paths in task text; runtime defaults ar
 
 - Env manifest: `buddyswitch/manifest.toml`
 - Track objects: `buddyswitch/objects/tracks/*.json`
-- Artifact objects: `buddyswitch/objects/artifacts/*.json`
-- Canonical structured content: `buddyswitch/content/**`
-- Artifact markdown files: `artifacts/*.md` (flat root)
-- Run summaries: `runs/summaries/`
-- Raw dumps: `runs/raw/`
+- Artifact objects with canonical structured content: `buddyswitch/objects/artifacts/*.json`
+- Run audit content: `buddyswitch/content/runs/*.json`
+- Legacy/raw dumps: `runs/raw/`
 
 ## Env APIs
 
@@ -55,10 +53,11 @@ Users are not required to provide output paths in task text; runtime defaults ar
 - BuddySwitch skills are stored under `buddyswitch/skills/**/SKILL.md`.
 - BuddySwitch does not use Codex native `.agents/skills` semantics for these skills.
 - `required_tools` and `required_env` are advisory skill metadata for the host session. They stay visible in `skill_cards`, but they do not reject resolve candidates.
-- `resolve` returns `eligible_skills`, compact `skill_cards`, per-skill track context, artifact defaults, summary defaults, output schema paths, invocation details, and explicit next actions. `resolve` itself does not write BuddySwitch state.
+- `resolve` returns `eligible_skills`, compact `skill_cards`, per-skill track context, output schema paths, invocation details, and explicit next actions. `resolve` itself does not write BuddySwitch state.
 - Single-skill buddies may expose `implicit_skill_id`; multi-skill buddies never auto-select in runtime.
 - The host Codex session chooses `skill_id`, executes the selected skill, and emits structured output.
-- `persist` is a minimal technical gate: it validates selected-skill identity, schema shape, and safe state references, then writes canonical JSON under `buddyswitch/content/` and renders compatibility markdown to `artifacts/*.md` and `runs/summaries/**`.
+- `persist` is a minimal technical gate: it validates selected-skill identity, schema shape, and safe state references, then writes artifact objects with canonical content and run audit JSON under `buddyswitch/content/runs/`.
+- Explicit requests to write BuddySwitch outputs into `artifacts/*.md` or `runs/summaries/**` are rejected. Derived markdown outputs are retired.
 
 ## Framework Docs
 
@@ -80,10 +79,9 @@ The panel is read-only and serves live data from `/api/workspace`:
 
 - tracks from `buddyswitch/objects/tracks/*.json`
 - artifacts from `buddyswitch/objects/artifacts/*.json`
-- artifact inbox from untracked `artifacts/*.md`
-- run summaries from `runs/summaries/`
+- run audits from `buddyswitch/content/runs/*.json`
 
-Current panel behavior stays unchanged in this phase. Markdown artifacts and summaries remain the human-readable compatibility layer even though BuddySwitch now also stores canonical structured payloads under `buddyswitch/content/`.
+The panel reads canonical object state only. It does not depend on any derived markdown compatibility layer.
 
 ## Cleanup
 
@@ -95,9 +93,7 @@ Defaults to dry-run. Add `--execute` to apply deletion.
 
 Cleanup is storage-aware:
 
-- `--agent <buddy>` cleans that buddy's raw/summaries, artifact objects/files, canonical artifact content, and run content with `switch.buddy == <buddy>`
-- `--all-agents` clears BuddySwitch env state for all buddies, including canonical content under `buddyswitch/content/**`
+- `--agent <buddy>` cleans that buddy's raw logs, artifact objects, and run content with `switch.buddy == <buddy>`
+- `--all-agents` clears BuddySwitch env state for all buddies, including run audit content under `buddyswitch/content/runs/`
 - `--project app` only clears `projects/app/.runtime/`
-- `--all-storage` clears the full local storage surface, including `buddyswitch/content/artifacts/*.json` and `buddyswitch/content/runs/*.json`
-
-Orphan canonical artifact content is reported in dry-run output and removed automatically during execute when it falls inside the selected cleanup scope.
+- `--all-storage` clears the full local storage surface, including run audit content under `buddyswitch/content/runs/*.json`

@@ -30,11 +30,11 @@ Validate PM track-manager core operations and artifact auto-register behavior.
 ## Pass Criteria
 
 - PM can run core operations through `track-manager` runtime flow.
-- Non-PM artifact with `context_track_id` auto-registers into `artifact_ids`.
+- Non-PM artifact with `track_id` auto-registers into `artifact_ids`.
 - Object files are persisted under `buddyswitch/objects/`.
 
 ## Fail Signals
 
 - Non-PM can mutate track lifecycle fields.
-- Artifact `context_track_id` does not attach to track.
+- Artifact `track_id` does not attach to track.
 - Track state depends on legacy registry script.

@@ -24,7 +24,7 @@ Validate implemented behavior and produce clear pass/fail/blocked outcomes with 
 - Changed files or commit context.
 - Feature scope and expected behavior.
 - Environment setup and commands.
-- Optional explicit report path.
+- Optional track context or summary hint.
 
 ## Required Output Structure
 
@@ -48,11 +48,12 @@ Every run should return:
 - Follow `framework/docs/track-registry.md`.
 - This buddy can read tracks and write artifact objects.
 - Do not directly mutate track `status/current_buddy/next_buddy/artifact_ids`.
-- Use `context_track_id` when test output belongs to a specific track.
+- Use `track_id` when test output belongs to a specific track.
 
-## Default Artifact Path
+## Default Artifact State
 
-- `artifacts/<artifact-id>--<slug>.md`
+- `buddyswitch/objects/artifacts/<artifact-id>.json`
+- `buddyswitch/content/runs/<run-id>.json`
 
 ## Runtime Output Rule
 

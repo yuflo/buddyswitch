@@ -24,7 +24,7 @@ Implement approved work in project code and report exactly what changed and how 
 - Task description.
 - PRD/design context.
 - Relevant code paths and constraints.
-- Optional explicit output path for implementation summary.
+- Optional track context or summary hint.
 
 ## Required Output Structure
 
@@ -53,8 +53,9 @@ Every run should return:
 - Follow `framework/docs/track-registry.md`.
 - This buddy can read tracks and write artifact objects.
 - Do not directly mutate track `status/current_buddy/next_buddy/artifact_ids`.
-- Use `context_track_id` when implementation output belongs to a specific track.
+- Use `track_id` when implementation output belongs to a specific track.
 
-## Default Artifact Path
+## Default Artifact State
 
-- `artifacts/<artifact-id>--<slug>.md` (when a durable build summary is needed)
+- `buddyswitch/objects/artifacts/<artifact-id>.json`
+- `buddyswitch/content/runs/<run-id>.json`

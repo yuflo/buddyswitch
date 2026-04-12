@@ -35,12 +35,12 @@ consumes:
 - Changed files, commit, or feature scope.
 - Expected behavior.
 - Environment setup and test commands.
-- Optional report output path.
+- Optional track context or summary hint.
 
 ## Outputs
 - A smoke-test artifact with passed, failed, and blocked items plus reproduction notes.
 - Runtime outputs under `projects/app/.runtime/` when needed.
-- A run summary in `runs/summaries/test/` when default runtime persistence is used.
+- A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
 
 ## Steps
 
@@ -61,13 +61,13 @@ consumes:
 - Follow `framework/docs/track-registry.md`.
 - This buddy may read tracks and create/update artifact objects.
 - Do not mutate track lifecycle fields directly.
-- If output belongs to a track, set `context_track_id` on artifact creation/update.
+- If output belongs to a track, set `track_id` on artifact creation/update.
 
 ## Output Path
 
-- Default: `artifacts/<artifact-id>--<slug>.md`
+- Default BuddySwitch state: `buddyswitch/objects/artifacts/<artifact-id>.json`
 - Project runtime-only temporary outputs: `projects/app/.runtime/`
-- If user provides a path, use it as-is.
+- Do not request or rely on `artifacts/*.md` or `runs/summaries/**`.
 
 ## Required Output Fields
 

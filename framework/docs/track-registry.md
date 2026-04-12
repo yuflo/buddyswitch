@@ -28,11 +28,11 @@ Required fields:
 
 - `id`
 - `title`
-- `kind`
-- `path` (`artifacts/<artifact-id>--<slug>.md`)
-- `producer_buddy`
-- `source_skill`
-- `context_track_id` (nullable)
+- `track_id` (nullable)
+- `buddy`
+- `skill_id`
+- `summary`
+- `content` (structured artifact payload)
 - `created_at`
 - `updated_at`
 
@@ -45,7 +45,7 @@ Required fields:
 
 ## Auto-Register Rule
 
-When an artifact is created or updated with `context_track_id`, the system auto-attaches its `id` into the target track's `artifact_ids`.
+When an artifact is created or updated with `track_id`, the system auto-attaches its `id` into the target track's `artifact_ids`.
 
 ## Explicitness Rule
 

@@ -35,12 +35,12 @@ consumes:
 - Task request and expected behavior.
 - PRD and design context when available.
 - Target code paths and technical constraints.
-- Optional summary or artifact output path.
+- Optional track context or summary hint.
 
 ## Outputs
 - Code changes primarily under `projects/app/`.
 - Runtime-only temporary outputs under `projects/app/.runtime/`.
-- A durable implementation artifact and optional summary scaffold from the default runtime.
+- A durable implementation artifact object plus run audit from the default runtime.
 
 ## Steps
 
@@ -61,14 +61,14 @@ consumes:
 - Follow `framework/docs/track-registry.md`.
 - This buddy may read tracks and create/update artifact objects.
 - Do not mutate track lifecycle fields directly.
-- If output belongs to a track, set `context_track_id` on artifact creation/update.
+- If output belongs to a track, set `track_id` on artifact creation/update.
 
 ## Output Path
 
 - Code changes: primarily `projects/app/`
 - Project runtime-only temporary outputs: `projects/app/.runtime/`
-- Durable summary default: `artifacts/<artifact-id>--<slug>.md`
-- If user provides a path, use it as-is.
+- Durable BuddySwitch state: artifact objects under `buddyswitch/objects/artifacts/` and run audits under `buddyswitch/content/runs/`
+- Do not request or rely on `artifacts/*.md` or `runs/summaries/**`.
 
 ## Required Output Fields
 

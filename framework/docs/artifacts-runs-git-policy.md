@@ -11,19 +11,19 @@ Model constraints:
 
 ## 2. Output Boundary
 
-### `artifacts/` (durable markdown outputs)
+### `buddyswitch/objects/artifacts/` (canonical artifact outputs)
 
-Use flat `artifacts/` (`artifacts/*.md`) for outputs that are reusable and worth preserving as project memory:
+Artifact objects are the source of truth for reusable buddy outputs:
 - research reports
 - PRDs
 - design specs
 - implementation reports
 - test reports
-- markdown content files referenced by artifact objects
 
-Object metadata source of truth is not in markdown filenames:
+Object source of truth:
 - tracks: `buddyswitch/objects/tracks/*.json`
-- artifacts: `buddyswitch/objects/artifacts/*.json`
+- artifacts with structured content: `buddyswitch/objects/artifacts/*.json`
+- run audit payloads: `buddyswitch/content/runs/*.json`
 
 ### `runs/raw/` (raw execution dumps)
 
@@ -32,15 +32,6 @@ Use `runs/raw/` for noisy intermediate output that helps a run but is not durabl
 - transient logs
 - debugging traces
 - copied snippets and temporary analysis dumps
-
-### `runs/summaries/` (compact summaries)
-
-Use `runs/summaries/` for optional compressed run summaries when the run produced meaningful progress.
-
-A summary should be:
-- much shorter than raw dumps
-- readable in under a minute
-- enough to understand what changed, why, and what remains
 
 ### `projects/app/.runtime/` (project runtime-only temporary data)
 
@@ -61,12 +52,12 @@ Do not write these files into `projects/app/` source folders.
 - `buddyswitch/skills/**/SKILL.md`
 - `framework/**`
 - `projects/app/**`
-- `artifacts/**`
-- `runs/summaries/**`
 - `evals/**`
 
 ### Do not commit by default
 
+- generated state under `buddyswitch/objects/**` (except `.gitkeep`)
+- generated run audit content under `buddyswitch/content/runs/**` (except `.gitkeep`)
 - `runs/raw/**`
 - `projects/app/.runtime/**` (except `.gitkeep`)
 - temporary logs and traces
@@ -74,20 +65,7 @@ Do not write these files into `projects/app/` source folders.
 - machine-local clutter
 - secret environment files
 
-## 4. Summary Compression Rule
-
-Create or update `runs/summaries/<slug>.md` when a run includes one of:
-- a durable artifact creation or major update
-- code changes with verification results
-- resolved blockers or risk decisions
-
-Keep summary content focused:
-1. what was done
-2. key decisions and risks
-3. changed files or artifact paths
-4. suggested next switch (optional)
-
-## 5. Placement Decision Checklist
+## 4. Placement Decision Checklist
 
 Ask this before writing output:
 1. Will this be useful in future handoff or review?
@@ -95,6 +73,6 @@ Ask this before writing output:
 3. Is this mainly temporary working noise?
 
 Decision:
-- If 1 or 2 is yes, write to `artifacts/`.
+- If 1 or 2 is yes, write to an artifact object under `buddyswitch/objects/artifacts/`.
 - If 3 is yes, write to `runs/raw/`.
-- If the run has meaningful progress, optionally add a compact entry in `runs/summaries/`.
+- If the run should become BuddySwitch state, also write a run audit under `buddyswitch/content/runs/`.

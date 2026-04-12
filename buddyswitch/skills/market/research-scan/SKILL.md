@@ -35,11 +35,11 @@ consumes:
 - Research question or hypothesis.
 - Target market and user context.
 - Provided links, prior artifacts, or required channels.
-- Optional output path.
+- Optional track context or summary hint.
 
 ## Outputs
-- A research artifact with evidence, source traceability, patterns, caveats, and conclusion.
-- A run summary in `runs/summaries/market/` when default runtime persistence is used.
+- A research artifact object with evidence, source traceability, patterns, caveats, and conclusion.
+- A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
 - Explicit notes when login, paywall, or anti-bot constraints degrade evidence quality.
 
 ## Research Defaults
@@ -97,12 +97,12 @@ For each round, run this fixed loop:
 - Follow `framework/docs/track-registry.md`.
 - This buddy may read tracks and create/update artifact objects.
 - Do not mutate track lifecycle fields directly.
-- If output belongs to a track, set `context_track_id` on artifact creation/update.
+- If output belongs to a track, set `track_id` on artifact creation/update.
 
 ## Output Path
 
-- Default: `artifacts/<artifact-id>--<slug>.md`
-- If user provides a path, use it as-is.
+- Default BuddySwitch state: `buddyswitch/objects/artifacts/<artifact-id>.json`
+- Do not request or rely on `artifacts/*.md` or `runs/summaries/**`.
 
 ## Required Output Fields
 

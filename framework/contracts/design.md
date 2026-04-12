@@ -24,7 +24,7 @@ Produce interaction and structure specifications that make implementation decisi
 - PRD or equivalent requirements.
 - Product and platform constraints.
 - Optional references (screenshots, patterns, components).
-- Optional explicit output path.
+- Optional track context or summary hint.
 
 ## Required Output Structure
 
@@ -48,8 +48,9 @@ Every run should return:
 - Follow `framework/docs/track-registry.md`.
 - This buddy can read tracks and write artifact objects.
 - Do not directly mutate track `status/current_buddy/next_buddy/artifact_ids`.
-- Use `context_track_id` when design output belongs to a specific track.
+- Use `track_id` when design output belongs to a specific track.
 
-## Default Artifact Path
+## Default Artifact State
 
-- `artifacts/<artifact-id>--<slug>.md`
+- `buddyswitch/objects/artifacts/<artifact-id>.json`
+- `buddyswitch/content/runs/<run-id>.json`

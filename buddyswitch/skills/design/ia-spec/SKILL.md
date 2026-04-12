@@ -36,12 +36,12 @@ consumes:
 - PRD or equivalent requirement artifact.
 - Platform and component constraints.
 - Existing patterns, references, or screenshots.
-- Optional output path.
+- Optional track context or summary hint.
 
 ## Outputs
-- A design-spec artifact in `artifacts/<artifact-id>--<slug>.md` unless overridden.
+- A design-spec artifact object in `buddyswitch/objects/artifacts/`.
 - A structured IA and interaction spec covering flows, screens, states, and open questions.
-- A design run summary when default runtime persistence is used.
+- A run audit when default runtime persistence is used.
 
 ## Steps
 
@@ -62,12 +62,12 @@ consumes:
 - Follow `framework/docs/track-registry.md`.
 - This buddy may read tracks and create/update artifact objects.
 - Do not mutate track lifecycle fields directly.
-- If output belongs to a track, set `context_track_id` on artifact creation/update.
+- If output belongs to a track, set `track_id` on artifact creation/update.
 
 ## Output Path
 
-- Default: `artifacts/<artifact-id>--<slug>.md`
-- If user provides a path, use it as-is.
+- Default BuddySwitch state: `buddyswitch/objects/artifacts/<artifact-id>.json`
+- Do not request or rely on `artifacts/*.md` or `runs/summaries/**`.
 
 ## Required Output Fields
 

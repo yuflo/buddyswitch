@@ -8,8 +8,7 @@ It shows:
 
 - track objects
 - artifact objects
-- untracked artifact files
-- run summaries
+- run audits
 - copyable switch/cleanup commands
 
 ## Boundary
@@ -28,9 +27,8 @@ The local server serves live data at `/api/workspace` using:
 
 - `buddyswitch/manifest.toml`
 - `buddyswitch/objects/tracks/*.json`
-- `buddyswitch/objects/artifacts/*.json`
-- `artifacts/*.md`
-- `runs/summaries/**/*.md`
+- `buddyswitch/objects/artifacts/*.json` as the artifact source of truth
+- `buddyswitch/content/runs/*.json` as canonical run history
 
 No static snapshot fallback is supported.
 
@@ -51,4 +49,4 @@ Panel can show copyable commands only:
 - `scripts/cleanup_buddyswitch.sh --all-storage`
 
 Commands must not include `--execute` or `--force` by default.
-The cleanup command now covers canonical BuddySwitch content under `buddyswitch/content/**` in addition to compatibility markdown/runtime files.
+The cleanup command covers artifact objects, runtime files, and run audit content under `buddyswitch/content/runs/**`.

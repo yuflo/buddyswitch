@@ -103,7 +103,7 @@
 | `_persist_track_manager` | create/update/advance 中的 buddy/status 值必须合法 | `reject` | track state 一致性 | 保留 | 合理 |
 | `_persist_track_manager` | attach/detach 必须带 `artifact_id` | `reject` | 引用完整性 | 保留 | 合理 |
 | `_persist_track_manager` | update/advance patch 不能为空 | `reject` | 避免空写 | 保留 | 合理 |
-| `_persist_artifact_skill` | resolve payload 中必须存在 artifact defaults | `reject` | 持久化可执行性 | 保留 | 合理 |
+| `_persist_artifact_skill` | 根据 resolved task hints / track context 推导 artifact defaults | `reject` | 持久化可执行性 | 保留 | 合理 |
 
 ### 结论
 

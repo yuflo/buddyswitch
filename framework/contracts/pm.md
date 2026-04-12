@@ -25,7 +25,7 @@ Turn research and product context into a clear product definition that is implem
 - Research artifact(s) and context.
 - User/business requirements.
 - Existing constraints and assumptions.
-- Optional explicit output path.
+- Optional track context or summary hint.
 
 ## Required Output Structure
 
@@ -50,9 +50,10 @@ Every run should return:
 
 - Follow `framework/docs/track-registry.md`.
 - PM owns track lifecycle: create/update/advance/attach/detach.
-- PM can write artifact objects and set `context_track_id`.
+- PM can write artifact objects and set `track_id`.
 - Track state changes should remain explicit in task intent.
 
-## Default Artifact Path
+## Default Artifact State
 
-- `artifacts/<artifact-id>--<slug>.md`
+- `buddyswitch/objects/artifacts/<artifact-id>.json`
+- `buddyswitch/content/runs/<run-id>.json`

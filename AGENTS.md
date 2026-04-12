@@ -19,9 +19,8 @@ Examples:
 
 - Env manifest: `buddyswitch/manifest.toml`
 - Track objects: `buddyswitch/objects/tracks/*.json`
-- Artifact objects: `buddyswitch/objects/artifacts/*.json`
-- Canonical structured content: `buddyswitch/content/**`
-- Artifact markdown files: `artifacts/*.md` (flat root)
+- Artifact objects with canonical structured content: `buddyswitch/objects/artifacts/*.json`
+- Run audit content: `buddyswitch/content/runs/*.json`
 
 ## Required Behavior
 
@@ -36,7 +35,7 @@ When user sends `switch <buddy>: <task>`:
    - other buddies can read tracks and create/update artifacts
 6. Resolve through `scripts/switch_runtime.py resolve` to get `eligible_skills`, skill cards, context, defaults, and output schema paths.
 7. Let the host Codex session choose one `skill_id` from `eligible_skills`, then use `buddyswitch/skills/<buddy>/<skill>/SKILL.md`.
-8. Persist through `scripts/switch_runtime.py persist` when you need BuddySwitch state plus default artifact/summary persistence.
+8. Persist through `scripts/switch_runtime.py persist` when you need BuddySwitch state and canonical run audit persistence.
 9. Keep outputs explicit:
    - execution summary
    - working notes
@@ -45,10 +44,10 @@ When user sends `switch <buddy>: <task>`:
 
 Default runtime behavior:
 
-- Artifact path: `artifacts/<artifact-id>--<slug>.md`
-- Summary path: `runs/summaries/<buddy>/<artifact-id>.md` when skill `auto_summary=true`
-- Users do not need to provide output file paths unless they want explicit overrides.
-- Current markdown artifacts and summaries remain the panel-facing compatibility layer.
+- Artifact object path: `buddyswitch/objects/artifacts/<artifact-id>.json`
+- Run audit path: `buddyswitch/content/runs/<run-id>.json`
+- Users do not need to provide output file paths.
+- Requests to write BuddySwitch-managed outputs into `artifacts/*.md` or `runs/summaries/**` must be rejected.
 
 ## Switch Rules
 
@@ -63,16 +62,16 @@ Default runtime behavior:
 - `framework/console/` is read-only and uses live `/api/workspace` data.
 - Interface must not invoke buddies, LLMs, cleanup, or hidden state writes.
 - Tracks come from `buddyswitch/objects/tracks/*.json`.
-- Artifact inbox is diagnostics for `artifacts/*.md` files that are not represented by artifact objects.
+- Artifacts come from `buddyswitch/objects/artifacts/*.json`.
+- Run history comes from `buddyswitch/content/runs/*.json`.
 - Refresh by running `python3 scripts/serve_context_panel.py` and clicking `Refresh workspace`.
 
 ## File Placement
 
-- Artifact markdown files: `artifacts/*.md` (flat)
-- Run summaries: `runs/summaries/`
+- Run audit content: `buddyswitch/content/runs/`
 - Raw dumps: `runs/raw/`
 - Track objects: `buddyswitch/objects/tracks/*.json`
-- Artifact objects: `buddyswitch/objects/artifacts/*.json`
+- Artifact objects with canonical structured content: `buddyswitch/objects/artifacts/*.json`
 - Project runtime-only temporary data: `projects/app/.runtime/`
 
 ## Project Code Location
