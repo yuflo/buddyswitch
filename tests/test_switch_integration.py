@@ -43,6 +43,7 @@ class SwitchFlowIntegrationTests(unittest.TestCase):
         self.assertEqual(parsed["normalized_text"], routed["invocation"]["normalized_text"])
         self.assertEqual(parsed["normalized_text"], resolved["invocation"]["normalized_text"])
         self.assertEqual(resolved["implicit_skill_id"], "implement-task")
+        self.assertEqual(resolved["task_resolution"]["mode"], "create")
 
         result = {
             "execution_summary": "Implemented the requested change and verified the core path.",
@@ -64,11 +65,14 @@ class SwitchFlowIntegrationTests(unittest.TestCase):
 
         self.assertTrue(persisted["ok"])
         self.assertEqual(persisted["skill_id"], "implement-task")
+        self.assertEqual(persisted["artifact_ids"], [persisted["artifact_id"]])
 
-        self._remember(persisted["paths"]["artifact"])
+        self._remember(persisted["paths"]["artifacts"][0])
+        self._remember(persisted["paths"]["task"])
         self._remember(persisted["paths"]["run"])
 
-        self.assertIn(persisted["paths"]["artifact"], persisted["writes"])
+        self.assertIn(persisted["paths"]["artifacts"][0], persisted["writes"])
+        self.assertIn(persisted["paths"]["task"], persisted["writes"])
         self.assertIn(persisted["paths"]["run"], persisted["writes"])
         self.assertNotIn("artifact_markdown", persisted["paths"])
         self.assertNotIn("summary", persisted["paths"])

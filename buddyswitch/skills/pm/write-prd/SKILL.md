@@ -2,7 +2,7 @@
 name: write-prd
 description: Produce an MVP PRD from research and requirements, aligned with the PM contract.
 version: "2.0"
-track_mode: required
+track_mode: optional
 default_artifact_kind: prd
 auto_summary: true
 output_schema: framework/schemas/pm/write-prd.json
@@ -27,15 +27,15 @@ consumes:
 - The task references product goals, non-goals, users, scenarios, scope, dependencies, risks, or open questions.
 
 ## Do Not Use When
-- The task is primarily about track lifecycle administration such as create/advance/attach/archive.
+- The task is primarily about track lifecycle administration such as create, advance, update, or archive.
 - The user wants design structure, implementation work, market research, or smoke testing as the main outcome.
-- There is no valid track context and the user is not actually asking for a PRD.
+- There is no clear product-definition demand and the user is only asking for track lifecycle administration.
 
 ## Inputs
 - Research artifacts and product context.
-- Track context and existing artifact ids when relevant.
+- Track context and existing task/artifact context when relevant.
 - Constraints, assumptions, and requirements.
-- Optional track context hint.
+- Optional track context or summary hint.
 
 ## Outputs
 - A PRD artifact object in `buddyswitch/objects/artifacts/`.
@@ -52,20 +52,20 @@ consumes:
 6. Write the PRD using the PRD template.
 
 ## Verification
-- Confirm a valid track context exists because this skill requires one.
+- Use track context when available, but keep the PRD demand clear enough to stand on its own.
 - Confirm the output is product-definition content rather than design or implementation detail.
 - Confirm scope is split clearly enough for downstream buddies to act on it.
 
 ## Track/Object Handling
 
 - Follow `framework/docs/track-registry.md`.
-- PM can create/update/advance tracks and attach/detach artifact IDs.
-- PM can create/update artifact objects and set `track_id`.
-- Track creation/progression should stay explicit with user intent.
+- PM can create/update/advance/archive tracks through track-manager when needed.
+- PM can create/update artifact objects through the resolved task.
+- Track creation/progression should stay explicit in demand text or track-manager output.
 
 ## Output Path
 
-- Default BuddySwitch state: `buddyswitch/objects/artifacts/<artifact-id>.json`
+- Default BuddySwitch state: `buddyswitch/objects/tasks/<task-id>.json`, `buddyswitch/objects/artifacts/<artifact-id>.json`, and `buddyswitch/content/runs/<run-id>.json`
 - Do not request or rely on `artifacts/*.md` or `runs/summaries/**`.
 
 ## Required Output Fields
@@ -87,11 +87,11 @@ consumes:
 
 ## Examples
 - `switch pm: Draft the MVP PRD for onboarding rewrite track`
-- `switch pm: Continue track track-growth-loop and define P0/P1 scope`
+- `switch pm -> track-growth-loop: Continue product definition and define P0/P1 scope`
 - `switch pm: Write acceptance criteria and risks for the creator livestream MVP`
 
 ## Counterexamples
-- `switch pm: create creator-livestream track and set next_buddy design`
+- `switch pm -> track-creator-livestream: create track and set next_buddy design`
 - `switch design: produce IA spec for the onboarding rewrite`
 - `switch market: research competitor positioning for creator livestream tools`
 

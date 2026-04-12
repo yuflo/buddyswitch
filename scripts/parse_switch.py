@@ -11,8 +11,8 @@ from pathlib import Path
 
 from env_manifest import DEFAULT_MANIFEST, ManifestError, buddies_by_id, load_manifest
 
-SYNTAX = "switch <buddy>: <task>"
-EXAMPLE = "switch pm: Continue track-live-space track and draft the MVP PRD"
+SYNTAX = "switch <buddy>(<task-id>) -> <track-id>: <demand>"
+EXAMPLE = "switch pm(task-live-space) -> track-live-space: Draft the MVP PRD and refine acceptance criteria"
 
 
 def error(code: str, message: str, extra: dict | None = None) -> dict:
@@ -28,12 +28,26 @@ def error(code: str, message: str, extra: dict | None = None) -> dict:
     return payload
 
 
-def _build_invocation(raw_text: str, buddy: str, task: str) -> dict:
-    normalized_text = f"switch {buddy}: {task}"
+def _build_invocation(
+    raw_text: str,
+    *,
+    buddy: str,
+    demand: str,
+    task_id: str | None,
+    track_id: str | None,
+) -> dict:
+    head = f"switch {buddy}"
+    if task_id:
+        head = f"{head}({task_id})"
+    if track_id:
+        head = f"{head} -> {track_id}"
+    normalized_text = f"{head}: {demand}"
     return {
         "intent": "switch",
         "buddy": buddy,
-        "task": task,
+        "task_id": task_id,
+        "track_id": track_id,
+        "demand": demand,
         "raw_text": raw_text,
         "normalized_text": normalized_text,
     }
@@ -55,7 +69,10 @@ def parse_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict:
             {"expected_syntax": SYNTAX, "example": EXAMPLE},
         )
 
-    match = re.match(r"^switch\s+([a-z][a-z0-9-]*)\s*:(.*)$", raw)
+    match = re.match(
+        r"^switch\s+([a-z][a-z0-9-]*)(?:\s*\(\s*([a-z0-9][a-z0-9-]*)\s*\))?(?:\s*->\s*([a-z0-9][a-z0-9-]*))?\s*:(.*)$",
+        raw,
+    )
     if not match:
         return error(
             "E_INVALID_SYNTAX",
@@ -63,8 +80,10 @@ def parse_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict:
             {"expected_syntax": SYNTAX, "example": EXAMPLE},
         )
 
-    agent = match.group(1)
-    task = match.group(2).strip()
+    agent = match.group(1).strip().lower()
+    task_id = match.group(2).strip().lower() if match.group(2) else None
+    track_id = match.group(3).strip().lower() if match.group(3) else None
+    demand = match.group(4).strip()
 
     manifest = load_manifest(manifest_path)
     valid_agents = sorted(buddies_by_id(manifest).keys())
@@ -79,19 +98,27 @@ def parse_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict:
             },
         )
 
-    if not task:
+    if not demand:
         return error(
-            "E_EMPTY_TASK",
-            "Task is empty. Provide content after ':'.",
+            "E_EMPTY_DEMAND",
+            "Demand is empty. Provide content after ':'.",
             {"expected_syntax": SYNTAX, "example": EXAMPLE},
         )
 
-    invocation = _build_invocation(text, agent, task)
+    invocation = _build_invocation(
+        text,
+        buddy=agent,
+        demand=demand,
+        task_id=task_id,
+        track_id=track_id,
+    )
     return {
         "ok": True,
         "agent": agent,
         "buddy": agent,
-        "task": task,
+        "task_id": task_id,
+        "track_id": track_id,
+        "demand": demand,
         "intent": invocation["intent"],
         "raw_text": invocation["raw_text"],
         "normalized_text": invocation["normalized_text"],

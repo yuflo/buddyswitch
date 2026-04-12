@@ -13,7 +13,7 @@ Model constraints:
 
 ### `buddyswitch/objects/artifacts/` (canonical artifact outputs)
 
-Artifact objects are the source of truth for reusable buddy outputs:
+Task objects group runs and artifact objects. Artifact objects are the source of truth for reusable buddy outputs:
 - research reports
 - PRDs
 - design specs
@@ -22,6 +22,7 @@ Artifact objects are the source of truth for reusable buddy outputs:
 
 Object source of truth:
 - tracks: `buddyswitch/objects/tracks/*.json`
+- tasks: `buddyswitch/objects/tasks/*.json`
 - artifacts with structured content: `buddyswitch/objects/artifacts/*.json`
 - run audit payloads: `buddyswitch/content/runs/*.json`
 
@@ -75,4 +76,4 @@ Ask this before writing output:
 Decision:
 - If 1 or 2 is yes, write to an artifact object under `buddyswitch/objects/artifacts/`.
 - If 3 is yes, write to `runs/raw/`.
-- If the run should become BuddySwitch state, also write a run audit under `buddyswitch/content/runs/`.
+- If the run should become BuddySwitch state, persist it through a task object and write a run audit under `buddyswitch/content/runs/`.

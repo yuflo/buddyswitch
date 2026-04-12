@@ -7,6 +7,7 @@ The context panel is a read-only workspace viewer.
 It shows:
 
 - track objects
+- task objects
 - artifact objects
 - run audits
 - copyable switch/cleanup commands
@@ -27,6 +28,7 @@ The local server serves live data at `/api/workspace` using:
 
 - `buddyswitch/manifest.toml`
 - `buddyswitch/objects/tracks/*.json`
+- `buddyswitch/objects/tasks/*.json`
 - `buddyswitch/objects/artifacts/*.json` as the artifact source of truth
 - `buddyswitch/content/runs/*.json` as canonical run history
 
@@ -49,4 +51,4 @@ Panel can show copyable commands only:
 - `scripts/cleanup_buddyswitch.sh --all-storage`
 
 Commands must not include `--execute` or `--force` by default.
-The cleanup command covers artifact objects, runtime files, and run audit content under `buddyswitch/content/runs/**`.
+The cleanup command covers task objects, artifact objects, runtime files, and run audit content under `buddyswitch/content/runs/**`.

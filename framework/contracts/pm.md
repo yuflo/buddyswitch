@@ -49,11 +49,12 @@ Every run should return:
 ## Track Object Rule
 
 - Follow `framework/docs/track-registry.md`.
-- PM owns track lifecycle: create/update/advance/attach/detach.
-- PM can write artifact objects and set `track_id`.
-- Track state changes should remain explicit in task intent.
+- PM owns track lifecycle: create/read/list/update/advance/archive.
+- PM can write artifact objects through the resolved task and bind tasks to tracks through track-manager operations.
+- Track state changes should remain explicit in demand text or track-manager output.
 
-## Default Artifact State
+## Default BuddySwitch State
 
+- `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - `buddyswitch/content/runs/<run-id>.json`

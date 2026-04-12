@@ -51,11 +51,12 @@ Every run should return:
 ## Track Object Rule
 
 - Follow `framework/docs/track-registry.md`.
-- This buddy can read tracks and write artifact objects.
-- Do not directly mutate track `status/current_buddy/next_buddy/artifact_ids`.
-- Use `track_id` when implementation output belongs to a specific track.
+- This buddy can read tracks and write artifact objects through the resolved task.
+- Do not directly mutate track `status/current_buddy/next_buddy/task_ids`.
+- Use an explicit switch track target or existing task binding when implementation output belongs to a specific track.
 
-## Default Artifact State
+## Default BuddySwitch State
 
+- `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - `buddyswitch/content/runs/<run-id>.json`

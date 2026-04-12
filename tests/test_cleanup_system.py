@@ -49,14 +49,14 @@ id = "market"
 label = "Market"
 scope = "Market scope"
 skills = ["research-scan"]
-permissions = ["artifact.read", "artifact.create", "artifact.update"]
+permissions = ["task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
 
 [[buddies]]
 id = "pm"
 label = "PM"
 scope = "PM scope"
 skills = ["track-manager"]
-permissions = ["track.read", "track.create", "track.update", "artifact.read", "artifact.delete"]
+permissions = ["track.read", "track.create", "track.update", "task.read", "task.create", "task.update", "artifact.read", "artifact.delete"]
 """.strip()
             + "\n",
         )
@@ -69,6 +69,7 @@ permissions = ["track.read", "track.create", "track.update", "artifact.read", "a
             "runs/summaries/pm",
             "projects/app/.runtime",
             "buddyswitch/objects/tracks",
+            "buddyswitch/objects/tasks",
             "buddyswitch/objects/artifacts",
             "buddyswitch/content/runs",
         ):
@@ -90,8 +91,40 @@ permissions = ["track.read", "track.create", "track.update", "artifact.read", "a
                 "status": "active",
                 "current_buddy": "pm",
                 "next_buddy": None,
-                "artifact_ids": ["art-market", "art-pm"],
+                "task_ids": ["task-market", "task-pm"],
                 "summary": "Demo track",
+                "updated_at": "2026-04-11T10:00:00+08:00",
+            },
+        )
+        self._write_json(
+            "buddyswitch/objects/tasks/task-market.json",
+            {
+                "id": "task-market",
+                "title": "Market Task",
+                "buddy": "market",
+                "status": "active",
+                "track_id": "track-demo",
+                "run_ids": ["run-market"],
+                "artifact_ids": ["art-market"],
+                "latest_artifact_id": "art-market",
+                "summary": "Market task",
+                "created_at": "2026-04-11T10:00:00+08:00",
+                "updated_at": "2026-04-11T10:00:00+08:00",
+            },
+        )
+        self._write_json(
+            "buddyswitch/objects/tasks/task-pm.json",
+            {
+                "id": "task-pm",
+                "title": "PM Task",
+                "buddy": "pm",
+                "status": "active",
+                "track_id": "track-demo",
+                "run_ids": ["run-pm"],
+                "artifact_ids": ["art-pm"],
+                "latest_artifact_id": "art-pm",
+                "summary": "PM task",
+                "created_at": "2026-04-11T10:00:00+08:00",
                 "updated_at": "2026-04-11T10:00:00+08:00",
             },
         )
@@ -100,7 +133,8 @@ permissions = ["track.read", "track.create", "track.update", "artifact.read", "a
             {
                 "id": "art-market",
                 "title": "Market Artifact",
-                "track_id": "track-demo",
+                "task_id": "task-market",
+                "source_run_id": "run-market",
                 "buddy": "market",
                 "skill_id": "research-scan",
                 "summary": "Market summary",
@@ -114,7 +148,8 @@ permissions = ["track.read", "track.create", "track.update", "artifact.read", "a
             {
                 "id": "art-pm",
                 "title": "PM Artifact",
-                "track_id": "track-demo",
+                "task_id": "task-pm",
+                "source_run_id": "run-pm",
                 "buddy": "pm",
                 "skill_id": "track-manager",
                 "summary": "PM summary",
@@ -124,23 +159,33 @@ permissions = ["track.read", "track.create", "track.update", "artifact.read", "a
             },
         )
         self._write_text("buddyswitch/objects/artifacts/bad-object.json", "{not-json}\n")
+        self._write_text("buddyswitch/objects/tasks/bad-task.json", "{not-json}\n")
 
         self._write_json(
             "buddyswitch/content/runs/run-market.json",
             {
                 "run_id": "run-market",
                 "timestamp": "2026-04-11T10:00:00+08:00",
-                "switch": {"buddy": "market", "task": "research"},
+                "switch": {
+                    "buddy": "market",
+                    "demand": "research",
+                    "task_id": "task-market",
+                    "track_id": "track-demo",
+                },
+                "resolved_task_id": "task-market",
+                "effective_track_id": "track-demo",
                 "skill_id": "research-scan",
-                "artifact_id": "art-market",
+                "artifact_ids": ["art-market"],
                 "track_id": "track-demo",
                 "paths": {
-                    "artifact": "buddyswitch/objects/artifacts/art-market.json",
+                    "artifacts": ["buddyswitch/objects/artifacts/art-market.json"],
+                    "task": "buddyswitch/objects/tasks/task-market.json",
                     "track": "buddyswitch/objects/tracks/track-demo.json",
                     "run": "buddyswitch/content/runs/run-market.json",
                 },
                 "writes": [
                     "buddyswitch/objects/artifacts/art-market.json",
+                    "buddyswitch/objects/tasks/task-market.json",
                     "buddyswitch/objects/tracks/track-demo.json",
                     "buddyswitch/content/runs/run-market.json",
                 ],
@@ -152,15 +197,26 @@ permissions = ["track.read", "track.create", "track.update", "artifact.read", "a
             {
                 "run_id": "run-pm",
                 "timestamp": "2026-04-11T10:00:00+08:00",
-                "switch": {"buddy": "pm", "task": "manage track"},
+                "switch": {
+                    "buddy": "pm",
+                    "demand": "manage track",
+                    "task_id": "task-pm",
+                    "track_id": "track-demo",
+                },
                 "skill_id": "track-manager",
+                "resolved_task_id": "task-pm",
+                "effective_track_id": "track-demo",
+                "artifact_ids": ["art-pm"],
                 "track_action": "update",
                 "track_id": "track-demo",
                 "paths": {
+                    "artifacts": ["buddyswitch/objects/artifacts/art-pm.json"],
+                    "task": "buddyswitch/objects/tasks/task-pm.json",
                     "track": "buddyswitch/objects/tracks/track-demo.json",
                     "run": "buddyswitch/content/runs/run-pm.json",
                 },
                 "writes": [
+                    "buddyswitch/objects/tasks/task-pm.json",
                     "buddyswitch/objects/tracks/track-demo.json",
                     "buddyswitch/content/runs/run-pm.json",
                 ],
@@ -194,14 +250,18 @@ class CleanupBackendTests(unittest.TestCase):
         self.assertEqual(plan["scope"], "agent")
         self.assertEqual(plan["buddy"], "market")
         self.assertIn("art-market", plan["artifact_object_ids"])
+        self.assertIn("task-market", plan["task_object_ids"])
         self.assertIn("run-market", plan["run_ids"])
         self.assertIn("buddyswitch/objects/artifacts/art-market.json", plan["delete_paths"])
+        self.assertIn("buddyswitch/objects/tasks/task-market.json", plan["delete_paths"])
         self.assertIn("buddyswitch/content/runs/run-market.json", plan["delete_paths"])
         self.assertNotIn("artifacts/art-market--demo.md", plan["delete_paths"])
         self.assertNotIn("artifacts/art-pm--demo.md", plan["delete_paths"])
+        self.assertNotIn("buddyswitch/objects/tasks/task-pm.json", plan["delete_paths"])
         self.assertNotIn("buddyswitch/content/runs/run-pm.json", plan["delete_paths"])
         self.assertTrue(any("bad-run.json" in warning for warning in plan["warnings"]))
         self.assertTrue(any("bad-object.json" in warning for warning in plan["warnings"]))
+        self.assertTrue(any("bad-task.json" in warning for warning in plan["warnings"]))
 
     def test_agent_execute_detaches_track_and_preserves_other_buddy_files(self) -> None:
         plan = env_cleanup.build_cleanup_plan(
@@ -214,13 +274,15 @@ class CleanupBackendTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertFalse(self.fixture.exists("buddyswitch/objects/artifacts/art-market.json"))
+        self.assertFalse(self.fixture.exists("buddyswitch/objects/tasks/task-market.json"))
         self.assertFalse(self.fixture.exists("buddyswitch/content/runs/run-market.json"))
         self.assertTrue(self.fixture.exists("artifacts/art-market--demo.md"))
         self.assertTrue(self.fixture.exists("buddyswitch/objects/artifacts/art-pm.json"))
+        self.assertTrue(self.fixture.exists("buddyswitch/objects/tasks/task-pm.json"))
         self.assertTrue(self.fixture.exists("buddyswitch/content/runs/run-pm.json"))
         self.assertTrue(self.fixture.exists("buddyswitch/content/runs/bad-run.json"))
         track = self.fixture.read_json("buddyswitch/objects/tracks/track-demo.json")
-        self.assertEqual(track["artifact_ids"], ["art-pm"])
+        self.assertEqual(track["task_ids"], ["task-pm"])
         self.assertTrue(self.fixture.exists("buddyswitch/content/runs/.gitkeep"))
 
     def test_all_storage_execute_deletes_all_generated_state_and_restores_skeleton(self) -> None:
@@ -233,6 +295,7 @@ class CleanupBackendTests(unittest.TestCase):
 
         self.assertIn("buddyswitch/content/runs/run-market.json", plan["delete_paths"])
         self.assertIn("projects/app/.runtime/session.json", plan["delete_paths"])
+        self.assertIn("buddyswitch/objects/tasks/task-market.json", plan["delete_paths"])
         self.assertNotIn("artifacts/art-market--demo.md", plan["delete_paths"])
         self.assertNotIn("runs/summaries/market/market.md", plan["delete_paths"])
         result = env_cleanup.execute_cleanup_plan(plan)
@@ -243,6 +306,7 @@ class CleanupBackendTests(unittest.TestCase):
             "buddyswitch/content/runs/run-pm.json",
             "buddyswitch/content/runs/bad-run.json",
             "buddyswitch/objects/artifacts/art-market.json",
+            "buddyswitch/objects/tasks/task-market.json",
             "buddyswitch/objects/tracks/track-demo.json",
         ):
             self.assertFalse(self.fixture.exists(relative_path))
@@ -252,6 +316,7 @@ class CleanupBackendTests(unittest.TestCase):
             "runs/raw/.gitkeep",
             "projects/app/.runtime/.gitkeep",
             "buddyswitch/objects/tracks/.gitkeep",
+            "buddyswitch/objects/tasks/.gitkeep",
             "buddyswitch/objects/artifacts/.gitkeep",
             "buddyswitch/content/runs/.gitkeep",
         ):

@@ -23,7 +23,8 @@ Across current coding-agent ecosystems, the common pattern is:
 
 BuddySwitch follows that pattern, but keeps one extra control layer:
 
-- user chooses the buddy explicitly with `switch <buddy>: <task>`
+- user chooses the buddy explicitly with `switch <buddy>...: <demand>`
+- BuddySwitch treats the text after `:` as demand text; task objects are resolved or created by the runtime
 - BuddySwitch constrains the host model to that buddy's allowlisted skill set while keeping invocation parsing tolerant to minor CLI formatting variation
 
 ## Layer Responsibilities
@@ -38,12 +39,12 @@ BuddySwitch follows that pattern, but keeps one extra control layer:
 
 ### BuddySwitch
 
-- parse `switch <buddy>: <task>`
+- parse supported `switch <buddy>...: <demand>` forms
 - load manifest, buddy scope, object authority metadata, and allowed skills
 - apply only the deterministic gates needed for safe resolution
-- resolve track context and reject retired markdown output requests
+- resolve task context, optional track context, and reject retired markdown output requests
 - validate structured outputs at persistence time
-- write track/artifact state and run audit payloads
+- write task/artifact/track state and run audit payloads
 
 In this model:
 
@@ -69,7 +70,7 @@ Required front matter:
 
 - `name`
 - `description`
-- `track_mode`
+- `track_mode` (advisory metadata; not a resolve gate)
 - `default_artifact_kind`
 - `auto_summary`
 - `output_schema`
@@ -105,6 +106,7 @@ Instead:
 
 - `resolve` reports `required_output_schema_by_skill`
 - the host emits a structured payload that matches that schema
+- `persist` creates or reuses the resolved task for the run
 - `persist` writes canonical artifact content into artifact objects
 - `persist` writes run audit JSON to `buddyswitch/content/runs/**`
 - BuddySwitch does not maintain a derived markdown compatibility layer

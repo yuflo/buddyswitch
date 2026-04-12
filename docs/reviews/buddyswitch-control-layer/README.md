@@ -33,13 +33,16 @@
 6. [06-optimization-backlog.md](./06-optimization-backlog.md)
 7. [07-implementation-status.md](./07-implementation-status.md)
 8. [08-compatibility-debt-cleanup-plan.md](./08-compatibility-debt-cleanup-plan.md)
+9. [09-phase-2c-direct-convergence-plan.md](./09-phase-2c-direct-convergence-plan.md)
+10. [10-phase-3-task-centric-runtime-plan.md](./10-phase-3-task-centric-runtime-plan.md)
+11. [11-phase-3-implementation-handoff.md](./11-phase-3-implementation-handoff.md)
 
 ## 4. 核心结论摘要
 
-### 4.1 当前控制层已经形成两套不同倾向
+### 4.1 审查早期识别出两套不同倾向
 
 - 一套倾向是 LLM-native：
-  - 用户通过 `switch <buddy>: <task>` 明确表达意图
+  - 用户通过 `switch <buddy>...: <demand>` 明确表达意图
   - host Codex session 负责阅读 skill、执行工作流、生成结构化结果
 - 另一套倾向是 rule-heavy：
   - parser、runtime、manifest、store 中存在较多显式校验与 eligibility gate
@@ -75,6 +78,7 @@
 
 - [07-implementation-status.md](./07-implementation-status.md) 记录了哪些结论已经落地、哪些被降级为 metadata、哪些明确不做
 - [08-compatibility-debt-cleanup-plan.md](./08-compatibility-debt-cleanup-plan.md) 记录兼容包袱清理的收口状态与与 09 的关系
+- [10-phase-3-task-centric-runtime-plan.md](./10-phase-3-task-centric-runtime-plan.md) 记录 task-centric 运行时改造的完整执行计划
 - 后续迭代应先看这份状态页，再决定是否继续修改控制层
 
 ## 5. 审查对象清单

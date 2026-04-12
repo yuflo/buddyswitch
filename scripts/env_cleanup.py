@@ -7,21 +7,92 @@ import argparse
 import json
 import shutil
 import sys
-import tomllib
 from pathlib import Path
 from typing import Any
 
+try:
+    from env_manifest import ManifestError, load_manifest as _load_manifest_full
+except ModuleNotFoundError:  # pragma: no cover - exercised in shell integration fixture
+    class ManifestError(ValueError):
+        """Manifest validation error."""
+
+    _load_manifest_full = None
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 CONFIRM_PHRASE = "DELETE_BUDDYSWITCH_DATA"
 CATEGORY_ORDER = (
     "artifact_objects",
+    "task_objects",
     "run_content",
     "run_raw",
     "track_objects",
     "project_runtime",
 )
+
+
+def _strip_toml_comment(line: str) -> str:
+    in_single = False
+    in_double = False
+    escaped = False
+    output: list[str] = []
+    for char in line:
+        if escaped:
+            output.append(char)
+            escaped = False
+            continue
+        if char == "\\" and in_double:
+            output.append(char)
+            escaped = True
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            output.append(char)
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            output.append(char)
+            continue
+        if char == "#" and not in_single and not in_double:
+            break
+        output.append(char)
+    return "".join(output)
+
+
+def _strip_toml_quotes(value: str) -> str:
+    value = value.strip()
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        return value[1:-1].strip()
+    return value
+
+
+def _load_valid_buddies_minimal(manifest_path: Path) -> set[str]:
+    if not manifest_path.exists():
+        raise ManifestError(f"Manifest not found: {manifest_path}")
+
+    buddy_ids: set[str] = set()
+    current_section: str | None = None
+    for raw_line in manifest_path.read_text(encoding="utf-8").splitlines():
+        line = _strip_toml_comment(raw_line).strip()
+        if not line:
+            continue
+        if line.startswith("[[") and line.endswith("]]"):
+            current_section = line[2:-2].strip()
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current_section = None
+            continue
+        if current_section != "buddies" or "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        if key.strip() != "id":
+            continue
+        buddy_id = _strip_toml_quotes(raw_value.strip())
+        if buddy_id:
+            buddy_ids.add(buddy_id)
+    if not buddy_ids:
+        raise ManifestError("manifest must define at least one [[buddies]] id")
+    return buddy_ids
 
 
 def rel(root: Path, path: Path) -> str:
@@ -54,12 +125,19 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def load_valid_buddies(manifest_path: Path) -> set[str]:
-    data = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
-    return {
-        buddy["id"]
-        for buddy in data.get("buddies", [])
-        if isinstance(buddy, dict) and isinstance(buddy.get("id"), str) and buddy["id"].strip()
-    }
+    if _load_manifest_full is not None:
+        try:
+            data = _load_manifest_full(manifest_path)
+            ids = {
+                buddy["id"]
+                for buddy in data.get("buddies", [])
+                if isinstance(buddy, dict) and isinstance(buddy.get("id"), str) and buddy["id"].strip()
+            }
+            if ids:
+                return ids
+        except (ManifestError, OSError, ValueError, json.JSONDecodeError):
+            pass
+    return _load_valid_buddies_minimal(manifest_path)
 
 
 def new_plan(scope: str, *, buddy: str | None = None) -> dict[str, Any]:
@@ -69,10 +147,12 @@ def new_plan(scope: str, *, buddy: str | None = None) -> dict[str, Any]:
         "buddy": buddy,
         "delete_paths": [],
         "artifact_object_ids": [],
+        "task_object_ids": [],
         "run_ids": [],
         "warnings": [],
         "counts_by_category": counts,
         "artifact_records": [],
+        "task_records": [],
         "run_records": [],
         "direct_delete_paths": [],
     }
@@ -114,10 +194,41 @@ def discover_artifact_objects(root: Path) -> tuple[list[dict[str, Any]], list[di
         record = {
             "id": artifact_id,
             "producer_buddy": producer_buddy,
-            "track_id": payload.get("track_id"),
+            "task_id": payload.get("task_id"),
             "object_path": relative,
         }
         valid.append(record)
+    return valid, invalid
+
+
+def discover_task_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    valid: list[dict[str, Any]] = []
+    invalid: list[dict[str, Any]] = []
+    for path in iter_files(root, "buddyswitch/objects/tasks"):
+        relative = rel(root, path)
+        try:
+            payload = read_json(path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            invalid.append({"path": relative, "reason": f"invalid task object JSON: {exc}"})
+            continue
+
+        task_id = payload.get("id")
+        task_buddy = payload.get("buddy")
+        if not isinstance(task_id, str) or not task_id:
+            invalid.append({"path": relative, "reason": "task object is missing id"})
+            continue
+        if not isinstance(task_buddy, str) or not task_buddy:
+            invalid.append({"path": relative, "reason": f"task '{task_id}' is missing buddy"})
+            continue
+
+        valid.append(
+            {
+                "id": task_id,
+                "buddy": task_buddy,
+                "track_id": payload.get("track_id"),
+                "object_path": relative,
+            }
+        )
     return valid, invalid
 
 
@@ -162,6 +273,16 @@ def add_indexed_artifact(plan: dict[str, Any], record: dict[str, Any]) -> None:
     add_path(plan, object_path, "artifact_objects")
 
 
+def add_indexed_task(plan: dict[str, Any], record: dict[str, Any]) -> None:
+    root = Path(plan["repo_root"])
+    if record["id"] not in plan["task_object_ids"]:
+        plan["task_object_ids"].append(record["id"])
+        plan["task_records"].append(record)
+
+    object_path = root / record["object_path"]
+    add_path(plan, object_path, "task_objects")
+
+
 def add_run_content(plan: dict[str, Any], record: dict[str, Any]) -> None:
     root = Path(plan["repo_root"])
     if record["run_id"] not in plan["run_ids"]:
@@ -183,7 +304,7 @@ def delete_relative_path(root: Path, relative_path: str) -> None:
     resolved.unlink()
 
 
-def detach_artifact_from_track(root: Path, track_id: str | None, artifact_id: str) -> None:
+def detach_task_from_track(root: Path, track_id: str | None, task_id: str) -> None:
     if not isinstance(track_id, str) or not track_id:
         return
     track_path = root / "buddyswitch" / "objects" / "tracks" / f"{track_id}.json"
@@ -193,6 +314,26 @@ def detach_artifact_from_track(root: Path, track_id: str | None, artifact_id: st
         payload = read_json(track_path)
     except (OSError, ValueError, json.JSONDecodeError):
         return
+    task_ids = payload.get("task_ids")
+    if not isinstance(task_ids, list):
+        return
+    filtered = [item for item in task_ids if item != task_id]
+    if filtered == task_ids:
+        return
+    payload["task_ids"] = filtered
+    write_json(track_path, payload)
+
+
+def detach_artifact_from_task(root: Path, task_id: str | None, artifact_id: str) -> None:
+    if not isinstance(task_id, str) or not task_id:
+        return
+    task_path = root / "buddyswitch" / "objects" / "tasks" / f"{task_id}.json"
+    if not task_path.exists():
+        return
+    try:
+        payload = read_json(task_path)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return
     artifact_ids = payload.get("artifact_ids")
     if not isinstance(artifact_ids, list):
         return
@@ -200,7 +341,9 @@ def detach_artifact_from_track(root: Path, track_id: str | None, artifact_id: st
     if filtered == artifact_ids:
         return
     payload["artifact_ids"] = filtered
-    write_json(track_path, payload)
+    if payload.get("latest_artifact_id") == artifact_id:
+        payload["latest_artifact_id"] = filtered[-1] if filtered else None
+    write_json(task_path, payload)
 
 
 def ensure_required_skeleton(root: Path) -> None:
@@ -208,6 +351,7 @@ def ensure_required_skeleton(root: Path) -> None:
         "runs/raw",
         "projects/app/.runtime",
         "buddyswitch/objects/tracks",
+        "buddyswitch/objects/tasks",
         "buddyswitch/objects/artifacts",
         "buddyswitch/content/runs",
     ):
@@ -236,6 +380,7 @@ def build_cleanup_plan(
     plan["_path_categories"] = {}
 
     artifact_objects, invalid_artifact_objects = discover_artifact_objects(repo_root)
+    task_objects, invalid_task_objects = discover_task_objects(repo_root)
     run_content, invalid_run_content = discover_run_content(repo_root)
 
     if scope == "agent":
@@ -243,6 +388,9 @@ def build_cleanup_plan(
         for record in artifact_objects:
             if record["producer_buddy"] == buddy:
                 add_indexed_artifact(plan, record)
+        for record in task_objects:
+            if record["buddy"] == buddy:
+                add_indexed_task(plan, record)
         for record in run_content:
             if record["buddy"] == buddy:
                 add_run_content(plan, record)
@@ -256,12 +404,19 @@ def build_cleanup_plan(
                 plan,
                 f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
             )
+        for item in invalid_task_objects:
+            add_warning(
+                plan,
+                f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
+            )
 
     elif scope == "all-agents":
         add_dir_files(plan, "runs/raw", "run_raw")
         add_dir_files(plan, "buddyswitch/objects/tracks", "track_objects")
         for record in artifact_objects:
             add_indexed_artifact(plan, record)
+        for record in task_objects:
+            add_indexed_task(plan, record)
         for record in run_content:
             add_run_content(plan, record)
         for item in invalid_artifact_objects:
@@ -271,6 +426,10 @@ def build_cleanup_plan(
         for item in invalid_run_content:
             add_warning(plan, f"Deleting malformed run content during all-agents cleanup: {item['path']} ({item['reason']}).")
             add_run_content(plan, {"path": item["path"], "run_id": item["run_id"], "buddy": None})
+        for item in invalid_task_objects:
+            add_warning(plan, f"Deleting malformed task object during all-agents cleanup: {item['path']} ({item['reason']}).")
+            add_path(plan, repo_root / item["path"], "task_objects")
+            plan["direct_delete_paths"].append(item["path"])
 
     elif scope == "project":
         add_dir_files(plan, "projects/app/.runtime", "project_runtime")
@@ -279,12 +438,17 @@ def build_cleanup_plan(
         add_dir_files(plan, "runs/raw", "run_raw")
         add_dir_files(plan, "projects/app/.runtime", "project_runtime")
         add_dir_files(plan, "buddyswitch/objects/tracks", "track_objects")
+        add_dir_files(plan, "buddyswitch/objects/tasks", "task_objects")
         add_dir_files(plan, "buddyswitch/objects/artifacts", "artifact_objects")
         add_dir_files(plan, "buddyswitch/content/runs", "run_content")
         for record in artifact_objects:
             if record["id"] not in plan["artifact_object_ids"]:
                 plan["artifact_object_ids"].append(record["id"])
                 plan["artifact_records"].append(record)
+        for record in task_objects:
+            if record["id"] not in plan["task_object_ids"]:
+                plan["task_object_ids"].append(record["id"])
+                plan["task_records"].append(record)
         for record in run_content:
             if record["run_id"] not in plan["run_ids"]:
                 plan["run_ids"].append(record["run_id"])
@@ -294,6 +458,8 @@ def build_cleanup_plan(
                 plan["run_ids"].append(item["run_id"])
         for item in invalid_artifact_objects:
             add_warning(plan, f"All-storage cleanup will delete malformed artifact object: {item['path']} ({item['reason']}).")
+        for item in invalid_task_objects:
+            add_warning(plan, f"All-storage cleanup will delete malformed task object: {item['path']} ({item['reason']}).")
         for item in invalid_run_content:
             add_warning(plan, f"All-storage cleanup will delete malformed run content: {item['path']} ({item['reason']}).")
     else:
@@ -301,6 +467,7 @@ def build_cleanup_plan(
 
     plan["delete_paths"].sort()
     plan["artifact_object_ids"].sort()
+    plan["task_object_ids"].sort()
     plan["run_ids"].sort()
     plan["direct_delete_paths"] = sorted(set(plan["direct_delete_paths"]))
     plan["warnings"].sort()
@@ -314,18 +481,28 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
 
     if plan["scope"] == "agent":
         for record in plan["artifact_records"]:
-            detach_artifact_from_track(root, record.get("track_id"), record["id"])
+            detach_artifact_from_task(root, record.get("task_id"), record["id"])
+        for record in plan["task_records"]:
+            detach_task_from_track(root, record.get("track_id"), record["id"])
 
     indexed_artifact_paths = set()
     for record in plan["artifact_records"]:
         indexed_artifact_paths.add(record["object_path"])
 
+    indexed_task_paths = set()
+    for record in plan["task_records"]:
+        indexed_task_paths.add(record["object_path"])
+
     for relative_path in sorted(indexed_artifact_paths):
         delete_relative_path(root, relative_path)
         deleted_paths.append(relative_path)
 
+    for relative_path in sorted(indexed_task_paths):
+        delete_relative_path(root, relative_path)
+        deleted_paths.append(relative_path)
+
     for relative_path in plan["direct_delete_paths"]:
-        if relative_path in indexed_artifact_paths:
+        if relative_path in indexed_artifact_paths or relative_path in indexed_task_paths:
             continue
         delete_relative_path(root, relative_path)
         deleted_paths.append(relative_path)
@@ -338,6 +515,7 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "deleted_paths": deleted_paths,
         "deleted_count": len(deleted_paths),
         "artifact_object_ids": plan["artifact_object_ids"],
+        "task_object_ids": plan["task_object_ids"],
         "run_ids": plan["run_ids"],
         "warnings": plan["warnings"],
     }
@@ -443,7 +621,7 @@ def main() -> int:
             print()
             print(f"Cleanup completed. Deleted {result['deleted_count']} file(s).")
         return 0
-    except (OSError, ValueError, json.JSONDecodeError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, ValueError, ManifestError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

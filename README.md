@@ -23,18 +23,28 @@ BuddySwitch runs as an orchestration layer inside the host Codex CLI session.
 
 ## Canonical UI
 
-`switch <buddy>: <task>`
+```text
+switch <buddy>(<task-id>) -> <track-id>: <demand>
+```
 
-This is the canonical form, not a brittle exact-match requirement. Minor CLI spacing variation around `:` can be normalized as long as `switch`, `buddy`, and `task` remain clear.
+The supported forms are:
+
+- `switch <buddy>: <demand>`
+- `switch <buddy> -> <track-id>: <demand>`
+- `switch <buddy>(<task-id>): <demand>`
+- `switch <buddy>(<task-id>) -> <track-id>: <demand>`
+
+The text after `:` is a demand, not a task object. If no task id is supplied, `persist` creates a new task for the run. Minor CLI spacing variation around `:` and `->` can be normalized as long as `switch`, `buddy`, optional task id, optional track id, and demand remain clear.
 
 Buddy list, scope, skills, and object authority metadata are loaded from `buddyswitch/manifest.toml`.
 `buddy -> skills` is the main runtime routing authority. Buddy `permissions` remain object-authority metadata for manual/debug mutation APIs.
-Users are not required to provide output paths in task text; runtime defaults are applied automatically.
+Users are not required to provide output paths in demand text; runtime defaults are applied automatically.
 
 ## Core Storage
 
 - Env manifest: `buddyswitch/manifest.toml`
 - Track objects: `buddyswitch/objects/tracks/*.json`
+- Task objects: `buddyswitch/objects/tasks/*.json`
 - Artifact objects with canonical structured content: `buddyswitch/objects/artifacts/*.json`
 - Run audit content: `buddyswitch/content/runs/*.json`
 - Legacy/raw dumps: `runs/raw/`
@@ -45,6 +55,7 @@ Users are not required to provide output paths in task text; runtime defaults ar
 - Output schema validator: `scripts/output_schema.py`
 - Manifest inspection: `scripts/env_manifest.py`
 - Track CRUD/advance (manual/debug): `scripts/env_tracks.py`
+- Task read/update/archive (manual/debug): `scripts/env_tasks.py`
 - Artifact CRUD/auto-register (manual/debug): `scripts/env_artifacts.py`
 - Codex routing: `scripts/codex_router.py`
 
@@ -53,10 +64,10 @@ Users are not required to provide output paths in task text; runtime defaults ar
 - BuddySwitch skills are stored under `buddyswitch/skills/**/SKILL.md`.
 - BuddySwitch does not use Codex native `.agents/skills` semantics for these skills.
 - `required_tools` and `required_env` are advisory skill metadata for the host session. They stay visible in `skill_cards`, but they do not reject resolve candidates.
-- `resolve` returns `eligible_skills`, compact `skill_cards`, per-skill track context, output schema paths, invocation details, and explicit next actions. `resolve` itself does not write BuddySwitch state.
+- `resolve` returns `eligible_skills`, compact `skill_cards`, task context, optional track context, output schema paths, invocation details, and explicit next actions. `resolve` itself does not write BuddySwitch state.
 - Single-skill buddies may expose `implicit_skill_id`; multi-skill buddies never auto-select in runtime.
 - The host Codex session chooses `skill_id`, executes the selected skill, and emits structured output.
-- `persist` is a minimal technical gate: it validates selected-skill identity, schema shape, and safe state references, then writes artifact objects with canonical content and run audit JSON under `buddyswitch/content/runs/`.
+- `persist` is a minimal technical gate: it validates selected-skill identity, schema shape, and safe state references, then writes task objects, artifact objects with canonical content, optional track references through tasks, and run audit JSON under `buddyswitch/content/runs/`.
 - Explicit requests to write BuddySwitch outputs into `artifacts/*.md` or `runs/summaries/**` are rejected. Derived markdown outputs are retired.
 
 ## Framework Docs
@@ -68,8 +79,8 @@ Users are not required to provide output paths in task text; runtime defaults ar
 ## Example Commands
 
 - `python3 scripts/switch_runtime.py resolve "switch market: quick market research for AI scheduler landing page"`
-- `python3 scripts/switch_runtime.py resolve "switch pm: continue track-demo track and define the MVP scope with acceptance criteria"`
 - `python3 scripts/switch_runtime.py resolve "switch pm: create ai-scheduler-lp track"`
+- `python3 scripts/parse_switch.py "switch dev(task-dev-onboarding) -> track-demo: continue the implementation"`
 - `python3 scripts/switch_runtime.py persist --resolved resolved.json --skill-id write-prd --result result.json`
 - `python3 scripts/switch_runtime.py persist --resolved resolved.json --skill-id track-manager --result result.json`
 
@@ -78,6 +89,7 @@ Users are not required to provide output paths in task text; runtime defaults ar
 The panel is read-only and serves live data from `/api/workspace`:
 
 - tracks from `buddyswitch/objects/tracks/*.json`
+- tasks from `buddyswitch/objects/tasks/*.json`
 - artifacts from `buddyswitch/objects/artifacts/*.json`
 - run audits from `buddyswitch/content/runs/*.json`
 
@@ -93,7 +105,7 @@ Defaults to dry-run. Add `--execute` to apply deletion.
 
 Cleanup is storage-aware:
 
-- `--agent <buddy>` cleans that buddy's raw logs, artifact objects, and run content with `switch.buddy == <buddy>`
+- `--agent <buddy>` cleans that buddy's raw logs, task objects, artifact objects, and run content with `switch.buddy == <buddy>`
 - `--all-agents` clears BuddySwitch env state for all buddies, including run audit content under `buddyswitch/content/runs/`
 - `--project app` only clears `projects/app/.runtime/`
 - `--all-storage` clears the full local storage surface, including run audit content under `buddyswitch/content/runs/*.json`

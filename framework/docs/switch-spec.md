@@ -3,16 +3,26 @@
 ## Canonical Syntax
 
 ```text
-switch <buddy>: <task>
+switch <buddy>(<task-id>) -> <track-id>: <demand>
 ```
+
+Supported forms:
+
+1. `switch <buddy>: <demand>`
+2. `switch <buddy> -> <track-id>: <demand>`
+3. `switch <buddy>(<task-id>): <demand>`
+4. `switch <buddy>(<task-id>) -> <track-id>: <demand>`
 
 Rules:
 
 1. Message must start with `switch`.
 2. `<buddy>` must be one token.
-3. `:` is required.
-4. `<task>` must be non-empty.
-5. This is the canonical form. Parser and router may normalize minor CLI whitespace variation around `:` when buddy and task remain unambiguous.
+3. Optional `<task-id>` is written in parentheses immediately after buddy.
+4. Optional `<track-id>` is written after `->`.
+5. `:` is required.
+6. `<demand>` must be non-empty.
+7. Text after `:` is demand text, not a task object. When no task id is supplied, persistence creates a new task.
+8. Parser and router may normalize minor CLI whitespace variation around `:`, `->`, and task parentheses when intent remains unambiguous.
 
 ## Buddy Validation
 
@@ -44,11 +54,11 @@ Current control-layer expectations:
 
 - `parse`
   - minor CLI spacing variation around `:` => `normalize`
-  - unknown buddy / empty task / non-switch input => `reject`
+  - unknown buddy / empty demand / non-switch input => `reject`
 - `resolve`
   - advisory runtime metadata such as `required_tools` / `required_env` => `warn`
   - multi-skill selection belongs to the host decision loop => `ask`
-  - missing required track context or unsafe explicit references => `reject`
+  - missing explicit task/track references or unsafe task-track conflicts => `reject`
 - `persist`
   - invalid `skill_id`, schema mismatch, or unsafe state/reference writes => `reject`
 - manual/debug APIs
@@ -60,10 +70,11 @@ Current control-layer expectations:
 - Resolution order:
   1. parse switch
   2. load the selected buddy's skill catalog from `buddyswitch/skills/**/SKILL.md`
-  3. apply the minimal deterministic gates needed for safe resolution (`track_mode` and track context)
-  4. resolve track context from `track_mode`
-  5. reject explicit requests for retired markdown outputs under `artifacts/*.md` or `runs/summaries/**`
-  6. return `eligible_skills`, compact `skill_cards`, per-skill context, output schema paths, invocation details, and explicit next actions
+  3. validate explicit task id, explicit track id, and task ownership when supplied
+  4. derive task resolution (`create` or `reuse`) and effective track id
+  5. build task context and optional track context from canonical objects
+  6. reject explicit requests for retired markdown outputs under `artifacts/*.md` or `runs/summaries/**`
+  7. return `eligible_skills`, compact `skill_cards`, task context, track context, output schema paths, invocation details, and explicit next actions
 
 Current runtime defaults:
 
@@ -76,6 +87,7 @@ Current runtime defaults:
 - BuddySwitch does not rely on Codex native `.agents/skills` discovery for these skills
 - output contracts are enforced through `framework/schemas/**`
 - output schema validation is structure-only; it does not score business quality, research quality, or workflow completeness
+- every persisted run belongs to a task object
 - artifact objects include canonical structured artifact content
 - run audit payloads are written to `buddyswitch/content/runs/**`
 - derived markdown artifacts and run summaries are retired
@@ -105,9 +117,10 @@ Schema validation in this stage is structural only. It checks shape and allowed 
 
 It writes:
 
+- task objects under `buddyswitch/objects/tasks/*.json`
 - artifact objects with canonical structured content under `buddyswitch/objects/artifacts/*.json`
 - run audit payloads under `buddyswitch/content/runs/**`
-- track objects under `buddyswitch/objects/tracks/*.json` when PM track-manager mutations are requested
+- track objects under `buddyswitch/objects/tracks/*.json` when task binding or PM track-manager mutations are requested
 
 `resolve` writes nothing. Its only job is to return enough context for the host Codex session to decide what to do next.
 
@@ -118,7 +131,7 @@ Parsing should return explicit errors:
 - `E_EMPTY_INPUT`
 - `E_INVALID_SYNTAX`
 - `E_UNKNOWN_AGENT`
-- `E_EMPTY_TASK`
+- `E_EMPTY_DEMAND`
 - `E_ENV_MANIFEST`
 
 Runtime should return explicit errors:
@@ -128,13 +141,13 @@ Runtime should return explicit errors:
 
 For syntax and unknown-buddy errors include:
 
-- expected syntax: `switch <buddy>: <task>`
+- expected syntax: `switch <buddy>(<task-id>) -> <track-id>: <demand>`
 - one valid example
 - current valid buddies from manifest
 
 ## Reference Commands
 
-- Parser: `python3 scripts/parse_switch.py "switch pm: continue track"`
-- Router: `python3 scripts/codex_router.py "switch pm: continue track"`
-- Runtime resolve: `python3 scripts/switch_runtime.py resolve "switch pm: continue track"`
+- Parser: `python3 scripts/parse_switch.py "switch pm -> track-demo: continue scope definition"`
+- Router: `python3 scripts/codex_router.py "switch pm -> track-demo: continue scope definition"`
+- Runtime resolve: `python3 scripts/switch_runtime.py resolve "switch dev: continue implementation"`
 - Runtime persist: `python3 scripts/switch_runtime.py persist --resolved resolved.json --skill-id write-prd --result result.json`

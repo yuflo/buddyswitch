@@ -59,15 +59,15 @@ consumes:
 ## Track/Object Handling
 
 - Follow `framework/docs/track-registry.md`.
-- This buddy may read tracks and create/update artifact objects.
+- This buddy may read tracks and create/update artifact objects through the resolved task.
 - Do not mutate track lifecycle fields directly.
-- If output belongs to a track, set `track_id` on artifact creation/update.
+- If output belongs to a track, rely on the explicit switch track target or existing task binding; artifacts do not store direct track references.
 
 ## Output Path
 
 - Code changes: primarily `projects/app/`
 - Project runtime-only temporary outputs: `projects/app/.runtime/`
-- Durable BuddySwitch state: artifact objects under `buddyswitch/objects/artifacts/` and run audits under `buddyswitch/content/runs/`
+- Durable BuddySwitch state: task objects under `buddyswitch/objects/tasks/`, artifact objects under `buddyswitch/objects/artifacts/`, and run audits under `buddyswitch/content/runs/`
 - Do not request or rely on `artifacts/*.md` or `runs/summaries/**`.
 
 ## Required Output Fields

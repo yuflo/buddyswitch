@@ -27,6 +27,9 @@ def route_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict:
 
     buddy_id = parsed["buddy"]
     buddy = require_buddy(manifest, buddy_id)
+    demand = parsed["demand"]
+    task_id = parsed.get("task_id")
+    track_id = parsed.get("track_id")
     route = {
         "ok": True,
         "adapter": "codex",
@@ -34,17 +37,21 @@ def route_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict:
         "example": EXAMPLE,
         "intent": parsed.get("intent", "switch"),
         "buddy": buddy_id,
-        "task": parsed["task"],
+        "task_id": task_id,
+        "track_id": track_id,
+        "demand": demand,
         "raw_text": parsed.get("raw_text", text),
-        "normalized_text": parsed.get("normalized_text", f"switch {buddy_id}: {parsed['task']}"),
+        "normalized_text": parsed.get("normalized_text"),
         "invocation": parsed.get(
             "invocation",
             {
                 "intent": "switch",
                 "buddy": buddy_id,
-                "task": parsed["task"],
+                "task_id": task_id,
+                "track_id": track_id,
+                "demand": demand,
                 "raw_text": text,
-                "normalized_text": f"switch {buddy_id}: {parsed['task']}",
+                "normalized_text": parsed.get("normalized_text"),
             },
         ),
         "profile": {

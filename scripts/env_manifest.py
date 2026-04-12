@@ -12,7 +12,10 @@ import argparse
 import json
 import re
 import sys
-import tomllib
+try:
+    import tomllib  # type: ignore[attr-defined]
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
+    tomllib = None  # type: ignore[assignment]
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +46,170 @@ class ManifestError(ValueError):
     """Raised when the env manifest is invalid."""
 
 
+def _strip_toml_comment(line: str) -> str:
+    in_quote = False
+    escape = False
+    for index, char in enumerate(line):
+        if char == "\\" and in_quote:
+            escape = not escape
+            continue
+        if char == '"' and not escape:
+            in_quote = not in_quote
+        if char == "#" and not in_quote:
+            return line[:index].rstrip()
+        escape = False
+    return line.rstrip()
+
+
+def _split_array_items(raw: str) -> list[str]:
+    items: list[str] = []
+    current: list[str] = []
+    in_quote = False
+    escape = False
+    for char in raw:
+        if char == "\\" and in_quote:
+            escape = not escape
+            current.append(char)
+            continue
+        if char == '"' and not escape:
+            in_quote = not in_quote
+            current.append(char)
+            continue
+        if char == "," and not in_quote:
+            part = "".join(current).strip()
+            if part:
+                items.append(part)
+            current = []
+            continue
+        current.append(char)
+        escape = False
+    tail = "".join(current).strip()
+    if tail:
+        items.append(tail)
+    return items
+
+
+def _parse_toml_scalar(raw: str) -> Any:
+    value = raw.strip()
+    if not value:
+        raise ManifestError("TOML scalar must not be empty")
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        return value[1:-1]
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if re.match(r"^-?\d+$", value):
+        return int(value)
+    if value.startswith("[") and value.endswith("]"):
+        inner = value[1:-1].strip()
+        if not inner:
+            return []
+        return [_parse_toml_scalar(item) for item in _split_array_items(inner)]
+    return value
+
+
+def _parse_toml_array(
+    *,
+    raw: str,
+    lines: list[str],
+    index: int,
+    path: Path,
+) -> tuple[list[Any], int]:
+    stripped = raw.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        return _parse_toml_scalar(stripped), index  # type: ignore[return-value]
+    if stripped != "[":
+        raise ManifestError(f"Invalid TOML array syntax in {path}: {raw}")
+
+    items: list[Any] = []
+    pointer = index + 1
+    while pointer < len(lines):
+        line = _strip_toml_comment(lines[pointer]).strip()
+        if not line:
+            pointer += 1
+            continue
+        if line == "]":
+            return items, pointer
+        if line.endswith(","):
+            line = line[:-1].rstrip()
+        items.append(_parse_toml_scalar(line))
+        pointer += 1
+
+    raise ManifestError(f"Invalid TOML in {path}: unterminated array")
+
+
+def _load_toml(path: Path) -> dict[str, Any]:
+    if tomllib is not None:
+        try:
+            return tomllib.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # pragma: no cover - delegated to stdlib parser
+            raise ManifestError(f"Invalid TOML in {path}: {exc}") from exc
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    manifest: dict[str, Any] = {}
+    # Allow root-level key/value entries before any [section], e.g. `schema_version = 1`.
+    current: dict[str, Any] | None = manifest
+    pointer = 0
+
+    while pointer < len(lines):
+        line = _strip_toml_comment(lines[pointer]).strip()
+        if not line:
+            pointer += 1
+            continue
+
+        if line.startswith("[[") and line.endswith("]]"):
+            section = line[2:-2].strip()
+            if not section:
+                raise ManifestError(f"Invalid TOML in {path}: empty [[section]] name")
+            node = manifest.get(section)
+            if node is None:
+                manifest[section] = []
+                node = manifest[section]
+            if not isinstance(node, list):
+                raise ManifestError(f"Invalid TOML in {path}: [[{section}]] conflicts with table value")
+            entry: dict[str, Any] = {}
+            node.append(entry)
+            current = entry
+            pointer += 1
+            continue
+
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip()
+            if not section:
+                raise ManifestError(f"Invalid TOML in {path}: empty [section] name")
+            entry = manifest.get(section)
+            if entry is None:
+                entry = {}
+                manifest[section] = entry
+            if not isinstance(entry, dict):
+                raise ManifestError(f"Invalid TOML in {path}: [{section}] conflicts with array-table")
+            current = entry
+            pointer += 1
+            continue
+
+        if "=" not in line:
+            raise ManifestError(f"Invalid TOML in {path}: expected key/value, got '{line}'")
+        if current is None:
+            raise ManifestError(f"Invalid TOML in {path}: key/value outside table: '{line}'")
+
+        key, raw = line.split("=", 1)
+        key = key.strip()
+        raw = raw.strip()
+        if not key:
+            raise ManifestError(f"Invalid TOML in {path}: empty key in line '{line}'")
+
+        if raw.startswith("["):
+            value, pointer = _parse_toml_array(raw=raw, lines=lines, index=pointer, path=path)
+        else:
+            value = _parse_toml_scalar(raw)
+        current[key] = value
+        pointer += 1
+
+    return manifest
+
+
 def _require_string(node: dict[str, Any], key: str, label: str) -> str:
     value = node.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -66,7 +233,7 @@ def _validate_permission(permission: str, label: str) -> None:
     if "." not in permission:
         raise ManifestError(f"{label} permission '{permission}' must use '<object>.<action>' format")
     obj, action = permission.split(".", 1)
-    if obj not in {"track", "artifact"}:
+    if obj not in {"track", "artifact", "task"}:
         raise ManifestError(f"{label} permission '{permission}' has unsupported object '{obj}'")
     if not action:
         raise ManifestError(f"{label} permission '{permission}' has empty action")
@@ -354,10 +521,7 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
     if not path.exists():
         raise ManifestError(f"Manifest not found: {path}")
 
-    try:
-        manifest = tomllib.loads(path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as exc:
-        raise ManifestError(f"Invalid TOML in {path}: {exc}") from exc
+    manifest = _load_toml(path)
 
     schema_version = manifest.get("schema_version")
     if schema_version != 1:

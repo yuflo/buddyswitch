@@ -9,7 +9,7 @@ from typing import Any
 import json
 
 from env_manifest import DEFAULT_MANIFEST, load_manifest
-from env_store import ROOT, list_artifacts, list_tracks
+from env_store import ROOT, list_artifacts, list_tasks, list_tracks
 
 
 def iso_time(path: Path) -> str:
@@ -24,6 +24,10 @@ def artifact_object_path(artifact_id: str) -> str:
     return f"buddyswitch/objects/artifacts/{artifact_id}.json"
 
 
+def task_object_path(task_id: str) -> str:
+    return f"buddyswitch/objects/tasks/{task_id}.json"
+
+
 def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
     return {
         **artifact,
@@ -33,25 +37,42 @@ def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    latest_artifact_id = task.get("latest_artifact_id")
+    latest_artifact = artifact_map.get(latest_artifact_id) if latest_artifact_id else None
+    return {
+        **task,
+        "object_path": task_object_path(task["id"]),
+        "file_name": Path(task_object_path(task["id"])).name,
+        "latest_artifact": latest_artifact,
+        "missing": False,
+    }
+
+
 def build_track_views(
-    tracks: list[dict[str, Any]], artifact_map: dict[str, dict[str, Any]]
+    tracks: list[dict[str, Any]],
+    task_map: dict[str, dict[str, Any]],
+    artifact_map: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for track in tracks:
-        artifacts: list[dict[str, Any]] = []
-        missing_artifact_ids: list[str] = []
+        tasks: list[dict[str, Any]] = []
+        missing_task_ids: list[str] = []
         latest = track["updated_at"]
 
-        for artifact_id in track.get("artifact_ids", []):
-            artifact = artifact_map.get(artifact_id)
-            if artifact is None:
-                missing_artifact_ids.append(artifact_id)
+        for task_id in track.get("task_ids", []):
+            task = task_map.get(task_id)
+            if task is None:
+                missing_task_ids.append(task_id)
                 continue
-            artifacts.append(artifact)
-            if artifact.get("updated_at", "") > latest:
-                latest = artifact["updated_at"]
+            tasks.append(task)
+            if task.get("updated_at", "") > latest:
+                latest = task["updated_at"]
+            latest_artifact = task.get("latest_artifact")
+            if isinstance(latest_artifact, dict) and latest_artifact.get("updated_at", "") > latest:
+                latest = latest_artifact["updated_at"]
 
-        artifacts.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
+        tasks.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
         rows.append(
             {
                 "id": track["id"],
@@ -59,11 +80,11 @@ def build_track_views(
                 "status": track["status"],
                 "current_buddy": track["current_buddy"],
                 "next_buddy": track["next_buddy"],
-                "artifact_ids": track["artifact_ids"],
+                "task_ids": track.get("task_ids", []),
                 "summary": track.get("summary", ""),
                 "updated_at": latest,
-                "artifacts": artifacts,
-                "missing_artifact_ids": missing_artifact_ids,
+                "tasks": tasks,
+                "missing_task_ids": missing_task_ids,
             }
         )
     rows.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
@@ -110,10 +131,11 @@ def scan_run_audits() -> list[dict[str, Any]]:
                 "run_id": payload.get("run_id", path.stem),
                 "path": rel(path),
                 "buddy": switch_payload.get("buddy"),
-                "task": switch_payload.get("task"),
+                "task_id": payload.get("resolved_task_id") or switch_payload.get("task_id"),
+                "demand": switch_payload.get("demand"),
                 "skill_id": payload.get("skill_id"),
-                "artifact_id": payload.get("artifact_id"),
-                "track_id": payload.get("track_id"),
+                "artifact_ids": payload.get("artifact_ids") or [],
+                "track_id": payload.get("effective_track_id") or switch_payload.get("track_id"),
                 "track_action": payload.get("track_action"),
                 "execution_summary": payload.get("execution_summary"),
                 "suggested_next_switch": payload.get("suggested_next_switch"),
@@ -129,7 +151,9 @@ def build_workspace_data() -> dict[str, Any]:
     manifest = load_manifest(DEFAULT_MANIFEST)
     artifacts = [build_artifact_view(artifact) for artifact in list_artifacts()]
     artifact_map = {artifact["id"]: artifact for artifact in artifacts}
-    tracks = build_track_views(list_tracks(), artifact_map)
+    tasks = [build_task_view(task, artifact_map) for task in list_tasks()]
+    task_map = {task["id"]: task for task in tasks}
+    tracks = build_track_views(list_tracks(), task_map, artifact_map)
 
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -140,6 +164,7 @@ def build_workspace_data() -> dict[str, Any]:
             for buddy in manifest.get("buddies", [])
         ],
         "tracks": tracks,
+        "tasks": tasks,
         "artifacts": artifacts,
         "run_audits": scan_run_audits(),
     }

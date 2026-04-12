@@ -6,6 +6,7 @@ const emptyWorkspace = {
   objects_root: null,
   buddies: [],
   tracks: [],
+  tasks: [],
   artifacts: [],
   run_audits: [],
 };
@@ -33,6 +34,7 @@ function normalizeWorkspaceData(rawData) {
     ...(rawData || {}),
     buddies: Array.isArray(rawData?.buddies) ? rawData.buddies : [],
     tracks: Array.isArray(rawData?.tracks) ? rawData.tracks : [],
+    tasks: Array.isArray(rawData?.tasks) ? rawData.tasks : [],
     artifacts: Array.isArray(rawData?.artifacts) ? rawData.artifacts : [],
     run_audits: Array.isArray(rawData?.run_audits) ? rawData.run_audits : [],
   };
@@ -104,8 +106,8 @@ function renderCommand(parent, command) {
   parent.append(row);
 }
 
-function artifactCount(track) {
-  return Array.isArray(track.artifacts) ? track.artifacts.length : 0;
+function taskCount(track) {
+  return Array.isArray(track.tasks) ? track.tasks.length : 0;
 }
 
 function renderTrackButton(track) {
@@ -119,7 +121,7 @@ function renderTrackButton(track) {
     createEl("strong", "", track.title),
     createEl("em", "", track.status || "active"),
     createEl("span", "", flow),
-    createEl("span", "", `${artifactCount(track)} artifact(s)`),
+    createEl("span", "", `${taskCount(track)} task(s)`),
     createEl("span", "", track.updated_at || "no timestamp"),
   );
   button.addEventListener("click", () => {
@@ -163,15 +165,18 @@ function renderRunAudits() {
       : audit.skill_id || "unknown";
     item.append(
       createEl("strong", "", label),
-      createEl("span", "", audit.task || audit.path || "No task"),
+      createEl("span", "", audit.demand || audit.path || "No demand"),
       createEl("span", "", audit.execution_summary || audit.status || "No summary"),
-      createEl("span", "", audit.updated_at || "no timestamp"),
+      createEl("span", "", `${audit.task_id || "task-unknown"} | ${audit.updated_at || "no timestamp"}`),
     );
     runAuditList.append(item);
   });
 }
 
 function formatArtifactPreview(artifact) {
+  if (!artifact) {
+    return "No artifact yet";
+  }
   if (artifact.summary) {
     return artifact.summary;
   }
@@ -184,36 +189,39 @@ function formatArtifactPreview(artifact) {
 
 function renderTimeline(track) {
   timeline.replaceChildren();
-  const artifacts = Array.isArray(track.artifacts) ? track.artifacts : [];
+  const tasks = Array.isArray(track.tasks) ? track.tasks : [];
 
-  if (artifacts.length === 0) {
-    timeline.append(createEl("p", "note", "No artifact objects attached to this track."));
+  if (tasks.length === 0) {
+    timeline.append(createEl("p", "note", "No task objects attached to this track."));
   }
 
-  artifacts.forEach((artifact) => {
-    const artifactEl = createEl("div", artifact.missing ? "artifact missing" : "artifact");
+  tasks.forEach((task) => {
+    const artifact = task.latest_artifact;
+    const artifactEl = createEl("div", task.missing ? "artifact missing" : "artifact");
     const row = createEl("div", "artifact-row");
     row.append(
-      createEl("span", "artifact-title", artifact.title),
-      createEl("span", "role-tag", `${buddyLabel(artifact.buddy)} / ${artifact.skill_id}`),
+      createEl("span", "artifact-title", `${task.id} | ${task.title}`),
+      createEl("span", "role-tag", `${buddyLabel(task.buddy)} / ${task.status}`),
     );
     artifactEl.append(
       row,
-      createEl("code", "artifact-path", artifact.object_path),
-      createEl("span", "artifact-path", artifact.updated_at || "no timestamp"),
+      createEl("code", "artifact-path", task.object_path),
+      createEl("span", "artifact-path", task.updated_at || "no timestamp"),
+      createEl("pre", "artifact-path", task.summary || "No task summary"),
+      createEl("span", "artifact-path", artifact ? `latest artifact: ${artifact.id}` : "latest artifact: none"),
       createEl("pre", "artifact-path", formatArtifactPreview(artifact)),
     );
     timeline.append(artifactEl);
   });
 
-  if (Array.isArray(track.missing_artifact_ids) && track.missing_artifact_ids.length > 0) {
-    track.missing_artifact_ids.forEach((artifactId) => {
+  if (Array.isArray(track.missing_task_ids) && track.missing_task_ids.length > 0) {
+    track.missing_task_ids.forEach((taskId) => {
       const missing = createEl("div", "artifact missing");
       const row = createEl("div", "artifact-row");
-      row.append(createEl("span", "artifact-title", artifactId), createEl("span", "role-tag", "object missing"));
+      row.append(createEl("span", "artifact-title", taskId), createEl("span", "role-tag", "object missing"));
       missing.append(
         row,
-        createEl("code", "artifact-path", `missing artifact object: ${artifactId}`),
+        createEl("code", "artifact-path", `missing task object: ${taskId}`),
       );
       timeline.append(missing);
     });
@@ -223,23 +231,23 @@ function renderTimeline(track) {
 function suggestedTrackSwitches(track) {
   const suggestions = [];
   if (track.next_buddy) {
-    suggestions.push(`switch ${track.next_buddy}: 继续 ${track.id} track，基于当前上下文推进并产出需要的 artifact`);
+    suggestions.push(`switch ${track.next_buddy} -> ${track.id}: 基于当前track上下文推进并产出artifact`);
   } else if (track.status === "done" || track.status === "archived") {
-    suggestions.push(`switch pm: 复核 ${track.id} track 是否需要 reopen 或拆分下一条 track`);
+    suggestions.push(`switch pm -> ${track.id}: 复核该track是否需要reopen或拆分`);
   } else {
-    suggestions.push(`switch ${track.current_buddy}: 继续 ${track.id} track，补充当前阶段的交付`);
+    suggestions.push(`switch ${track.current_buddy} -> ${track.id}: 补充当前阶段交付`);
   }
-  suggestions.push(`switch pm: 继续 ${track.id} track，更新 status/current_buddy/next_buddy 并收口`);
+  suggestions.push(`switch pm -> ${track.id}: 更新status/current_buddy/next_buddy并收口`);
   return suggestions;
 }
 
 function cleanupSuggestions(track) {
   const seen = new Set();
   const commands = [];
-  (track.artifacts || []).forEach((artifact) => {
-    if (artifact.buddy && !seen.has(artifact.buddy)) {
-      seen.add(artifact.buddy);
-      commands.push(`scripts/cleanup_buddyswitch.sh --agent ${artifact.buddy}`);
+  (track.tasks || []).forEach((task) => {
+    if (task.buddy && !seen.has(task.buddy)) {
+      seen.add(task.buddy);
+      commands.push(`scripts/cleanup_buddyswitch.sh --agent ${task.buddy}`);
     }
   });
   commands.push("scripts/cleanup_buddyswitch.sh --all-agents");

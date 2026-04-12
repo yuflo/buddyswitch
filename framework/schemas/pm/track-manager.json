@@ -19,14 +19,13 @@
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["create", "read", "list", "update", "advance", "attach", "detach", "archive"]
+          "enum": ["create", "read", "list", "update", "advance", "archive"]
         },
         "track_id": { "type": ["string", "null"] },
         "title": { "type": ["string", "null"] },
         "status": { "type": ["string", "null"], "enum": ["active", "blocked", "done", "archived", null] },
         "current_buddy": { "type": ["string", "null"] },
         "next_buddy": { "type": ["string", "null"] },
-        "artifact_id": { "type": ["string", "null"] },
         "summary": { "type": ["string", "null"] }
       }
     }

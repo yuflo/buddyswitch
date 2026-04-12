@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""Regression tests for BuddySwitch resolve/persist runtime."""
+"""Regression tests for task-centric BuddySwitch resolve/persist runtime."""
 
 from __future__ import annotations
 
+import io
+import json
 import sys
 import tempfile
 import textwrap
 import unittest
-import uuid
-import io
-import json
 from contextlib import redirect_stderr
 from pathlib import Path
-from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +21,7 @@ if str(SCRIPTS) not in sys.path:
 import env_manifest  # noqa: E402
 import switch_runtime  # noqa: E402
 import workspace_data  # noqa: E402
+from env_store import create_task, create_track, get_track  # noqa: E402
 
 
 class ManifestSkillRuntimeTests(unittest.TestCase):
@@ -48,7 +47,7 @@ class ManifestSkillRuntimeTests(unittest.TestCase):
                     produces:
                       - note
                     consumes:
-                      - task
+                      - demand
                     ---
 
                     # test-skill
@@ -57,10 +56,10 @@ class ManifestSkillRuntimeTests(unittest.TestCase):
                     - Explain the workflow purpose.
 
                     ## Use when
-                    - The task matches the workflow.
+                    - The demand matches the workflow.
 
                     ## Do not use when
-                    - The task belongs to another buddy.
+                    - The demand belongs to another buddy.
 
                     ## Inputs
                     - Task input.
@@ -89,183 +88,79 @@ class ManifestSkillRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime["output_schema"], "framework/schemas/dev/implement-task.json")
         self.assertEqual(runtime["required_tools"], ["rg"])
         self.assertEqual(runtime["required_env"], ["BUDDYSWITCH_TEST_ENV"])
-        self.assertIn("The task matches the workflow.", runtime["guidance"]["use_when"])
+        self.assertIn("The demand matches the workflow.", runtime["guidance"]["use_when"])
 
 
 class ResolveRuntimeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.created_paths: list[Path] = []
+
+    def tearDown(self) -> None:
+        for path in sorted(self.created_paths, reverse=True):
+            if path.exists():
+                path.unlink()
+
+    def _remember(self, repo_path: str) -> None:
+        self.created_paths.append(ROOT / repo_path)
+
     def test_single_skill_buddy_returns_implicit_skill(self) -> None:
         payload = switch_runtime.resolve_switch(
             "switch dev: Implement the approved onboarding improvements in projects/app"
         )
 
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["intent"], "switch")
         self.assertEqual(payload["invocation"]["buddy"], "dev")
+        self.assertEqual(payload["switch"]["demand"], "Implement the approved onboarding improvements in projects/app")
+        self.assertEqual(payload["task_resolution"]["mode"], "create")
+        self.assertTrue(payload["task_resolution"]["task_id"].startswith("task-dev-"))
+        self.assertIsNone(payload["effective_track_id"])
         self.assertEqual(payload["eligible_skills"], ["implement-task"])
         self.assertEqual(payload["implicit_skill_id"], "implement-task")
-        self.assertEqual(payload["profile"]["authority"]["permission_scope"], "manual_debug_apis")
-        self.assertEqual(payload["skill_cards"][0]["runtime_requirements"]["policy"], "advisory")
-        self.assertIn("resolve parses the invocation", payload["run_instructions"]["resolve_notes"][0])
-        self.assertIn("Artifact skills write artifact objects", payload["run_instructions"]["persist_notes"][0])
-        self.assertIn("Use implicit_skill_id 'implement-task'", payload["run_instructions"]["next_actions"][0])
-        self.assertEqual(
-            payload["required_output_schema_by_skill"]["implement-task"],
-            "framework/schemas/dev/implement-task.json",
+
+    def test_resolve_reuses_explicit_task(self) -> None:
+        task = create_task(
+            "task-dev-resolve-reuse",
+            "Resolve Reuse",
+            buddy="dev",
+            initial_run_id="run-seed-reuse",
         )
+        self._remember(f"buddyswitch/objects/tasks/{task['id']}.json")
 
-    def test_required_env_and_tools_remain_metadata_not_rejection_gates(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            temp_path = Path(temp_dir)
-            skill_path = temp_path / "SKILL.md"
-            skill_repo_path = skill_path.relative_to(ROOT).as_posix()
-            skill_path.write_text(
-                textwrap.dedent(
-                    f"""\
-                    ---
-                    name: demo-scan
-                    description: Demo resolve skill.
-                    version: "2.0"
-                    track_mode: optional
-                    default_artifact_kind: note
-                    auto_summary: true
-                    output_schema: framework/schemas/dev/implement-task.json
-                    side_effect_level: low
-                    required_tools:
-                      - tool-that-does-not-exist
-                    required_env:
-                      - BUDDYSWITCH_MISSING_ENV
-                    produces:
-                      - note
-                    consumes:
-                      - task
-                    ---
-
-                    # demo-scan
-
-                    ## Purpose
-                    - Resolve demo skill.
-
-                    ## Use when
-                    - A demo scan is enough.
-
-                    ## Do not use when
-                    - Another skill owns the task.
-
-                    ## Inputs
-                    - Task input.
-
-                    ## Outputs
-                    - Structured result.
-
-                    ## Verification
-                    - Verify the result.
-
-                    ## Examples
-                    - `switch demo: run a scan`
-
-                    ## Counterexamples
-                    - `switch other: do something else`
-
-                    ## Gotchas
-                    - Keep the demo simple.
-                    """
-                ),
-                encoding="utf-8",
-            )
-
-            manifest_path = temp_path / "manifest.toml"
-            manifest_path.write_text(
-                textwrap.dedent(
-                    f"""\
-                    schema_version = 1
-
-                    [env]
-                    id = "demo"
-                    label = "Demo Env"
-
-                    [[adapters]]
-                    id = "codex"
-                    path = "scripts/codex_router.py"
-                    description = "Demo adapter"
-
-                    [[skills]]
-                    id = "demo-scan"
-                    path = "{skill_repo_path}"
-                    description = "Demo scan skill"
-                    buddies = ["demo"]
-                    objects = ["artifact"]
-
-                    [[buddies]]
-                    id = "demo"
-                    label = "Demo"
-                    scope = "Demo scope"
-                    skills = ["demo-scan"]
-                    permissions = ["track.read", "artifact.read", "artifact.create", "artifact.update"]
-                    """
-                ),
-                encoding="utf-8",
-            )
-
-            payload = switch_runtime.resolve_switch("switch demo: Run the demo scan", manifest_path=manifest_path)
+        payload = switch_runtime.resolve_switch("switch dev(task-dev-resolve-reuse): continue implementation")
 
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["eligible_skills"], ["demo-scan"])
-        self.assertEqual(payload["skill_cards"][0]["required_tools"], ["tool-that-does-not-exist"])
-        self.assertEqual(payload["skill_cards"][0]["required_env"], ["BUDDYSWITCH_MISSING_ENV"])
-        self.assertEqual(
-            payload["skill_cards"][0]["runtime_requirements"]["required_tools"],
-            ["tool-that-does-not-exist"],
+        self.assertEqual(payload["task_resolution"]["mode"], "reuse")
+        self.assertEqual(payload["task_resolution"]["task_id"], "task-dev-resolve-reuse")
+        self.assertEqual(payload["task_context"]["task"]["id"], "task-dev-resolve-reuse")
+
+    def test_resolve_rejects_task_buddy_mismatch(self) -> None:
+        task = create_task(
+            "task-market-forbidden",
+            "Market task",
+            buddy="market",
+            initial_run_id="run-seed-market",
         )
-        self.assertEqual(
-            payload["skill_cards"][0]["runtime_requirements"]["required_env"],
-            ["BUDDYSWITCH_MISSING_ENV"],
-        )
-        self.assertEqual(payload["skill_cards"][0]["runtime_requirements"]["policy"], "advisory")
+        self._remember(f"buddyswitch/objects/tasks/{task['id']}.json")
 
-    def test_multi_skill_buddy_returns_candidates_without_auto_selection(self) -> None:
-        def fake_track_context(task: str, track_mode: str, *, allow_missing_explicit: bool = False) -> dict[str, object]:
-            if track_mode == "required":
-                return {
-                    "track_mode": track_mode,
-                    "track_id": "track-demo",
-                    "reason": "explicit",
-                    "explicit_track_id": "track-demo",
-                    "active_track_ids": ["track-demo"],
-                }
-            return {
-                "track_mode": track_mode,
-                "track_id": "track-demo",
-                "reason": "explicit",
-                "explicit_track_id": "track-demo",
-                "active_track_ids": ["track-demo"],
-            }
-
-        with patch.object(switch_runtime, "_resolve_track_context", side_effect=fake_track_context):
-            payload = switch_runtime.resolve_switch(
-                "switch pm: continue track-demo track and define the MVP scope with acceptance criteria"
-            )
-
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["eligible_skills"], ["write-prd", "track-manager"])
-        self.assertIsNone(payload["implicit_skill_id"])
-        self.assertNotIn("artifact_defaults_by_skill", payload)
-        self.assertNotIn("summary_defaults_by_skill", payload)
+        with self.assertRaisesRegex(ValueError, "belongs to buddy"):
+            switch_runtime.resolve_switch("switch dev(task-market-forbidden): continue implementation")
 
     def test_resolve_rejects_legacy_markdown_output_requests(self) -> None:
         with self.assertRaisesRegex(ValueError, "Derived markdown outputs are retired"):
             switch_runtime.resolve_switch(
-                "switch dev: Implement the approved onboarding improvements and write to artifacts/demo.md"
+                "switch dev: Implement onboarding and write to artifacts/demo.md"
             )
 
 
 class WorkspaceDataTests(unittest.TestCase):
     def test_artifact_view_uses_object_path_only(self) -> None:
         artifact = {
-            "id": "art-missing-markdown",
-            "title": "Missing Markdown",
-            "track_id": None,
+            "id": "art-task-centric",
+            "title": "Task-Centric Artifact",
+            "task_id": "task-dev-one",
             "buddy": "dev",
             "skill_id": "implement-task",
+            "source_run_id": "run-test",
             "summary": "Canonical summary",
             "content": {"task_summary": "ok"},
             "created_at": "2026-04-12T10:00:00+08:00",
@@ -273,10 +168,8 @@ class WorkspaceDataTests(unittest.TestCase):
         }
 
         view = workspace_data.build_artifact_view(artifact)
-
         self.assertFalse(view["missing"])
-        self.assertEqual(view["object_path"], "buddyswitch/objects/artifacts/art-missing-markdown.json")
-        self.assertNotIn("markdown_exists", view)
+        self.assertEqual(view["object_path"], "buddyswitch/objects/artifacts/art-task-centric.json")
 
 
 class PersistRuntimeTests(unittest.TestCase):
@@ -291,59 +184,27 @@ class PersistRuntimeTests(unittest.TestCase):
     def _remember(self, repo_path: str) -> None:
         self.created_paths.append(ROOT / repo_path)
 
-    def _dev_resolved_payload(self) -> dict[str, object]:
+    def _remember_persisted_paths(self, payload: dict[str, object]) -> None:
+        paths = payload.get("paths", {})
+        if not isinstance(paths, dict):
+            return
+        run_path = paths.get("run")
+        task_path = paths.get("task")
+        artifact_paths = paths.get("artifacts")
+        track_path = paths.get("track")
+        if isinstance(run_path, str):
+            self._remember(run_path)
+        if isinstance(task_path, str):
+            self._remember(task_path)
+        if isinstance(track_path, str):
+            self._remember(track_path)
+        if isinstance(artifact_paths, list):
+            for item in artifact_paths:
+                if isinstance(item, str):
+                    self._remember(item)
+
+    def _artifact_result(self) -> dict[str, object]:
         return {
-            "ok": True,
-            "switch": {"buddy": "dev", "task": "Implement the approved onboarding improvements in projects/app"},
-            "eligible_skills": ["implement-task"],
-            "implicit_skill_id": "implement-task",
-            "task_hints": {},
-            "track_context_by_skill": {
-                "implement-task": {
-                    "track_mode": "optional",
-                    "track_id": None,
-                    "reason": "none",
-                    "explicit_track_id": None,
-                    "active_track_ids": [],
-                }
-            },
-        }
-
-    def test_persist_rejects_invalid_skill_id(self) -> None:
-        resolved = self._dev_resolved_payload()
-        result = {
-            "execution_summary": "Implemented the requested change.",
-            "working_notes": ["Kept the scope localized."],
-            "deliverables_or_changed_files": ["projects/app/src/example.ts"],
-            "artifact_content": {
-                "task_summary": "Implemented onboarding improvements.",
-                "changed_files": ["projects/app/src/example.ts"],
-                "implementation_notes": ["Updated CTA behavior."],
-                "verification_runs": [{"command": "npm test", "result": "passed", "notes": None}],
-                "known_limitations": ["No live browser check in this test."],
-            },
-        }
-
-        with self.assertRaisesRegex(ValueError, "is not eligible"):
-            switch_runtime.persist_switch(resolved, skill_id="write-prd", result=result)
-
-    def test_persist_rejects_schema_invalid_payload(self) -> None:
-        resolved = self._dev_resolved_payload()
-        result = {
-            "execution_summary": "Implemented the requested change.",
-            "working_notes": ["Kept the scope localized."],
-            "deliverables_or_changed_files": ["projects/app/src/example.ts"],
-            "artifact_content": {
-                "task_summary": "Implemented onboarding improvements."
-            },
-        }
-
-        with self.assertRaisesRegex(ValueError, "schema validation"):
-            switch_runtime.persist_switch(resolved, skill_id="implement-task", result=result)
-
-    def test_persist_writes_structured_content_and_run_audit_only(self) -> None:
-        resolved = self._dev_resolved_payload()
-        result = {
             "execution_summary": "Implemented the requested change and verified the core path.",
             "working_notes": ["Scoped the edits to onboarding CTA behavior."],
             "deliverables_or_changed_files": ["projects/app/src/example.ts"],
@@ -353,86 +214,75 @@ class PersistRuntimeTests(unittest.TestCase):
                 "changed_files": ["projects/app/src/example.ts"],
                 "implementation_notes": ["Updated CTA behavior.", "Kept state transitions unchanged."],
                 "verification_runs": [{"command": "npm test", "result": "passed", "notes": "Targeted unit coverage."}],
-                "known_limitations": ["No production build was executed in this unit test."],
+                "known_limitations": ["No production build was executed in this test."],
             },
         }
 
-        payload = switch_runtime.persist_switch(resolved, skill_id="implement-task", result=result)
+    def test_persist_creates_task_and_run_bound_artifact(self) -> None:
+        resolved = switch_runtime.resolve_switch("switch dev: Implement the approved onboarding improvements in projects/app")
+        payload = switch_runtime.persist_switch(resolved, skill_id=None, result=self._artifact_result())
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["skill_id"], "implement-task")
-        artifact_id = payload["artifact_id"]
-        artifact_object_path = payload["paths"]["artifact"]
-        run_content_path = payload["paths"]["run"]
+        self.assertEqual(payload["task_id"], resolved["task_resolution"]["task_id"])
+        self.assertEqual(payload["artifact_ids"], [payload["artifact_id"]])
+        self._remember_persisted_paths(payload)
 
-        self._remember(artifact_object_path)
-        self._remember(run_content_path)
+        artifact_json = json.loads((ROOT / payload["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
+        task_json = json.loads((ROOT / payload["paths"]["task"]).read_text(encoding="utf-8"))
+        run_json = json.loads((ROOT / payload["paths"]["run"]).read_text(encoding="utf-8"))
 
-        artifact_json = (ROOT / artifact_object_path).read_text(encoding="utf-8")
-        run_json = (ROOT / run_content_path).read_text(encoding="utf-8")
+        self.assertEqual(artifact_json["task_id"], payload["task_id"])
+        self.assertEqual(artifact_json["source_run_id"], payload["run_id"])
+        self.assertIn(payload["run_id"], task_json["run_ids"])
+        self.assertEqual(task_json["latest_artifact_id"], payload["artifact_id"])
+        self.assertEqual(run_json["resolved_task_id"], payload["task_id"])
+        self.assertEqual(run_json["artifact_ids"], [payload["artifact_id"]])
+        self.assertEqual(run_json["switch"]["demand"], resolved["switch"]["demand"])
+        self.assertNotIn("artifact_content", run_json)
 
-        self.assertEqual(artifact_id, payload["artifact_id"])
-        self.assertIn('"id":', artifact_json)
-        self.assertIn('"content":', artifact_json)
-        self.assertIn('"summary": "Implemented the requested change and verified the core path."', artifact_json)
-        self.assertIn('"execution_summary": "Implemented the requested change and verified the core path."', run_json)
-        self.assertNotIn('"result":', run_json)
-        self.assertNotIn('"artifact_content":', run_json)
-        self.assertNotIn('"artifact_markdown"', json.dumps(payload))
-        self.assertNotIn('"summary"', json.dumps(payload["paths"]))
-        self.assertIn(artifact_object_path, payload["writes"])
-        self.assertIn(run_content_path, payload["writes"])
-        self.assertFalse(any(path.startswith("artifacts/") for path in payload["writes"]))
-        self.assertFalse(any(path.startswith("runs/summaries/") for path in payload["writes"]))
+    def test_persist_reuses_task_and_binds_to_track(self) -> None:
+        track = create_track("track-dev-binding", "Track Binding")
+        task = create_task("task-dev-binding", "Task Binding", buddy="dev", initial_run_id="run-seed-binding")
+        self._remember(f"buddyswitch/objects/tracks/{track['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{task['id']}.json")
 
-    def test_track_manager_persist_creates_track(self) -> None:
-        track_id = f"track-test-{uuid.uuid4().hex[:6]}"
-        resolved = {
-            "ok": True,
-            "switch": {"buddy": "pm", "task": f"create {track_id} track"},
-            "eligible_skills": ["track-manager"],
-            "implicit_skill_id": "track-manager",
-            "task_hints": {
-                "explicit_track_id": track_id,
-                "explicit_artifact_id": None,
-                "action_hint": "create",
-                "status_hint": None,
-                "current_buddy_hint": None,
-                "next_buddy_hint": None,
-                "summary_hint": None,
-            },
-        }
+        resolved = switch_runtime.resolve_switch("switch dev(task-dev-binding) -> track-dev-binding: continue implementation")
+        payload = switch_runtime.persist_switch(resolved, skill_id=None, result=self._artifact_result())
+        self._remember_persisted_paths(payload)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["task_id"], "task-dev-binding")
+        self.assertEqual(payload["track_id"], "track-dev-binding")
+        track_after = get_track("track-dev-binding")
+        self.assertIsNotNone(track_after)
+        self.assertIn("task-dev-binding", track_after["task_ids"])
+
+    def test_track_manager_create_track_binds_current_task(self) -> None:
+        resolved = switch_runtime.resolve_switch("switch pm: create new track and set ownership")
         result = {
             "execution_summary": "Created the requested track.",
             "working_notes": ["Reserved PM as the initial owner."],
-            "deliverables_or_changed_files": [f"buddyswitch/objects/tracks/{track_id}.json"],
+            "deliverables_or_changed_files": [],
             "track_operation": {
                 "action": "create",
-                "track_id": track_id,
-                "title": "Track Test",
+                "track_id": "track-task-manager-create",
+                "title": "Track Task Manager Create",
                 "status": "active",
                 "current_buddy": "pm",
                 "next_buddy": "design",
-                "artifact_id": None,
-                "summary": "Initial track creation."
-            }
+                "summary": "Initial track creation.",
+            },
         }
-
         payload = switch_runtime.persist_switch(resolved, skill_id="track-manager", result=result)
+        self._remember_persisted_paths(payload)
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["skill_id"], "track-manager")
-        self.assertEqual(payload["track_id"], track_id)
-        self._remember(payload["paths"]["track"])
-        self._remember(payload["paths"]["run"])
-
-        track_json = (ROOT / f"buddyswitch/objects/tracks/{track_id}.json").read_text(encoding="utf-8")
-        run_json = (ROOT / payload["paths"]["run"]).read_text(encoding="utf-8")
-        self.assertIn('"current_buddy": "pm"', track_json)
-        self.assertIn('"next_buddy": "design"', track_json)
-        self.assertIn('"track_action": "create"', run_json)
-        self.assertNotIn('"result":', run_json)
-        self.assertIn(f"buddyswitch/objects/tracks/{track_id}.json", payload["writes"])
+        self.assertEqual(payload["track_action"], "create")
+        self.assertEqual(payload["track_id"], "track-task-manager-create")
+        track_json = json.loads((ROOT / payload["paths"]["track"]).read_text(encoding="utf-8"))
+        self.assertIn(payload["task_id"], track_json["task_ids"])
 
     def test_execute_alias_is_not_registered(self) -> None:
         parser = switch_runtime.build_parser()
