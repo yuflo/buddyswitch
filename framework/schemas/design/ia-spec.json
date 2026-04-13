@@ -11,7 +11,6 @@
     "execution_summary": { "type": "string" },
     "working_notes": { "type": "array", "items": { "type": "string" } },
     "deliverables_or_changed_files": { "type": "array", "items": { "type": "string" } },
-    "suggested_next_switch": { "type": ["string", "null"] },
     "artifact_content": {
       "type": "object",
       "required": [

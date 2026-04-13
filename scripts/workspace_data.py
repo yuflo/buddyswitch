@@ -152,7 +152,6 @@ def scan_run_audits() -> list[dict[str, Any]]:
                 "track_title": payload.get("track_title"),
                 "track_action": payload.get("track_action"),
                 "execution_summary": payload.get("execution_summary"),
-                "suggested_next_switch": payload.get("suggested_next_switch"),
                 "reference_switches": payload.get("reference_switches")
                 if isinstance(payload.get("reference_switches"), dict)
                 else {},

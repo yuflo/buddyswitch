@@ -34,6 +34,12 @@ The local server serves live data at `/api/workspace` using:
 
 No static snapshot fallback is supported.
 
+Task and track projections in the panel are slot-aware:
+
+- task view exposes current artifacts by artifact slot
+- artifact lineage is represented through revision metadata
+- track summaries derive "latest material" from slot-aware current artifacts
+
 ## Refresh Flow
 
 1. Start server: `python3 scripts/serve_context_panel.py`

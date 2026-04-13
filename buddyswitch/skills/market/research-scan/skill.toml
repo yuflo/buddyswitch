@@ -1,0 +1,14 @@
+id = "research-scan"
+buddy = "market"
+description = "Run browser-first deep market research with iterative query refinement and strong source traceability."
+produces_artifact = true
+output_slot = "research"
+input_slots = ["research-question", "links", "prior-artifacts"]
+output_schema = "framework/schemas/market/research-scan.json"
+produces = ["research-report", "evidence-log"]
+consumes = ["research-question", "links", "prior-artifacts"]
+side_effect_level = "medium"
+required_tools = []
+required_env = []
+allowed_task_kinds = ["research"]
+

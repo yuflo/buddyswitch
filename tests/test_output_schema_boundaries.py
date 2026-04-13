@@ -82,6 +82,23 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
 
         self.assertEqual(errors, [])
 
+    def test_dev_schema_rejects_suggested_next_switch(self) -> None:
+        schema = output_schema.load_output_schema("framework/schemas/dev/implement-task.json")
+        payload = {
+            "execution_summary": "Implemented onboarding flow",
+            "working_notes": [],
+            "deliverables_or_changed_files": ["projects/app/src/onboarding.tsx"],
+            "suggested_next_switch": "switch test: run smoke",
+            "artifact_content": {
+                "task_summary": "Implemented onboarding flow",
+                "changed_files": ["projects/app/src/onboarding.tsx"],
+                "implementation_notes": [],
+                "verification_runs": [],
+                "known_limitations": [],
+            },
+        }
+        self.assertNotEqual(output_schema.validate_output_payload(payload, schema), [])
+
 
 if __name__ == "__main__":
     unittest.main()

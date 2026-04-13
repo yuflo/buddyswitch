@@ -175,12 +175,20 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
     guidance = runtime.get("guidance", {})
     required_tools = runtime.get("required_tools", [])
     required_env = runtime.get("required_env", [])
+    output_slot = runtime.get("output_slot") or runtime.get("default_artifact_kind")
+    input_slots = runtime.get("input_slots")
+    if not isinstance(input_slots, list):
+        input_slots = runtime.get("consumes", [])
     return {
         "id": skill["id"],
         "path": skill["path"],
+        "instruction_path": runtime.get("instruction_path", skill["path"]),
         "description": skill["description"],
         "objects": skill["objects"],
         "default_artifact_kind": runtime["default_artifact_kind"],
+        "produces_artifact": bool(runtime.get("produces_artifact", True)),
+        "output_slot": output_slot,
+        "input_slots": input_slots,
         "auto_summary": runtime["auto_summary"],
         "output_schema": runtime["output_schema"],
         "version": runtime.get("version"),
@@ -490,7 +498,11 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
     track_artifact_index = build_track_artifact_index(effective_track_id)
     artifact_selection = _build_artifact_selection_context(
         demand=demand,
-        required_slots=list(implicit_skill["runtime"].get("consumes", [])) if implicit_skill else [],
+        required_slots=(
+            list(implicit_skill["runtime"].get("input_slots", implicit_skill["runtime"].get("consumes", [])))
+            if implicit_skill
+            else []
+        ),
         task_id=resolved_task_id,
         track_artifact_index=track_artifact_index,
     )
@@ -548,7 +560,6 @@ def _strip_run_fields(result: dict[str, Any]) -> dict[str, Any]:
         "execution_summary": result.get("execution_summary"),
         "working_notes": result.get("working_notes") or [],
         "deliverables_or_changed_files": result.get("deliverables_or_changed_files") or [],
-        "suggested_next_switch": result.get("suggested_next_switch"),
     }
 
 
@@ -767,13 +778,17 @@ def _persist_artifact_skill(
     buddy = resolved["switch"]["buddy"]
     demand = resolved["switch"]["demand"]
     skill_id = skill["id"]
-    artifact_id = _derive_artifact_id(task["id"], skill["runtime"]["default_artifact_kind"])
+    output_slot = skill["runtime"].get("output_slot") or skill["runtime"]["default_artifact_kind"]
+    if not isinstance(output_slot, str) or not output_slot:
+        raise ValueError(f"skill '{skill_id}' must define a non-empty output_slot/default_artifact_kind")
+    artifact_id = _derive_artifact_id(task["id"], output_slot)
     artifact_summary = str(result.get("execution_summary") or "")
     artifact = create_artifact(
         artifact_id=artifact_id,
         title=_derive_artifact_title(buddy, skill_id, demand),
         buddy=buddy,
         skill_id=skill_id,
+        slot=output_slot,
         task_id=task["id"],
         source_run_id=run_id,
         summary=artifact_summary,

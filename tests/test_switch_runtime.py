@@ -208,6 +208,9 @@ class ResolveRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["implicit_skill_id"], "implement-task")
         self.assertEqual(payload["run_instructions"]["selected_inputs"], [])
         self.assertEqual(payload["run_instructions"]["artifact_read_commands"], [])
+        self.assertEqual(payload["skill_cards"][0]["instruction_path"], "buddyswitch/skills/dev/implement-task/SKILL.md")
+        self.assertEqual(payload["skill_cards"][0]["output_slot"], "implementation-report")
+        self.assertEqual(payload["skill_cards"][0]["input_slots"], ["prd", "design-spec", "task"])
 
     def test_resolve_reuses_explicit_task(self) -> None:
         task = create_task(
@@ -511,6 +514,7 @@ class WorkspaceDataTests(unittest.TestCase):
         )
         self.assertEqual(row["related_run_ids"], ["run-prior-a", "run-prior-b"])
         self.assertEqual(row["recommended_switch"], "switch dev(task-dev-audit-123abc): <demand>")
+        self.assertNotIn("suggested_next_switch", row)
 
 
 class PersistRuntimeTests(unittest.TestCase):
@@ -549,7 +553,6 @@ class PersistRuntimeTests(unittest.TestCase):
             "execution_summary": "Implemented the requested change and verified the core path.",
             "working_notes": ["Scoped the edits to onboarding CTA behavior."],
             "deliverables_or_changed_files": ["projects/app/src/example.ts"],
-            "suggested_next_switch": "switch test: Run smoke checks for the onboarding improvements",
             "artifact_content": {
                 "task_summary": "Implemented onboarding improvements.",
                 "changed_files": ["projects/app/src/example.ts"],
@@ -598,6 +601,7 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertEqual(run_json["reference_switches"], payload["reference_switches"])
         self.assertEqual(run_json["related_run_ids"], payload["related_run_ids"])
         self.assertEqual(run_json["recommended_switch"], payload["recommended_switch"])
+        self.assertNotIn("suggested_next_switch", run_json)
         self.assertNotIn("artifact_content", run_json)
 
     def test_persist_reuses_task_and_binds_to_track(self) -> None:

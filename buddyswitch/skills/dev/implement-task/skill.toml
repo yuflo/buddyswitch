@@ -1,0 +1,14 @@
+id = "implement-task"
+buddy = "dev"
+description = "Implement scoped product changes in project code and report verified outcomes."
+produces_artifact = true
+output_slot = "implementation-report"
+input_slots = ["prd", "design-spec", "task"]
+output_schema = "framework/schemas/dev/implement-task.json"
+produces = ["code-change", "implementation-report"]
+consumes = ["prd", "design-spec", "task"]
+side_effect_level = "high"
+required_tools = []
+required_env = []
+allowed_task_kinds = ["implementation"]
+
