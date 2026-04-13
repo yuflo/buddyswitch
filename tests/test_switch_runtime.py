@@ -485,7 +485,11 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertEqual(artifact_json["task_id"], payload["task_id"])
         self.assertEqual(artifact_json["source_run_id"], payload["run_id"])
         self.assertIn(payload["run_id"], task_json["run_ids"])
-        self.assertEqual(task_json["latest_artifact_id"], payload["artifact_id"])
+        self.assertNotIn("latest_artifact_id", task_json)
+        self.assertEqual(
+            task_json["artifact_slots"][artifact_json["slot"]]["current_artifact_id"],
+            payload["artifact_id"],
+        )
         self.assertEqual(run_json["resolved_task_id"], payload["task_id"])
         self.assertEqual(run_json["artifact_ids"], [payload["artifact_id"]])
         self.assertEqual(run_json["switch"]["demand"], resolved["switch"]["demand"])

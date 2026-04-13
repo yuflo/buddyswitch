@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -11,6 +12,12 @@ from env_store import create_artifact, create_task, get_artifact, get_task  # no
 
 
 class ArtifactSlotLifecycleTests(unittest.TestCase):
+    def _task_path(self, task_id: str) -> Path:
+        return ROOT / "buddyswitch" / "objects" / "tasks" / f"{task_id}.json"
+
+    def _artifact_path(self, artifact_id: str) -> Path:
+        return ROOT / "buddyswitch" / "objects" / "artifacts" / f"{artifact_id}.json"
+
     def test_create_task_initializes_artifact_slots(self) -> None:
         task = create_task(
             "task-pm-v2-slot",
@@ -21,6 +28,9 @@ class ArtifactSlotLifecycleTests(unittest.TestCase):
 
         self.assertEqual(task["artifact_slots"], {})
         self.assertNotIn("latest_artifact_id", task)
+        stored_task = json.loads(self._task_path(task["id"]).read_text(encoding="utf-8"))
+        self.assertEqual(stored_task["artifact_slots"], {})
+        self.assertNotIn("latest_artifact_id", stored_task)
 
     def test_create_artifact_builds_revision_chain_for_same_slot(self) -> None:
         task = create_task(
@@ -56,6 +66,9 @@ class ArtifactSlotLifecycleTests(unittest.TestCase):
         stored_first = get_artifact(first["id"])
         stored_second = get_artifact(second["id"])
         stored_task = get_task(task["id"])
+        stored_first_json = json.loads(self._artifact_path(first["id"]).read_text(encoding="utf-8"))
+        stored_second_json = json.loads(self._artifact_path(second["id"]).read_text(encoding="utf-8"))
+        stored_task_json = json.loads(self._task_path(task["id"]).read_text(encoding="utf-8"))
 
         self.assertEqual(stored_first["revision"], 1)
         self.assertFalse(stored_first["is_current"])
@@ -67,3 +80,7 @@ class ArtifactSlotLifecycleTests(unittest.TestCase):
             stored_second["id"],
         )
         self.assertEqual(stored_task["artifact_slots"]["prd"]["revision_count"], 2)
+        self.assertIn("supersedes_artifact_id", stored_first_json)
+        self.assertIsNone(stored_first_json["supersedes_artifact_id"])
+        self.assertEqual(stored_second_json["supersedes_artifact_id"], stored_first["id"])
+        self.assertNotIn("latest_artifact_id", stored_task_json)

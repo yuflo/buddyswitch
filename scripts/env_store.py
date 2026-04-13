@@ -161,7 +161,6 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
     artifact_slots = task.get("artifact_slots", {})
     run_ids = task.get("run_ids")
     latest_run_id = task.get("latest_run_id")
-    latest_artifact_id = task.get("latest_artifact_id")
     summary = task.get("summary")
     created_at = task.get("created_at")
     updated_at = task.get("updated_at")
@@ -201,11 +200,6 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("task.latest_run_id must be a non-empty string")
     if latest_run_id not in run_ids:
         raise ValueError("task.latest_run_id must be included in task.run_ids")
-    if latest_artifact_id is not None:
-        if not isinstance(latest_artifact_id, str) or not latest_artifact_id:
-            raise ValueError("task.latest_artifact_id must be a non-empty string or null")
-        if latest_artifact_id not in artifact_ids:
-            raise ValueError("task.latest_artifact_id must be included in task.artifact_ids")
     if summary is not None and not isinstance(summary, str):
         raise ValueError("task.summary must be a string or null")
     if not isinstance(created_at, str) or not created_at:
@@ -223,7 +217,6 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
         "artifact_slots": normalized_slots,
         "run_ids": list(dict.fromkeys(run_ids)),
         "latest_run_id": latest_run_id,
-        "latest_artifact_id": latest_artifact_id,
         "summary": summary or "",
         "created_at": created_at,
         "updated_at": updated_at,
@@ -241,7 +234,8 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     skill_id = artifact.get("skill_id")
     slot = artifact.get("slot")
     revision = artifact.get("revision")
-    supersedes_artifact_id = artifact.get("supersedes_artifact_id")
+    supersedes_sentinel = object()
+    supersedes_artifact_id = artifact.get("supersedes_artifact_id", supersedes_sentinel)
     is_current = artifact.get("is_current")
     source_run_id = artifact.get("source_run_id")
     summary = artifact.get("summary")
@@ -260,6 +254,8 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("artifact.slot must be a non-empty string")
     if not isinstance(revision, int) or revision <= 0:
         raise ValueError("artifact.revision must be a positive integer")
+    if supersedes_artifact_id is supersedes_sentinel:
+        raise ValueError("artifact.supersedes_artifact_id must be present")
     if supersedes_artifact_id is not None:
         require_id(supersedes_artifact_id, "artifact.supersedes_artifact_id")
     if not isinstance(is_current, bool):
@@ -323,14 +319,7 @@ def _current_task_artifact_id(task: dict[str, Any]) -> str | None:
                 current_artifact_id = row.get("current_artifact_id")
                 if isinstance(current_artifact_id, str) and current_artifact_id:
                     return current_artifact_id
-    latest_artifact_id = task.get("latest_artifact_id")
-    return latest_artifact_id if isinstance(latest_artifact_id, str) and latest_artifact_id else None
-
-
-def _refresh_task_legacy_latest_artifact(task: dict[str, Any]) -> dict[str, Any]:
-    current_artifact_id = _current_task_artifact_id(task)
-    task["latest_artifact_id"] = current_artifact_id
-    return task
+    return None
 
 
 def list_tracks() -> list[dict[str, Any]]:
@@ -581,7 +570,6 @@ def create_task(
         "artifact_slots": {},
         "run_ids": [initial_run_id],
         "latest_run_id": initial_run_id,
-        "latest_artifact_id": None,
         "summary": summary,
         "created_at": timestamp,
         "updated_at": timestamp,
@@ -589,7 +577,7 @@ def create_task(
     task = save_task(task)
     if track_id:
         _register_task_id(track_id, task_id)
-    return {key: value for key, value in task.items() if key != "latest_artifact_id"}
+    return task
 
 
 def update_task(task_id: str, patch: dict[str, Any]) -> dict[str, Any]:
@@ -605,7 +593,6 @@ def update_task(task_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         "artifact_ids",
         "run_ids",
         "latest_run_id",
-        "latest_artifact_id",
     }
     for key, value in patch.items():
         if key not in allowed:
@@ -666,7 +653,6 @@ def add_artifact_to_task(task_id: str, artifact_id: str, *, summary: str | None 
         "current_artifact_id": artifact_id,
         "revision_count": revision,
     }
-    task["latest_artifact_id"] = artifact_id
     if summary is not None:
         task["summary"] = summary
     task["updated_at"] = now_iso()
@@ -697,8 +683,6 @@ def remove_artifact_from_task(task_id: str, artifact_id: str) -> dict[str, Any]:
             }
         else:
             task["artifact_slots"].pop(slot, None)
-    if task.get("latest_artifact_id") == artifact_id:
-        task["latest_artifact_id"] = _current_task_artifact_id(task)
     task["updated_at"] = now_iso()
     return save_task(task)
 
