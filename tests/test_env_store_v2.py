@@ -19,7 +19,7 @@ class ArtifactSlotLifecycleTests(unittest.TestCase):
         return ROOT / "buddyswitch" / "objects" / "artifacts" / f"{artifact_id}.json"
 
     def _cleanup_fixtures(self) -> None:
-        for task_id in ("task-pm-v2-slot", "task-pm-v2-revision"):
+        for task_id in ("task-pm-v2-slot", "task-pm-v2-revision", "task-pm-v2-move-source", "task-pm-v2-move-dest"):
             path = self._task_path(task_id)
             if path.exists():
                 path.unlink()
@@ -27,6 +27,10 @@ class ArtifactSlotLifecycleTests(unittest.TestCase):
             "art-task-pm-v2-revision-prd-r1",
             "art-task-pm-v2-revision-prd-r2",
             "art-task-pm-v2-revision-prd-r3",
+            "art-task-pm-v2-move-source-prd-r1",
+            "art-task-pm-v2-move-source-prd-r2",
+            "art-task-pm-v2-move-dest-prd-r1",
+            "art-task-pm-v2-move-dest-prd-r2",
         ):
             path = self._artifact_path(artifact_id)
             if path.exists():
@@ -208,3 +212,134 @@ class ArtifactSlotLifecycleTests(unittest.TestCase):
         self.assertFalse(get_artifact(first["id"])["is_current"])
         self.assertEqual(stored_task_after_third["artifact_slots"]["prd"]["current_artifact_id"], third["id"])
         self.assertEqual(stored_task_after_third["artifact_slots"]["prd"]["revision_count"], 3)
+
+    def test_moving_historical_revision_into_occupied_destination_slot_keeps_destination_head(self) -> None:
+        source = create_task(
+            "task-pm-v2-move-source",
+            "V2 Move Source",
+            buddy="pm",
+            initial_run_id="run-seed-v2-move-source",
+        )
+        dest = create_task(
+            "task-pm-v2-move-dest",
+            "V2 Move Dest",
+            buddy="pm",
+            initial_run_id="run-seed-v2-move-dest",
+        )
+
+        source_old = create_artifact(
+            artifact_id="art-task-pm-v2-move-source-prd-r1",
+            title="Source PRD 1",
+            buddy="pm",
+            skill_id="write-prd",
+            slot="prd",
+            task_id=source["id"],
+            source_run_id="run-seed-v2-move-source",
+            summary="Source old",
+            content={"task_summary": "Source old"},
+        )
+        source_current = create_artifact(
+            artifact_id="art-task-pm-v2-move-source-prd-r2",
+            title="Source PRD 2",
+            buddy="pm",
+            skill_id="write-prd",
+            slot="prd",
+            task_id=source["id"],
+            source_run_id="run-seed-v2-move-source-2",
+            summary="Source current",
+            content={"task_summary": "Source current"},
+        )
+        dest_current = create_artifact(
+            artifact_id="art-task-pm-v2-move-dest-prd-r1",
+            title="Dest PRD 1",
+            buddy="pm",
+            skill_id="write-prd",
+            slot="prd",
+            task_id=dest["id"],
+            source_run_id="run-seed-v2-move-dest",
+            summary="Dest current",
+            content={"task_summary": "Dest current"},
+        )
+
+        update_artifact(source_old["id"], {"task_id": dest["id"]})
+
+        moved = get_artifact(source_old["id"])
+        dest_current_after = get_artifact(dest_current["id"])
+        moved_source_current = get_artifact(source_current["id"])
+        dest_task = get_task(dest["id"])
+        current_artifacts = [
+            artifact
+            for artifact in (moved, dest_current_after, moved_source_current)
+            if artifact["task_id"] == dest["id"] and artifact["slot"] == "prd" and artifact["is_current"]
+        ]
+
+        self.assertFalse(moved["is_current"])
+        self.assertTrue(dest_current_after["is_current"])
+        self.assertEqual(dest_task["artifact_slots"]["prd"]["current_artifact_id"], dest_current["id"])
+        self.assertEqual(dest_task["artifact_slots"]["prd"]["revision_count"], 1)
+        self.assertEqual(len(current_artifacts), 1)
+
+    def test_moving_current_revision_into_occupied_destination_slot_promotes_moved_artifact(self) -> None:
+        source = create_task(
+            "task-pm-v2-move-source",
+            "V2 Move Source",
+            buddy="pm",
+            initial_run_id="run-seed-v2-move-source",
+        )
+        dest = create_task(
+            "task-pm-v2-move-dest",
+            "V2 Move Dest",
+            buddy="pm",
+            initial_run_id="run-seed-v2-move-dest",
+        )
+
+        source_old = create_artifact(
+            artifact_id="art-task-pm-v2-move-source-prd-r1",
+            title="Source PRD 1",
+            buddy="pm",
+            skill_id="write-prd",
+            slot="prd",
+            task_id=source["id"],
+            source_run_id="run-seed-v2-move-source",
+            summary="Source old",
+            content={"task_summary": "Source old"},
+        )
+        source_current = create_artifact(
+            artifact_id="art-task-pm-v2-move-source-prd-r2",
+            title="Source PRD 2",
+            buddy="pm",
+            skill_id="write-prd",
+            slot="prd",
+            task_id=source["id"],
+            source_run_id="run-seed-v2-move-source-2",
+            summary="Source current",
+            content={"task_summary": "Source current"},
+        )
+        dest_current = create_artifact(
+            artifact_id="art-task-pm-v2-move-dest-prd-r1",
+            title="Dest PRD 1",
+            buddy="pm",
+            skill_id="write-prd",
+            slot="prd",
+            task_id=dest["id"],
+            source_run_id="run-seed-v2-move-dest",
+            summary="Dest current",
+            content={"task_summary": "Dest current"},
+        )
+
+        update_artifact(source_current["id"], {"task_id": dest["id"]})
+
+        moved = get_artifact(source_current["id"])
+        dest_current_after = get_artifact(dest_current["id"])
+        dest_task = get_task(dest["id"])
+        current_artifacts = [
+            artifact
+            for artifact in (moved, dest_current_after, get_artifact(source_old["id"]))
+            if artifact["task_id"] == dest["id"] and artifact["slot"] == "prd" and artifact["is_current"]
+        ]
+
+        self.assertTrue(moved["is_current"])
+        self.assertFalse(dest_current_after["is_current"])
+        self.assertEqual(dest_task["artifact_slots"]["prd"]["current_artifact_id"], moved["id"])
+        self.assertEqual(dest_task["artifact_slots"]["prd"]["revision_count"], 2)
+        self.assertEqual(len(current_artifacts), 1)

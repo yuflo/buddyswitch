@@ -649,10 +649,36 @@ def add_artifact_to_task(task_id: str, artifact_id: str, *, summary: str | None 
     if artifact_id not in task["artifact_ids"]:
         task["artifact_ids"].append(artifact_id)
     artifact_slots = task.setdefault("artifact_slots", {})
-    artifact_slots[slot] = {
-        "current_artifact_id": artifact_id,
-        "revision_count": revision,
-    }
+    current_slot = artifact_slots.get(slot)
+    if not isinstance(current_slot, dict):
+        current_slot = None
+    current_artifact_id = current_slot.get("current_artifact_id") if current_slot else None
+    current_revision_count = current_slot.get("revision_count") if current_slot else None
+    if current_slot is None or not isinstance(current_artifact_id, str) or not current_artifact_id:
+        if not artifact.get("is_current"):
+            artifact["is_current"] = True
+            artifact["updated_at"] = now_iso()
+            save_artifact(artifact)
+        artifact_slots[slot] = {
+            "current_artifact_id": artifact_id,
+            "revision_count": revision,
+        }
+    elif artifact.get("is_current"):
+        if current_artifact_id != artifact_id:
+            current_artifact = get_artifact(current_artifact_id)
+            if current_artifact is not None:
+                current_artifact["is_current"] = False
+                current_artifact["updated_at"] = now_iso()
+                save_artifact(current_artifact)
+        artifact_slots[slot] = {
+            "current_artifact_id": artifact_id,
+            "revision_count": max(current_revision_count if isinstance(current_revision_count, int) else 0, revision),
+        }
+    else:
+        artifact_slots[slot] = {
+            "current_artifact_id": current_artifact_id,
+            "revision_count": max(current_revision_count if isinstance(current_revision_count, int) else 0, revision),
+        }
     if summary is not None:
         task["summary"] = summary
     task["updated_at"] = now_iso()
