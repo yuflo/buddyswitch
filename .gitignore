@@ -30,6 +30,7 @@ test-results/
 playwright-report/
 
 # Temporary and local noise
+.worktrees/
 *.log
 *.tmp
 *.trace
