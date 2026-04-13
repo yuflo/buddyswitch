@@ -38,13 +38,23 @@ def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    latest_artifact_id = task.get("latest_artifact_id")
-    latest_artifact = artifact_map.get(latest_artifact_id) if latest_artifact_id else None
+    current_artifacts: dict[str, dict[str, Any]] = {}
+    artifact_slots = task.get("artifact_slots", {})
+    if isinstance(artifact_slots, dict):
+        for slot, row in artifact_slots.items():
+            if not isinstance(row, dict):
+                continue
+            artifact_id = row.get("current_artifact_id")
+            if not isinstance(artifact_id, str) or not artifact_id:
+                continue
+            artifact = artifact_map.get(artifact_id)
+            if artifact is not None:
+                current_artifacts[slot] = artifact
     return {
         **task,
         "object_path": task_object_path(task["id"]),
         "file_name": Path(task_object_path(task["id"])).name,
-        "latest_artifact": latest_artifact,
+        "current_artifacts": current_artifacts,
         "missing": False,
     }
 
@@ -68,9 +78,11 @@ def build_track_views(
             tasks.append(task)
             if task.get("updated_at", "") > latest:
                 latest = task["updated_at"]
-            latest_artifact = task.get("latest_artifact")
-            if isinstance(latest_artifact, dict) and latest_artifact.get("updated_at", "") > latest:
-                latest = latest_artifact["updated_at"]
+            current_artifacts = task.get("current_artifacts")
+            if isinstance(current_artifacts, dict):
+                for artifact in current_artifacts.values():
+                    if isinstance(artifact, dict) and artifact.get("updated_at", "") > latest:
+                        latest = artifact["updated_at"]
 
         tasks.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
         rows.append(
@@ -140,7 +152,6 @@ def scan_run_audits() -> list[dict[str, Any]]:
                 "track_title": payload.get("track_title"),
                 "track_action": payload.get("track_action"),
                 "execution_summary": payload.get("execution_summary"),
-                "suggested_next_switch": payload.get("suggested_next_switch"),
                 "reference_switches": payload.get("reference_switches")
                 if isinstance(payload.get("reference_switches"), dict)
                 else {},

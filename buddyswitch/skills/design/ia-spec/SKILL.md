@@ -1,21 +1,3 @@
----
-name: ia-spec
-description: Create IA and interaction specification artifacts aligned with the design contract.
-version: "2.0"
-default_artifact_kind: design-spec
-auto_summary: true
-output_schema: framework/schemas/design/ia-spec.json
-side_effect_level: medium
-produces:
-  - design-spec
-  - ia
-  - interaction-flow
-consumes:
-  - prd
-  - requirements
-  - track
----
-
 # ia-spec
 
 ## Purpose

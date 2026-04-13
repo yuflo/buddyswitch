@@ -175,12 +175,20 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
     guidance = runtime.get("guidance", {})
     required_tools = runtime.get("required_tools", [])
     required_env = runtime.get("required_env", [])
+    output_slot = runtime.get("output_slot") or runtime.get("default_artifact_kind")
+    input_slots = runtime.get("input_slots")
+    if not isinstance(input_slots, list):
+        input_slots = runtime.get("consumes", [])
     return {
         "id": skill["id"],
         "path": skill["path"],
+        "instruction_path": runtime.get("instruction_path", skill["path"]),
         "description": skill["description"],
         "objects": skill["objects"],
         "default_artifact_kind": runtime["default_artifact_kind"],
+        "produces_artifact": bool(runtime.get("produces_artifact", True)),
+        "output_slot": output_slot,
+        "input_slots": input_slots,
         "auto_summary": runtime["auto_summary"],
         "output_schema": runtime["output_schema"],
         "version": runtime.get("version"),
@@ -211,11 +219,11 @@ def _build_run_instructions(
     implicit_skill_id: str | None,
     artifact_selection: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    selected_artifact_ids: list[str] = []
+    selected_inputs: list[dict[str, Any]] = []
     if isinstance(artifact_selection, dict):
-        raw_ids = artifact_selection.get("selected_artifact_ids")
-        if isinstance(raw_ids, list):
-            selected_artifact_ids = [item for item in raw_ids if isinstance(item, str) and item]
+        raw_inputs = artifact_selection.get("selected_inputs")
+        if isinstance(raw_inputs, list):
+            selected_inputs = [item for item in raw_inputs if isinstance(item, dict)]
 
     if implicit_skill_id:
         first_action = f"Use implicit_skill_id '{implicit_skill_id}' for this run."
@@ -224,11 +232,15 @@ def _build_run_instructions(
 
     next_actions = [
         first_action,
-        "When track_artifact_index is present, select relevant artifact_ids before running the skill.",
+        "When track_artifact_index is present, select relevant inputs by slot before running the skill.",
     ]
-    if selected_artifact_ids:
-        joined_ids = ", ".join(selected_artifact_ids)
-        next_actions.append(f"Read selected artifacts by id: {joined_ids}.")
+    if selected_inputs:
+        joined_slots = ", ".join(
+            f"{item.get('slot')}={item.get('artifact_id')}"
+            for item in selected_inputs
+            if isinstance(item.get("slot"), str) and isinstance(item.get("artifact_id"), str)
+        )
+        next_actions.append(f"Read selected inputs by slot: {joined_slots}.")
     next_actions.extend(
         [
             "Read the selected buddyswitch/skills/<buddy>/<skill>/SKILL.md in the current Codex CLI session.",
@@ -237,9 +249,14 @@ def _build_run_instructions(
         ]
     )
 
-    artifact_read_commands = [
-        f"python3 scripts/env_artifacts.py get {artifact_id}" for artifact_id in selected_artifact_ids
-    ]
+    artifact_read_commands = []
+    seen_artifact_ids: set[str] = set()
+    for item in selected_inputs:
+        artifact_id = item.get("artifact_id")
+        if not isinstance(artifact_id, str) or not artifact_id or artifact_id in seen_artifact_ids:
+            continue
+        seen_artifact_ids.add(artifact_id)
+        artifact_read_commands.append(f"python3 scripts/env_artifacts.py get {artifact_id}")
     return {
         "host": "codex",
         "selection_rule": "Choose exactly one skill_id from eligible_skills. Multi-skill buddies are never auto-selected by the runtime.",
@@ -248,7 +265,7 @@ def _build_run_instructions(
         "resolve_notes": [
             "resolve parses the invocation, derives candidates and context, and does not write BuddySwitch state."
         ],
-        "selected_artifact_ids": selected_artifact_ids,
+        "selected_inputs": selected_inputs,
         "artifact_read_commands": artifact_read_commands,
         "next_actions": next_actions,
     }
@@ -329,7 +346,7 @@ def _build_task_context(task: dict[str, Any] | None) -> dict[str, Any]:
             "summary": task.get("summary", ""),
             "track_id": task.get("track_id"),
             "latest_run_id": task.get("latest_run_id"),
-            "latest_artifact_id": task.get("latest_artifact_id"),
+            "artifact_slots": task.get("artifact_slots", {}),
         },
         "artifacts": artifacts[:5],
         "recent_runs": _scan_task_recent_runs(task["id"], limit=3),
@@ -343,20 +360,30 @@ def _build_track_context(track_id: str | None) -> dict[str, Any] | None:
     if track is None:
         return None
 
-    artifacts = {artifact["id"]: artifact for artifact in list_artifacts()}
     rows: list[dict[str, Any]] = []
     for task_id in track.get("task_ids", []):
         task = get_task(task_id)
         if task is None:
             continue
-        latest_artifact = artifacts.get(task.get("latest_artifact_id")) if task.get("latest_artifact_id") else None
+        current_artifacts: dict[str, dict[str, Any]] = {}
+        artifact_slots = task.get("artifact_slots", {})
+        if isinstance(artifact_slots, dict):
+            for slot, row in artifact_slots.items():
+                if not isinstance(row, dict):
+                    continue
+                artifact_id = row.get("current_artifact_id")
+                if not isinstance(artifact_id, str) or not artifact_id:
+                    continue
+                artifact = get_artifact(artifact_id)
+                if artifact is not None:
+                    current_artifacts[slot] = artifact
         rows.append(
             {
                 "task_id": task["id"],
                 "buddy": task["buddy"],
                 "status": task["status"],
                 "summary": task.get("summary", ""),
-                "latest_artifact": latest_artifact,
+                "current_artifacts": current_artifacts,
             }
         )
 
@@ -375,16 +402,17 @@ def _build_track_context(track_id: str | None) -> dict[str, Any] | None:
 
 def _build_artifact_selection_context(
     *,
-    buddy_id: str,
     demand: str,
+    required_slots: list[str],
     task_id: str,
     track_artifact_index: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     if track_artifact_index is None:
         return None
     return select_artifacts_for_run(
-        current_buddy=buddy_id,
+        current_buddy="",
         demand=demand,
+        required_slots=required_slots,
         track_artifact_index=track_artifact_index,
         current_task_id=task_id,
     )
@@ -455,6 +483,7 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
         raise ValueError(f"No eligible skills remain for buddy '{buddy_id}'.")
 
     implicit_skill_id = eligible_skill_ids[0] if len(eligible_skill_ids) == 1 else None
+    implicit_skill = next((skill for skill in buddy_skill_docs(manifest, buddy_id) if skill["id"] == implicit_skill_id), None)
     normalized_text = parsed.get("normalized_text")
     switch_payload = {
         "buddy": buddy_id,
@@ -468,8 +497,12 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
     track_context = _build_track_context(effective_track_id)
     track_artifact_index = build_track_artifact_index(effective_track_id)
     artifact_selection = _build_artifact_selection_context(
-        buddy_id=buddy_id,
         demand=demand,
+        required_slots=(
+            list(implicit_skill["runtime"].get("input_slots", implicit_skill["runtime"].get("consumes", [])))
+            if implicit_skill
+            else []
+        ),
         task_id=resolved_task_id,
         track_artifact_index=track_artifact_index,
     )
@@ -527,7 +560,6 @@ def _strip_run_fields(result: dict[str, Any]) -> dict[str, Any]:
         "execution_summary": result.get("execution_summary"),
         "working_notes": result.get("working_notes") or [],
         "deliverables_or_changed_files": result.get("deliverables_or_changed_files") or [],
-        "suggested_next_switch": result.get("suggested_next_switch"),
     }
 
 
@@ -746,13 +778,17 @@ def _persist_artifact_skill(
     buddy = resolved["switch"]["buddy"]
     demand = resolved["switch"]["demand"]
     skill_id = skill["id"]
-    artifact_id = _derive_artifact_id(task["id"], skill["runtime"]["default_artifact_kind"])
+    output_slot = skill["runtime"].get("output_slot") or skill["runtime"]["default_artifact_kind"]
+    if not isinstance(output_slot, str) or not output_slot:
+        raise ValueError(f"skill '{skill_id}' must define a non-empty output_slot/default_artifact_kind")
+    artifact_id = _derive_artifact_id(task["id"], output_slot)
     artifact_summary = str(result.get("execution_summary") or "")
     artifact = create_artifact(
         artifact_id=artifact_id,
         title=_derive_artifact_title(buddy, skill_id, demand),
         buddy=buddy,
         skill_id=skill_id,
+        slot=output_slot,
         task_id=task["id"],
         source_run_id=run_id,
         summary=artifact_summary,

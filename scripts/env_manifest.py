@@ -262,64 +262,6 @@ def _parse_scalar(value: str, label: str) -> Any:
     return raw
 
 
-def _parse_skill_front_matter(path: Path) -> dict[str, Any]:
-    text = path.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    if len(lines) < 3 or lines[0].strip() != "---":
-        raise ManifestError(f"{path.relative_to(ROOT)} must start with '---' front matter")
-
-    end = None
-    for index in range(1, len(lines)):
-        if lines[index].strip() == "---":
-            end = index
-            break
-    if end is None:
-        raise ManifestError(f"{path.relative_to(ROOT)} front matter is missing closing '---'")
-
-    block = lines[1:end]
-    data: dict[str, Any] = {}
-    i = 0
-    while i < len(block):
-        line = block[i]
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            i += 1
-            continue
-
-        match = re.match(r"^([A-Za-z0-9_-]+)\s*:\s*(.*)$", stripped)
-        if not match:
-            raise ManifestError(f"Invalid front matter line in {path.relative_to(ROOT)}: {stripped}")
-        key = match.group(1)
-        value = match.group(2).strip()
-
-        if value:
-            data[key] = _parse_scalar(value, f"{path.relative_to(ROOT)}:{key}")
-            i += 1
-            continue
-
-        # Parse multiline list values:
-        items: list[Any] = []
-        i += 1
-        while i < len(block):
-            next_line = block[i]
-            next_stripped = next_line.strip()
-            if not next_stripped:
-                i += 1
-                continue
-            if _SKILL_KEY_RE.match(next_stripped) and not next_stripped.startswith("-"):
-                break
-            item_match = re.match(r"^\s*-\s*(.+)\s*$", next_line)
-            if not item_match:
-                raise ManifestError(
-                    f"Invalid list item for '{key}' in {path.relative_to(ROOT)}: {next_stripped}"
-                )
-            items.append(_parse_scalar(item_match.group(1), f"{path.relative_to(ROOT)}:{key}"))
-            i += 1
-        data[key] = items
-
-    return data
-
-
 def _split_front_matter(path: Path) -> tuple[dict[str, Any], list[str]]:
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -427,6 +369,138 @@ def _parse_skill_guidance(path: Path, body_lines: list[str]) -> dict[str, list[s
     return sections
 
 
+def _normalize_string_list(value: Any, *, label: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ManifestError(f"{label} must be a list")
+    cleaned: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ManifestError(f"{label} must contain non-empty strings")
+        cleaned.append(item.strip())
+    return cleaned
+
+
+def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
+    if not package_root.exists() or not package_root.is_dir():
+        raise ManifestError(f"Skill package not found: {package_root.relative_to(ROOT)}")
+
+    metadata_path = package_root / "skill.toml"
+    instruction_path = package_root / "SKILL.md"
+    if not metadata_path.exists():
+        raise ManifestError(f"{metadata_path.relative_to(ROOT)} not found")
+    if not instruction_path.exists():
+        raise ManifestError(f"{instruction_path.relative_to(ROOT)} not found")
+
+    metadata = _load_toml(metadata_path)
+    if not isinstance(metadata, dict):
+        raise ManifestError(f"{metadata_path.relative_to(ROOT)} must contain a TOML object")
+
+    required = ("id", "buddy", "description", "produces_artifact", "input_slots", "output_schema")
+    missing = [key for key in required if key not in metadata]
+    if missing:
+        raise ManifestError(
+            f"{metadata_path.relative_to(ROOT)} is missing required key(s): {', '.join(missing)}"
+        )
+
+    metadata_id = metadata.get("id")
+    if not isinstance(metadata_id, str) or metadata_id.strip() != skill_id:
+        raise ManifestError(
+            f"{metadata_path.relative_to(ROOT)}:id must match manifest skill id '{skill_id}'"
+        )
+    metadata_buddy = metadata.get("buddy")
+    if not isinstance(metadata_buddy, str) or not metadata_buddy.strip():
+        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:buddy must be a non-empty string")
+    description = metadata.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:description must be a non-empty string")
+
+    produces_artifact = metadata.get("produces_artifact")
+    if not isinstance(produces_artifact, bool):
+        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:produces_artifact must be true or false")
+
+    output_slot_raw = metadata.get("output_slot")
+    if produces_artifact:
+        if not isinstance(output_slot_raw, str) or not output_slot_raw.strip():
+            raise ManifestError(
+                f"{metadata_path.relative_to(ROOT)} requires output_slot when produces_artifact=true"
+            )
+        output_slot = output_slot_raw.strip()
+    else:
+        if output_slot_raw is not None:
+            raise ManifestError(
+                f"{metadata_path.relative_to(ROOT)} must omit output_slot when produces_artifact=false"
+            )
+        output_slot = None
+
+    input_slots = _normalize_string_list(metadata.get("input_slots"), label=f"{metadata_path.relative_to(ROOT)}:input_slots")
+
+    output_schema = metadata.get("output_schema")
+    if not isinstance(output_schema, str) or not output_schema.strip():
+        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:output_schema must be a non-empty string")
+    try:
+        normalized_schema = normalize_schema_path(output_schema.strip())
+    except OutputSchemaError as exc:
+        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:output_schema invalid: {exc}") from exc
+    if not (ROOT / normalized_schema).exists():
+        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:output_schema file not found: {normalized_schema}")
+
+    side_effect_level = metadata.get("side_effect_level")
+    if side_effect_level is not None and (not isinstance(side_effect_level, str) or not side_effect_level.strip()):
+        raise ManifestError(
+            f"{metadata_path.relative_to(ROOT)}:side_effect_level must be a non-empty string when provided"
+        )
+
+    required_tools = _normalize_string_list(
+        metadata.get("required_tools", []),
+        label=f"{metadata_path.relative_to(ROOT)}:required_tools",
+    )
+    required_env = _normalize_string_list(
+        metadata.get("required_env", []),
+        label=f"{metadata_path.relative_to(ROOT)}:required_env",
+    )
+    produces = _normalize_string_list(
+        metadata.get("produces", []),
+        label=f"{metadata_path.relative_to(ROOT)}:produces",
+    )
+    consumes = _normalize_string_list(
+        metadata.get("consumes", []),
+        label=f"{metadata_path.relative_to(ROOT)}:consumes",
+    )
+    allowed_task_kinds = _normalize_string_list(
+        metadata.get("allowed_task_kinds", []),
+        label=f"{metadata_path.relative_to(ROOT)}:allowed_task_kinds",
+    )
+
+    guidance = _parse_skill_guidance(
+        instruction_path,
+        instruction_path.read_text(encoding="utf-8").splitlines(),
+    )
+
+    return {
+        "name": skill_id,
+        "buddy": metadata_buddy.strip(),
+        "description": description.strip(),
+        "produces_artifact": produces_artifact,
+        "output_slot": output_slot,
+        "input_slots": input_slots,
+        "output_schema": normalized_schema,
+        "version": None,
+        "side_effect_level": side_effect_level.strip() if isinstance(side_effect_level, str) else None,
+        "required_tools": required_tools,
+        "required_env": required_env,
+        "produces": produces,
+        "consumes": consumes,
+        "allowed_task_kinds": allowed_task_kinds,
+        "instruction_path": instruction_path.relative_to(ROOT).as_posix(),
+        "guidance": guidance,
+        # Compatibility fields during migration to slot metadata.
+        "default_artifact_kind": output_slot or "track-event",
+        "auto_summary": True,
+    }
+
+
 def _load_skill_runtime(path: Path, skill_id: str) -> dict[str, Any]:
     if not path.exists():
         raise ManifestError(f"Skill file not found: {path.relative_to(ROOT)}")
@@ -500,6 +574,7 @@ def _load_skill_runtime(path: Path, skill_id: str) -> dict[str, Any]:
 
     return {
         "name": name.strip(),
+        "buddy": None,
         "description": description.strip(),
         "default_artifact_kind": artifact_kind.strip(),
         "auto_summary": auto_summary,
@@ -510,6 +585,11 @@ def _load_skill_runtime(path: Path, skill_id: str) -> dict[str, Any]:
         "required_env": optional_lists["required_env"],
         "produces": optional_lists["produces"],
         "consumes": optional_lists["consumes"],
+        "produces_artifact": True,
+        "output_slot": artifact_kind.strip(),
+        "input_slots": optional_lists["consumes"],
+        "allowed_task_kinds": [],
+        "instruction_path": path.relative_to(ROOT).as_posix(),
         "guidance": guidance,
     }
 
@@ -559,7 +639,16 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         skill["buddies"] = _require_string_list(skill, "buddies", label)
         skill["objects"] = _require_string_list(skill, "objects", label)
         skill_path = ROOT / skill["path"]
-        skill["runtime"] = _load_skill_runtime(skill_path, skill_id)
+        if skill_path.is_dir():
+            runtime = _load_skill_package(skill_path, skill_id)
+        else:
+            runtime = _load_skill_runtime(skill_path, skill_id)
+        runtime_buddy = runtime.get("buddy")
+        if isinstance(runtime_buddy, str) and runtime_buddy and runtime_buddy not in skill["buddies"]:
+            raise ManifestError(
+                f"{label}.buddies must include runtime buddy '{runtime_buddy}' declared in {skill['path']}"
+            )
+        skill["runtime"] = runtime
         lookup[skill_id] = skill
 
     buddies = manifest.get("buddies")

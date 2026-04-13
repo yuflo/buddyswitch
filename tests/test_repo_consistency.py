@@ -155,6 +155,61 @@ class RepoConsistencyTests(unittest.TestCase):
             self.assertIn("execution summary rule", text, msg=f"missing execution summary section in {path.relative_to(ROOT)}")
             self.assertIn("artifact.summary", text, msg=f"missing artifact.summary rule in {path.relative_to(ROOT)}")
 
+    def test_every_skill_package_has_metadata_and_instruction_files(self) -> None:
+        expected_packages = (
+            ROOT / "buddyswitch" / "skills" / "market" / "research-scan",
+            ROOT / "buddyswitch" / "skills" / "pm" / "write-prd",
+            ROOT / "buddyswitch" / "skills" / "pm" / "track-manager",
+            ROOT / "buddyswitch" / "skills" / "design" / "ia-spec",
+            ROOT / "buddyswitch" / "skills" / "dev" / "implement-task",
+            ROOT / "buddyswitch" / "skills" / "test" / "smoke-test",
+        )
+        for package_root in expected_packages:
+            self.assertTrue((package_root / "skill.toml").exists(), msg=f"missing skill.toml in {package_root}")
+            self.assertTrue((package_root / "SKILL.md").exists(), msg=f"missing SKILL.md in {package_root}")
+
+    def test_skill_instructions_are_markdown_only_without_frontmatter_metadata(self) -> None:
+        expected_packages = (
+            ROOT / "buddyswitch" / "skills" / "market" / "research-scan",
+            ROOT / "buddyswitch" / "skills" / "pm" / "write-prd",
+            ROOT / "buddyswitch" / "skills" / "pm" / "track-manager",
+            ROOT / "buddyswitch" / "skills" / "design" / "ia-spec",
+            ROOT / "buddyswitch" / "skills" / "dev" / "implement-task",
+            ROOT / "buddyswitch" / "skills" / "test" / "smoke-test",
+        )
+        for package_root in expected_packages:
+            skill_doc = package_root / "SKILL.md"
+            lines = skill_doc.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(lines, msg=f"empty SKILL.md in {package_root}")
+            self.assertNotEqual(lines[0].strip(), "---", msg=f"frontmatter not allowed in {skill_doc.relative_to(ROOT)}")
+            self.assertTrue(lines[0].startswith("# "), msg=f"SKILL.md must start with heading in {skill_doc.relative_to(ROOT)}")
+
+    def test_template_references_are_materialized_in_assets(self) -> None:
+        expected_assets = (
+            ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "assets" / "research-report-template.md",
+            ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "assets" / "prd-template.md",
+            ROOT / "buddyswitch" / "skills" / "design" / "ia-spec" / "assets" / "design-spec-template.md",
+            ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "assets" / "implementation-report-template.md",
+            ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "assets" / "test-report-template.md",
+        )
+        for path in expected_assets:
+            self.assertTrue(path.exists(), msg=f"missing template asset: {path.relative_to(ROOT)}")
+
+    def test_active_docs_use_slot_revision_and_package_contract_language(self) -> None:
+        targets = (
+            ROOT / "README.md",
+            ROOT / "framework" / "docs" / "switch-spec.md",
+            ROOT / "framework" / "docs" / "skill-architecture-best-practices.md",
+            ROOT / "framework" / "docs" / "interface-spec.md",
+        )
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in targets).lower()
+
+        self.assertIn("artifact slot", combined)
+        self.assertIn("revision", combined)
+        self.assertIn("skill package", combined)
+        self.assertNotIn("latest_artifact_id", combined)
+        self.assertNotIn("suggested_next_switch", combined)
+
 
 if __name__ == "__main__":
     unittest.main()

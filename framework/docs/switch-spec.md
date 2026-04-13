@@ -69,7 +69,7 @@ Current control-layer expectations:
 - Runtime entry: `scripts/switch_runtime.py`
 - Resolution order:
   1. parse switch
-  2. load the selected buddy's skill catalog from `buddyswitch/skills/**/SKILL.md`
+  2. load the selected buddy's skill catalog from skill packages under `buddyswitch/skills/**/` (`skill.toml` + `SKILL.md`)
   3. validate explicit task id, explicit track id, and task ownership when supplied
   4. derive task resolution (`create` or `reuse`) and effective track id
   5. build task context and optional track context from canonical objects
@@ -85,8 +85,9 @@ Current runtime defaults:
 - `buddy -> skills` is the main routing authority in runtime
 - buddy `permissions` stay as object-authority metadata for manual/debug mutation APIs
 - `required_tools` and `required_env` are advisory skill metadata for the host session
-- BuddySwitch skills are loaded from `buddyswitch/skills/**/SKILL.md`
+- BuddySwitch skills are loaded from skill packages under `buddyswitch/skills/**/`
 - BuddySwitch does not rely on Codex native `.agents/skills` discovery for these skills
+- artifact slot and revision semantics are canonical (`task.artifact_slots[slot]` + artifact `revision`/`is_current`)
 - output contracts are enforced through `framework/schemas/**`
 - output schema validation is structure-only; it does not score business quality, research quality, or workflow completeness
 - every persisted run belongs to a task object
@@ -99,7 +100,7 @@ Current runtime defaults:
 After `resolve`:
 
 1. choose exactly one `skill_id` from `eligible_skills`
-2. read the selected `buddyswitch/skills/<buddy>/<skill>/SKILL.md`
+2. read the selected skill package instruction file `buddyswitch/skills/<buddy>/<skill>/SKILL.md`
 3. execute the workflow in-session
 4. produce a structured result payload matching `required_output_schema_by_skill[skill_id]`
 5. call `scripts/switch_runtime.py persist`
@@ -107,7 +108,7 @@ After `resolve`:
 Recommended fixed host flow for track-bound work:
 1. resolve switch
 2. read `track_artifact_index` and `artifact_selection`
-3. read selected artifacts by id (from `artifact_selection.selected_artifact_ids` or `run_instructions.artifact_read_commands`)
+3. read selected artifact inputs by slot (from `artifact_selection.selected_inputs`) or use `run_instructions.artifact_read_commands`
 4. execute selected skill
 5. persist result
 

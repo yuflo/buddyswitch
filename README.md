@@ -12,7 +12,7 @@ BuddySwitch runs as an orchestration layer inside the host Codex CLI session.
    - `python3 scripts/switch_runtime.py resolve "switch market: quick market research for AI scheduler landing page"`
 4. Inside the current Codex session:
    - choose one `skill_id` from `eligible_skills`
-   - read the selected `buddyswitch/skills/.../SKILL.md`
+   - read the selected skill package instruction file `buddyswitch/skills/.../SKILL.md`
    - run the workflow and produce a structured result matching the reported schema
 5. Persist the structured result:
    - `python3 scripts/switch_runtime.py persist --resolved resolved.json --skill-id implement-task --result result.json`
@@ -61,8 +61,9 @@ Users are not required to provide output paths in demand text; runtime defaults 
 
 ## Runtime Notes
 
-- BuddySwitch skills are stored under `buddyswitch/skills/**/SKILL.md`.
+- BuddySwitch skills are loaded as skill packages under `buddyswitch/skills/**/` with `skill.toml` metadata and `SKILL.md` guidance.
 - BuddySwitch does not use Codex native `.agents/skills` semantics for these skills.
+- Artifact persistence is slot-aware: one current artifact per artifact slot, with revision progression tracked in task state.
 - `required_tools` and `required_env` are advisory skill metadata for the host session. They stay visible in `skill_cards`, but they do not reject resolve candidates.
 - `resolve` returns `eligible_skills`, compact `skill_cards`, task context, optional track context, output schema paths, invocation details, and explicit next actions. `resolve` itself does not write BuddySwitch state.
 - Single-skill buddies may expose `implicit_skill_id`; multi-skill buddies never auto-select in runtime.

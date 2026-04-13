@@ -1,20 +1,3 @@
----
-name: research-scan
-description: Run browser-first deep market research with iterative query refinement and strong source traceability.
-version: "2.0"
-default_artifact_kind: research
-auto_summary: true
-output_schema: framework/schemas/market/research-scan.json
-side_effect_level: medium
-produces:
-  - research-report
-  - evidence-log
-consumes:
-  - research-question
-  - links
-  - prior-artifacts
----
-
 # research-scan
 
 ## Purpose

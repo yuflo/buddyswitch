@@ -1,0 +1,14 @@
+id = "write-prd"
+buddy = "pm"
+description = "Produce an MVP PRD from research and requirements, aligned with the PM contract."
+produces_artifact = true
+output_slot = "prd"
+input_slots = ["research", "requirements", "track"]
+output_schema = "framework/schemas/pm/write-prd.json"
+produces = ["prd", "scope"]
+consumes = ["research", "requirements", "track"]
+side_effect_level = "medium"
+required_tools = []
+required_env = []
+allowed_task_kinds = ["definition"]
+

@@ -1,20 +1,3 @@
----
-name: implement-task
-description: Implement scoped product changes in project code and report verified outcomes.
-version: "2.0"
-default_artifact_kind: implementation-report
-auto_summary: true
-output_schema: framework/schemas/dev/implement-task.json
-side_effect_level: high
-produces:
-  - code-change
-  - implementation-report
-consumes:
-  - prd
-  - design-spec
-  - task
----
-
 # implement-task
 
 ## Purpose

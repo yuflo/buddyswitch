@@ -8,7 +8,7 @@ That means:
 
 - Codex CLI provides the general-agent runtime.
 - BuddySwitch owns protocol, authority, state, and persistence.
-- BuddySwitch skills stay under `buddyswitch/skills/**/SKILL.md`.
+- BuddySwitch skills are skill packages under `buddyswitch/skills/**/` with `skill.toml` + `SKILL.md`.
 - The host Codex session chooses the skill from BuddySwitch-provided candidates.
 - BuddySwitch scripts never call a second LLM backend to route skills.
 
@@ -33,7 +33,7 @@ BuddySwitch follows that pattern, but keeps one extra control layer:
 
 - interpret the current user task
 - choose one `skill_id` from `eligible_skills`
-- read the selected `buddyswitch/skills/.../SKILL.md`
+- read the selected skill package instruction file `buddyswitch/skills/.../SKILL.md`
 - execute the workflow
 - emit structured output matching the chosen schema
 
@@ -64,26 +64,31 @@ In this model:
 
 ## Skill Contract
 
-Each BuddySwitch skill should contain:
+Each BuddySwitch skill package should contain:
 
-Required front matter:
+Required metadata in `skill.toml`:
 
-- `name`
+- `id`
+- `buddy`
 - `description`
-- `default_artifact_kind`
-- `auto_summary`
+- `produces_artifact`
+- `input_slots`
 - `output_schema`
 
-Recommended front matter:
+Conditional metadata in `skill.toml`:
 
-- `version`
+- `output_slot` (required when `produces_artifact=true`)
+
+Recommended metadata in `skill.toml`:
+
 - `side_effect_level`
 - `required_tools`
 - `required_env`
 - `produces`
 - `consumes`
+- `allowed_task_kinds`
 
-`required_tools` and `required_env` should be written as host-facing context. They are not a second control layer for rejecting skill candidates during `resolve`.
+`required_tools` and `required_env` stay host-facing advisory metadata. They are not resolve reject gates.
 
 Required body sections:
 

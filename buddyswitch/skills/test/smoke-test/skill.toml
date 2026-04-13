@@ -1,0 +1,14 @@
+id = "smoke-test"
+buddy = "test"
+description = "Run focused smoke checks and produce structured pass/fail/blocked reports."
+produces_artifact = true
+output_slot = "smoke-test"
+input_slots = ["change-scope", "build", "implementation-report"]
+output_schema = "framework/schemas/test/smoke-test.json"
+produces = ["test-report", "smoke-check"]
+consumes = ["change-scope", "build", "implementation-report"]
+side_effect_level = "high"
+required_tools = []
+required_env = []
+allowed_task_kinds = ["validation"]
+

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -49,7 +50,6 @@ class SwitchFlowIntegrationTests(unittest.TestCase):
             "execution_summary": "Implemented the requested change and verified the core path.",
             "working_notes": ["Scoped the edits to onboarding CTA behavior."],
             "deliverables_or_changed_files": ["projects/app/src/example.ts"],
-            "suggested_next_switch": "switch test: Run smoke checks for the onboarding improvements",
             "artifact_content": {
                 "task_summary": "Implemented onboarding improvements.",
                 "changed_files": ["projects/app/src/example.ts"],
@@ -78,6 +78,13 @@ class SwitchFlowIntegrationTests(unittest.TestCase):
         self.assertIn(persisted["paths"]["run"], persisted["writes"])
         self.assertNotIn("artifact_markdown", persisted["paths"])
         self.assertNotIn("summary", persisted["paths"])
+        self.assertNotIn("suggested_next_switch", persisted)
+        run_json = json.loads((ROOT / persisted["paths"]["run"]).read_text(encoding="utf-8"))
+        self.assertNotIn("suggested_next_switch", run_json)
+        self.assertEqual(
+            persisted["recommended_switch"],
+            persisted["reference_switches"]["continue_current_task"],
+        )
 
 
 if __name__ == "__main__":
