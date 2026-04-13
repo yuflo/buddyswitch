@@ -739,6 +739,8 @@ def create_artifact(
     auto_register: bool = True,
 ) -> dict[str, Any]:
     ensure_dirs()
+    if not auto_register:
+        raise ValueError("auto_register=False is not supported for v2 slot-aware artifact creation")
     task = get_task(task_id)
     if task is None:
         raise ValueError(f"task not found: {task_id}")
