@@ -382,7 +382,6 @@ def build_track_artifact_index(track_id: str | None) -> dict[str, Any] | None:
             track_updated_at = task_updated_at
         artifacts = _task_artifacts_from_map(task, artifact_map)
         artifact_rows: list[dict[str, Any]] = []
-        latest_artifact_id = task.get("latest_artifact_id") or _current_task_artifact_id(task)
         for artifact in artifacts:
             artifact_updated_at = artifact.get("updated_at", "")
             if artifact_updated_at > track_updated_at:
@@ -391,10 +390,13 @@ def build_track_artifact_index(track_id: str | None) -> dict[str, Any] | None:
                 {
                     "artifact_id": artifact["id"],
                     "title": artifact["title"],
+                    "slot": artifact.get("slot"),
+                    "revision": artifact.get("revision"),
+                    "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
                     "summary": artifact.get("summary", ""),
                     "skill_id": artifact.get("skill_id", ""),
                     "updated_at": artifact_updated_at,
-                    "is_latest": artifact["id"] == latest_artifact_id,
+                    "is_current": bool(artifact.get("is_current")),
                 }
             )
 
@@ -404,7 +406,7 @@ def build_track_artifact_index(track_id: str | None) -> dict[str, Any] | None:
                 "buddy": task["buddy"],
                 "task_title": task["title"],
                 "task_summary": task.get("summary", ""),
-                "latest_artifact_id": latest_artifact_id,
+                "artifact_slots": task.get("artifact_slots", {}),
                 "artifacts": artifact_rows,
             }
         )

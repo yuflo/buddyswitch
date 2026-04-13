@@ -206,7 +206,7 @@ class ResolveRuntimeTests(unittest.TestCase):
         self.assertIsNone(payload["artifact_selection"])
         self.assertEqual(payload["eligible_skills"], ["implement-task"])
         self.assertEqual(payload["implicit_skill_id"], "implement-task")
-        self.assertEqual(payload["run_instructions"]["selected_artifact_ids"], [])
+        self.assertEqual(payload["run_instructions"]["selected_inputs"], [])
         self.assertEqual(payload["run_instructions"]["artifact_read_commands"], [])
 
     def test_resolve_reuses_explicit_task(self) -> None:
@@ -290,19 +290,78 @@ class ResolveRuntimeTests(unittest.TestCase):
         self.assertEqual(len(index["tasks"]), 1)
         task_row = index["tasks"][0]
         self.assertEqual(task_row["task_id"], "task-pm-index-resolve")
-        self.assertEqual(task_row["latest_artifact_id"], "art-task-pm-index-resolve-prd-2")
+        self.assertEqual(
+            task_row["artifact_slots"]["write-prd"]["current_artifact_id"],
+            "art-task-pm-index-resolve-prd-2",
+        )
         self.assertEqual(
             [item["artifact_id"] for item in task_row["artifacts"]],
             ["art-task-pm-index-resolve-prd-2", "art-task-pm-index-resolve-prd"],
         )
-        self.assertEqual([item["is_latest"] for item in task_row["artifacts"]], [True, False])
-        self.assertEqual(payload["artifact_selection"]["selected_artifact_ids"], ["art-task-pm-index-resolve-prd-2"])
-        self.assertEqual(payload["artifact_selection"]["selection_mode"], "deterministic-v1")
-        self.assertEqual(payload["run_instructions"]["selected_artifact_ids"], ["art-task-pm-index-resolve-prd-2"])
+        self.assertEqual([item["is_current"] for item in task_row["artifacts"]], [True, False])
+        self.assertEqual(payload["artifact_selection"]["selected_inputs"], [])
+        self.assertEqual(payload["artifact_selection"]["selection_mode"], "slot-current-v2")
+        self.assertEqual(payload["run_instructions"]["selected_inputs"], [])
         self.assertEqual(
             payload["run_instructions"]["artifact_read_commands"],
-            ["python3 scripts/env_artifacts.py get art-task-pm-index-resolve-prd-2"],
+            [],
         )
+
+    def test_resolve_track_artifact_index_exposes_current_artifacts_by_slot(self) -> None:
+        track = create_track("track-index-resolve-slot", "Track Index Resolve Slot")
+        dev_task = create_task(
+            "task-dev-slot-aware",
+            "Dev Slot Aware",
+            buddy="dev",
+            track_id=track["id"],
+            initial_run_id="run-seed-dev-slot-aware",
+        )
+        task = create_task(
+            "task-pm-index-resolve-slot",
+            "PM Index Resolve Slot",
+            buddy="pm",
+            track_id=track["id"],
+            initial_run_id="run-seed-index-resolve-slot",
+        )
+        first_artifact = create_artifact(
+            artifact_id="art-task-pm-index-resolve-prd-r1",
+            title="PM PRD V1",
+            buddy="pm",
+            skill_id="write-prd",
+            slot="prd",
+            task_id=task["id"],
+            source_run_id="run-index-resolve-slot-v1",
+            summary="First requirement summary.",
+            content={"problem": "v1"},
+        )
+        second_artifact = create_artifact(
+            artifact_id="art-task-pm-index-resolve-prd-r2",
+            title="PM PRD V2",
+            buddy="pm",
+            skill_id="write-prd",
+            slot="prd",
+            task_id=task["id"],
+            source_run_id="run-index-resolve-slot-v2",
+            summary="Second requirement summary.",
+            content={"problem": "v2"},
+        )
+        self._remember(f"buddyswitch/objects/tracks/{track['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{dev_task['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{task['id']}.json")
+        self._remember(f"buddyswitch/objects/artifacts/{first_artifact['id']}.json")
+        self._remember(f"buddyswitch/objects/artifacts/{second_artifact['id']}.json")
+
+        payload = switch_runtime.resolve_switch(
+            "switch dev(task-dev-slot-aware) -> track-index-resolve-slot: continue implementation"
+        )
+
+        task_rows = payload["track_artifact_index"]["tasks"]
+        pm_row = next(row for row in task_rows if row["buddy"] == "pm")
+        prd_row = next(item for item in pm_row["artifacts"] if item["slot"] == "prd" and item["is_current"])
+
+        self.assertEqual(pm_row["artifact_slots"]["prd"]["current_artifact_id"], prd_row["artifact_id"])
+        self.assertEqual(prd_row["revision"], 2)
+        self.assertEqual(prd_row["supersedes_artifact_id"], "art-task-pm-index-resolve-prd-r1")
 
     def test_resolve_track_index_includes_task_without_artifacts(self) -> None:
         track = create_track("track-empty-artifacts", "Track Empty Artifacts")
@@ -327,10 +386,10 @@ class ResolveRuntimeTests(unittest.TestCase):
         self.assertEqual(index["track_id"], "track-empty-artifacts")
         self.assertEqual(len(index["tasks"]), 1)
         self.assertEqual(index["tasks"][0]["task_id"], "task-design-empty-artifacts")
-        self.assertEqual(index["tasks"][0]["latest_artifact_id"], None)
+        self.assertEqual(index["tasks"][0]["artifact_slots"], {})
         self.assertEqual(index["tasks"][0]["artifacts"], [])
-        self.assertEqual(payload["artifact_selection"]["selected_artifact_ids"], [])
-        self.assertEqual(payload["run_instructions"]["selected_artifact_ids"], [])
+        self.assertEqual(payload["artifact_selection"]["selected_inputs"], [])
+        self.assertEqual(payload["run_instructions"]["selected_inputs"], [])
         self.assertEqual(payload["run_instructions"]["artifact_read_commands"], [])
 
 
@@ -353,6 +412,10 @@ class WorkspaceDataTests(unittest.TestCase):
             "task_id": "task-dev-one",
             "buddy": "dev",
             "skill_id": "implement-task",
+            "slot": "implementation-report",
+            "revision": 1,
+            "supersedes_artifact_id": None,
+            "is_current": True,
             "source_run_id": "run-test",
             "summary": "Canonical summary",
             "content": {"task_summary": "ok"},
@@ -363,6 +426,43 @@ class WorkspaceDataTests(unittest.TestCase):
         view = workspace_data.build_artifact_view(artifact)
         self.assertFalse(view["missing"])
         self.assertEqual(view["object_path"], "buddyswitch/objects/artifacts/art-task-centric.json")
+
+    def test_task_view_projects_current_artifacts_by_slot(self) -> None:
+        task = {
+            "id": "task-dev-one",
+            "buddy": "dev",
+            "title": "Dev Task",
+            "status": "active",
+            "track_id": "track-dev-one",
+            "artifact_ids": ["art-prd", "art-impl"],
+            "artifact_slots": {
+                "prd": {"current_artifact_id": "art-prd", "revision_count": 2},
+                "implementation-report": {"current_artifact_id": "art-impl", "revision_count": 1},
+            },
+            "run_ids": ["run-seed"],
+            "latest_run_id": "run-seed",
+            "summary": "Task summary",
+            "created_at": "2026-04-12T10:00:00+08:00",
+            "updated_at": "2026-04-12T10:00:00+08:00",
+        }
+        artifact_map = {
+            "art-prd": {
+                "id": "art-prd",
+                "slot": "prd",
+                "updated_at": "2026-04-12T10:05:00+08:00",
+            },
+            "art-impl": {
+                "id": "art-impl",
+                "slot": "implementation-report",
+                "updated_at": "2026-04-12T10:06:00+08:00",
+            },
+        }
+
+        view = workspace_data.build_task_view(task, artifact_map)
+
+        self.assertEqual(sorted(view["current_artifacts"].keys()), ["implementation-report", "prd"])
+        self.assertEqual(view["current_artifacts"]["prd"]["id"], "art-prd")
+        self.assertNotIn("latest_artifact", view)
 
     def test_scan_run_audits_includes_reference_switches(self) -> None:
         run_id = f"run-workspace-audit-{uuid.uuid4().hex[:8]}"
