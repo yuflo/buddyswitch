@@ -158,6 +158,7 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
     status = task.get("status")
     track_id = task.get("track_id")
     artifact_ids = task.get("artifact_ids")
+    artifact_slots = task.get("artifact_slots", {})
     run_ids = task.get("run_ids")
     latest_run_id = task.get("latest_run_id")
     latest_artifact_id = task.get("latest_artifact_id")
@@ -175,6 +176,23 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
         require_id(track_id, "task.track_id")
     if not isinstance(artifact_ids, list) or any(not isinstance(item, str) or not item for item in artifact_ids):
         raise ValueError("task.artifact_ids must be a list of non-empty strings")
+    if not isinstance(artifact_slots, dict):
+        raise ValueError("task.artifact_slots must be an object")
+    normalized_slots: dict[str, dict[str, Any]] = {}
+    for slot, row in artifact_slots.items():
+        if not isinstance(slot, str) or not slot.strip():
+            raise ValueError("task.artifact_slots keys must be non-empty strings")
+        if not isinstance(row, dict):
+            raise ValueError("task.artifact_slots values must be objects")
+        current_artifact_id = row.get("current_artifact_id")
+        revision_count = row.get("revision_count")
+        require_id(current_artifact_id, f"task.artifact_slots[{slot}].current_artifact_id")
+        if not isinstance(revision_count, int) or revision_count <= 0:
+            raise ValueError("task.artifact_slots revision_count must be a positive integer")
+        normalized_slots[slot] = {
+            "current_artifact_id": current_artifact_id,
+            "revision_count": revision_count,
+        }
     if not isinstance(run_ids, list) or any(not isinstance(item, str) or not item for item in run_ids):
         raise ValueError("task.run_ids must be a list of non-empty strings")
     if not run_ids:
@@ -202,6 +220,7 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "track_id": track_id,
         "artifact_ids": list(dict.fromkeys(artifact_ids)),
+        "artifact_slots": normalized_slots,
         "run_ids": list(dict.fromkeys(run_ids)),
         "latest_run_id": latest_run_id,
         "latest_artifact_id": latest_artifact_id,
@@ -220,6 +239,10 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     task_id = artifact.get("task_id")
     buddy = artifact.get("buddy")
     skill_id = artifact.get("skill_id")
+    slot = artifact.get("slot")
+    revision = artifact.get("revision")
+    supersedes_artifact_id = artifact.get("supersedes_artifact_id")
+    is_current = artifact.get("is_current")
     source_run_id = artifact.get("source_run_id")
     summary = artifact.get("summary")
     content = artifact.get("content", {})
@@ -233,6 +256,14 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("artifact.buddy must be a non-empty string")
     if not isinstance(skill_id, str) or not skill_id.strip():
         raise ValueError("artifact.skill_id must be a non-empty string")
+    if not isinstance(slot, str) or not slot.strip():
+        raise ValueError("artifact.slot must be a non-empty string")
+    if not isinstance(revision, int) or revision <= 0:
+        raise ValueError("artifact.revision must be a positive integer")
+    if supersedes_artifact_id is not None:
+        require_id(supersedes_artifact_id, "artifact.supersedes_artifact_id")
+    if not isinstance(is_current, bool):
+        raise ValueError("artifact.is_current must be a boolean")
     require_id(source_run_id, "artifact.source_run_id")
     if summary is not None and not isinstance(summary, str):
         raise ValueError("artifact.summary must be a string or null")
@@ -249,12 +280,57 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         "task_id": task_id,
         "buddy": buddy.strip(),
         "skill_id": skill_id.strip(),
+        "slot": slot.strip(),
+        "revision": revision,
+        "supersedes_artifact_id": supersedes_artifact_id,
+        "is_current": is_current,
         "source_run_id": source_run_id,
         "summary": summary or "",
         "content": content,
         "created_at": created_at,
         "updated_at": updated_at,
     }
+
+
+def _artifact_slot_name(task: dict[str, Any], artifact: dict[str, Any] | None = None) -> str:
+    if artifact is not None:
+        slot = artifact.get("slot")
+        if isinstance(slot, str) and slot.strip():
+            return slot.strip()
+    if artifact is not None:
+        skill_id = artifact.get("skill_id")
+        if isinstance(skill_id, str) and skill_id.strip():
+            return skill_id.strip()
+    task_title = task.get("title")
+    if isinstance(task_title, str) and task_title.strip():
+        return slugify(task_title)
+    return "artifact"
+
+
+def _task_slot_state(task: dict[str, Any], slot: str) -> dict[str, Any] | None:
+    artifact_slots = task.get("artifact_slots", {})
+    if not isinstance(artifact_slots, dict):
+        return None
+    row = artifact_slots.get(slot)
+    return row if isinstance(row, dict) else None
+
+
+def _current_task_artifact_id(task: dict[str, Any]) -> str | None:
+    artifact_slots = task.get("artifact_slots", {})
+    if isinstance(artifact_slots, dict):
+        for row in artifact_slots.values():
+            if isinstance(row, dict):
+                current_artifact_id = row.get("current_artifact_id")
+                if isinstance(current_artifact_id, str) and current_artifact_id:
+                    return current_artifact_id
+    latest_artifact_id = task.get("latest_artifact_id")
+    return latest_artifact_id if isinstance(latest_artifact_id, str) and latest_artifact_id else None
+
+
+def _refresh_task_legacy_latest_artifact(task: dict[str, Any]) -> dict[str, Any]:
+    current_artifact_id = _current_task_artifact_id(task)
+    task["latest_artifact_id"] = current_artifact_id
+    return task
 
 
 def list_tracks() -> list[dict[str, Any]]:
@@ -317,7 +393,7 @@ def build_track_artifact_index(track_id: str | None) -> dict[str, Any] | None:
             track_updated_at = task_updated_at
         artifacts = _task_artifacts_from_map(task, artifact_map)
         artifact_rows: list[dict[str, Any]] = []
-        latest_artifact_id = task.get("latest_artifact_id")
+        latest_artifact_id = task.get("latest_artifact_id") or _current_task_artifact_id(task)
         for artifact in artifacts:
             artifact_updated_at = artifact.get("updated_at", "")
             if artifact_updated_at > track_updated_at:
@@ -502,6 +578,7 @@ def create_task(
         "status": status,
         "track_id": track_id,
         "artifact_ids": [],
+        "artifact_slots": {},
         "run_ids": [initial_run_id],
         "latest_run_id": initial_run_id,
         "latest_artifact_id": None,
@@ -512,7 +589,7 @@ def create_task(
     task = save_task(task)
     if track_id:
         _register_task_id(track_id, task_id)
-    return task
+    return {key: value for key, value in task.items() if key != "latest_artifact_id"}
 
 
 def update_task(task_id: str, patch: dict[str, Any]) -> dict[str, Any]:
@@ -575,8 +652,20 @@ def add_artifact_to_task(task_id: str, artifact_id: str, *, summary: str | None 
     task = get_task(task_id)
     if task is None:
         raise ValueError(f"task not found: {task_id}")
+    artifact = get_artifact(artifact_id)
+    if artifact is None:
+        raise ValueError(f"artifact not found: {artifact_id}")
+    slot = _artifact_slot_name(task, artifact)
+    revision = artifact.get("revision")
+    if not isinstance(revision, int) or revision <= 0:
+        raise ValueError("artifact.revision must be a positive integer")
     if artifact_id not in task["artifact_ids"]:
         task["artifact_ids"].append(artifact_id)
+    artifact_slots = task.setdefault("artifact_slots", {})
+    artifact_slots[slot] = {
+        "current_artifact_id": artifact_id,
+        "revision_count": revision,
+    }
     task["latest_artifact_id"] = artifact_id
     if summary is not None:
         task["summary"] = summary
@@ -588,9 +677,28 @@ def remove_artifact_from_task(task_id: str, artifact_id: str) -> dict[str, Any]:
     task = get_task(task_id)
     if task is None:
         raise ValueError(f"task not found: {task_id}")
+    artifact = get_artifact(artifact_id)
+    slot = _artifact_slot_name(task, artifact) if artifact else None
     task["artifact_ids"] = [item for item in task["artifact_ids"] if item != artifact_id]
+    if slot and isinstance(task.get("artifact_slots"), dict):
+        candidates = []
+        artifact_map = {item["id"]: item for item in list_artifacts()}
+        for candidate_id in task["artifact_ids"]:
+            candidate = artifact_map.get(candidate_id)
+            if candidate is None:
+                continue
+            if _artifact_slot_name(task, candidate) == slot:
+                candidates.append(candidate)
+        if candidates:
+            candidates.sort(key=lambda row: (row.get("revision", 0), row.get("updated_at", ""), row["id"]), reverse=True)
+            task["artifact_slots"][slot] = {
+                "current_artifact_id": candidates[0]["id"],
+                "revision_count": candidates[0]["revision"],
+            }
+        else:
+            task["artifact_slots"].pop(slot, None)
     if task.get("latest_artifact_id") == artifact_id:
-        task["latest_artifact_id"] = task["artifact_ids"][-1] if task["artifact_ids"] else None
+        task["latest_artifact_id"] = _current_task_artifact_id(task)
     task["updated_at"] = now_iso()
     return save_task(task)
 
@@ -601,6 +709,7 @@ def create_artifact(
     title: str,
     buddy: str,
     skill_id: str,
+    slot: str | None = None,
     task_id: str,
     source_run_id: str,
     summary: str = "",
@@ -617,6 +726,14 @@ def create_artifact(
         raise ValueError(f"artifact already exists: {resolved_id}")
     if task["buddy"] != buddy:
         raise ValueError(f"artifact.buddy '{buddy}' must match task buddy '{task['buddy']}'")
+    resolved_slot = slot.strip() if isinstance(slot, str) and slot.strip() else _artifact_slot_name(task, {"skill_id": skill_id, "title": title})
+    current_slot = _task_slot_state(task, resolved_slot)
+    previous = get_artifact(current_slot["current_artifact_id"]) if current_slot else None
+    revision = 1 if previous is None else int(previous["revision"]) + 1
+    if previous is not None:
+        previous["is_current"] = False
+        previous["updated_at"] = now_iso()
+        save_artifact(previous)
     timestamp = now_iso()
     artifact = {
         "id": resolved_id,
@@ -624,6 +741,10 @@ def create_artifact(
         "task_id": task_id,
         "buddy": buddy,
         "skill_id": skill_id,
+        "slot": resolved_slot,
+        "revision": revision,
+        "supersedes_artifact_id": previous["id"] if previous else None,
+        "is_current": True,
         "source_run_id": require_id(source_run_id, "artifact.source_run_id"),
         "summary": summary,
         "content": content or {},
