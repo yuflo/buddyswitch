@@ -665,24 +665,36 @@ def remove_artifact_from_task(task_id: str, artifact_id: str) -> dict[str, Any]:
         raise ValueError(f"task not found: {task_id}")
     artifact = get_artifact(artifact_id)
     slot = _artifact_slot_name(task, artifact) if artifact else None
+    slot_state = _task_slot_state(task, slot) if slot else None
     task["artifact_ids"] = [item for item in task["artifact_ids"] if item != artifact_id]
-    if slot and isinstance(task.get("artifact_slots"), dict):
-        candidates = []
-        artifact_map = {item["id"]: item for item in list_artifacts()}
-        for candidate_id in task["artifact_ids"]:
-            candidate = artifact_map.get(candidate_id)
-            if candidate is None:
-                continue
-            if _artifact_slot_name(task, candidate) == slot:
-                candidates.append(candidate)
-        if candidates:
-            candidates.sort(key=lambda row: (row.get("revision", 0), row.get("updated_at", ""), row["id"]), reverse=True)
-            task["artifact_slots"][slot] = {
-                "current_artifact_id": candidates[0]["id"],
-                "revision_count": candidates[0]["revision"],
-            }
-        else:
-            task["artifact_slots"].pop(slot, None)
+    if slot and slot_state is not None and isinstance(task.get("artifact_slots"), dict):
+        deleting_current = slot_state.get("current_artifact_id") == artifact_id
+        if deleting_current:
+            candidates = []
+            artifact_map = {item["id"]: item for item in list_artifacts()}
+            for candidate_id in task["artifact_ids"]:
+                candidate = artifact_map.get(candidate_id)
+                if candidate is None:
+                    continue
+                if _artifact_slot_name(task, candidate) == slot:
+                    candidates.append(candidate)
+            if candidates:
+                candidates.sort(key=lambda row: (row.get("revision", 0), row.get("updated_at", ""), row["id"]), reverse=True)
+                promoted = candidates[0]
+                revision_count = slot_state.get("revision_count", promoted["revision"])
+                if not isinstance(revision_count, int) or revision_count < promoted["revision"]:
+                    revision_count = promoted["revision"]
+                timestamp = now_iso()
+                for candidate in candidates:
+                    candidate["is_current"] = candidate["id"] == promoted["id"]
+                    candidate["updated_at"] = timestamp
+                    save_artifact(candidate)
+                task["artifact_slots"][slot] = {
+                    "current_artifact_id": promoted["id"],
+                    "revision_count": revision_count,
+                }
+            else:
+                task["artifact_slots"].pop(slot, None)
     task["updated_at"] = now_iso()
     return save_task(task)
 
@@ -713,7 +725,7 @@ def create_artifact(
     resolved_slot = slot.strip() if isinstance(slot, str) and slot.strip() else _artifact_slot_name(task, {"skill_id": skill_id, "title": title})
     current_slot = _task_slot_state(task, resolved_slot)
     previous = get_artifact(current_slot["current_artifact_id"]) if current_slot else None
-    revision = 1 if previous is None else int(previous["revision"]) + 1
+    revision = 1 if current_slot is None else int(current_slot["revision_count"]) + 1
     if previous is not None:
         previous["is_current"] = False
         previous["updated_at"] = now_iso()
@@ -788,7 +800,7 @@ def update_artifact(
     if auto_register:
         if old_task_id and old_task_id != new_task_id:
             remove_artifact_from_task(old_task_id, artifact_id)
-        add_artifact_to_task(new_task_id, artifact_id, summary=artifact.get("summary") or None)
+            add_artifact_to_task(new_task_id, artifact_id, summary=artifact.get("summary") or None)
     return artifact
 
 
