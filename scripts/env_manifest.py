@@ -25,7 +25,6 @@ from output_schema import OutputSchemaError, normalize_schema_path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 _BUDDY_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
-_SKILL_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+\s*:")
 ADVISORY_RUNTIME_METADATA_POLICY = "advisory"
 DEBUG_API_PERMISSION_SCOPE = "manual_debug_apis"
 GUIDANCE_HEADINGS = {
@@ -236,30 +235,6 @@ def _validate_permission(permission: str, label: str) -> None:
         raise ManifestError(f"{label} permission '{permission}' has unsupported object '{obj}'")
     if not action:
         raise ManifestError(f"{label} permission '{permission}' has empty action")
-
-
-def _strip_quotes(value: str) -> str:
-    value = value.strip()
-    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
-        return value[1:-1].strip()
-    return value
-
-
-def _parse_scalar(value: str, label: str) -> Any:
-    raw = _strip_quotes(value)
-    lowered = raw.lower()
-    if lowered == "true":
-        return True
-    if lowered == "false":
-        return False
-    if raw.startswith("[") and raw.endswith("]"):
-        inner = raw[1:-1].strip()
-        if not inner:
-            return []
-        return [_strip_quotes(part.strip()) for part in inner.split(",") if part.strip()]
-    if not raw:
-        raise ManifestError(f"{label} must not be empty")
-    return raw
 
 
 def _normalize_section_lines(lines: list[str]) -> list[str]:
