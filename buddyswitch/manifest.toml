@@ -14,6 +14,10 @@ id = "research-scan"
 path = "buddyswitch/skills/market/research-scan"
 
 [[skills]]
+id = "pmf-recon"
+path = "buddyswitch/skills/market/pmf-recon"
+
+[[skills]]
 id = "write-prd"
 path = "buddyswitch/skills/pm/write-prd"
 
@@ -37,7 +41,7 @@ path = "buddyswitch/skills/test/smoke-test"
 id = "market"
 label = "Market"
 scope = "Research demand, users, and competition."
-skills = ["research-scan"]
+skills = ["research-scan", "pmf-recon"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
 [[buddies]]

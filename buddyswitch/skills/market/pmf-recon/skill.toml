@@ -1,0 +1,14 @@
+id = "pmf-recon"
+buddy = "market"
+description = "Use when the task is validating a startup or product idea, narrowing an ICP, comparing alternatives, or collecting evidence to decide whether a market is worth pursuing."
+objects = ["task", "artifact"]
+produces_artifact = true
+output_slot = "research"
+input_slots = ["research-question", "links", "prior-artifacts"]
+output_schema = "framework/schemas/market/pmf-recon.json"
+produces = ["pmf-report", "evidence-log", "interview-plan"]
+consumes = ["research-question", "links", "prior-artifacts"]
+side_effect_level = "medium"
+required_tools = []
+required_env = []
+allowed_task_kinds = ["research"]

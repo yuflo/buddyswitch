@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
@@ -19,6 +20,7 @@ CANONICAL_PATHS = (
 TEXT_SUFFIXES = {".md", ".toml", ".py", ".json"}
 ARTIFACT_SKILL_DOCS = (
     ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "SKILL.md",
+    ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "design" / "ia-spec" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "SKILL.md",
@@ -26,6 +28,7 @@ ARTIFACT_SKILL_DOCS = (
 )
 SKILL_TOMLS = (
     ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "skill.toml",
+    ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "design" / "ia-spec" / "skill.toml",
@@ -198,9 +201,31 @@ class RepoConsistencyTests(unittest.TestCase):
                     msg=f"description should not summarize workflow details in {path.relative_to(ROOT)}",
                 )
 
+    def test_skill_toml_output_schemas_exist_and_are_parseable_json(self) -> None:
+        for path in SKILL_TOMLS:
+            schema_path = None
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("output_schema = "):
+                    schema_path = line.split("=", 1)[1].strip().strip('"')
+                    break
+            self.assertIsNotNone(schema_path, msg=f"missing output_schema in {path.relative_to(ROOT)}")
+            resolved_schema = ROOT / schema_path
+            self.assertTrue(
+                resolved_schema.exists(),
+                msg=f"missing output schema for {path.relative_to(ROOT)}: {schema_path}",
+            )
+            with resolved_schema.open("r", encoding="utf-8") as handle:
+                parsed_schema = json.load(handle)
+            self.assertIsInstance(
+                parsed_schema,
+                dict,
+                msg=f"output schema must be a JSON object in {resolved_schema.relative_to(ROOT)}",
+            )
+
     def test_every_skill_package_has_metadata_and_instruction_files(self) -> None:
         expected_packages = (
             ROOT / "buddyswitch" / "skills" / "market" / "research-scan",
+            ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon",
             ROOT / "buddyswitch" / "skills" / "pm" / "write-prd",
             ROOT / "buddyswitch" / "skills" / "pm" / "track-manager",
             ROOT / "buddyswitch" / "skills" / "design" / "ia-spec",
@@ -214,6 +239,7 @@ class RepoConsistencyTests(unittest.TestCase):
     def test_skill_instructions_are_markdown_only_without_frontmatter_metadata(self) -> None:
         expected_packages = (
             ROOT / "buddyswitch" / "skills" / "market" / "research-scan",
+            ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon",
             ROOT / "buddyswitch" / "skills" / "pm" / "write-prd",
             ROOT / "buddyswitch" / "skills" / "pm" / "track-manager",
             ROOT / "buddyswitch" / "skills" / "design" / "ia-spec",
@@ -230,6 +256,8 @@ class RepoConsistencyTests(unittest.TestCase):
     def test_template_references_are_materialized_in_assets(self) -> None:
         expected_assets = (
             ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "assets" / "research-report-template.md",
+            ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "assets" / "pmf-report-template.md",
+            ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "assets" / "evidence-log-template.md",
             ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "assets" / "prd-template.md",
             ROOT / "buddyswitch" / "skills" / "design" / "ia-spec" / "assets" / "design-spec-template.md",
             ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "assets" / "implementation-report-template.md",
