@@ -1,6 +1,7 @@
 id = "research-scan"
 buddy = "market"
-description = "Run browser-first deep market research with iterative query refinement and strong source traceability."
+description = "Use when the task is market demand research, competitor analysis, audience sentiment analysis, or other source-backed external research."
+objects = ["task", "artifact"]
 produces_artifact = true
 output_slot = "research"
 input_slots = ["research-question", "links", "prior-artifacts"]
@@ -11,4 +12,3 @@ side_effect_level = "medium"
 required_tools = []
 required_env = []
 allowed_task_kinds = ["research"]
-

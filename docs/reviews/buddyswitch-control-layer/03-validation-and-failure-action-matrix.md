@@ -53,13 +53,8 @@
 
 | 位置 | 当前规则 | 当前失败动作 | 保护对象 | 审查判断 | 后续建议 |
 |---|---|---|---|---|---|
-| `_split_front_matter` | skill 文件必须存在且 front matter 完整 | `reject` | skill metadata 可加载性 | 保留 | 这是配置层硬约束 |
-| `_load_skill_runtime` | `name/description/default_artifact_kind/auto_summary/output_schema` 必填 | `reject` | skill runtime 最小结构 | 保留 | 合理 |
-| `_load_skill_runtime` | `name` 必须与 manifest skill id 相同 | `reject` | 避免 skill 身份漂移 | 保留 | 合理 |
-| `_load_skill_runtime` | 若出现 `track_mode` 字段则拒绝（retired field） | `reject` | 避免历史字段回流 | 保留 | Phase 3 已硬退役 |
-| `_load_skill_runtime` | `output_schema` 路径合法且文件存在 | `reject` | persist 可执行性 | 保留 | 属于状态安全前置条件 |
-| `_load_skill_runtime` | `version/side_effect_level` 为可选但需是非空字符串 | `reject` | metadata 完整性 | 降级 | 这类说明型字段不应过度承担阻断职责 |
-| `_load_skill_runtime` | `required_tools/required_env/produces/consumes` 类型必须正确 | `reject` | metadata 完整性 | 重定义 | 若这些字段不承担实际动作，阻断价值有限 |
+| `_load_skill_package` | `skill.toml` 必填，`SKILL.md` 不能包含 frontmatter，metadata 统一放入 `skill.toml` | `reject` | skill package 结构一致性 | 保留 | 这是当前唯一支持的 skill 加载形态 |
+| `load_manifest` | skill 路径必须指向 package 目录而不是单文件 | `reject` | 防止 legacy file-based skill 路径回流 | 保留 | package-only 作为唯一支持路径 |
 | `_parse_skill_guidance` | 要求 `Purpose/Use when/.../Gotchas` 全部存在 | `reject` | skill docs 完整性 | 降级 | 更像文档质量门槛，适合 lint 或 review，不必总是 runtime 级强校验 |
 | `load_manifest` | `schema_version` 必须为 1 | `reject` | manifest 版本一致性 | 保留 | 合理 |
 | `load_manifest` | `env/adapters/skills/buddies` 都必须存在且类型正确 | `reject` | manifest 可消费性 | 保留 | 合理 |
@@ -70,7 +65,7 @@
 ### 结论
 
 - manifest 层的大部分强校验是合理的，因为它们保护的是“配置是否可被系统消费”。
-- 需要重点警惕的是：说明型 metadata 如果没有明确运行时动作，不应继续提升为系统级阻断门槛。
+- 旧的单文件/frontmatter skill runtime contract 已不再是生产接口；当前应以 package 目录 + `skill.toml` 为唯一加载入口。
 
 ## 5. `switch_runtime.py resolve`
 

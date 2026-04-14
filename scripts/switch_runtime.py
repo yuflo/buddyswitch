@@ -175,21 +175,18 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
     guidance = runtime.get("guidance", {})
     required_tools = runtime.get("required_tools", [])
     required_env = runtime.get("required_env", [])
-    output_slot = runtime.get("output_slot") or runtime.get("default_artifact_kind")
+    output_slot = runtime.get("output_slot")
     input_slots = runtime.get("input_slots")
     if not isinstance(input_slots, list):
         input_slots = runtime.get("consumes", [])
-    return {
+    card = {
         "id": skill["id"],
         "path": skill["path"],
         "instruction_path": runtime.get("instruction_path", skill["path"]),
         "description": skill["description"],
         "objects": skill["objects"],
-        "default_artifact_kind": runtime["default_artifact_kind"],
         "produces_artifact": bool(runtime.get("produces_artifact", True)),
-        "output_slot": output_slot,
         "input_slots": input_slots,
-        "auto_summary": runtime["auto_summary"],
         "output_schema": runtime["output_schema"],
         "version": runtime.get("version"),
         "side_effect_level": runtime.get("side_effect_level"),
@@ -213,6 +210,9 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
         "counterexamples": guidance.get("counterexamples", []),
         "gotchas": guidance.get("gotchas", []),
     }
+    if isinstance(output_slot, str) and output_slot.strip():
+        card["output_slot"] = output_slot.strip()
+    return card
 
 
 def _build_run_instructions(
@@ -778,9 +778,12 @@ def _persist_artifact_skill(
     buddy = resolved["switch"]["buddy"]
     demand = resolved["switch"]["demand"]
     skill_id = skill["id"]
-    output_slot = skill["runtime"].get("output_slot") or skill["runtime"]["default_artifact_kind"]
+    output_slot = skill["runtime"].get("output_slot")
     if not isinstance(output_slot, str) or not output_slot:
-        raise ValueError(f"skill '{skill_id}' must define a non-empty output_slot/default_artifact_kind")
+        raise ValueError(f"skill '{skill_id}' must define a non-empty output_slot")
+    output_slot = output_slot.strip()
+    if not output_slot:
+        raise ValueError(f"skill '{skill_id}' must define a non-empty output_slot")
     artifact_id = _derive_artifact_id(task["id"], output_slot)
     artifact_summary = str(result.get("execution_summary") or "")
     artifact = create_artifact(

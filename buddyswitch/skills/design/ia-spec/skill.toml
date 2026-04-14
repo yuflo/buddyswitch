@@ -1,6 +1,7 @@
 id = "ia-spec"
 buddy = "design"
-description = "Create IA and interaction specification artifacts aligned with the design contract."
+description = "Use when the task is creating IA, user flow, interaction, or design specification artifacts."
+objects = ["task", "artifact"]
 produces_artifact = true
 output_slot = "design-spec"
 input_slots = ["prd", "requirements", "track"]
@@ -11,4 +12,3 @@ side_effect_level = "medium"
 required_tools = []
 required_env = []
 allowed_task_kinds = ["design"]
-

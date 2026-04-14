@@ -19,127 +19,9 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_manifest  # noqa: E402
 import switch_runtime  # noqa: E402
 import workspace_data  # noqa: E402
 from env_store import create_artifact, create_task, create_track, get_track, validate_artifact, validate_track  # noqa: E402
-
-
-class ManifestSkillRuntimeTests(unittest.TestCase):
-    def test_output_schema_and_guidance_are_required(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            skill_path = Path(temp_dir) / "SKILL.md"
-            skill_path.write_text(
-                textwrap.dedent(
-                    """\
-                    ---
-                    name: test-skill
-                    description: Example test skill.
-                    version: "2.0"
-                    default_artifact_kind: note
-                    auto_summary: true
-                    output_schema: framework/schemas/dev/implement-task.json
-                    side_effect_level: low
-                    required_tools:
-                      - rg
-                    required_env:
-                      - BUDDYSWITCH_TEST_ENV
-                    produces:
-                      - note
-                    consumes:
-                      - demand
-                    ---
-
-                    # test-skill
-
-                    ## Purpose
-                    - Explain the workflow purpose.
-
-                    ## Use when
-                    - The demand matches the workflow.
-
-                    ## Do not use when
-                    - The demand belongs to another buddy.
-
-                    ## Inputs
-                    - Task input.
-
-                    ## Outputs
-                    - Structured result.
-
-                    ## Verification
-                    - Verify the result.
-
-                    ## Examples
-                    - `switch demo: run the task`
-
-                    ## Counterexamples
-                    - `switch other: do something else`
-
-                    ## Gotchas
-                    - Beware of drift.
-                    """
-                ),
-                encoding="utf-8",
-            )
-
-            runtime = env_manifest._load_skill_runtime(skill_path, "test-skill")
-
-        self.assertEqual(runtime["output_schema"], "framework/schemas/dev/implement-task.json")
-        self.assertEqual(runtime["required_tools"], ["rg"])
-        self.assertEqual(runtime["required_env"], ["BUDDYSWITCH_TEST_ENV"])
-        self.assertIn("The demand matches the workflow.", runtime["guidance"]["use_when"])
-
-    def test_track_mode_front_matter_is_rejected(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            skill_path = Path(temp_dir) / "SKILL.md"
-            skill_path.write_text(
-                textwrap.dedent(
-                    """\
-                    ---
-                    name: test-skill
-                    description: Example test skill.
-                    track_mode: optional
-                    default_artifact_kind: note
-                    auto_summary: true
-                    output_schema: framework/schemas/dev/implement-task.json
-                    ---
-
-                    # test-skill
-
-                    ## Purpose
-                    - Explain the workflow purpose.
-
-                    ## Use when
-                    - The demand matches the workflow.
-
-                    ## Do not use when
-                    - The demand belongs to another buddy.
-
-                    ## Inputs
-                    - Task input.
-
-                    ## Outputs
-                    - Structured result.
-
-                    ## Verification
-                    - Verify the result.
-
-                    ## Examples
-                    - `switch demo: run the task`
-
-                    ## Counterexamples
-                    - `switch other: do something else`
-
-                    ## Gotchas
-                    - Beware of drift.
-                    """
-                ),
-                encoding="utf-8",
-            )
-
-            with self.assertRaisesRegex(env_manifest.ManifestError, "track_mode is retired"):
-                env_manifest._load_skill_runtime(skill_path, "test-skill")
 
 
 class EnvStoreRetiredFieldTests(unittest.TestCase):
@@ -208,9 +90,121 @@ class ResolveRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["implicit_skill_id"], "implement-task")
         self.assertEqual(payload["run_instructions"]["selected_inputs"], [])
         self.assertEqual(payload["run_instructions"]["artifact_read_commands"], [])
-        self.assertEqual(payload["skill_cards"][0]["instruction_path"], "buddyswitch/skills/dev/implement-task/SKILL.md")
-        self.assertEqual(payload["skill_cards"][0]["output_slot"], "implementation-report")
-        self.assertEqual(payload["skill_cards"][0]["input_slots"], ["prd", "design-spec", "task"])
+        card = payload["skill_cards"][0]
+        self.assertEqual(card["instruction_path"], "buddyswitch/skills/dev/implement-task/SKILL.md")
+        self.assertEqual(card["output_slot"], "implementation-report")
+        self.assertEqual(card["input_slots"], ["prd", "design-spec", "task"])
+        self.assertNotIn("default_artifact_kind", card)
+        self.assertNotIn("auto_summary", card)
+
+    def test_track_manager_skill_card_omits_output_slot_and_compat_fields(self) -> None:
+        payload = switch_runtime.resolve_switch("switch pm: manage the active track")
+
+        self.assertTrue(payload["ok"])
+        card = next(card for card in payload["skill_cards"] if card["id"] == "track-manager")
+        self.assertFalse(card["produces_artifact"])
+        self.assertNotIn("output_slot", card)
+        self.assertNotIn("default_artifact_kind", card)
+        self.assertNotIn("auto_summary", card)
+
+    def test_skill_card_uses_package_metadata_for_description_and_objects(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            package_root = Path(temp_dir) / "demo-skill"
+            package_root.mkdir()
+            (package_root / "skill.toml").write_text(
+                textwrap.dedent(
+                    """\
+                    id = "demo-skill"
+                    buddy = "pm"
+                    description = "Demo skill package."
+                    objects = ["task", "artifact"]
+                    produces_artifact = true
+                    output_slot = "prd"
+                    input_slots = ["research-report"]
+                    output_schema = "framework/schemas/pm/write-prd.json"
+                    produces = ["prd"]
+                    consumes = ["research-report"]
+                    side_effect_level = "medium"
+                    required_tools = []
+                    required_env = []
+                    allowed_task_kinds = ["definition"]
+                    """
+                ),
+                encoding="utf-8",
+            )
+            (package_root / "SKILL.md").write_text(
+                textwrap.dedent(
+                    """\
+                    # demo-skill
+
+                    ## Purpose
+                    - Define product scope.
+
+                    ## Use when
+                    - The task is about product definition.
+
+                    ## Do not use when
+                    - The task is implementation or testing.
+
+                    ## Inputs
+                    - Research and scope context.
+
+                    ## Outputs
+                    - A structured PRD result.
+
+                    ## Verification
+                    - Confirm scope and open questions.
+
+                    ## Examples
+                    - `switch pm: define scope`
+
+                    ## Counterexamples
+                    - `switch dev: implement scope`
+
+                    ## Gotchas
+                    - Keep scope narrow.
+                    """
+                ),
+                encoding="utf-8",
+            )
+            manifest_path = Path(temp_dir) / "manifest.toml"
+            manifest_path.write_text(
+                textwrap.dedent(
+                    f"""\
+                    schema_version = 1
+
+                    [env]
+                    id = "demo"
+                    label = "Demo"
+
+                    [[adapters]]
+                    id = "codex"
+                    path = "scripts/codex_router.py"
+                    description = "Demo router."
+
+                    [[skills]]
+                    id = "demo-skill"
+                    path = "{package_root.relative_to(ROOT).as_posix()}"
+
+                    [[buddies]]
+                    id = "pm"
+                    label = "PM"
+                    scope = "Owns scope."
+                    skills = ["demo-skill"]
+                    permissions = ["task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            payload = switch_runtime.resolve_switch("switch pm: define scope", manifest_path=manifest_path)
+
+        self.assertTrue(payload["ok"])
+        skill_card = payload["skill_cards"][0]
+        self.assertEqual(skill_card["description"], "Demo skill package.")
+        self.assertEqual(skill_card["objects"], ["task", "artifact"])
+        self.assertNotIn("default_artifact_kind", skill_card)
+        self.assertNotIn("auto_summary", skill_card)
 
     def test_resolve_reuses_explicit_task(self) -> None:
         task = create_task(
@@ -624,6 +618,46 @@ class PersistRuntimeTests(unittest.TestCase):
         track_after = get_track("track-dev-binding")
         self.assertIsNotNone(track_after)
         self.assertIn("task-dev-binding", track_after["task_ids"])
+
+    def test_persist_artifact_skill_requires_output_slot_without_legacy_fallback(self) -> None:
+        track = create_track("track-legacy-output-slot", "Track Legacy Output Slot")
+        task = create_task(
+            "task-dev-legacy-output-slot",
+            "Task Legacy Output Slot",
+            buddy="dev",
+            track_id=track["id"],
+            initial_run_id="run-seed-legacy-output-slot",
+        )
+        self._remember(f"buddyswitch/objects/tracks/{track['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{task['id']}.json")
+
+        resolved = switch_runtime.resolve_switch(
+            "switch dev(task-dev-legacy-output-slot) -> track-legacy-output-slot: continue implementation"
+        )
+        skill = {
+            "id": "legacy-output-slot-skill",
+            "runtime": {
+                "default_artifact_kind": "legacy-kind",
+                "produces_artifact": True,
+                "input_slots": ["task"],
+                "output_schema": "framework/schemas/dev/implement-task.json",
+            },
+        }
+
+        try:
+            payload = switch_runtime._persist_artifact_skill(  # type: ignore[attr-defined]
+                resolved=resolved,
+                skill=skill,
+                result=self._artifact_result(),
+                run_id="run-legacy-output-slot",
+                task=task,
+                effective_track_id=track["id"],
+            )
+        except ValueError as exc:
+            self.assertRegex(str(exc), "non-empty output_slot")
+        else:
+            self._remember_persisted_paths(payload)
+            self.fail("Expected _persist_artifact_skill to reject missing output_slot")
 
     def test_track_manager_create_track_binds_current_task(self) -> None:
         resolved = switch_runtime.resolve_switch("switch pm: create new track and set ownership")

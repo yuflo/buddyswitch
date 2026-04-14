@@ -38,27 +38,9 @@
 - Confirm the implementation stays within the approved scope.
 - Report known limitations or blocked validation explicitly.
 
-## Execution Summary Rule
+## Shared Runtime Rules
 
-- `execution_summary` persists as `artifact.summary`.
-- Keep it selection-ready for downstream buddies:
-  - artifact role
-  - key resolved outcome
-  - downstream relevance
-
-## Track/Object Handling
-
-- Follow `framework/docs/track-registry.md`.
-- This buddy may read tracks and create/update artifact objects through the resolved task.
-- Do not mutate track lifecycle fields directly.
-- If output belongs to a track, rely on the explicit switch track target or existing task binding; artifacts do not store direct track references.
-
-## Output Path
-
-- Code changes: primarily `projects/app/`
-- Project runtime-only temporary outputs: `projects/app/.runtime/`
-- Durable BuddySwitch state: task objects under `buddyswitch/objects/tasks/`, artifact objects under `buddyswitch/objects/artifacts/`, and run audits under `buddyswitch/content/runs/`
-- Do not request or rely on `artifacts/*.md` or `runs/summaries/**`.
+- See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
 
 ## Required Output Fields
 

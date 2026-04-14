@@ -12,44 +12,26 @@ description = "Resolve supported `switch <buddy>...: <demand>` directives with e
 [[skills]]
 id = "research-scan"
 path = "buddyswitch/skills/market/research-scan"
-description = "Browser-first market research scan workflow."
-buddies = ["market"]
-objects = ["task", "artifact"]
 
 [[skills]]
 id = "write-prd"
 path = "buddyswitch/skills/pm/write-prd"
-description = "PM PRD authoring and scope shaping workflow."
-buddies = ["pm"]
-objects = ["task", "artifact"]
 
 [[skills]]
 id = "track-manager"
 path = "buddyswitch/skills/pm/track-manager"
-description = "PM track lifecycle manager workflow."
-buddies = ["pm"]
-objects = ["track", "task"]
 
 [[skills]]
 id = "ia-spec"
 path = "buddyswitch/skills/design/ia-spec"
-description = "Information architecture and interaction specification workflow."
-buddies = ["design"]
-objects = ["task", "artifact"]
 
 [[skills]]
 id = "implement-task"
 path = "buddyswitch/skills/dev/implement-task"
-description = "Scoped implementation workflow for project code."
-buddies = ["dev"]
-objects = ["task", "artifact"]
 
 [[skills]]
 id = "smoke-test"
 path = "buddyswitch/skills/test/smoke-test"
-description = "Smoke validation workflow with structured outcomes."
-buddies = ["test"]
-objects = ["task", "artifact"]
 
 [[buddies]]
 id = "market"

@@ -38,25 +38,15 @@
 - Confirm the output is product-definition content rather than design or implementation detail.
 - Confirm scope is split clearly enough for downstream buddies to act on it.
 
-## Execution Summary Rule
+## Shared Runtime Rules
 
-- `execution_summary` persists as `artifact.summary`.
-- Keep it selection-ready for downstream buddies:
-  - artifact role
-  - key resolved outcome
-  - downstream relevance
+- See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
 
-## Track/Object Handling
+## PM Track Handling
 
-- Follow `framework/docs/track-registry.md`.
-- PM can create/update/advance/archive tracks through track-manager when needed.
-- PM can create/update artifact objects through the resolved task.
-- Track creation/progression should stay explicit in demand text or track-manager output.
-
-## Output Path
-
-- Default BuddySwitch state: `buddyswitch/objects/tasks/<task-id>.json`, `buddyswitch/objects/artifacts/<artifact-id>.json`, and `buddyswitch/content/runs/<run-id>.json`
-- Do not request or rely on `artifacts/*.md` or `runs/summaries/**`.
+- A `switch pm -> track-*` PRD task may use the track as context, but the core deliverable is still product-definition output.
+- If the user is actually asking to create, update, advance, archive, or hand off a track, use `track-manager` for that lifecycle change.
+- Keep track progression or buddy handoff explicit in demand text or in a separate `track-manager` result; do not silently turn PRD work into track mutation.
 
 ## Required Output Fields
 
