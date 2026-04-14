@@ -397,7 +397,7 @@ def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
     if not isinstance(metadata, dict):
         raise ManifestError(f"{metadata_path.relative_to(ROOT)} must contain a TOML object")
 
-    required = ("id", "buddy", "description", "produces_artifact", "input_slots", "output_schema")
+    required = ("id", "buddy", "description", "objects", "produces_artifact", "input_slots", "output_schema")
     missing = [key for key in required if key not in metadata]
     if missing:
         raise ManifestError(
@@ -415,6 +415,12 @@ def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
     description = metadata.get("description")
     if not isinstance(description, str) or not description.strip():
         raise ManifestError(f"{metadata_path.relative_to(ROOT)}:description must be a non-empty string")
+    objects = _normalize_string_list(
+        metadata.get("objects", []),
+        label=f"{metadata_path.relative_to(ROOT)}:objects",
+    )
+    if not objects:
+        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:objects must be a non-empty list")
 
     produces_artifact = metadata.get("produces_artifact")
     if not isinstance(produces_artifact, bool):
@@ -482,6 +488,7 @@ def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
         "name": skill_id,
         "buddy": metadata_buddy.strip(),
         "description": description.strip(),
+        "objects": objects,
         "produces_artifact": produces_artifact,
         "output_slot": output_slot,
         "input_slots": input_slots,
@@ -559,7 +566,7 @@ def _load_skill_runtime(path: Path, skill_id: str) -> dict[str, Any]:
         )
 
     optional_lists: dict[str, list[str]] = {}
-    for key in ("required_tools", "required_env", "produces", "consumes"):
+    for key in ("required_tools", "required_env", "produces", "consumes", "objects"):
         raw = front.get(key, [])
         if not isinstance(raw, list):
             raise ManifestError(f"{path.relative_to(ROOT)}:{key} must be a list when provided")
@@ -588,6 +595,7 @@ def _load_skill_runtime(path: Path, skill_id: str) -> dict[str, Any]:
         "produces_artifact": True,
         "output_slot": artifact_kind.strip(),
         "input_slots": optional_lists["consumes"],
+        "objects": optional_lists["objects"],
         "allowed_task_kinds": [],
         "instruction_path": path.relative_to(ROOT).as_posix(),
         "guidance": guidance,
@@ -635,19 +643,11 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
             raise ManifestError(f"duplicate skill id: {skill_id}")
         skill_ids.add(skill_id)
         skill["path"] = _require_string(skill, "path", label)
-        skill["description"] = _require_string(skill, "description", label)
-        skill["buddies"] = _require_string_list(skill, "buddies", label)
-        skill["objects"] = _require_string_list(skill, "objects", label)
         skill_path = ROOT / skill["path"]
         if skill_path.is_dir():
             runtime = _load_skill_package(skill_path, skill_id)
         else:
             runtime = _load_skill_runtime(skill_path, skill_id)
-        runtime_buddy = runtime.get("buddy")
-        if isinstance(runtime_buddy, str) and runtime_buddy and runtime_buddy not in skill["buddies"]:
-            raise ManifestError(
-                f"{label}.buddies must include runtime buddy '{runtime_buddy}' declared in {skill['path']}"
-            )
         skill["runtime"] = runtime
         lookup[skill_id] = skill
 
@@ -656,6 +656,7 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         raise ManifestError("buddies must be a non-empty list")
 
     buddy_ids: set[str] = set()
+    buddy_skill_membership: dict[str, set[str]] = {}
     for index, buddy in enumerate(buddies):
         label = f"buddies[{index}]"
         if not isinstance(buddy, dict):
@@ -672,18 +673,23 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         permissions = _require_string_list(buddy, "permissions", label)
         for permission in permissions:
             _validate_permission(permission, label)
+        buddy_skill_membership[buddy_id] = set(declared_skills)
         for skill_id in declared_skills:
             if skill_id not in lookup:
                 raise ManifestError(f"{label}.skills contains unknown skill '{skill_id}'")
-            if buddy_id not in lookup[skill_id]["buddies"]:
-                raise ManifestError(
-                    f"{label}.skills '{skill_id}' missing buddy '{buddy_id}' in skills[{skill_id}].buddies"
-                )
 
     for skill_id, skill in lookup.items():
-        for buddy_id in skill["buddies"]:
-            if buddy_id not in buddy_ids:
-                raise ManifestError(f"skills[{skill_id}].buddies contains unknown buddy '{buddy_id}'")
+        runtime_buddy = skill["runtime"].get("buddy")
+        if runtime_buddy is None:
+            continue
+        if not isinstance(runtime_buddy, str) or not runtime_buddy.strip():
+            raise ManifestError(f"skills[{skill_id}].runtime buddy must be a non-empty string")
+        if runtime_buddy not in buddy_ids:
+            raise ManifestError(f"skills[{skill_id}].runtime buddy '{runtime_buddy}' is unknown")
+        if skill_id not in buddy_skill_membership.get(runtime_buddy, set()):
+            raise ManifestError(
+                f"skills[{skill_id}].runtime buddy '{runtime_buddy}' must be declared in buddies[{runtime_buddy}].skills"
+            )
 
     return manifest
 
@@ -736,8 +742,8 @@ def buddy_skill_docs(manifest: dict[str, Any], buddy_id: str) -> list[dict[str, 
             {
                 "id": skill["id"],
                 "path": skill["path"],
-                "description": skill["description"],
-                "objects": skill["objects"],
+                "description": skill["runtime"]["description"],
+                "objects": skill["runtime"]["objects"],
                 "runtime": dict(skill.get("runtime", {})),
                 "guidance": dict(skill.get("runtime", {}).get("guidance", {})),
             }

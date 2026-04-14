@@ -1,6 +1,7 @@
 id = "track-manager"
 buddy = "pm"
 description = "Manage track lifecycle operations for product iteration control."
+objects = ["track", "task"]
 produces_artifact = false
 input_slots = []
 output_schema = "framework/schemas/pm/track-manager.json"
@@ -10,4 +11,3 @@ side_effect_level = "high"
 required_tools = []
 required_env = []
 allowed_task_kinds = ["track-management"]
-

@@ -71,6 +71,7 @@ Required metadata in `skill.toml`:
 - `id`
 - `buddy`
 - `description`
+- `objects`
 - `produces_artifact`
 - `input_slots`
 - `output_schema`
@@ -89,6 +90,10 @@ Recommended metadata in `skill.toml`:
 - `allowed_task_kinds`
 
 `required_tools` and `required_env` stay host-facing advisory metadata. They are not resolve reject gates.
+
+The top-level env manifest keeps only `id` and `path` for each `[[skills]]` entry. BuddySwitch loads the package metadata from `skill.toml` and uses it as the authoritative source for skill descriptions, object coverage, and runtime buddy identity.
+
+Routing is validated by checking that the `buddy` declared in `skill.toml` is present in the matching `[[buddies]]` entry's `skills` list. The manifest no longer duplicates skill descriptions or object lists.
 
 Required body sections:
 
