@@ -1,6 +1,6 @@
 id = "smoke-test"
 buddy = "test"
-description = "Run focused smoke checks and produce structured pass/fail/blocked reports."
+description = "Use when the task is running smoke checks, regression verification, or readiness testing for a change."
 objects = ["task", "artifact"]
 produces_artifact = true
 output_slot = "smoke-test"

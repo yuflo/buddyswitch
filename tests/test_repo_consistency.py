@@ -17,6 +17,21 @@ CANONICAL_PATHS = (
     ROOT / "buddyswitch" / "manifest.toml",
 )
 TEXT_SUFFIXES = {".md", ".toml", ".py", ".json"}
+ARTIFACT_SKILL_DOCS = (
+    ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "SKILL.md",
+    ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "SKILL.md",
+    ROOT / "buddyswitch" / "skills" / "design" / "ia-spec" / "SKILL.md",
+    ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "SKILL.md",
+    ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "SKILL.md",
+)
+ARTIFACT_SKILL_TOMLS = (
+    ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "skill.toml",
+    ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "skill.toml",
+    ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "skill.toml",
+    ROOT / "buddyswitch" / "skills" / "design" / "ia-spec" / "skill.toml",
+    ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "skill.toml",
+    ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "skill.toml",
+)
 
 
 class RepoConsistencyTests(unittest.TestCase):
@@ -136,13 +151,7 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "framework" / "contracts" / "dev.md",
             ROOT / "framework" / "contracts" / "test.md",
         )
-        skills = (
-            ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "SKILL.md",
-            ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "SKILL.md",
-            ROOT / "buddyswitch" / "skills" / "design" / "ia-spec" / "SKILL.md",
-            ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "SKILL.md",
-            ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "SKILL.md",
-        )
+        shared_runtime_rules = ROOT / "framework" / "docs" / "skill-runtime-shared-rules.md"
 
         for path in contracts:
             text = path.read_text(encoding="utf-8").lower()
@@ -150,10 +159,29 @@ class RepoConsistencyTests(unittest.TestCase):
             self.assertIn("artifact.summary", text, msg=f"missing artifact.summary rule in {path.relative_to(ROOT)}")
             self.assertIn("selection-ready", text, msg=f"missing selection-ready wording in {path.relative_to(ROOT)}")
 
-        for path in skills:
+        shared_text = shared_runtime_rules.read_text(encoding="utf-8").lower()
+        self.assertIn("execution_summary", shared_text, msg="missing execution summary rule in shared runtime rules")
+        self.assertIn("artifact.summary", shared_text, msg="missing artifact.summary rule in shared runtime rules")
+        self.assertIn("selection-ready", shared_text, msg="missing selection-ready wording in shared runtime rules")
+        self.assertIn("task and artifact boundaries", shared_text, msg="missing task/artifact boundary section in shared runtime rules")
+        self.assertIn("durable output paths", shared_text, msg="missing durable output path section in shared runtime rules")
+
+        for path in ARTIFACT_SKILL_DOCS:
             text = path.read_text(encoding="utf-8").lower()
-            self.assertIn("execution summary rule", text, msg=f"missing execution summary section in {path.relative_to(ROOT)}")
-            self.assertIn("artifact.summary", text, msg=f"missing artifact.summary rule in {path.relative_to(ROOT)}")
+            self.assertIn("framework/docs/skill-runtime-shared-rules.md", text, msg=f"missing shared runtime rules reference in {path.relative_to(ROOT)}")
+            self.assertNotIn("## execution summary rule", text, msg=f"execution summary rule should be shared in {path.relative_to(ROOT)}")
+            self.assertNotIn("## track/object handling", text, msg=f"track/object handling should be shared in {path.relative_to(ROOT)}")
+            self.assertNotIn("## output path", text, msg=f"output path should be shared in {path.relative_to(ROOT)}")
+
+    def test_skill_toml_descriptions_use_activation_style(self) -> None:
+        for path in ARTIFACT_SKILL_TOMLS:
+            text = path.read_text(encoding="utf-8").splitlines()
+            description_lines = [line for line in text if line.startswith("description = ")]
+            self.assertEqual(1, len(description_lines), msg=f"expected one description in {path.relative_to(ROOT)}")
+            self.assertTrue(
+                description_lines[0].startswith('description = "Use when '),
+                msg=f"description must use activation style in {path.relative_to(ROOT)}",
+            )
 
     def test_every_skill_package_has_metadata_and_instruction_files(self) -> None:
         expected_packages = (

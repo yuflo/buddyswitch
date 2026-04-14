@@ -38,25 +38,9 @@
 - Confirm the output is product-definition content rather than design or implementation detail.
 - Confirm scope is split clearly enough for downstream buddies to act on it.
 
-## Execution Summary Rule
+## Shared Runtime Rules
 
-- `execution_summary` persists as `artifact.summary`.
-- Keep it selection-ready for downstream buddies:
-  - artifact role
-  - key resolved outcome
-  - downstream relevance
-
-## Track/Object Handling
-
-- Follow `framework/docs/track-registry.md`.
-- PM can create/update/advance/archive tracks through track-manager when needed.
-- PM can create/update artifact objects through the resolved task.
-- Track creation/progression should stay explicit in demand text or track-manager output.
-
-## Output Path
-
-- Default BuddySwitch state: `buddyswitch/objects/tasks/<task-id>.json`, `buddyswitch/objects/artifacts/<artifact-id>.json`, and `buddyswitch/content/runs/<run-id>.json`
-- Do not request or rely on `artifacts/*.md` or `runs/summaries/**`.
+- See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
 
 ## Required Output Fields
 

@@ -1,6 +1,6 @@
 id = "write-prd"
 buddy = "pm"
-description = "Produce an MVP PRD from research and requirements, aligned with the PM contract."
+description = "Use when the task is drafting a PRD, defining MVP scope, or turning validated requirements into product requirements."
 objects = ["task", "artifact"]
 produces_artifact = true
 output_slot = "prd"

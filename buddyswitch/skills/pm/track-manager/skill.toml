@@ -1,6 +1,6 @@
 id = "track-manager"
 buddy = "pm"
-description = "Manage track lifecycle operations for product iteration control."
+description = "Use when the task is managing track lifecycle operations such as create, update, advance, or archive."
 objects = ["track", "task"]
 produces_artifact = false
 input_slots = []

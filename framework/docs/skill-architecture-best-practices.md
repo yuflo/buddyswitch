@@ -70,7 +70,7 @@ Required metadata in `skill.toml`:
 
 - `id`
 - `buddy`
-- `description`
+- `description` as activation-style trigger wording that starts with `Use when `
 - `objects`
 - `produces_artifact`
 - `input_slots`
@@ -94,6 +94,8 @@ Recommended metadata in `skill.toml`:
 The top-level env manifest keeps only `id` and `path` for each `[[skills]]` entry. BuddySwitch loads the package metadata from `skill.toml` and uses it as the authoritative source for skill descriptions, object coverage, and runtime buddy identity.
 
 Routing is validated by checking that the `buddy` declared in `skill.toml` is present in the matching `[[buddies]]` entry's `skills` list. The manifest no longer duplicates skill descriptions or object lists.
+
+Artifact-producing skills share durable runtime rules through `framework/docs/skill-runtime-shared-rules.md` rather than duplicating execution-summary, task/artifact boundary, and output-path guidance in each `SKILL.md`.
 
 Required body sections:
 
