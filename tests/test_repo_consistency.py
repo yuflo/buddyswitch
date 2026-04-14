@@ -24,7 +24,7 @@ ARTIFACT_SKILL_DOCS = (
     ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "SKILL.md",
 )
-ARTIFACT_SKILL_TOMLS = (
+SKILL_TOMLS = (
     ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "skill.toml",
@@ -174,7 +174,15 @@ class RepoConsistencyTests(unittest.TestCase):
             self.assertNotIn("## output path", text, msg=f"output path should be shared in {path.relative_to(ROOT)}")
 
     def test_skill_toml_descriptions_use_activation_style(self) -> None:
-        for path in ARTIFACT_SKILL_TOMLS:
+        disallowed_summary_tokens = (
+            "workflow",
+            "steps",
+            "template",
+            "persist",
+            "execution summary",
+            "artifact.summary",
+        )
+        for path in SKILL_TOMLS:
             text = path.read_text(encoding="utf-8").splitlines()
             description_lines = [line for line in text if line.startswith("description = ")]
             self.assertEqual(1, len(description_lines), msg=f"expected one description in {path.relative_to(ROOT)}")
@@ -182,6 +190,13 @@ class RepoConsistencyTests(unittest.TestCase):
                 description_lines[0].startswith('description = "Use when '),
                 msg=f"description must use activation style in {path.relative_to(ROOT)}",
             )
+            lowered = description_lines[0].lower()
+            for token in disallowed_summary_tokens:
+                self.assertNotIn(
+                    token,
+                    lowered,
+                    msg=f"description should not summarize workflow details in {path.relative_to(ROOT)}",
+                )
 
     def test_every_skill_package_has_metadata_and_instruction_files(self) -> None:
         expected_packages = (

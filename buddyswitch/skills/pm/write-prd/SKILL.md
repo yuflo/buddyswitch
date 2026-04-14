@@ -42,6 +42,12 @@
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
 
+## PM Track Handling
+
+- A `switch pm -> track-*` PRD task may use the track as context, but the core deliverable is still product-definition output.
+- If the user is actually asking to create, update, advance, archive, or hand off a track, use `track-manager` for that lifecycle change.
+- Keep track progression or buddy handoff explicit in demand text or in a separate `track-manager` result; do not silently turn PRD work into track mutation.
+
 ## Required Output Fields
 
 - `problem`
