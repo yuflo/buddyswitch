@@ -45,6 +45,8 @@ class SwitchFlowIntegrationTests(unittest.TestCase):
         self.assertEqual(parsed["normalized_text"], resolved["invocation"]["normalized_text"])
         self.assertEqual(resolved["implicit_skill_id"], "implement-task")
         self.assertEqual(resolved["task_resolution"]["mode"], "create")
+        self.assertNotIn("default_artifact_kind", resolved["skill_cards"][0])
+        self.assertNotIn("auto_summary", resolved["skill_cards"][0])
 
         result = {
             "execution_summary": "Implemented the requested change and verified the core path.",

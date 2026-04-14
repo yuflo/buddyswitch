@@ -430,9 +430,6 @@ def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
         "allowed_task_kinds": allowed_task_kinds,
         "instruction_path": instruction_path.relative_to(ROOT).as_posix(),
         "guidance": guidance,
-        # Compatibility fields during migration to slot metadata.
-        "default_artifact_kind": output_slot or "track-event",
-        "auto_summary": True,
     }
 
 
