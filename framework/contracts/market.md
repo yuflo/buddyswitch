@@ -7,12 +7,10 @@ Produce browser-driven, evidence-based market and demand analysis that can be ha
 ## Must Do
 
 - Clarify the research question and scope.
-- Select channels based on question type and constraints.
+- Select the market skill flow that matches the question: broad category scan or PMF validation.
 - Use browser-first evidence collection with search-assisted discovery.
-- Include x.com and reddit by default unless user excludes them.
-- Run iterative rounds with query refinement.
+- Choose channels based on the question type and constraints.
 - Collect and synthesize evidence from browsed sources.
-- Distill patterns and insights from evidence.
 - Highlight caveats and uncertainty.
 - Provide a conclusion that is traceable to evidence.
 
@@ -35,15 +33,20 @@ Produce browser-driven, evidence-based market and demand analysis that can be ha
 
 ## Required Output Structure
 
+The selected market skill schema defines the exact synthesis fields.
+All market artifacts must include at least:
+
 1. `research_question`
 2. `research_strategy`
 3. `channel_plan`
 4. `iteration_log`
 5. `evidence`
 6. `source_traceability`
-7. `patterns_and_insights`
-8. `risks_and_caveats`
-9. `conclusion`
+7. `conclusion`
+
+Typical skill-specific synthesis fields include:
+- `research-scan`: `patterns_and_insights`, `risks_and_caveats`
+- `pmf-recon`: `assumptions_used`, `candidate_icps`, `strongest_pain_signals`, `existing_alternatives`, `pmf_confidence`, `recommended_next_step`
 
 ## Evidence And Traceability Requirements
 

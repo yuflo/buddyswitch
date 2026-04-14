@@ -107,6 +107,30 @@ class ResolveRuntimeTests(unittest.TestCase):
         self.assertNotIn("default_artifact_kind", card)
         self.assertNotIn("auto_summary", card)
 
+    def test_multi_skill_market_buddy_returns_no_implicit_skill(self) -> None:
+        payload = switch_runtime.resolve_switch(
+            "switch market: Validate an AI tool idea for indie developers"
+        )
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["invocation"]["buddy"], "market")
+        self.assertEqual(payload["eligible_skills"], ["research-scan", "pmf-recon"])
+        self.assertIsNone(payload["implicit_skill_id"])
+
+        ids = [card["id"] for card in payload["skill_cards"]]
+        self.assertEqual(ids, ["research-scan", "pmf-recon"])
+
+        pmf_card = next(card for card in payload["skill_cards"] if card["id"] == "pmf-recon")
+        self.assertEqual(
+            pmf_card["instruction_path"],
+            "buddyswitch/skills/market/pmf-recon/SKILL.md",
+        )
+        self.assertEqual(pmf_card["output_slot"], "research")
+        self.assertEqual(
+            pmf_card["input_slots"],
+            ["research-question", "links", "prior-artifacts"],
+        )
+
     def test_skill_card_uses_package_metadata_for_description_and_objects(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             package_root = Path(temp_dir) / "demo-skill"
@@ -556,6 +580,80 @@ class PersistRuntimeTests(unittest.TestCase):
             },
         }
 
+    def _pmf_recon_result(self) -> dict[str, object]:
+        return {
+            "execution_summary": "Completed a narrow PMF recon pass for the idea.",
+            "working_notes": ["Focused on evidence-backed pain signals only."],
+            "deliverables_or_changed_files": [],
+            "artifact_content": {
+                "research_question": "Do indie developers show credible demand for AI companion live spaces?",
+                "research_strategy": {
+                    "depth": "quick",
+                    "rationale": "Cover the new persist path with a minimal valid payload.",
+                    "collection_mode": "Targeted secondary research",
+                    "initial_hypotheses": ["Developers struggle to validate demand before building."],
+                    "source_category_targets": ["forums", "founder communities"],
+                },
+                "channel_plan": ["Founder forums", "Indie hacker communities"],
+                "iteration_log": [
+                    {
+                        "round": 1,
+                        "focus": "Demand discovery",
+                        "sources_checked": ["https://example.com/source-1"],
+                        "evidence_captured": "Found repeated mentions of weak feedback loops.",
+                        "synthesis": "Pain centers on confidence in what to build next.",
+                        "next_adjustment": "Probe willingness to try lightweight validation tools.",
+                    }
+                ],
+                "evidence": [
+                    {
+                        "source_id": "src-1",
+                        "url": "https://example.com/source-1",
+                        "source_type": "forum-thread",
+                        "accessed_at": "2026-04-14T10:00:00+08:00",
+                        "claim_excerpt": "I keep building without enough real demand signals.",
+                        "segment": "indie developers",
+                        "pain_category": "demand-validation",
+                        "confidence": "medium",
+                    }
+                ],
+                "source_traceability": [
+                    {
+                        "conclusion": "Early demand validation remains a recurring pain point.",
+                        "source_ids": ["src-1"],
+                    }
+                ],
+                "assumptions_used": ["Public founder discussions are directionally useful for this check."],
+                "candidate_icps": [
+                    {
+                        "segment": "Indie developers launching early products",
+                        "pain_summary": "Need faster feedback on whether a concept is worth pursuing.",
+                        "why_now_or_why_this_segment": "They operate with limited time and budget.",
+                    }
+                ],
+                "strongest_pain_signals": ["Low confidence in what to build", "Weak user feedback volume"],
+                "existing_alternatives": [
+                    {
+                        "name": "Manual interviews",
+                        "type": "service",
+                        "gaps": ["Slow to schedule", "Hard to maintain cadence"],
+                    }
+                ],
+                "why_current_solutions_fall_short": ["They are too manual for continuous lightweight validation."],
+                "pmf_confidence": {
+                    "level": "medium",
+                    "rationale": "Evidence suggests real pain, but paid demand remains unproven.",
+                },
+                "recommended_next_step": {
+                    "action": "interviews",
+                    "rationale": "Direct interviews are the fastest next step to validate urgency.",
+                },
+                "suggested_interview_angles": ["Current validation workflow", "Signals that would change roadmap decisions"],
+                "risks_and_unknowns": ["Willingness to pay is still unclear."],
+                "conclusion": "There is enough evidence to continue with direct customer discovery.",
+            },
+        }
+
     def test_persist_creates_task_and_run_bound_artifact(self) -> None:
         resolved = switch_runtime.resolve_switch("switch dev: Implement the approved onboarding improvements in projects/app")
         payload = switch_runtime.persist_switch(resolved, skill_id=None, result=self._artifact_result())
@@ -596,6 +694,83 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertEqual(run_json["related_run_ids"], payload["related_run_ids"])
         self.assertEqual(run_json["recommended_switch"], payload["recommended_switch"])
         self.assertNotIn("suggested_next_switch", run_json)
+        self.assertNotIn("artifact_content", run_json)
+
+    def test_persist_multi_skill_market_requires_explicit_skill_id(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch market: Validate an AI tool idea for indie developers"
+        )
+        task_id = resolved["task_resolution"]["task_id"]
+        task_path = ROOT / "buddyswitch" / "objects" / "tasks" / f"{task_id}.json"
+        artifact_path = ROOT / "buddyswitch" / "objects" / "artifacts" / f"art-{task_id}-research.json"
+        run_dir = ROOT / "buddyswitch" / "content" / "runs"
+        before_runs = {path.name for path in run_dir.glob("run-*.json")}
+
+        self.assertFalse(task_path.exists())
+        self.assertFalse(artifact_path.exists())
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "skill_id is required for multi-skill buddies. Choose one from eligible_skills first.",
+        ):
+            switch_runtime.persist_switch(resolved, skill_id=None, result=self._pmf_recon_result())
+
+        self.assertFalse(task_path.exists())
+        self.assertFalse(artifact_path.exists())
+        self.assertEqual({path.name for path in run_dir.glob("run-*.json")}, before_runs)
+
+    def test_persist_multi_skill_market_with_pmf_recon_persists_run_bound_artifact(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch market: Validate an AI tool idea for indie developers"
+        )
+
+        payload = switch_runtime.persist_switch(
+            resolved,
+            skill_id="pmf-recon",
+            result=self._pmf_recon_result(),
+        )
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["skill_id"], "pmf-recon")
+        self.assertEqual(payload["task_id"], resolved["task_resolution"]["task_id"])
+        self.assertEqual(payload["artifact_ids"], [payload["artifact_id"]])
+        self.assertIn("task_title", payload)
+        self.assertIsNone(payload["track_title"])
+        self.assertIn("reference_switches", payload)
+        self.assertEqual(
+            payload["reference_switches"]["continue_current_task"],
+            f"switch market({payload['task_id']}): <demand>",
+        )
+        self.assertEqual(payload["related_run_ids"], [])
+        self.assertEqual(payload["recommended_switch"], payload["reference_switches"]["continue_current_task"])
+        self._remember_persisted_paths(payload)
+
+        artifact_json = json.loads((ROOT / payload["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
+        task_json = json.loads((ROOT / payload["paths"]["task"]).read_text(encoding="utf-8"))
+        run_json = json.loads((ROOT / payload["paths"]["run"]).read_text(encoding="utf-8"))
+
+        self.assertEqual(artifact_json["task_id"], payload["task_id"])
+        self.assertEqual(artifact_json["source_run_id"], payload["run_id"])
+        self.assertEqual(artifact_json["skill_id"], "pmf-recon")
+        self.assertEqual(artifact_json["slot"], "research")
+        self.assertEqual(
+            artifact_json["content"]["research_question"],
+            self._pmf_recon_result()["artifact_content"]["research_question"],
+        )
+        self.assertIn(payload["run_id"], task_json["run_ids"])
+        self.assertEqual(
+            task_json["artifact_slots"][artifact_json["slot"]]["current_artifact_id"],
+            payload["artifact_id"],
+        )
+        self.assertEqual(run_json["resolved_task_id"], payload["task_id"])
+        self.assertEqual(run_json["artifact_ids"], [payload["artifact_id"]])
+        self.assertEqual(run_json["skill_id"], "pmf-recon")
+        self.assertEqual(run_json["switch"]["demand"], resolved["switch"]["demand"])
+        self.assertEqual(run_json["task_title"], payload["task_title"])
+        self.assertEqual(run_json["track_title"], payload["track_title"])
+        self.assertEqual(run_json["reference_switches"], payload["reference_switches"])
+        self.assertEqual(run_json["related_run_ids"], payload["related_run_ids"])
+        self.assertEqual(run_json["recommended_switch"], payload["recommended_switch"])
         self.assertNotIn("artifact_content", run_json)
 
     def test_persist_reuses_task_and_binds_to_track(self) -> None:

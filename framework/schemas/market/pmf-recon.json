@@ -1,0 +1,156 @@
+{
+  "type": "object",
+  "required": [
+    "execution_summary",
+    "working_notes",
+    "deliverables_or_changed_files",
+    "artifact_content"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "execution_summary": { "type": "string" },
+    "working_notes": { "type": "array", "items": { "type": "string" } },
+    "deliverables_or_changed_files": { "type": "array", "items": { "type": "string" } },
+    "artifact_content": {
+      "type": "object",
+      "required": [
+        "research_question",
+        "research_strategy",
+        "channel_plan",
+        "iteration_log",
+        "evidence",
+        "source_traceability",
+        "assumptions_used",
+        "candidate_icps",
+        "strongest_pain_signals",
+        "existing_alternatives",
+        "why_current_solutions_fall_short",
+        "pmf_confidence",
+        "recommended_next_step",
+        "suggested_interview_angles",
+        "risks_and_unknowns",
+        "conclusion"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "research_question": { "type": "string" },
+        "research_strategy": {
+          "type": "object",
+          "required": ["depth", "rationale", "collection_mode", "initial_hypotheses", "source_category_targets"],
+          "additionalProperties": false,
+          "properties": {
+            "depth": { "type": "string", "enum": ["quick", "standard", "deep"] },
+            "rationale": { "type": "string" },
+            "collection_mode": { "type": "string" },
+            "initial_hypotheses": { "type": "array", "items": { "type": "string" } },
+            "source_category_targets": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "channel_plan": { "type": "array", "items": { "type": "string" } },
+        "iteration_log": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["round", "focus", "sources_checked", "evidence_captured", "synthesis", "next_adjustment"],
+            "additionalProperties": false,
+            "properties": {
+              "round": { "type": "integer" },
+              "focus": { "type": "string" },
+              "sources_checked": { "type": "array", "items": { "type": "string" } },
+              "evidence_captured": { "type": "string" },
+              "synthesis": { "type": "string" },
+              "next_adjustment": { "type": "string" }
+            }
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["source_id", "url", "source_type", "accessed_at", "claim_excerpt", "segment", "pain_category"],
+            "additionalProperties": false,
+            "properties": {
+              "source_id": { "type": "string" },
+              "url": { "type": "string" },
+              "source_type": { "type": "string" },
+              "accessed_at": { "type": "string" },
+              "claim_excerpt": { "type": "string" },
+              "segment": { "type": "string" },
+              "pain_category": { "type": "string" },
+              "alternative": { "type": "string" },
+              "commitment_signal": { "type": "string" },
+              "confidence": { "type": "string", "enum": ["low", "medium", "high"] }
+            }
+          }
+        },
+        "source_traceability": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["conclusion", "source_ids"],
+            "additionalProperties": false,
+            "properties": {
+              "conclusion": { "type": "string" },
+              "source_ids": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "assumptions_used": { "type": "array", "items": { "type": "string" } },
+        "candidate_icps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["segment", "pain_summary", "why_now_or_why_this_segment"],
+            "additionalProperties": false,
+            "properties": {
+              "segment": { "type": "string" },
+              "pain_summary": { "type": "string" },
+              "why_now_or_why_this_segment": { "type": "string" },
+              "buying_signal": { "type": "string" },
+              "reachability": { "type": "string" }
+            }
+          }
+        },
+        "strongest_pain_signals": { "type": "array", "items": { "type": "string" } },
+        "existing_alternatives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type", "gaps"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "type": { "type": "string" },
+              "gaps": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "why_current_solutions_fall_short": { "type": "array", "items": { "type": "string" } },
+        "pmf_confidence": {
+          "type": "object",
+          "required": ["level", "rationale"],
+          "additionalProperties": false,
+          "properties": {
+            "level": { "type": "string", "enum": ["low", "medium", "high"] },
+            "rationale": { "type": "string" }
+          }
+        },
+        "recommended_next_step": {
+          "type": "object",
+          "required": ["action", "rationale"],
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": ["interviews", "concierge", "landing-page", "mvp", "pricing-test", "stop-or-reposition"]
+            },
+            "rationale": { "type": "string" }
+          }
+        },
+        "suggested_interview_angles": { "type": "array", "items": { "type": "string" } },
+        "risks_and_unknowns": { "type": "array", "items": { "type": "string" } },
+        "conclusion": { "type": "string" }
+      }
+    }
+  }
+}
