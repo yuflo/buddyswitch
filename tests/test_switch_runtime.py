@@ -19,127 +19,9 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_manifest  # noqa: E402
 import switch_runtime  # noqa: E402
 import workspace_data  # noqa: E402
 from env_store import create_artifact, create_task, create_track, get_track, validate_artifact, validate_track  # noqa: E402
-
-
-class ManifestSkillRuntimeTests(unittest.TestCase):
-    def test_output_schema_and_guidance_are_required(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            skill_path = Path(temp_dir) / "SKILL.md"
-            skill_path.write_text(
-                textwrap.dedent(
-                    """\
-                    ---
-                    name: test-skill
-                    description: Example test skill.
-                    version: "2.0"
-                    default_artifact_kind: note
-                    auto_summary: true
-                    output_schema: framework/schemas/dev/implement-task.json
-                    side_effect_level: low
-                    required_tools:
-                      - rg
-                    required_env:
-                      - BUDDYSWITCH_TEST_ENV
-                    produces:
-                      - note
-                    consumes:
-                      - demand
-                    ---
-
-                    # test-skill
-
-                    ## Purpose
-                    - Explain the workflow purpose.
-
-                    ## Use when
-                    - The demand matches the workflow.
-
-                    ## Do not use when
-                    - The demand belongs to another buddy.
-
-                    ## Inputs
-                    - Task input.
-
-                    ## Outputs
-                    - Structured result.
-
-                    ## Verification
-                    - Verify the result.
-
-                    ## Examples
-                    - `switch demo: run the task`
-
-                    ## Counterexamples
-                    - `switch other: do something else`
-
-                    ## Gotchas
-                    - Beware of drift.
-                    """
-                ),
-                encoding="utf-8",
-            )
-
-            runtime = env_manifest._load_skill_runtime(skill_path, "test-skill")
-
-        self.assertEqual(runtime["output_schema"], "framework/schemas/dev/implement-task.json")
-        self.assertEqual(runtime["required_tools"], ["rg"])
-        self.assertEqual(runtime["required_env"], ["BUDDYSWITCH_TEST_ENV"])
-        self.assertIn("The demand matches the workflow.", runtime["guidance"]["use_when"])
-
-    def test_track_mode_front_matter_is_rejected(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            skill_path = Path(temp_dir) / "SKILL.md"
-            skill_path.write_text(
-                textwrap.dedent(
-                    """\
-                    ---
-                    name: test-skill
-                    description: Example test skill.
-                    track_mode: optional
-                    default_artifact_kind: note
-                    auto_summary: true
-                    output_schema: framework/schemas/dev/implement-task.json
-                    ---
-
-                    # test-skill
-
-                    ## Purpose
-                    - Explain the workflow purpose.
-
-                    ## Use when
-                    - The demand matches the workflow.
-
-                    ## Do not use when
-                    - The demand belongs to another buddy.
-
-                    ## Inputs
-                    - Task input.
-
-                    ## Outputs
-                    - Structured result.
-
-                    ## Verification
-                    - Verify the result.
-
-                    ## Examples
-                    - `switch demo: run the task`
-
-                    ## Counterexamples
-                    - `switch other: do something else`
-
-                    ## Gotchas
-                    - Beware of drift.
-                    """
-                ),
-                encoding="utf-8",
-            )
-
-            with self.assertRaisesRegex(env_manifest.ManifestError, "track_mode is retired"):
-                env_manifest._load_skill_runtime(skill_path, "test-skill")
 
 
 class EnvStoreRetiredFieldTests(unittest.TestCase):
@@ -240,14 +122,6 @@ class ResolveRuntimeTests(unittest.TestCase):
             (package_root / "SKILL.md").write_text(
                 textwrap.dedent(
                     """\
-                    ---
-                    name: demo-skill
-                    description: Example skill package.
-                    default_artifact_kind: prd
-                    auto_summary: true
-                    output_schema: framework/schemas/pm/write-prd.json
-                    ---
-
                     # demo-skill
 
                     ## Purpose

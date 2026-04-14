@@ -262,63 +262,6 @@ def _parse_scalar(value: str, label: str) -> Any:
     return raw
 
 
-def _split_front_matter(path: Path) -> tuple[dict[str, Any], list[str]]:
-    text = path.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    if len(lines) < 3 or lines[0].strip() != "---":
-        raise ManifestError(f"{path.relative_to(ROOT)} must start with '---' front matter")
-
-    end = None
-    for index in range(1, len(lines)):
-        if lines[index].strip() == "---":
-            end = index
-            break
-    if end is None:
-        raise ManifestError(f"{path.relative_to(ROOT)} front matter is missing closing '---'")
-
-    block = lines[1:end]
-    data: dict[str, Any] = {}
-    i = 0
-    while i < len(block):
-        line = block[i]
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            i += 1
-            continue
-
-        match = re.match(r"^([A-Za-z0-9_-]+)\s*:\s*(.*)$", stripped)
-        if not match:
-            raise ManifestError(f"Invalid front matter line in {path.relative_to(ROOT)}: {stripped}")
-        key = match.group(1)
-        value = match.group(2).strip()
-
-        if value:
-            data[key] = _parse_scalar(value, f"{path.relative_to(ROOT)}:{key}")
-            i += 1
-            continue
-
-        items: list[Any] = []
-        i += 1
-        while i < len(block):
-            next_line = block[i]
-            next_stripped = next_line.strip()
-            if not next_stripped:
-                i += 1
-                continue
-            if _SKILL_KEY_RE.match(next_stripped) and not next_stripped.startswith("-"):
-                break
-            item_match = re.match(r"^\s*-\s*(.+)\s*$", next_line)
-            if not item_match:
-                raise ManifestError(
-                    f"Invalid list item for '{key}' in {path.relative_to(ROOT)}: {next_stripped}"
-                )
-            items.append(_parse_scalar(item_match.group(1), f"{path.relative_to(ROOT)}:{key}"))
-            i += 1
-        data[key] = items
-
-    return data, lines[end + 1 :]
-
-
 def _normalize_section_lines(lines: list[str]) -> list[str]:
     cleaned: list[str] = []
     for raw in lines:
@@ -479,9 +422,19 @@ def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
         label=f"{metadata_path.relative_to(ROOT)}:allowed_task_kinds",
     )
 
+    instruction_lines = instruction_path.read_text(encoding="utf-8").splitlines()
+    for line in instruction_lines:
+        if not line.strip():
+            continue
+        if line.strip() == "---":
+            raise ManifestError(
+                f"{instruction_path.relative_to(ROOT)} must not contain frontmatter; move metadata to skill.toml"
+            )
+        break
+
     guidance = _parse_skill_guidance(
         instruction_path,
-        instruction_path.read_text(encoding="utf-8").splitlines(),
+        instruction_lines,
     )
 
     return {
@@ -505,100 +458,6 @@ def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
         # Compatibility fields during migration to slot metadata.
         "default_artifact_kind": output_slot or "track-event",
         "auto_summary": True,
-    }
-
-
-def _load_skill_runtime(path: Path, skill_id: str) -> dict[str, Any]:
-    if not path.exists():
-        raise ManifestError(f"Skill file not found: {path.relative_to(ROOT)}")
-    front, body_lines = _split_front_matter(path)
-
-    if "track_mode" in front:
-        raise ManifestError(
-            f"{path.relative_to(ROOT)}:track_mode is retired; remove this front matter field"
-        )
-
-    required = ("name", "description", "default_artifact_kind", "auto_summary", "output_schema")
-    missing = [key for key in required if key not in front]
-    if missing:
-        raise ManifestError(
-            f"{path.relative_to(ROOT)} is missing required front matter key(s): {', '.join(missing)}"
-        )
-
-    name = front["name"]
-    if not isinstance(name, str) or not name.strip():
-        raise ManifestError(f"{path.relative_to(ROOT)}:name must be a non-empty string")
-    if name.strip() != skill_id:
-        raise ManifestError(
-            f"{path.relative_to(ROOT)}:name '{name}' must match manifest skill id '{skill_id}'"
-        )
-
-    description = front["description"]
-    if not isinstance(description, str) or not description.strip():
-        raise ManifestError(f"{path.relative_to(ROOT)}:description must be a non-empty string")
-
-    artifact_kind = front["default_artifact_kind"]
-    if not isinstance(artifact_kind, str) or not artifact_kind.strip():
-        raise ManifestError(f"{path.relative_to(ROOT)}:default_artifact_kind must be a non-empty string")
-
-    auto_summary = front["auto_summary"]
-    if not isinstance(auto_summary, bool):
-        raise ManifestError(f"{path.relative_to(ROOT)}:auto_summary must be true or false")
-
-    output_schema = front["output_schema"]
-    if not isinstance(output_schema, str) or not output_schema.strip():
-        raise ManifestError(f"{path.relative_to(ROOT)}:output_schema must be a non-empty string")
-    try:
-        normalized_schema = normalize_schema_path(output_schema.strip())
-    except OutputSchemaError as exc:
-        raise ManifestError(f"{path.relative_to(ROOT)}:output_schema invalid: {exc}") from exc
-    if not (ROOT / normalized_schema).exists():
-        raise ManifestError(f"{path.relative_to(ROOT)}:output_schema file not found: {normalized_schema}")
-
-    version = front.get("version")
-    if version is not None and (not isinstance(version, str) or not version.strip()):
-        raise ManifestError(f"{path.relative_to(ROOT)}:version must be a non-empty string when provided")
-
-    side_effect_level = front.get("side_effect_level")
-    if side_effect_level is not None and (not isinstance(side_effect_level, str) or not side_effect_level.strip()):
-        raise ManifestError(
-            f"{path.relative_to(ROOT)}:side_effect_level must be a non-empty string when provided"
-        )
-
-    optional_lists: dict[str, list[str]] = {}
-    for key in ("required_tools", "required_env", "produces", "consumes", "objects"):
-        raw = front.get(key, [])
-        if not isinstance(raw, list):
-            raise ManifestError(f"{path.relative_to(ROOT)}:{key} must be a list when provided")
-        cleaned: list[str] = []
-        for item in raw:
-            if not isinstance(item, str) or not item.strip():
-                raise ManifestError(f"{path.relative_to(ROOT)}:{key} must contain non-empty strings")
-            cleaned.append(item.strip())
-        optional_lists[key] = cleaned
-
-    guidance = _parse_skill_guidance(path, body_lines)
-
-    return {
-        "name": name.strip(),
-        "buddy": None,
-        "description": description.strip(),
-        "default_artifact_kind": artifact_kind.strip(),
-        "auto_summary": auto_summary,
-        "output_schema": normalized_schema,
-        "version": version.strip() if isinstance(version, str) else None,
-        "side_effect_level": side_effect_level.strip() if isinstance(side_effect_level, str) else None,
-        "required_tools": optional_lists["required_tools"],
-        "required_env": optional_lists["required_env"],
-        "produces": optional_lists["produces"],
-        "consumes": optional_lists["consumes"],
-        "produces_artifact": True,
-        "output_slot": artifact_kind.strip(),
-        "input_slots": optional_lists["consumes"],
-        "objects": optional_lists["objects"],
-        "allowed_task_kinds": [],
-        "instruction_path": path.relative_to(ROOT).as_posix(),
-        "guidance": guidance,
     }
 
 
@@ -644,10 +503,9 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         skill_ids.add(skill_id)
         skill["path"] = _require_string(skill, "path", label)
         skill_path = ROOT / skill["path"]
-        if skill_path.is_dir():
-            runtime = _load_skill_package(skill_path, skill_id)
-        else:
-            runtime = _load_skill_runtime(skill_path, skill_id)
+        if not skill_path.is_dir():
+            raise ManifestError(f"{label}.path must point to a skill package directory: {skill['path']}")
+        runtime = _load_skill_package(skill_path, skill_id)
         skill["runtime"] = runtime
         lookup[skill_id] = skill
 
