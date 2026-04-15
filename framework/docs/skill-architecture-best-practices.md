@@ -24,7 +24,7 @@ Across current coding-agent ecosystems, the common pattern is:
 BuddySwitch follows that pattern, but keeps one extra control layer:
 
 - user chooses the buddy explicitly with `switch <buddy>...: <demand>`
-- BuddySwitch treats the text after `:` as demand text; task objects are resolved or created by the runtime
+- BuddySwitch treats the text after `:` as demand text; `resolve` determines task mode and `persist` creates the task only in create mode
 - BuddySwitch constrains the host model to that buddy's allowlisted skill set while keeping invocation parsing tolerant to minor CLI formatting variation
 
 ## Layer Responsibilities
@@ -117,8 +117,8 @@ Instead:
 
 - `resolve` reports `required_output_schema_by_skill`
 - the host emits a structured payload that matches that schema
-- `persist` creates or reuses the resolved task for the run
-- `persist` writes canonical artifact content into artifact objects
+- `persist` reuses the referenced task in reuse mode, or creates the task and assigns the final task id in create mode
+- `persist` writes canonical artifact content into artifact objects for artifact-producing skills
 - `persist` writes run audit JSON to `buddyswitch/content/runs/**`
 - BuddySwitch does not maintain a derived markdown compatibility layer
 

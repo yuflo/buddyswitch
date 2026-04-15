@@ -21,7 +21,7 @@ Rules:
 4. Optional `<track-id>` is written after `->`.
 5. `:` is required.
 6. `<demand>` must be non-empty.
-7. Text after `:` is demand text, not a task object. When no task id is supplied, persistence creates a new task.
+7. Text after `:` is demand text, not a task object. When no task id is supplied, `resolve` stays in create mode and `persist` creates the task.
 8. Parser and router may normalize minor CLI whitespace variation around `:`, `->`, and task parentheses when intent remains unambiguous.
 
 ## Buddy Validation
@@ -77,6 +77,11 @@ Current control-layer expectations:
   7. reject explicit requests for retired markdown outputs under `artifacts/*.md` or `runs/summaries/**`
   8. run deterministic artifact selection from `track_artifact_index` (when present) and return complete `artifact_selection_by_skill` / `run_instructions_by_skill` maps for all eligible skills
   9. return top-level `artifact_selection` only when it aligns with an implicit single-skill resolve; keep top-level `run_instructions` available for neutral host guidance; also return `eligible_skills`, compact `skill_cards`, task context, track context, `track_artifact_index`, output schema paths, invocation details, and explicit next actions
+
+Create-mode contract:
+
+- When no explicit task id is supplied, `resolve` returns `task_resolution.mode = "create"` without allocating a final task id.
+- `persist` is the only step that creates the task object and assigns the final task id.
 
 Current runtime defaults:
 

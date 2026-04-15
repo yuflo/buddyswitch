@@ -92,6 +92,8 @@ becomes:
 
 Prepare execution context without writing state.
 
+For create-mode switches, `resolve` does not create a task and does not assign the final task id.
+
 This step loads:
 
 - the buddy definition from `buddyswitch/manifest.toml`
@@ -127,6 +129,8 @@ The host:
 
 This step writes canonical BuddySwitch state.
 
+For create-mode switches, `persist` creates the task object, assigns the final task id, and then writes the resulting state and run audit data against that persisted task.
+
 BuddySwitch validates:
 
 - the selected `skill_id`
@@ -136,7 +140,7 @@ BuddySwitch validates:
 Then it writes:
 
 - task objects under `buddyswitch/objects/tasks/`
-- artifact objects under `buddyswitch/objects/artifacts/`
+- artifact objects under `buddyswitch/objects/artifacts/` when the selected skill produces artifacts
 - run audit JSON under `buddyswitch/content/runs/`
 - track objects when track mutations are part of the request
 
