@@ -18,6 +18,22 @@ id = "pmf-recon"
 path = "buddyswitch/skills/market/pmf-recon"
 
 [[skills]]
+id = "customer-discovery"
+path = "buddyswitch/skills/market/customer-discovery"
+
+[[skills]]
+id = "positioning-copy"
+path = "buddyswitch/skills/market/positioning-copy"
+
+[[skills]]
+id = "channel-discovery"
+path = "buddyswitch/skills/market/channel-discovery"
+
+[[skills]]
+id = "launch-prep"
+path = "buddyswitch/skills/market/launch-prep"
+
+[[skills]]
 id = "write-prd"
 path = "buddyswitch/skills/pm/write-prd"
 
@@ -41,7 +57,14 @@ path = "buddyswitch/skills/test/smoke-test"
 id = "market"
 label = "Market"
 scope = "Research demand, users, and competition."
-skills = ["research-scan", "pmf-recon"]
+skills = [
+  "research-scan",
+  "pmf-recon",
+  "customer-discovery",
+  "positioning-copy",
+  "channel-discovery",
+  "launch-prep",
+]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
 [[buddies]]

@@ -1,0 +1,14 @@
+id = "launch-prep"
+buddy = "market"
+description = "Use when the task is preparing a first launch, validation page, or feedback loop before public release."
+objects = ["task", "artifact"]
+produces_artifact = true
+output_slot = "launch-prep"
+input_slots = ["pmf-report", "positioning-brief", "channel-plan", "links", "prior-artifacts"]
+output_schema = "framework/schemas/market/launch-prep.json"
+produces = ["launch-plan", "validation-brief", "feedback-loop"]
+consumes = ["pmf-report", "positioning-brief", "channel-plan", "links", "prior-artifacts"]
+side_effect_level = "medium"
+required_tools = []
+required_env = []
+allowed_task_kinds = ["research"]

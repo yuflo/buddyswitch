@@ -1,12 +1,12 @@
 id = "research-scan"
 buddy = "market"
-description = "Use when the task is market demand research, competitor analysis, audience sentiment analysis, or other source-backed external research."
+description = "Use when the task is building broad market reality, category structure, competitor coverage, or external context before narrower demand or launch analysis."
 objects = ["task", "artifact"]
 produces_artifact = true
-output_slot = "research"
+output_slot = "market-scan"
 input_slots = ["research-question", "links", "prior-artifacts"]
 output_schema = "framework/schemas/market/research-scan.json"
-produces = ["research-report", "evidence-log"]
+produces = ["market-scan", "competitor-map", "evidence-log"]
 consumes = ["research-question", "links", "prior-artifacts"]
 side_effect_level = "medium"
 required_tools = []

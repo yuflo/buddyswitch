@@ -1,0 +1,126 @@
+{
+  "type": "object",
+  "required": [
+    "execution_summary",
+    "working_notes",
+    "deliverables_or_changed_files",
+    "artifact_content"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "execution_summary": { "type": "string" },
+    "working_notes": { "type": "array", "items": { "type": "string" } },
+    "deliverables_or_changed_files": { "type": "array", "items": { "type": "string" } },
+    "artifact_content": {
+      "type": "object",
+      "required": [
+        "research_question",
+        "target_audience",
+        "status_quo_and_alternatives",
+        "differentiated_capabilities",
+        "value_claims",
+        "positioning_statement",
+        "message_house",
+        "homepage_angles",
+        "evidence",
+        "source_traceability",
+        "risks_and_unknowns",
+        "conclusion"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "research_question": { "type": "string" },
+        "target_audience": {
+          "type": "object",
+          "required": ["primary", "context", "trigger"],
+          "additionalProperties": false,
+          "properties": {
+            "primary": { "type": "string" },
+            "context": { "type": "string" },
+            "trigger": { "type": "string" }
+          }
+        },
+        "status_quo_and_alternatives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["option", "type", "why_it_persists"],
+            "additionalProperties": false,
+            "properties": {
+              "option": { "type": "string" },
+              "type": { "type": "string" },
+              "why_it_persists": { "type": "string" },
+              "limitations": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "differentiated_capabilities": { "type": "array", "items": { "type": "string" } },
+        "value_claims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["claim", "audience_value", "evidence_basis"],
+            "additionalProperties": false,
+            "properties": {
+              "claim": { "type": "string" },
+              "audience_value": { "type": "string" },
+              "evidence_basis": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "positioning_statement": { "type": "string" },
+        "message_house": {
+          "type": "object",
+          "required": ["core_message", "supporting_points"],
+          "additionalProperties": false,
+          "properties": {
+            "core_message": { "type": "string" },
+            "supporting_points": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "homepage_angles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["angle", "headline_direction", "why_it_might_work"],
+            "additionalProperties": false,
+            "properties": {
+              "angle": { "type": "string" },
+              "headline_direction": { "type": "string" },
+              "why_it_might_work": { "type": "string" }
+            }
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["source_id", "url", "source_type", "accessed_at", "summary"],
+            "additionalProperties": false,
+            "properties": {
+              "source_id": { "type": "string" },
+              "url": { "type": "string" },
+              "source_type": { "type": "string" },
+              "accessed_at": { "type": "string" },
+              "summary": { "type": "string" }
+            }
+          }
+        },
+        "source_traceability": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["claim", "source_ids"],
+            "additionalProperties": false,
+            "properties": {
+              "claim": { "type": "string" },
+              "source_ids": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "risks_and_unknowns": { "type": "array", "items": { "type": "string" } },
+        "conclusion": { "type": "string" }
+      }
+    }
+  }
+}

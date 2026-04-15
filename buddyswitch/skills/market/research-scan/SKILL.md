@@ -12,6 +12,11 @@
 - The main outcome should be a PRD, design spec, implementation change, or smoke-test report.
 - The task is asking for unverified opinion or product strategy without research.
 - The user has already supplied enough evidence and is really asking PM to scope a solution.
+- The task is asking for PMF judgment on whether a specific product idea is worth pursuing; use `pmf-recon`.
+- The task is asking for interview planning or structured customer-discovery output.
+- The task is asking for positioning writing or founder-facing copy.
+- The task is asking for first-channel choice or experiment selection.
+- The task is asking for launch preparation or validation-page planning.
 
 ## Inputs
 - Research question or hypothesis.

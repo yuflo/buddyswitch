@@ -1,0 +1,132 @@
+{
+  "type": "object",
+  "required": [
+    "execution_summary",
+    "working_notes",
+    "deliverables_or_changed_files",
+    "artifact_content"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "execution_summary": { "type": "string" },
+    "working_notes": { "type": "array", "items": { "type": "string" } },
+    "deliverables_or_changed_files": { "type": "array", "items": { "type": "string" } },
+    "artifact_content": {
+      "type": "object",
+      "required": [
+        "research_question",
+        "launch_goal",
+        "target_audience",
+        "selected_channel",
+        "launch_assets",
+        "instrumentation_plan",
+        "feedback_collection_plan",
+        "success_signals",
+        "failure_signals",
+        "evidence",
+        "source_traceability",
+        "risks_and_unknowns",
+        "conclusion"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "research_question": { "type": "string" },
+        "launch_goal": {
+          "type": "object",
+          "required": ["primary_goal", "timebox"],
+          "additionalProperties": false,
+          "properties": {
+            "primary_goal": { "type": "string" },
+            "timebox": { "type": "string" },
+            "secondary_goal": { "type": "string" }
+          }
+        },
+        "target_audience": {
+          "type": "object",
+          "required": ["primary", "why_now"],
+          "additionalProperties": false,
+          "properties": {
+            "primary": { "type": "string" },
+            "why_now": { "type": "string" },
+            "reach_notes": { "type": "string" }
+          }
+        },
+        "selected_channel": {
+          "type": "object",
+          "required": ["channel", "reason"],
+          "additionalProperties": false,
+          "properties": {
+            "channel": { "type": "string" },
+            "reason": { "type": "string" },
+            "constraints": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "launch_assets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["asset", "purpose", "owner"],
+            "additionalProperties": false,
+            "properties": {
+              "asset": { "type": "string" },
+              "purpose": { "type": "string" },
+              "owner": { "type": "string" },
+              "notes": { "type": "string" }
+            }
+          }
+        },
+        "instrumentation_plan": {
+          "type": "object",
+          "required": ["signals_to_track", "capture_method", "review_cadence"],
+          "additionalProperties": false,
+          "properties": {
+            "signals_to_track": { "type": "array", "items": { "type": "string" } },
+            "capture_method": { "type": "string" },
+            "review_cadence": { "type": "string" }
+          }
+        },
+        "feedback_collection_plan": {
+          "type": "object",
+          "required": ["collection_methods", "follow_up_path", "response_owner"],
+          "additionalProperties": false,
+          "properties": {
+            "collection_methods": { "type": "array", "items": { "type": "string" } },
+            "follow_up_path": { "type": "string" },
+            "response_owner": { "type": "string" }
+          }
+        },
+        "success_signals": { "type": "array", "items": { "type": "string" } },
+        "failure_signals": { "type": "array", "items": { "type": "string" } },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["source_id", "url", "source_type", "accessed_at", "summary"],
+            "additionalProperties": false,
+            "properties": {
+              "source_id": { "type": "string" },
+              "url": { "type": "string" },
+              "source_type": { "type": "string" },
+              "accessed_at": { "type": "string" },
+              "summary": { "type": "string" }
+            }
+          }
+        },
+        "source_traceability": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["claim", "source_ids"],
+            "additionalProperties": false,
+            "properties": {
+              "claim": { "type": "string" },
+              "source_ids": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "risks_and_unknowns": { "type": "array", "items": { "type": "string" } },
+        "conclusion": { "type": "string" }
+      }
+    }
+  }
+}

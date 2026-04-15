@@ -1,0 +1,14 @@
+id = "positioning-copy"
+buddy = "market"
+description = "Use when the task is sharpening external positioning, value framing, or founder-facing market copy from validated market evidence."
+objects = ["task", "artifact"]
+produces_artifact = true
+output_slot = "positioning-brief"
+input_slots = ["market-scan", "pmf-report", "customer-discovery", "links", "prior-artifacts"]
+output_schema = "framework/schemas/market/positioning-copy.json"
+produces = ["positioning-brief", "value-prop", "copy-angles"]
+consumes = ["market-scan", "pmf-report", "customer-discovery", "links", "prior-artifacts"]
+side_effect_level = "medium"
+required_tools = []
+required_env = []
+allowed_task_kinds = ["research"]

@@ -12,6 +12,10 @@
 - The task is mainly a broad market/category scan without a concrete idea or user hypothesis; use `research-scan` instead.
 - The main outcome should be a PRD, design spec, implementation change, or smoke-test report.
 - The user wants unsupported opinion or product strategy without source-backed research.
+- The task needs detailed interview-guide drafting beyond a PMF-oriented interview plan.
+- The task needs homepage copy output, messaging frameworks, or positioning statements.
+- The task needs first-channel selection or an acquisition experiment recommendation.
+- The task needs launch execution prep, validation-page operations, or feedback-loop setup.
 
 ## Inputs
 - Product idea in one or two sentences.

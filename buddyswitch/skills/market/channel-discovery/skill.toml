@@ -1,0 +1,14 @@
+id = "channel-discovery"
+buddy = "market"
+description = "Use when the task is choosing the first believable user-acquisition channel or planning a small-channel experiment for an early product."
+objects = ["task", "artifact"]
+produces_artifact = true
+output_slot = "channel-plan"
+input_slots = ["market-scan", "pmf-report", "customer-discovery", "positioning-brief", "links", "prior-artifacts"]
+output_schema = "framework/schemas/market/channel-discovery.json"
+produces = ["channel-plan", "channel-ranking", "experiment-brief"]
+consumes = ["market-scan", "pmf-report", "customer-discovery", "positioning-brief", "links", "prior-artifacts"]
+side_effect_level = "medium"
+required_tools = []
+required_env = []
+allowed_task_kinds = ["research"]
