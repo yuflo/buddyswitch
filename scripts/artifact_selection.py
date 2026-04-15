@@ -62,28 +62,45 @@ def _all_artifacts(task: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def _latest_current_artifact_for_slot(
+def _current_artifacts_by_slot(task: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    current_artifacts: dict[str, dict[str, Any]] = {}
+    for artifact in _all_artifacts(task):
+        slot = _as_str(artifact.get("slot"))
+        if not slot or not bool(artifact.get("is_current")) or slot in current_artifacts:
+            continue
+        current_artifacts[slot] = artifact
+    return current_artifacts
+
+
+def _pick_best_task_bundle(
     tasks: list[dict[str, Any]],
-    slot: str,
-) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    rows: list[tuple[str, str, dict[str, Any], dict[str, Any]]] = []
+    remaining_slots: list[str],
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]] | None:
+    best_choice: tuple[tuple[int, str, str, str], dict[str, Any], dict[str, dict[str, Any]], list[str]] | None = None
     for task in tasks:
-        for artifact in _all_artifacts(task):
-            if _as_str(artifact.get("slot")) != slot or not bool(artifact.get("is_current")):
-                continue
-            rows.append(
-                (
-                    _as_str(artifact.get("updated_at")),
-                    _as_str(artifact.get("artifact_id")),
-                    task,
-                    artifact,
-                )
+        current_artifacts = _current_artifacts_by_slot(task)
+        covered_slots = [slot for slot in remaining_slots if slot in current_artifacts]
+        if not covered_slots:
+            continue
+        newest_updated_at, newest_artifact_id = max(
+            (
+                _as_str(current_artifacts[slot].get("updated_at")),
+                _as_str(current_artifacts[slot].get("artifact_id")),
             )
-    rows.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    if not rows:
+            for slot in covered_slots
+        )
+        score = (
+            len(covered_slots),
+            newest_updated_at,
+            newest_artifact_id,
+            _as_str(task.get("task_id")),
+        )
+        if best_choice is None or score > best_choice[0]:
+            best_choice = (score, task, current_artifacts, covered_slots)
+    if best_choice is None:
         return None
-    _, _, task, artifact = rows[0]
-    return task, artifact
+    _, task, current_artifacts, covered_slots = best_choice
+    return task, current_artifacts, covered_slots
 
 
 def select_artifacts_for_run(
@@ -116,18 +133,30 @@ def select_artifacts_for_run(
     selected_inputs: list[dict[str, Any]] = []
     reasons: list[str] = []
     seen_artifact_ids: set[str] = set()
+    required_slots_in_order = [slot for slot in required_slots if isinstance(slot, str) and slot]
+    selected_by_slot: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    remaining_slots = [slot for slot in required_slots_in_order if slot not in selected_by_slot]
 
-    for slot in required_slots:
-        if not isinstance(slot, str) or not slot:
-            continue
-        picked = _latest_current_artifact_for_slot(tasks, slot)
+    while remaining_slots:
+        picked_bundle = _pick_best_task_bundle(tasks, remaining_slots)
+        if picked_bundle is None:
+            break
+        task, current_artifacts, covered_slots = picked_bundle
+        for slot in covered_slots:
+            artifact = current_artifacts[slot]
+            artifact_id = _as_str(artifact.get("artifact_id"))
+            if not artifact_id or artifact_id in seen_artifact_ids or slot in selected_by_slot:
+                continue
+            seen_artifact_ids.add(artifact_id)
+            selected_by_slot[slot] = (task, artifact)
+        remaining_slots = [slot for slot in remaining_slots if slot not in selected_by_slot]
+
+    for slot in required_slots_in_order:
+        picked = selected_by_slot.get(slot)
         if picked is None:
             continue
         task, artifact = picked
         artifact_id = _as_str(artifact.get("artifact_id"))
-        if not artifact_id or artifact_id in seen_artifact_ids:
-            continue
-        seen_artifact_ids.add(artifact_id)
         selected_inputs.append(
             {
                 "slot": slot,

@@ -218,6 +218,8 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
 def _build_run_instructions(
     implicit_skill_id: str | None,
     artifact_selection: dict[str, Any] | None,
+    *,
+    selected_skill_id: str | None = None,
 ) -> dict[str, Any]:
     selected_inputs: list[dict[str, Any]] = []
     if isinstance(artifact_selection, dict):
@@ -225,15 +227,18 @@ def _build_run_instructions(
         if isinstance(raw_inputs, list):
             selected_inputs = [item for item in raw_inputs if isinstance(item, dict)]
 
+    next_actions: list[str]
     if implicit_skill_id:
-        first_action = f"Use implicit_skill_id '{implicit_skill_id}' for this run."
+        next_actions = [f"Use implicit_skill_id '{implicit_skill_id}' for this run."]
+    elif selected_skill_id:
+        next_actions = [
+            "Choose one skill_id from eligible_skills.",
+            f"If you choose skill_id '{selected_skill_id}', use the selected inputs below for that run.",
+        ]
     else:
-        first_action = "Choose one skill_id from eligible_skills."
+        next_actions = ["Choose one skill_id from eligible_skills."]
 
-    next_actions = [
-        first_action,
-        "When track_artifact_index is present, select relevant inputs by slot before running the skill.",
-    ]
+    next_actions.append("When track_artifact_index is present, select relevant inputs by slot before running the skill.")
     if selected_inputs:
         joined_slots = ", ".join(
             f"{item.get('slot')}={item.get('artifact_id')}"
@@ -418,6 +423,47 @@ def _build_artifact_selection_context(
     )
 
 
+def _skill_required_slots(skill: dict[str, Any]) -> list[str]:
+    runtime = skill["runtime"]
+    raw_slots = runtime.get("input_slots")
+    if not isinstance(raw_slots, list):
+        raw_slots = runtime.get("consumes", [])
+    return [slot for slot in raw_slots if isinstance(slot, str) and slot]
+
+
+def _build_selection_contexts_by_skill(
+    *,
+    demand: str,
+    skills: list[dict[str, Any]],
+    task_id: str,
+    track_artifact_index: dict[str, Any] | None,
+) -> tuple[dict[str, dict[str, Any] | None], dict[str, dict[str, Any]], list[str]]:
+    artifact_selection_by_skill: dict[str, dict[str, Any] | None] = {}
+    run_instructions_by_skill: dict[str, dict[str, Any]] = {}
+    slot_consuming_skill_ids: list[str] = []
+
+    for skill in skills:
+        required_slots = _skill_required_slots(skill)
+        if not required_slots:
+            continue
+        skill_id = skill["id"]
+        slot_consuming_skill_ids.append(skill_id)
+        selection = _build_artifact_selection_context(
+            demand=demand,
+            required_slots=required_slots,
+            task_id=task_id,
+            track_artifact_index=track_artifact_index,
+        )
+        artifact_selection_by_skill[skill_id] = selection
+        run_instructions_by_skill[skill_id] = _build_run_instructions(
+            None,
+            selection,
+            selected_skill_id=skill_id,
+        )
+
+    return artifact_selection_by_skill, run_instructions_by_skill, slot_consuming_skill_ids
+
+
 def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
     parsed = parse_switch(text, manifest_path=manifest_path)
@@ -471,10 +517,11 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
 
     effective_track_id = explicit_track_id or (existing_task.get("track_id") if existing_task else None)
 
+    eligible_skills = buddy_skill_docs(manifest, buddy_id)
     eligible_skill_ids: list[str] = []
     skill_cards: list[dict[str, Any]] = []
     required_output_schema_by_skill: dict[str, str] = {}
-    for skill in buddy_skill_docs(manifest, buddy_id):
+    for skill in eligible_skills:
         eligible_skill_ids.append(skill["id"])
         skill_cards.append(_build_skill_card(skill))
         required_output_schema_by_skill[skill["id"]] = skill["runtime"]["output_schema"]
@@ -483,7 +530,6 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
         raise ValueError(f"No eligible skills remain for buddy '{buddy_id}'.")
 
     implicit_skill_id = eligible_skill_ids[0] if len(eligible_skill_ids) == 1 else None
-    implicit_skill = next((skill for skill in buddy_skill_docs(manifest, buddy_id) if skill["id"] == implicit_skill_id), None)
     normalized_text = parsed.get("normalized_text")
     switch_payload = {
         "buddy": buddy_id,
@@ -496,15 +542,23 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
 
     track_context = _build_track_context(effective_track_id)
     track_artifact_index = build_track_artifact_index(effective_track_id)
-    artifact_selection = _build_artifact_selection_context(
+    artifact_selection_by_skill, run_instructions_by_skill, slot_consuming_skill_ids = _build_selection_contexts_by_skill(
         demand=demand,
-        required_slots=(
-            list(implicit_skill["runtime"].get("input_slots", implicit_skill["runtime"].get("consumes", [])))
-            if implicit_skill
-            else []
-        ),
+        skills=eligible_skills,
         task_id=resolved_task_id,
         track_artifact_index=track_artifact_index,
+    )
+
+    artifact_selection_skill_id: str | None = None
+    if implicit_skill_id and implicit_skill_id in artifact_selection_by_skill:
+        artifact_selection_skill_id = implicit_skill_id
+    elif not implicit_skill_id and len(slot_consuming_skill_ids) == 1:
+        artifact_selection_skill_id = slot_consuming_skill_ids[0]
+
+    artifact_selection = (
+        artifact_selection_by_skill.get(artifact_selection_skill_id)
+        if artifact_selection_skill_id is not None
+        else None
     )
 
     return {
@@ -525,11 +579,17 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
         "track_context": track_context,
         "track_artifact_index": track_artifact_index,
         "artifact_selection": artifact_selection,
+        "artifact_selection_by_skill": artifact_selection_by_skill,
         "eligible_skills": eligible_skill_ids,
         "skill_cards": skill_cards,
         "implicit_skill_id": implicit_skill_id,
         "required_output_schema_by_skill": required_output_schema_by_skill,
-        "run_instructions": _build_run_instructions(implicit_skill_id, artifact_selection),
+        "run_instructions": _build_run_instructions(
+            implicit_skill_id,
+            artifact_selection,
+            selected_skill_id=artifact_selection_skill_id if implicit_skill_id is None else None,
+        ),
+        "run_instructions_by_skill": run_instructions_by_skill,
     }
 
 

@@ -573,6 +573,237 @@ class ResolveRuntimeTests(unittest.TestCase):
             ],
         )
 
+    def test_resolve_pm_surfaces_write_prd_selection_for_multi_skill_track_handoff(self) -> None:
+        track = create_track("track-pm-market-handoff", "PM Market Handoff")
+        market_task = create_task(
+            "task-market-pm-handoff",
+            "Market PM Handoff",
+            buddy="market",
+            track_id=track["id"],
+            initial_run_id="run-seed-market-pm-handoff",
+        )
+        market_artifacts = [
+            create_artifact(
+                artifact_id="art-task-market-pm-handoff-market-scan-r1",
+                title="Market Scan PM Handoff",
+                buddy="market",
+                skill_id="research-scan",
+                slot="market-scan",
+                task_id=market_task["id"],
+                source_run_id="run-market-pm-handoff-market-scan-r1",
+                summary="Current market scan for PM handoff.",
+                content={"research_question": "What should PM scope next?"},
+            ),
+            create_artifact(
+                artifact_id="art-task-market-pm-handoff-pmf-report-r1",
+                title="PMF Report PM Handoff",
+                buddy="market",
+                skill_id="pmf-recon",
+                slot="pmf-report",
+                task_id=market_task["id"],
+                source_run_id="run-market-pm-handoff-pmf-report-r1",
+                summary="Current PMF report for PM handoff.",
+                content={"conclusion": "Proceed with scoped PM work."},
+            ),
+            create_artifact(
+                artifact_id="art-task-market-pm-handoff-customer-discovery-r1",
+                title="Customer Discovery PM Handoff",
+                buddy="market",
+                skill_id="customer-discovery",
+                slot="customer-discovery",
+                task_id=market_task["id"],
+                source_run_id="run-market-pm-handoff-customer-discovery-r1",
+                summary="Current customer discovery for PM handoff.",
+                content={"recommended_next_step": {"action": "Scope the product surface."}},
+            ),
+            create_artifact(
+                artifact_id="art-task-market-pm-handoff-positioning-brief-r1",
+                title="Positioning Brief PM Handoff",
+                buddy="market",
+                skill_id="positioning-copy",
+                slot="positioning-brief",
+                task_id=market_task["id"],
+                source_run_id="run-market-pm-handoff-positioning-brief-r1",
+                summary="Current positioning brief for PM handoff.",
+                content={"positioning_statement": "Confidence before code."},
+            ),
+            create_artifact(
+                artifact_id="art-task-market-pm-handoff-channel-plan-r1",
+                title="Channel Plan PM Handoff",
+                buddy="market",
+                skill_id="channel-discovery",
+                slot="channel-plan",
+                task_id=market_task["id"],
+                source_run_id="run-market-pm-handoff-channel-plan-r1",
+                summary="Current channel plan for PM handoff.",
+                content={"channels": ["communities"]},
+            ),
+            create_artifact(
+                artifact_id="art-task-market-pm-handoff-launch-prep-r1",
+                title="Launch Prep PM Handoff",
+                buddy="market",
+                skill_id="launch-prep",
+                slot="launch-prep",
+                task_id=market_task["id"],
+                source_run_id="run-market-pm-handoff-launch-prep-r1",
+                summary="Current launch prep for PM handoff.",
+                content={"launch_goal": {"primary_goal": "Validate demand", "timebox": "14 days"}},
+            ),
+        ]
+        self._remember(f"buddyswitch/objects/tracks/{track['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{market_task['id']}.json")
+        for artifact in market_artifacts:
+            self._remember(f"buddyswitch/objects/artifacts/{artifact['id']}.json")
+
+        payload = switch_runtime.resolve_switch(
+            "switch pm -> track-pm-market-handoff: draft the PRD from the active market evidence"
+        )
+
+        expected_inputs = [
+            ("market-scan", "art-task-market-pm-handoff-market-scan-r1"),
+            ("pmf-report", "art-task-market-pm-handoff-pmf-report-r1"),
+            ("customer-discovery", "art-task-market-pm-handoff-customer-discovery-r1"),
+            ("positioning-brief", "art-task-market-pm-handoff-positioning-brief-r1"),
+            ("channel-plan", "art-task-market-pm-handoff-channel-plan-r1"),
+            ("launch-prep", "art-task-market-pm-handoff-launch-prep-r1"),
+        ]
+
+        self.assertIsNone(payload["implicit_skill_id"])
+        self.assertEqual(payload["eligible_skills"], ["write-prd", "track-manager"])
+        self.assertEqual(
+            sorted(payload["artifact_selection_by_skill"].keys()),
+            ["write-prd"],
+        )
+        self.assertEqual(
+            sorted(payload["run_instructions_by_skill"].keys()),
+            ["write-prd"],
+        )
+        self.assertEqual(
+            [(item["slot"], item["artifact_id"]) for item in payload["artifact_selection"]["selected_inputs"]],
+            expected_inputs,
+        )
+        self.assertEqual(
+            [(item["slot"], item["artifact_id"]) for item in payload["artifact_selection_by_skill"]["write-prd"]["selected_inputs"]],
+            expected_inputs,
+        )
+        self.assertEqual(
+            [(item["slot"], item["artifact_id"]) for item in payload["run_instructions"]["selected_inputs"]],
+            expected_inputs,
+        )
+        self.assertEqual(
+            [(item["slot"], item["artifact_id"]) for item in payload["run_instructions_by_skill"]["write-prd"]["selected_inputs"]],
+            expected_inputs,
+        )
+        self.assertEqual(
+            payload["run_instructions"]["artifact_read_commands"],
+            payload["run_instructions_by_skill"]["write-prd"]["artifact_read_commands"],
+        )
+
+    def test_resolve_design_prefers_coherent_market_bundle_across_tasks(self) -> None:
+        track = create_track("track-design-bundle-aware", "Design Bundle Aware")
+        design_task = create_task(
+            "task-design-bundle-aware",
+            "Design Bundle Aware",
+            buddy="design",
+            track_id=track["id"],
+            initial_run_id="run-seed-design-bundle-aware",
+        )
+        pm_task = create_task(
+            "task-pm-bundle-aware",
+            "PM Bundle Aware",
+            buddy="pm",
+            track_id=track["id"],
+            initial_run_id="run-seed-pm-bundle-aware",
+        )
+        market_task_a = create_task(
+            "task-market-bundle-a",
+            "Market Bundle A",
+            buddy="market",
+            track_id=track["id"],
+            initial_run_id="run-seed-market-bundle-a",
+        )
+        market_task_b = create_task(
+            "task-market-bundle-b",
+            "Market Bundle B",
+            buddy="market",
+            track_id=track["id"],
+            initial_run_id="run-seed-market-bundle-b",
+        )
+        created_artifacts = [
+            create_artifact(
+                artifact_id="art-task-pm-bundle-aware-prd-r1",
+                title="PRD Bundle Aware",
+                buddy="pm",
+                skill_id="write-prd",
+                slot="prd",
+                task_id=pm_task["id"],
+                source_run_id="run-pm-bundle-aware-prd-r1",
+                summary="Current PRD for the bundle-aware design test.",
+                content={"problem": "Support the coherent onboarding bundle."},
+            ),
+            create_artifact(
+                artifact_id="art-task-market-bundle-a-positioning-brief-r1",
+                title="Bundle A Positioning Brief",
+                buddy="market",
+                skill_id="positioning-copy",
+                slot="positioning-brief",
+                task_id=market_task_a["id"],
+                source_run_id="run-market-bundle-a-positioning-r1",
+                summary="Task A positioning brief.",
+                content={"positioning_statement": "Bundle A message."},
+            ),
+            create_artifact(
+                artifact_id="art-task-market-bundle-a-launch-prep-r1",
+                title="Bundle A Launch Prep",
+                buddy="market",
+                skill_id="launch-prep",
+                slot="launch-prep",
+                task_id=market_task_a["id"],
+                source_run_id="run-market-bundle-a-launch-r1",
+                summary="Task A launch prep.",
+                content={"launch_goal": {"primary_goal": "Validate the coherent bundle", "timebox": "7 days"}},
+            ),
+            create_artifact(
+                artifact_id="art-task-market-bundle-b-positioning-brief-r1",
+                title="Bundle B Positioning Brief",
+                buddy="market",
+                skill_id="positioning-copy",
+                slot="positioning-brief",
+                task_id=market_task_b["id"],
+                source_run_id="run-market-bundle-b-positioning-r1",
+                summary="Task B newer but unrelated positioning brief.",
+                content={"positioning_statement": "Bundle B message."},
+            ),
+        ]
+        self._remember(f"buddyswitch/objects/tracks/{track['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{design_task['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{pm_task['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{market_task_a['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{market_task_b['id']}.json")
+        for artifact in created_artifacts:
+            self._remember(f"buddyswitch/objects/artifacts/{artifact['id']}.json")
+
+        payload = switch_runtime.resolve_switch(
+            "switch design(task-design-bundle-aware) -> track-design-bundle-aware: continue the IA spec with the active market handoff"
+        )
+
+        self.assertEqual(
+            [(item["slot"], item["artifact_id"]) for item in payload["artifact_selection"]["selected_inputs"]],
+            [
+                ("prd", "art-task-pm-bundle-aware-prd-r1"),
+                ("positioning-brief", "art-task-market-bundle-a-positioning-brief-r1"),
+                ("launch-prep", "art-task-market-bundle-a-launch-prep-r1"),
+            ],
+        )
+        self.assertEqual(
+            [(item["slot"], item["artifact_id"]) for item in payload["run_instructions"]["selected_inputs"]],
+            [
+                ("prd", "art-task-pm-bundle-aware-prd-r1"),
+                ("positioning-brief", "art-task-market-bundle-a-positioning-brief-r1"),
+                ("launch-prep", "art-task-market-bundle-a-launch-prep-r1"),
+            ],
+        )
+
 
 class WorkspaceDataTests(unittest.TestCase):
     def setUp(self) -> None:

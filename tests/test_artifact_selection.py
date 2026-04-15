@@ -311,6 +311,97 @@ class ArtifactSelectionTests(unittest.TestCase):
             required_slot_artifacts,
         )
 
+    def test_selection_prefers_coherent_task_bundle_over_newer_unrelated_slot(self) -> None:
+        track_artifact_index = {
+            "track_id": "track-market-bundle-selection",
+            "track_title": "Market Bundle Selection",
+            "track_summary": "Bundle-aware selection demo",
+            "updated_at": "2026-04-15T12:00:00+08:00",
+            "tasks": [
+                {
+                    "task_id": "task-market-bundle-a",
+                    "buddy": "market",
+                    "task_title": "Market Bundle A",
+                    "task_summary": "Coherent positioning and launch prep",
+                    "artifact_slots": {
+                        "positioning-brief": {
+                            "current_artifact_id": "art-task-market-bundle-a-positioning-brief-r1",
+                            "revision_count": 1,
+                        },
+                        "launch-prep": {
+                            "current_artifact_id": "art-task-market-bundle-a-launch-prep-r1",
+                            "revision_count": 1,
+                        },
+                    },
+                    "artifacts": [
+                        {
+                            "artifact_id": "art-task-market-bundle-a-positioning-brief-r1",
+                            "title": "Bundle A Positioning Brief",
+                            "slot": "positioning-brief",
+                            "revision": 1,
+                            "supersedes_artifact_id": None,
+                            "summary": "Task A positioning brief",
+                            "skill_id": "positioning-copy",
+                            "updated_at": "2026-04-15T10:00:00+08:00",
+                            "is_current": True,
+                        },
+                        {
+                            "artifact_id": "art-task-market-bundle-a-launch-prep-r1",
+                            "title": "Bundle A Launch Prep",
+                            "slot": "launch-prep",
+                            "revision": 1,
+                            "supersedes_artifact_id": None,
+                            "summary": "Task A launch prep",
+                            "skill_id": "launch-prep",
+                            "updated_at": "2026-04-15T10:05:00+08:00",
+                            "is_current": True,
+                        },
+                    ],
+                },
+                {
+                    "task_id": "task-market-bundle-b",
+                    "buddy": "market",
+                    "task_title": "Market Bundle B",
+                    "task_summary": "Newer but incomplete positioning brief",
+                    "artifact_slots": {
+                        "positioning-brief": {
+                            "current_artifact_id": "art-task-market-bundle-b-positioning-brief-r1",
+                            "revision_count": 1,
+                        }
+                    },
+                    "artifacts": [
+                        {
+                            "artifact_id": "art-task-market-bundle-b-positioning-brief-r1",
+                            "title": "Bundle B Positioning Brief",
+                            "slot": "positioning-brief",
+                            "revision": 1,
+                            "supersedes_artifact_id": None,
+                            "summary": "Task B positioning brief",
+                            "skill_id": "positioning-copy",
+                            "updated_at": "2026-04-15T11:00:00+08:00",
+                            "is_current": True,
+                        }
+                    ],
+                },
+            ],
+        }
+
+        selected = artifact_selection.select_artifacts_for_run(
+            current_buddy="design",
+            demand="Continue the IA spec with the current market bundle",
+            required_slots=["positioning-brief", "launch-prep"],
+            track_artifact_index=track_artifact_index,
+            current_task_id="task-design-bundle-aware",
+        )
+
+        self.assertEqual(
+            [(item["slot"], item["artifact_id"]) for item in selected["selected_inputs"]],
+            [
+                ("positioning-brief", "art-task-market-bundle-a-positioning-brief-r1"),
+                ("launch-prep", "art-task-market-bundle-a-launch-prep-r1"),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
