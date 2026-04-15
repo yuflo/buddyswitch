@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -89,12 +90,25 @@ def _next_unique(base: str, existing: set[str]) -> str:
         index += 1
 
 
-def _derive_task_id(buddy: str, demand: str) -> str:
-    existing = {row["id"] for row in list_tasks()}
+def _readable_demand_slug(demand: str) -> str:
     tokens = [token for token in slugify(demand).split("-") if token]
     if not tokens:
         tokens = ["task"]
-    short_slug = "-".join(token[:10] for token in tokens[:4]).strip("-") or "task"
+    return "-".join(token[:10] for token in tokens[:4]).strip("-") or "task"
+
+
+def _derive_create_token(demand: str) -> str:
+    return f"{_readable_demand_slug(demand)}-{uuid.uuid4().hex[:8]}"
+
+
+def _derive_task_id(buddy: str, demand: str, *, create_token: str | None = None) -> str:
+    if isinstance(create_token, str) and create_token:
+        token_slug = _readable_demand_slug(create_token)
+        digest = hashlib.sha256(f"{buddy}\n{create_token}".encode("utf-8")).hexdigest()[:10]
+        return f"task-{buddy}-{token_slug}-{digest}"
+
+    short_slug = _readable_demand_slug(demand)
+    existing = {row["id"] for row in list_tasks()}
     while True:
         candidate = f"task-{buddy}-{short_slug}-{uuid.uuid4().hex[:6]}"
         if candidate not in existing:
@@ -302,10 +316,15 @@ def _scan_task_recent_runs(task_id: str, *, limit: int = 3) -> list[dict[str, An
             continue
         if not isinstance(payload, dict):
             continue
-        switch = payload.get("switch")
-        if not isinstance(switch, dict):
-            continue
-        if switch.get("task_id") != task_id:
+        resolved_task_id = payload.get("resolved_task_id")
+        if isinstance(resolved_task_id, str) and resolved_task_id:
+            persisted_task_id = resolved_task_id
+        else:
+            switch = payload.get("switch")
+            if not isinstance(switch, dict):
+                continue
+            persisted_task_id = switch.get("task_id")
+        if persisted_task_id != task_id:
             continue
         rows.append(
             {
@@ -409,7 +428,7 @@ def _build_artifact_selection_context(
     *,
     demand: str,
     required_slots: list[str],
-    task_id: str,
+    task_id: str | None,
     track_artifact_index: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     if track_artifact_index is None:
@@ -504,13 +523,15 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
             "task_track_id": existing_task.get("track_id"),
         }
     else:
-        resolved_task_id = _derive_task_id(buddy_id, demand)
+        resolved_task_id = None
+        create_token = _derive_create_token(demand)
         task_resolution = {
             "mode": "create",
-            "task_id": resolved_task_id,
+            "task_id": None,
             "task_exists": False,
             "task_buddy": buddy_id,
             "task_track_id": None,
+            "create_token": create_token,
         }
 
     effective_track_id = explicit_track_id or (existing_task.get("track_id") if existing_task else None)
@@ -962,15 +983,30 @@ def persist_switch(
     task_id = resolution.get("task_id")
     if task_mode not in {"create", "reuse"}:
         raise ValueError("resolved.task_resolution.mode must be 'create' or 'reuse'")
-    if not isinstance(task_id, str) or not task_id:
-        raise ValueError("resolved.task_resolution.task_id must be a non-empty string")
+    if task_mode == "reuse" and (not isinstance(task_id, str) or not task_id):
+        raise ValueError("resolved.task_resolution.task_id must be a non-empty string for reuse mode")
 
     run_id = f"run-{uuid.uuid4().hex[:10]}"
     explicit_track_id = switch_payload.get("track_id")
+    switch_task_id = switch_payload.get("task_id")
+    created_task_id_for_recovery: str | None = None
 
     if task_mode == "create":
+        if task_id is not None:
+            raise ValueError("resolved.task_resolution.task_id must be null for create mode")
+        if switch_task_id is not None:
+            raise ValueError("resolved.switch.task_id must be null for create mode")
+        create_token = resolution.get("create_token")
+        if not isinstance(create_token, str) or not create_token.strip():
+            raise ValueError("resolved.task_resolution.create_token is required for create mode")
+        create_token = create_token.strip()
+        generated_task_id = _derive_task_id(
+            buddy_id,
+            "",
+            create_token=create_token,
+        )
         task = create_task(
-            task_id,
+            generated_task_id,
             _derive_task_title(switch_payload.get("demand") or ""),
             buddy=buddy_id,
             track_id=None,
@@ -978,6 +1014,8 @@ def persist_switch(
             summary="",
             initial_run_id=run_id,
         )
+        task_id = task["id"]
+        created_task_id_for_recovery = task_id
     else:
         task = get_task(task_id)
         if task is None:
@@ -987,25 +1025,32 @@ def persist_switch(
         add_run_to_task(task_id, run_id)
         task = get_task(task_id) or task
 
-    task, effective_track_id, _ = _ensure_task_binding(task=task, explicit_track_id=explicit_track_id)
+    try:
+        task, effective_track_id, _ = _ensure_task_binding(task=task, explicit_track_id=explicit_track_id)
 
-    if selected_skill_id == "track-manager":
-        return _persist_track_manager(
+        if selected_skill_id == "track-manager":
+            return _persist_track_manager(
+                resolved=resolved,
+                result=result,
+                run_id=run_id,
+                task=task,
+                effective_track_id=effective_track_id,
+            )
+
+        return _persist_artifact_skill(
             resolved=resolved,
+            skill=skill,
             result=result,
             run_id=run_id,
             task=task,
             effective_track_id=effective_track_id,
         )
-
-    return _persist_artifact_skill(
-        resolved=resolved,
-        skill=skill,
-        result=result,
-        run_id=run_id,
-        task=task,
-        effective_track_id=effective_track_id,
-    )
+    except (ValueError, OSError) as exc:
+        if task_mode == "create" and isinstance(created_task_id_for_recovery, str) and created_task_id_for_recovery:
+            raise exc.__class__(
+                f"{exc} (created task_id: {created_task_id_for_recovery}; recover with switch {buddy_id}({created_task_id_for_recovery}): <demand>)"
+            ) from exc
+        raise
 
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
@@ -1025,7 +1070,7 @@ def _cmd_persist(args: argparse.Namespace) -> int:
         resolved = _read_json_input(args.resolved, stdin_text=stdin_text if args.resolved == "-" else None)
         result = _read_json_input(args.result, stdin_text=stdin_text if args.result == "-" else None)
         payload = persist_switch(resolved, skill_id=args.skill_id, result=result, manifest_path=args.manifest)
-    except (ManifestError, ValueError, OutputSchemaError, json.JSONDecodeError) as exc:
+    except (ManifestError, ValueError, OSError, OutputSchemaError, json.JSONDecodeError) as exc:
         payload = runtime_error("E_RUNTIME_PERSIST", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0 if payload.get("ok") else 1

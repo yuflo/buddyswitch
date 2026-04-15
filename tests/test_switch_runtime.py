@@ -1562,6 +1562,64 @@ class PersistRuntimeTests(unittest.TestCase):
         ):
             switch_runtime.persist_switch(blank_token, skill_id=None, result=self._artifact_result())
 
+    def test_create_mode_persist_retry_same_resolved_payload_fails_closed(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch dev: Implement the approved onboarding improvements in projects/app"
+        )
+        task_dir = ROOT / "buddyswitch" / "objects" / "tasks"
+        run_dir = ROOT / "buddyswitch" / "content" / "runs"
+        artifact_dir = ROOT / "buddyswitch" / "objects" / "artifacts"
+        before_tasks = {path.name for path in task_dir.glob("task-*.json")}
+        before_runs = {path.name for path in run_dir.glob("run-*.json")}
+        before_artifacts = {path.name for path in artifact_dir.glob("art-*.json")}
+
+        first_payload = switch_runtime.persist_switch(resolved, skill_id=None, result=self._artifact_result())
+        self._remember_persisted_paths(first_payload)
+        after_first_tasks = {path.name for path in task_dir.glob("task-*.json")}
+        after_first_runs = {path.name for path in run_dir.glob("run-*.json")}
+        after_first_artifacts = {path.name for path in artifact_dir.glob("art-*.json")}
+
+        self.assertEqual(len(after_first_tasks), len(before_tasks) + 1)
+        self.assertEqual(len(after_first_runs), len(before_runs) + 1)
+        self.assertEqual(len(after_first_artifacts), len(before_artifacts) + 1)
+
+        resolved["switch"]["demand"] = "A completely different demand that should not change retry identity"
+        with self.assertRaisesRegex(ValueError, f"task already exists: {first_payload['task_id']}"):
+            switch_runtime.persist_switch(resolved, skill_id=None, result=self._artifact_result())
+
+        self.assertEqual({path.name for path in task_dir.glob("task-*.json")}, after_first_tasks)
+        self.assertEqual({path.name for path in run_dir.glob("run-*.json")}, after_first_runs)
+        self.assertEqual({path.name for path in artifact_dir.glob("art-*.json")}, after_first_artifacts)
+
+    def test_create_mode_downstream_failure_surfaces_created_task_id(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch dev: Implement the approved onboarding improvements in projects/app"
+        )
+        create_token = resolved["task_resolution"]["create_token"]
+        expected_task_id = switch_runtime._derive_task_id("dev", "", create_token=create_token)
+        self._remember(f"buddyswitch/objects/tasks/{expected_task_id}.json")
+
+        with patch("switch_runtime._persist_artifact_skill", side_effect=ValueError("downstream persist failed")):
+            with self.assertRaisesRegex(
+                ValueError,
+                rf"downstream persist failed .*created task_id: {expected_task_id}",
+            ):
+                switch_runtime.persist_switch(resolved, skill_id=None, result=self._artifact_result())
+
+    def test_create_mode_downstream_oserror_surfaces_created_task_id(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch dev: Implement the approved onboarding improvements in projects/app"
+        )
+        create_token = resolved["task_resolution"]["create_token"]
+        expected_task_id = switch_runtime._derive_task_id("dev", "", create_token=create_token)
+        self._remember(f"buddyswitch/objects/tasks/{expected_task_id}.json")
+
+        with patch("switch_runtime._persist_artifact_skill", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(
+                OSError,
+                rf"disk full .*created task_id: {expected_task_id}; recover with switch dev\({expected_task_id}\): <demand>",
+            ):
+                switch_runtime.persist_switch(resolved, skill_id=None, result=self._artifact_result())
     def test_cmd_persist_create_mode_downstream_oserror_returns_runtime_error_payload(self) -> None:
         resolved = switch_runtime.resolve_switch(
             "switch dev: Implement the approved onboarding improvements in projects/app"
@@ -1627,7 +1685,6 @@ class PersistRuntimeTests(unittest.TestCase):
                 self.assertIn(content_key, artifact_json["content"])
                 self.assertEqual(run_json["skill_id"], skill_id)
                 self.assertEqual(run_json["artifact_ids"], [payload["artifact_id"]])
-
     def test_persist_reuses_task_and_binds_to_track(self) -> None:
         track = create_track("track-dev-binding", "Track Binding")
         task = create_task("task-dev-binding", "Task Binding", buddy="dev", initial_run_id="run-seed-binding")
