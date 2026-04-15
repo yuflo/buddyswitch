@@ -114,45 +114,42 @@ class ResolveRuntimeTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["invocation"]["buddy"], "market")
-        self.assertEqual(
-            payload["eligible_skills"],
-            [
-                "research-scan",
-                "pmf-recon",
-                "customer-discovery",
-                "positioning-copy",
-                "channel-discovery",
-                "launch-prep",
-            ],
-        )
         self.assertIsNone(payload["implicit_skill_id"])
 
-        ids = [card["id"] for card in payload["skill_cards"]]
-        self.assertEqual(
-            ids,
-            [
-                "research-scan",
-                "pmf-recon",
-                "customer-discovery",
-                "positioning-copy",
-                "channel-discovery",
-                "launch-prep",
-            ],
-        )
+        expected_market_skills = [
+            "research-scan",
+            "pmf-recon",
+            "customer-discovery",
+            "positioning-copy",
+            "channel-discovery",
+            "launch-prep",
+        ]
+        with self.subTest("eligible_skills_order"):
+            self.assertEqual(payload["eligible_skills"], expected_market_skills)
 
-        research_card = next(card for card in payload["skill_cards"] if card["id"] == "research-scan")
-        self.assertEqual(research_card["output_slot"], "market-scan")
+        ids = [card["id"] for card in payload["skill_cards"] if isinstance(card, dict) and "id" in card]
+        with self.subTest("skill_cards_order"):
+            self.assertEqual(ids, expected_market_skills)
 
-        pmf_card = next(card for card in payload["skill_cards"] if card["id"] == "pmf-recon")
-        self.assertEqual(
-            pmf_card["instruction_path"],
-            "buddyswitch/skills/market/pmf-recon/SKILL.md",
-        )
-        self.assertEqual(pmf_card["output_slot"], "pmf-report")
-        self.assertEqual(
-            pmf_card["input_slots"],
-            ["research-question", "links", "prior-artifacts"],
-        )
+        skill_cards_by_id = {
+            card["id"]: card for card in payload["skill_cards"] if isinstance(card, dict) and "id" in card
+        }
+        with self.subTest("research_scan_output_slot"):
+            self.assertIn("research-scan", skill_cards_by_id)
+            self.assertEqual(skill_cards_by_id.get("research-scan", {}).get("output_slot"), "market-scan")
+
+        with self.subTest("pmf_recon_contract"):
+            self.assertIn("pmf-recon", skill_cards_by_id)
+            pmf_card = skill_cards_by_id.get("pmf-recon", {})
+            self.assertEqual(
+                pmf_card.get("instruction_path"),
+                "buddyswitch/skills/market/pmf-recon/SKILL.md",
+            )
+            self.assertEqual(pmf_card.get("output_slot"), "pmf-report")
+            self.assertEqual(
+                pmf_card.get("input_slots"),
+                ["research-question", "links", "prior-artifacts"],
+            )
 
     def test_skill_card_uses_package_metadata_for_description_and_objects(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
