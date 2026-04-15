@@ -106,7 +106,12 @@ permissions = ["track.read", "track.create", "track.update", "task.read", "task.
                 "track_id": "track-demo",
                 "run_ids": ["run-market"],
                 "artifact_ids": ["art-market"],
-                "latest_artifact_id": "art-market",
+                "artifact_slots": {
+                    "market-scan": {
+                        "current_artifact_id": "art-market",
+                        "revision_count": 1,
+                    }
+                },
                 "summary": "Market task",
                 "created_at": "2026-04-11T10:00:00+08:00",
                 "updated_at": "2026-04-11T10:00:00+08:00",
@@ -122,7 +127,12 @@ permissions = ["track.read", "track.create", "track.update", "task.read", "task.
                 "track_id": "track-demo",
                 "run_ids": ["run-pm"],
                 "artifact_ids": ["art-pm"],
-                "latest_artifact_id": "art-pm",
+                "artifact_slots": {
+                    "track-update": {
+                        "current_artifact_id": "art-pm",
+                        "revision_count": 1,
+                    }
+                },
                 "summary": "PM task",
                 "created_at": "2026-04-11T10:00:00+08:00",
                 "updated_at": "2026-04-11T10:00:00+08:00",
@@ -321,6 +331,80 @@ class CleanupBackendTests(unittest.TestCase):
             "buddyswitch/content/runs/.gitkeep",
         ):
             self.assertTrue(self.fixture.exists(marker))
+
+    def test_detach_artifact_from_task_updates_artifact_slots_from_remaining_revisions(self) -> None:
+        self.fixture._write_json(
+            "buddyswitch/objects/tasks/task-keep.json",
+            {
+                "id": "task-keep",
+                "title": "Keep Task",
+                "buddy": "pm",
+                "status": "active",
+                "track_id": "track-demo",
+                "run_ids": ["run-keep"],
+                "artifact_ids": ["art-keep-r1", "art-keep-r2"],
+                "artifact_slots": {
+                    "prd": {
+                        "current_artifact_id": "art-keep-r2",
+                        "revision_count": 2,
+                    }
+                },
+                "summary": "Task with retained history",
+                "created_at": "2026-04-11T10:00:00+08:00",
+                "updated_at": "2026-04-11T10:00:00+08:00",
+            },
+        )
+        self.fixture._write_json(
+            "buddyswitch/objects/artifacts/art-keep-r1.json",
+            {
+                "id": "art-keep-r1",
+                "title": "Keep Artifact r1",
+                "task_id": "task-keep",
+                "source_run_id": "run-keep-r1",
+                "buddy": "pm",
+                "skill_id": "write-prd",
+                "slot": "prd",
+                "revision": 1,
+                "is_current": False,
+                "summary": "Older PRD",
+                "content": {"summary": "old"},
+                "created_at": "2026-04-11T10:00:00+08:00",
+                "updated_at": "2026-04-11T10:00:00+08:00",
+            },
+        )
+        self.fixture._write_json(
+            "buddyswitch/objects/artifacts/art-keep-r2.json",
+            {
+                "id": "art-keep-r2",
+                "title": "Keep Artifact r2",
+                "task_id": "task-keep",
+                "source_run_id": "run-keep-r2",
+                "buddy": "pm",
+                "skill_id": "write-prd",
+                "slot": "prd",
+                "revision": 2,
+                "is_current": True,
+                "summary": "Current PRD",
+                "content": {"summary": "new"},
+                "created_at": "2026-04-11T10:00:00+08:00",
+                "updated_at": "2026-04-11T11:00:00+08:00",
+            },
+        )
+
+        env_cleanup.detach_artifact_from_task(self.repo_root, "task-keep", "art-keep-r2")
+
+        task = self.fixture.read_json("buddyswitch/objects/tasks/task-keep.json")
+        artifact = self.fixture.read_json("buddyswitch/objects/artifacts/art-keep-r1.json")
+
+        self.assertEqual(task["artifact_ids"], ["art-keep-r1"])
+        self.assertEqual(
+            task["artifact_slots"]["prd"],
+            {
+                "current_artifact_id": "art-keep-r1",
+                "revision_count": 2,
+            },
+        )
+        self.assertTrue(artifact["is_current"])
 
 
 class CleanupShellIntegrationTests(unittest.TestCase):

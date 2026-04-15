@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from itertools import combinations
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -103,6 +104,70 @@ def _pick_best_task_bundle(
     return task, current_artifacts, covered_slots
 
 
+def _task_bundle_signature(
+    task: dict[str, Any],
+    current_artifacts: dict[str, dict[str, Any]],
+    required_slots: list[str],
+) -> tuple[int, str, str, str]:
+    covered_slots = [slot for slot in required_slots if slot in current_artifacts]
+    newest_updated_at, newest_artifact_id = max(
+        (
+            _as_str(current_artifacts[slot].get("updated_at")),
+            _as_str(current_artifacts[slot].get("artifact_id")),
+        )
+        for slot in covered_slots
+    )
+    return (
+        len(covered_slots),
+        newest_updated_at,
+        newest_artifact_id,
+        _as_str(task.get("task_id")),
+    )
+
+
+def _pick_best_task_cover(
+    tasks: list[dict[str, Any]],
+    required_slots: list[str],
+) -> list[tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]]:
+    bundle_rows: list[tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]] = []
+    for task in tasks:
+        current_artifacts = _current_artifacts_by_slot(task)
+        covered_slots = [slot for slot in required_slots if slot in current_artifacts]
+        if covered_slots:
+            bundle_rows.append((task, current_artifacts, covered_slots))
+
+    if not bundle_rows:
+        return []
+
+    best_combo: tuple[int, int, tuple[tuple[int, str, str, str], ...], tuple[str, ...]] | None = None
+    best_rows: list[tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]] = []
+
+    for combo_size in range(1, len(bundle_rows) + 1):
+        for combo in combinations(bundle_rows, combo_size):
+            covered = {slot for _, _, slots in combo for slot in slots}
+            ranked_rows = sorted(
+                combo,
+                key=lambda row: _task_bundle_signature(row[0], row[1], required_slots),
+                reverse=True,
+            )
+            row_signatures = tuple(
+                _task_bundle_signature(task, current_artifacts, required_slots)
+                for task, current_artifacts, _ in ranked_rows
+            )
+            task_ids = tuple(_as_str(task.get("task_id")) for task, _, _ in ranked_rows)
+            combo_score = (
+                len(covered),
+                -len(ranked_rows),
+                row_signatures,
+                task_ids,
+            )
+            if best_combo is None or combo_score > best_combo:
+                best_combo = combo_score
+                best_rows = ranked_rows
+
+    return best_rows
+
+
 def select_artifacts_for_run(
     *,
     current_buddy: str,
@@ -135,13 +200,9 @@ def select_artifacts_for_run(
     seen_artifact_ids: set[str] = set()
     required_slots_in_order = [slot for slot in required_slots if isinstance(slot, str) and slot]
     selected_by_slot: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
-    remaining_slots = [slot for slot in required_slots_in_order if slot not in selected_by_slot]
+    bundle_rows = _pick_best_task_cover(tasks, required_slots_in_order)
 
-    while remaining_slots:
-        picked_bundle = _pick_best_task_bundle(tasks, remaining_slots)
-        if picked_bundle is None:
-            break
-        task, current_artifacts, covered_slots = picked_bundle
+    for task, current_artifacts, covered_slots in bundle_rows:
         for slot in covered_slots:
             artifact = current_artifacts[slot]
             artifact_id = _as_str(artifact.get("artifact_id"))
@@ -149,7 +210,6 @@ def select_artifacts_for_run(
                 continue
             seen_artifact_ids.add(artifact_id)
             selected_by_slot[slot] = (task, artifact)
-        remaining_slots = [slot for slot in remaining_slots if slot not in selected_by_slot]
 
     for slot in required_slots_in_order:
         picked = selected_by_slot.get(slot)

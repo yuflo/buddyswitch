@@ -172,11 +172,17 @@ Current `market` buddy behavior:
 
 1. `parse` identifies `buddy = market`
 2. `resolve` loads the `market` buddy and returns:
-   - `eligible_skills = ["research-scan", "pmf-recon"]`
+   - `eligible_skills = ["research-scan", "pmf-recon", "customer-discovery", "positioning-copy", "channel-discovery", "launch-prep"]`
    - `implicit_skill_id = null`
+   - top-level `artifact_selection = null`
+   - per-skill selection maps in `artifact_selection_by_skill` and `run_instructions_by_skill`
 3. The host chooses the skill:
    - choose `research-scan` for broad market/category/competitor/demand analysis
    - choose `pmf-recon` for PMF-oriented validation such as ICP, pain intensity, alternatives, and next validation action
+   - choose `customer-discovery` for interview planning and problem discovery
+   - choose `positioning-copy` for founder-facing positioning and message framing
+   - choose `channel-discovery` for first-channel selection and channel experiment planning
+   - choose `launch-prep` for launch-ready validation prep and feedback-loop setup
 4. The host executes the chosen skill
 5. `persist` writes the result only after the host provides:
    - the resolved payload

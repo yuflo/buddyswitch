@@ -419,6 +419,94 @@ class ArtifactSelectionTests(unittest.TestCase):
             ],
         )
 
+    def test_selection_prefers_minimal_task_cover_for_overlapping_bundles(self) -> None:
+        track_artifact_index = {
+            "track_id": "track-overlapping-bundles",
+            "track_title": "Overlapping Bundles",
+            "track_summary": "Overlap-aware selection demo",
+            "updated_at": "2026-04-15T12:30:00+08:00",
+            "tasks": [
+                {
+                    "task_id": "task-bundle-left",
+                    "buddy": "market",
+                    "task_title": "Bundle Left",
+                    "task_summary": "Covers slots a and b",
+                    "artifacts": [
+                        {
+                            "artifact_id": "art-bundle-left-a",
+                            "slot": "a",
+                            "updated_at": "2026-04-15T10:00:00+08:00",
+                            "is_current": True,
+                        },
+                        {
+                            "artifact_id": "art-bundle-left-b",
+                            "slot": "b",
+                            "updated_at": "2026-04-15T10:00:00+08:00",
+                            "is_current": True,
+                        },
+                    ],
+                },
+                {
+                    "task_id": "task-bundle-middle",
+                    "buddy": "market",
+                    "task_title": "Bundle Middle",
+                    "task_summary": "Newer overlap across b and c",
+                    "artifacts": [
+                        {
+                            "artifact_id": "art-bundle-middle-b",
+                            "slot": "b",
+                            "updated_at": "2026-04-15T11:00:00+08:00",
+                            "is_current": True,
+                        },
+                        {
+                            "artifact_id": "art-bundle-middle-c",
+                            "slot": "c",
+                            "updated_at": "2026-04-15T11:00:00+08:00",
+                            "is_current": True,
+                        },
+                    ],
+                },
+                {
+                    "task_id": "task-bundle-right",
+                    "buddy": "market",
+                    "task_title": "Bundle Right",
+                    "task_summary": "Covers slots c and d",
+                    "artifacts": [
+                        {
+                            "artifact_id": "art-bundle-right-c",
+                            "slot": "c",
+                            "updated_at": "2026-04-15T09:00:00+08:00",
+                            "is_current": True,
+                        },
+                        {
+                            "artifact_id": "art-bundle-right-d",
+                            "slot": "d",
+                            "updated_at": "2026-04-15T09:00:00+08:00",
+                            "is_current": True,
+                        },
+                    ],
+                },
+            ],
+        }
+
+        selected = artifact_selection.select_artifacts_for_run(
+            current_buddy="design",
+            demand="Continue with the cleanest overlapping market evidence bundle",
+            required_slots=["a", "b", "c", "d"],
+            track_artifact_index=track_artifact_index,
+            current_task_id="task-design-overlap-aware",
+        )
+
+        self.assertEqual(
+            [(item["slot"], item["artifact_id"], item["task_id"]) for item in selected["selected_inputs"]],
+            [
+                ("a", "art-bundle-left-a", "task-bundle-left"),
+                ("b", "art-bundle-left-b", "task-bundle-left"),
+                ("c", "art-bundle-right-c", "task-bundle-right"),
+                ("d", "art-bundle-right-d", "task-bundle-right"),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

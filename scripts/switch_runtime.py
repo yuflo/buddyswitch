@@ -1047,8 +1047,12 @@ def persist_switch(
         )
     except (ValueError, OSError) as exc:
         if task_mode == "create" and isinstance(created_task_id_for_recovery, str) and created_task_id_for_recovery:
+            recovery_switch = f"switch {buddy_id}({created_task_id_for_recovery})"
+            if isinstance(explicit_track_id, str) and explicit_track_id:
+                recovery_switch += f" -> {explicit_track_id}"
+            recovery_switch += ": <demand>"
             raise exc.__class__(
-                f"{exc} (created task_id: {created_task_id_for_recovery}; recover with switch {buddy_id}({created_task_id_for_recovery}): <demand>)"
+                f"{exc} (created task_id: {created_task_id_for_recovery}; recover with {recovery_switch})"
             ) from exc
         raise
 

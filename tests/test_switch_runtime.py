@@ -1620,6 +1620,24 @@ class PersistRuntimeTests(unittest.TestCase):
                 rf"disk full .*created task_id: {expected_task_id}; recover with switch dev\({expected_task_id}\): <demand>",
             ):
                 switch_runtime.persist_switch(resolved, skill_id=None, result=self._artifact_result())
+
+    def test_create_mode_downstream_oserror_with_explicit_track_surfaces_track_aware_recovery(self) -> None:
+        track = create_track("track-dev-recovery-hint", "Track Dev Recovery Hint")
+        self._remember(f"buddyswitch/objects/tracks/{track['id']}.json")
+
+        resolved = switch_runtime.resolve_switch(
+            "switch dev -> track-dev-recovery-hint: Implement the approved onboarding improvements in projects/app"
+        )
+        create_token = resolved["task_resolution"]["create_token"]
+        expected_task_id = switch_runtime._derive_task_id("dev", "", create_token=create_token)
+        self._remember(f"buddyswitch/objects/tasks/{expected_task_id}.json")
+
+        with patch("switch_runtime._persist_artifact_skill", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(
+                OSError,
+                rf"disk full .*created task_id: {expected_task_id}; recover with switch dev\({expected_task_id}\) -> track-dev-recovery-hint: <demand>",
+            ):
+                switch_runtime.persist_switch(resolved, skill_id=None, result=self._artifact_result())
     def test_cmd_persist_create_mode_downstream_oserror_returns_runtime_error_payload(self) -> None:
         resolved = switch_runtime.resolve_switch(
             "switch dev: Implement the approved onboarding improvements in projects/app"

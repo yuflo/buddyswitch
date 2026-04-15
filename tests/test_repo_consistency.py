@@ -501,9 +501,12 @@ class RepoConsistencyTests(unittest.TestCase):
     def test_active_docs_use_slot_revision_and_package_contract_language(self) -> None:
         targets = (
             ROOT / "README.md",
+            ROOT / "framework" / "docs" / "architecture-overview.md",
             ROOT / "framework" / "docs" / "switch-spec.md",
             ROOT / "framework" / "docs" / "skill-architecture-best-practices.md",
             ROOT / "framework" / "docs" / "interface-spec.md",
+            ROOT / "framework" / "docs" / "track-registry.md",
+            ROOT / "scripts" / "env_cleanup.py",
         )
         combined = "\n".join(path.read_text(encoding="utf-8") for path in targets).lower()
 
@@ -512,6 +515,15 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("skill package", combined)
         self.assertNotIn("latest_artifact_id", combined)
         self.assertNotIn("suggested_next_switch", combined)
+
+    def test_architecture_overview_describes_six_skill_market_collection(self) -> None:
+        text = (ROOT / "framework" / "docs" / "architecture-overview.md").read_text(encoding="utf-8")
+
+        self.assertIn("customer-discovery", text)
+        self.assertIn("positioning-copy", text)
+        self.assertIn("channel-discovery", text)
+        self.assertIn("launch-prep", text)
+        self.assertNotIn('eligible_skills = ["research-scan", "pmf-recon"]', text)
 
 
 if __name__ == "__main__":

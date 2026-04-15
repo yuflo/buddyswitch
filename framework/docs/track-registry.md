@@ -34,10 +34,10 @@ Required fields:
 - `title`
 - `status` (`active | blocked | done | archived`)
 - `track_id` (nullable)
+- `artifact_slots`
 - `artifact_ids`
 - `run_ids`
 - `latest_run_id`
-- `latest_artifact_id` (nullable)
 - `summary`
 - `created_at`
 - `updated_at`
@@ -70,7 +70,7 @@ Artifacts participate in track flow through `artifact.task_id -> task.track_id`.
 
 ## Auto-Register Rule
 
-When a task is bound to a track, the system registers its id in the target track's `task_ids`. Artifact creation updates the owning task's `artifact_ids` and `latest_artifact_id`.
+When a task is bound to a track, the system registers its id in the target track's `task_ids`. Artifact creation updates the owning task's `artifact_ids` and `artifact_slots[slot]` state.
 
 ## Explicitness Rule
 

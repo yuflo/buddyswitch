@@ -341,8 +341,61 @@ def detach_artifact_from_task(root: Path, task_id: str | None, artifact_id: str)
     if filtered == artifact_ids:
         return
     payload["artifact_ids"] = filtered
-    if payload.get("latest_artifact_id") == artifact_id:
-        payload["latest_artifact_id"] = filtered[-1] if filtered else None
+
+    artifact_slots = payload.get("artifact_slots")
+    artifact_path = root / "buddyswitch" / "objects" / "artifacts" / f"{artifact_id}.json"
+    slot: str | None = None
+    if isinstance(artifact_slots, dict) and artifact_path.exists():
+        try:
+            artifact_payload = read_json(artifact_path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            artifact_payload = None
+        if isinstance(artifact_payload, dict):
+            artifact_slot = artifact_payload.get("slot")
+            if isinstance(artifact_slot, str) and artifact_slot:
+                slot = artifact_slot
+
+    if isinstance(artifact_slots, dict) and isinstance(slot, str) and slot:
+        slot_state = artifact_slots.get(slot)
+        deleting_current = isinstance(slot_state, dict) and slot_state.get("current_artifact_id") == artifact_id
+        if deleting_current:
+            candidates: list[dict[str, Any]] = []
+            for candidate_id in filtered:
+                candidate_path = root / "buddyswitch" / "objects" / "artifacts" / f"{candidate_id}.json"
+                if not candidate_path.exists():
+                    continue
+                try:
+                    candidate = read_json(candidate_path)
+                except (OSError, ValueError, json.JSONDecodeError):
+                    continue
+                if not isinstance(candidate, dict):
+                    continue
+                candidate_slot = candidate.get("slot")
+                if not isinstance(candidate_slot, str) or candidate_slot != slot:
+                    continue
+                candidates.append(candidate)
+            if candidates:
+                candidates.sort(
+                    key=lambda row: (
+                        row.get("revision", 0) if isinstance(row.get("revision"), int) else 0,
+                        row.get("updated_at", "") if isinstance(row.get("updated_at"), str) else "",
+                        row.get("id", "") if isinstance(row.get("id"), str) else "",
+                    ),
+                    reverse=True,
+                )
+                promoted = candidates[0]
+                revision_count = slot_state.get("revision_count", promoted.get("revision")) if isinstance(slot_state, dict) else promoted.get("revision")
+                if not isinstance(revision_count, int) or revision_count < promoted.get("revision", 0):
+                    revision_count = promoted.get("revision", 0)
+                for candidate in candidates:
+                    candidate["is_current"] = candidate.get("id") == promoted.get("id")
+                    write_json(root / "buddyswitch" / "objects" / "artifacts" / f"{candidate['id']}.json", candidate)
+                artifact_slots[slot] = {
+                    "current_artifact_id": promoted["id"],
+                    "revision_count": revision_count,
+                }
+            else:
+                artifact_slots.pop(slot, None)
     write_json(task_path, payload)
 
 
