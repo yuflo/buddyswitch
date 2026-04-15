@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import io
 import json
 import sys
@@ -10,8 +11,10 @@ import tempfile
 import textwrap
 import unittest
 import uuid
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
+from copy import deepcopy
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +24,7 @@ if str(SCRIPTS) not in sys.path:
 
 import switch_runtime  # noqa: E402
 import workspace_data  # noqa: E402
-from env_store import create_artifact, create_task, create_track, get_track, validate_artifact, validate_track  # noqa: E402
+from env_store import create_artifact, create_task, create_track, get_track, require_id, validate_artifact, validate_track  # noqa: E402
 
 
 class EnvStoreRetiredFieldTests(unittest.TestCase):
@@ -81,8 +84,10 @@ class ResolveRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["invocation"]["buddy"], "dev")
         self.assertEqual(payload["switch"]["demand"], "Implement the approved onboarding improvements in projects/app")
         self.assertEqual(payload["task_resolution"]["mode"], "create")
-        self.assertRegex(payload["task_resolution"]["task_id"], r"^task-dev-[a-z0-9-]+-[0-9a-f]{6}$")
-        self.assertLess(len(payload["task_resolution"]["task_id"]), 64)
+        self.assertIsNone(payload["task_resolution"]["task_id"])
+        self.assertIsInstance(payload["task_resolution"]["create_token"], str)
+        self.assertTrue(payload["task_resolution"]["create_token"])
+        self.assertIsNone(payload["switch"]["task_id"])
         self.assertIsNone(payload["effective_track_id"])
         self.assertIsNone(payload["track_artifact_index"])
         self.assertIsNone(payload["artifact_selection"])
@@ -90,6 +95,26 @@ class ResolveRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["implicit_skill_id"], "implement-task")
         self.assertEqual(payload["run_instructions"]["selected_inputs"], [])
         self.assertEqual(payload["run_instructions"]["artifact_read_commands"], [])
+        self.assertEqual(
+            sorted(payload["artifact_selection_by_skill"].keys()),
+            ["implement-task"],
+        )
+        self.assertEqual(
+            sorted(payload["run_instructions_by_skill"].keys()),
+            ["implement-task"],
+        )
+        self.assertEqual(
+            payload["artifact_selection_by_skill"]["implement-task"]["selected_inputs"],
+            [],
+        )
+        self.assertEqual(
+            payload["run_instructions_by_skill"]["implement-task"]["selected_inputs"],
+            [],
+        )
+        self.assertEqual(
+            payload["run_instructions_by_skill"]["implement-task"]["next_actions"],
+            payload["run_instructions"]["next_actions"],
+        )
         card = payload["skill_cards"][0]
         self.assertEqual(card["instruction_path"], "buddyswitch/skills/dev/implement-task/SKILL.md")
         self.assertEqual(card["output_slot"], "implementation-report")
@@ -612,6 +637,14 @@ class PersistRuntimeTests(unittest.TestCase):
                 if isinstance(item, str):
                     self._remember(item)
 
+    def _assert_generated_task_id(self, task_id: object, buddy: str) -> None:
+        self.assertIsInstance(task_id, str)
+        assert isinstance(task_id, str)
+        prefix = f"task-{buddy}-"
+        self.assertTrue(task_id.startswith(prefix))
+        self.assertGreater(len(task_id), len(prefix))
+        require_id(task_id, "task id")
+
     def _artifact_result(self) -> dict[str, object]:
         return {
             "execution_summary": "Implemented the requested change and verified the core path.",
@@ -706,7 +739,7 @@ class PersistRuntimeTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["skill_id"], "implement-task")
-        self.assertEqual(payload["task_id"], resolved["task_resolution"]["task_id"])
+        self._assert_generated_task_id(payload["task_id"], buddy="dev")
         self.assertEqual(payload["artifact_ids"], [payload["artifact_id"]])
         self.assertIn("task_title", payload)
         self.assertIsNone(payload["track_title"])
@@ -746,14 +779,24 @@ class PersistRuntimeTests(unittest.TestCase):
         resolved = switch_runtime.resolve_switch(
             "switch market: Validate an AI tool idea for indie developers"
         )
-        task_id = resolved["task_resolution"]["task_id"]
-        task_path = ROOT / "buddyswitch" / "objects" / "tasks" / f"{task_id}.json"
-        artifact_path = ROOT / "buddyswitch" / "objects" / "artifacts" / f"art-{task_id}-research.json"
+        task_dir = ROOT / "buddyswitch" / "objects" / "tasks"
+        artifact_dir = ROOT / "buddyswitch" / "objects" / "artifacts"
         run_dir = ROOT / "buddyswitch" / "content" / "runs"
+        before_tasks = {path.name for path in task_dir.glob("task-*.json")}
+        before_artifacts = {path.name for path in artifact_dir.glob("art-*.json")}
         before_runs = {path.name for path in run_dir.glob("run-*.json")}
-
-        self.assertFalse(task_path.exists())
-        self.assertFalse(artifact_path.exists())
+        before_task_contents = {
+            path.name: path.read_text(encoding="utf-8")
+            for path in task_dir.glob("task-*.json")
+        }
+        before_artifact_contents = {
+            path.name: path.read_text(encoding="utf-8")
+            for path in artifact_dir.glob("art-*.json")
+        }
+        before_run_contents = {
+            path.name: path.read_text(encoding="utf-8")
+            for path in run_dir.glob("run-*.json")
+        }
 
         with self.assertRaisesRegex(
             ValueError,
@@ -761,9 +804,30 @@ class PersistRuntimeTests(unittest.TestCase):
         ):
             switch_runtime.persist_switch(resolved, skill_id=None, result=self._pmf_recon_result())
 
-        self.assertFalse(task_path.exists())
-        self.assertFalse(artifact_path.exists())
+        self.assertEqual({path.name for path in task_dir.glob("task-*.json")}, before_tasks)
+        self.assertEqual({path.name for path in artifact_dir.glob("art-*.json")}, before_artifacts)
         self.assertEqual({path.name for path in run_dir.glob("run-*.json")}, before_runs)
+        self.assertEqual(
+            {
+                path.name: path.read_text(encoding="utf-8")
+                for path in task_dir.glob("task-*.json")
+            },
+            before_task_contents,
+        )
+        self.assertEqual(
+            {
+                path.name: path.read_text(encoding="utf-8")
+                for path in artifact_dir.glob("art-*.json")
+            },
+            before_artifact_contents,
+        )
+        self.assertEqual(
+            {
+                path.name: path.read_text(encoding="utf-8")
+                for path in run_dir.glob("run-*.json")
+            },
+            before_run_contents,
+        )
 
     def test_persist_multi_skill_market_with_pmf_recon_persists_run_bound_artifact(self) -> None:
         resolved = switch_runtime.resolve_switch(
@@ -778,7 +842,7 @@ class PersistRuntimeTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["skill_id"], "pmf-recon")
-        self.assertEqual(payload["task_id"], resolved["task_resolution"]["task_id"])
+        self._assert_generated_task_id(payload["task_id"], buddy="market")
         self.assertEqual(payload["artifact_ids"], [payload["artifact_id"]])
         self.assertIn("task_title", payload)
         self.assertIsNone(payload["track_title"])
@@ -798,7 +862,7 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertEqual(artifact_json["task_id"], payload["task_id"])
         self.assertEqual(artifact_json["source_run_id"], payload["run_id"])
         self.assertEqual(artifact_json["skill_id"], "pmf-recon")
-        self.assertEqual(artifact_json["slot"], "research")
+        self.assertEqual(artifact_json["slot"], "pmf-report")
         self.assertEqual(
             artifact_json["content"]["research_question"],
             self._pmf_recon_result()["artifact_content"]["research_question"],
@@ -818,6 +882,108 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertEqual(run_json["related_run_ids"], payload["related_run_ids"])
         self.assertEqual(run_json["recommended_switch"], payload["recommended_switch"])
         self.assertNotIn("artifact_content", run_json)
+
+    def test_create_mode_resolve_does_not_expose_task_id_but_persist_generates_one(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch dev: Implement the approved onboarding improvements in projects/app"
+        )
+
+        self.assertEqual(resolved["task_resolution"]["mode"], "create")
+        self.assertIsNone(resolved["task_resolution"]["task_id"])
+        self.assertIsInstance(resolved["task_resolution"]["create_token"], str)
+        self.assertTrue(resolved["task_resolution"]["create_token"])
+        self.assertIsNone(resolved["switch"]["task_id"])
+
+        payload = switch_runtime.persist_switch(resolved, skill_id=None, result=self._artifact_result())
+        self._remember_persisted_paths(payload)
+
+        self.assertIsNone(resolved["task_resolution"]["task_id"])
+        self.assertIsInstance(resolved["task_resolution"]["create_token"], str)
+        self.assertTrue(resolved["task_resolution"]["create_token"])
+        self.assertIsNone(resolved["switch"]["task_id"])
+        self._assert_generated_task_id(payload["task_id"], buddy="dev")
+
+        run_json = json.loads((ROOT / payload["paths"]["run"]).read_text(encoding="utf-8"))
+        self.assertEqual(run_json["resolved_task_id"], payload["task_id"])
+        self.assertIsNone(run_json["switch"]["task_id"])
+
+    def test_create_mode_persist_rejects_prefilled_task_ids(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch dev: Implement the approved onboarding improvements in projects/app"
+        )
+
+        malformed_resolution = deepcopy(resolved)
+        malformed_resolution["task_resolution"]["task_id"] = "task-dev-prefilled-from-resolution"
+        with self.assertRaisesRegex(
+            ValueError,
+            "resolved.task_resolution.task_id must be null for create mode",
+        ):
+            switch_runtime.persist_switch(malformed_resolution, skill_id=None, result=self._artifact_result())
+
+        malformed_switch = deepcopy(resolved)
+        malformed_switch["switch"]["task_id"] = "task-dev-prefilled-from-switch"
+        with self.assertRaisesRegex(
+            ValueError,
+            "resolved.switch.task_id must be null for create mode",
+        ):
+            switch_runtime.persist_switch(malformed_switch, skill_id=None, result=self._artifact_result())
+
+    def test_create_mode_persist_rejects_missing_or_blank_create_token(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch dev: Implement the approved onboarding improvements in projects/app"
+        )
+
+        missing_token = deepcopy(resolved)
+        missing_token["task_resolution"].pop("create_token", None)
+        with self.assertRaisesRegex(
+            ValueError,
+            "resolved.task_resolution.create_token is required for create mode",
+        ):
+            switch_runtime.persist_switch(missing_token, skill_id=None, result=self._artifact_result())
+
+        blank_token = deepcopy(resolved)
+        blank_token["task_resolution"]["create_token"] = "   "
+        with self.assertRaisesRegex(
+            ValueError,
+            "resolved.task_resolution.create_token is required for create mode",
+        ):
+            switch_runtime.persist_switch(blank_token, skill_id=None, result=self._artifact_result())
+
+    def test_cmd_persist_create_mode_downstream_oserror_returns_runtime_error_payload(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch dev: Implement the approved onboarding improvements in projects/app"
+        )
+        create_token = resolved["task_resolution"]["create_token"]
+        expected_task_id = switch_runtime._derive_task_id("dev", "", create_token=create_token)
+        self._remember(f"buddyswitch/objects/tasks/{expected_task_id}.json")
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            temp_root = Path(temp_dir)
+            resolved_path = temp_root / "resolved.json"
+            result_path = temp_root / "result.json"
+            resolved_path.write_text(json.dumps(resolved, ensure_ascii=True), encoding="utf-8")
+            result_path.write_text(json.dumps(self._artifact_result(), ensure_ascii=True), encoding="utf-8")
+
+            args = argparse.Namespace(
+                resolved=str(resolved_path),
+                result=str(result_path),
+                skill_id=None,
+                manifest=switch_runtime.DEFAULT_MANIFEST,
+            )
+
+            stdout = io.StringIO()
+            with patch("switch_runtime._persist_artifact_skill", side_effect=OSError("disk full")):
+                with redirect_stdout(stdout):
+                    exit_code = switch_runtime._cmd_persist(args)
+
+        self.assertEqual(exit_code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_RUNTIME_PERSIST")
+        message = payload["error"]["message"]
+        self.assertIn("disk full", message)
+        self.assertIn(f"created task_id: {expected_task_id}", message)
+        self.assertIn(f"recover with switch dev({expected_task_id}): <demand>", message)
 
     def test_persist_reuses_task_and_binds_to_track(self) -> None:
         track = create_track("track-dev-binding", "Track Binding")
