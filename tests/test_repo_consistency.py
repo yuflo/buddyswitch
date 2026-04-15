@@ -219,6 +219,14 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("continue_current_task", combined)
         self.assertIn("debug", combined)
 
+    def test_switch_spec_directs_multi_skill_hosts_to_per_skill_selection_maps(self) -> None:
+        text = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")
+
+        self.assertIn("artifact_selection_by_skill[chosen_skill_id]", text)
+        self.assertIn("run_instructions_by_skill[chosen_skill_id]", text)
+        self.assertNotIn("read `track_artifact_index` and `artifact_selection`", text)
+        self.assertNotIn("artifact_selection.selected_inputs", text)
+
     def test_contracts_and_skills_define_summary_selection_semantics(self) -> None:
         contracts = (
             ROOT / "framework" / "contracts" / "market.md",

@@ -437,6 +437,7 @@ def _build_selection_contexts_by_skill(
     skills: list[dict[str, Any]],
     task_id: str,
     track_artifact_index: dict[str, Any] | None,
+    implicit_skill_id: str | None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     artifact_selection_by_skill: dict[str, dict[str, Any]] = {}
     run_instructions_by_skill: dict[str, dict[str, Any]] = {}
@@ -453,9 +454,9 @@ def _build_selection_contexts_by_skill(
         )
         artifact_selection_by_skill[skill_id] = selection
         run_instructions_by_skill[skill_id] = _build_run_instructions(
-            None,
+            implicit_skill_id if skill_id == implicit_skill_id else None,
             selection,
-            selected_skill_id=skill_id,
+            selected_skill_id=skill_id if skill_id != implicit_skill_id else None,
         )
 
     return artifact_selection_by_skill, run_instructions_by_skill
@@ -545,6 +546,7 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
         skills=eligible_skills,
         task_id=resolved_task_id,
         track_artifact_index=track_artifact_index,
+        implicit_skill_id=implicit_skill_id,
     )
     artifact_selection = _build_artifact_selection_context(
         demand=demand,

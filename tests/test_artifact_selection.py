@@ -311,6 +311,23 @@ class ArtifactSelectionTests(unittest.TestCase):
             required_slot_artifacts,
         )
 
+    def test_selection_dedupes_repeated_required_slots_in_output(self) -> None:
+        selected = artifact_selection.select_artifacts_for_run(
+            current_buddy="dev",
+            demand="Implement the approved onboarding flow",
+            required_slots=["prd", "prd", "design-spec"],
+            track_artifact_index=self.track_artifact_index,
+            current_task_id="task-dev-onboarding",
+        )
+
+        self.assertEqual(
+            [(item["slot"], item["artifact_id"]) for item in selected["selected_inputs"]],
+            [
+                ("prd", "art-task-pm-onboarding-prd-r3"),
+                ("design-spec", "art-task-design-onboarding-design-spec-r2"),
+            ],
+        )
+
     def test_selection_prefers_coherent_task_bundle_over_newer_unrelated_slot(self) -> None:
         track_artifact_index = {
             "track_id": "track-market-bundle-selection",

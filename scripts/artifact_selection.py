@@ -155,6 +155,8 @@ def select_artifacts_for_run(
         picked = selected_by_slot.get(slot)
         if picked is None:
             continue
+        if any(item["slot"] == slot for item in selected_inputs):
+            continue
         task, artifact = picked
         artifact_id = _as_str(artifact.get("artifact_id"))
         selected_inputs.append(

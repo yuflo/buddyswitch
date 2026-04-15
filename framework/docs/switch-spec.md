@@ -75,8 +75,8 @@ Current control-layer expectations:
   5. build task context and optional track context from canonical objects
   6. build `track_artifact_index` from canonical `track -> task -> artifact` links when a track is present
   7. reject explicit requests for retired markdown outputs under `artifacts/*.md` or `runs/summaries/**`
-  8. run deterministic artifact selection from `track_artifact_index` (when present) and return `artifact_selection`
-  9. return `eligible_skills`, compact `skill_cards`, task context, track context, `track_artifact_index`, output schema paths, invocation details, and explicit next actions
+  8. run deterministic artifact selection from `track_artifact_index` (when present) and return complete `artifact_selection_by_skill` / `run_instructions_by_skill` maps for all eligible skills
+  9. return `artifact_selection` / `run_instructions` only when they align with an implicit single-skill resolve, plus `eligible_skills`, compact `skill_cards`, task context, track context, `track_artifact_index`, output schema paths, invocation details, and explicit next actions
 
 Current runtime defaults:
 
@@ -100,17 +100,20 @@ Current runtime defaults:
 After `resolve`:
 
 1. choose exactly one `skill_id` from `eligible_skills`
-2. read the selected skill package instruction file `buddyswitch/skills/<buddy>/<skill>/SKILL.md`
-3. execute the workflow in-session
-4. produce a structured result payload matching `required_output_schema_by_skill[skill_id]`
-5. call `scripts/switch_runtime.py persist`
+2. set `chosen_skill_id = skill_id`
+3. read `artifact_selection_by_skill[chosen_skill_id]` and `run_instructions_by_skill[chosen_skill_id]`
+4. read the selected skill package instruction file `buddyswitch/skills/<buddy>/<skill>/SKILL.md`
+5. execute the workflow in-session
+6. produce a structured result payload matching `required_output_schema_by_skill[chosen_skill_id]`
+7. call `scripts/switch_runtime.py persist`
 
 Recommended fixed host flow for track-bound work:
 1. resolve switch
-2. read `track_artifact_index` and `artifact_selection`
-3. read selected artifact inputs by slot (from `artifact_selection.selected_inputs`) or use `run_instructions.artifact_read_commands`
-4. execute selected skill
-5. persist result
+2. choose `chosen_skill_id` from `eligible_skills`
+3. read `track_artifact_index`, `artifact_selection_by_skill[chosen_skill_id]`, and `run_instructions_by_skill[chosen_skill_id]`
+4. read selected artifact inputs by slot (from `artifact_selection_by_skill[chosen_skill_id].selected_inputs`) or use `run_instructions_by_skill[chosen_skill_id].artifact_read_commands`
+5. execute selected skill
+6. persist result
 
 ## Persist Behavior
 
