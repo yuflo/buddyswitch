@@ -127,14 +127,20 @@ Recommended fixed host flow for track-bound work:
 
 `persist` is a lightweight technical gate, not a business-quality review.
 
-It validates:
+It performs one boundary validation pass:
 
-- selected `skill_id` belongs to the resolved buddy
-- selected `skill_id` is still in `eligible_skills`
+- resolves the chosen skill context exactly once from the successful `resolved` payload
 - result payload matches the selected schema
 - basic state/reference safety
 
 Schema validation in this stage is structural only. It checks shape and allowed values, not whether the work itself is good enough.
+
+It then commits canonical state:
+
+- materializes the already-resolved task mode (`create` or `reuse`)
+- applies task-track binding when the switch explicitly targets an existing track
+- routes into the selected skill's canonical write path (`track-manager` mutation or artifact persistence)
+- writes the final run audit after canonical object writes succeed
 
 It writes:
 

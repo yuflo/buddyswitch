@@ -1346,6 +1346,63 @@ class PersistRuntimeTests(unittest.TestCase):
             },
         }
 
+    def test_resolve_persist_skill_requires_successful_resolved_payload(self) -> None:
+        with self.assertRaisesRegex(ValueError, "resolved payload must be successful before persist"):
+            switch_runtime._resolve_persist_skill(  # type: ignore[attr-defined]
+                resolved={"ok": False},
+                requested_skill_id=None,
+            )
+
+    def test_resolve_persist_skill_returns_selected_skill_doc(self) -> None:
+        resolved = switch_runtime.resolve_switch("switch pm: manage the active track")
+
+        buddy_id, skill = switch_runtime._resolve_persist_skill(  # type: ignore[attr-defined]
+            resolved=resolved,
+            requested_skill_id="track-manager",
+        )
+
+        self.assertEqual(buddy_id, "pm")
+        self.assertEqual(skill["id"], "track-manager")
+        self.assertEqual(skill["runtime"]["output_schema"], "framework/schemas/pm/track-manager.json")
+
+    def test_resolve_persist_skill_rejects_skill_missing_from_resolved_catalog(self) -> None:
+        resolved = switch_runtime.resolve_switch("switch pm: manage the active track")
+        resolved["eligible_skills"] = ["write-prd"]
+        resolved["skill_cards"] = [card for card in resolved["skill_cards"] if card["id"] == "write-prd"]
+        resolved["required_output_schema_by_skill"] = {
+            "write-prd": resolved["required_output_schema_by_skill"]["write-prd"]
+        }
+
+        with self.assertRaisesRegex(ValueError, "not available in resolved skill context"):
+            switch_runtime._resolve_persist_skill(  # type: ignore[attr-defined]
+                resolved=resolved,
+                requested_skill_id="track-manager",
+            )
+
+    def test_materialize_task_for_persist_reuse_mode_returns_existing_task_and_run_id(self) -> None:
+        task = create_task(
+            "task-dev-persist-mode",
+            "Persist Mode",
+            buddy="dev",
+            initial_run_id="run-seed-persist-mode",
+        )
+        self._remember("buddyswitch/objects/tasks/task-dev-persist-mode.json")
+
+        task, run_id, created_task_id_for_recovery = switch_runtime._materialize_task_for_persist(  # type: ignore[attr-defined]
+            buddy_id="dev",
+            switch_payload={
+                "buddy": "dev",
+                "demand": "continue work",
+                "track_id": None,
+                "task_id": task["id"],
+            },
+            resolution={"mode": "reuse", "task_id": task["id"]},
+        )
+
+        self.assertEqual(task["id"], "task-dev-persist-mode")
+        self.assertRegex(run_id, r"^run-")
+        self.assertIsNone(created_task_id_for_recovery)
+
     def test_persist_creates_task_and_run_bound_artifact(self) -> None:
         resolved = switch_runtime.resolve_switch("switch dev: Implement the approved onboarding improvements in projects/app")
         payload = switch_runtime.persist_switch(resolved, skill_id=None, result=self._artifact_result())

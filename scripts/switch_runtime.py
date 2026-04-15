@@ -626,13 +626,55 @@ def _read_json_input(source: str, *, stdin_text: str | None = None) -> dict[str,
     return payload
 
 
-def _pick_skill_id(resolved: dict[str, Any], requested_skill_id: str | None) -> str:
+def _resolve_persist_skill(
+    *,
+    resolved: dict[str, Any],
+    requested_skill_id: str | None,
+) -> tuple[str, dict[str, Any]]:
+    if not resolved.get("ok"):
+        raise ValueError("resolved payload must be successful before persist")
+
+    switch_payload = resolved.get("switch") or {}
+    buddy_id = switch_payload.get("buddy")
+    if not isinstance(buddy_id, str) or not buddy_id:
+        raise ValueError("resolved.switch.buddy is required")
+
     if requested_skill_id:
-        return requested_skill_id
-    implicit_skill_id = resolved.get("implicit_skill_id")
-    if isinstance(implicit_skill_id, str) and implicit_skill_id:
-        return implicit_skill_id
-    raise ValueError("skill_id is required for multi-skill buddies. Choose one from eligible_skills first.")
+        selected_skill_id = requested_skill_id
+    else:
+        implicit_skill_id = resolved.get("implicit_skill_id")
+        if isinstance(implicit_skill_id, str) and implicit_skill_id:
+            selected_skill_id = implicit_skill_id
+        else:
+            raise ValueError("skill_id is required for multi-skill buddies. Choose one from eligible_skills first.")
+    required_output_schema_by_skill = resolved.get("required_output_schema_by_skill")
+    if not isinstance(required_output_schema_by_skill, dict):
+        raise ValueError("resolved.required_output_schema_by_skill is required before persist")
+
+    skill_cards = resolved.get("skill_cards")
+    if not isinstance(skill_cards, list):
+        raise ValueError("resolved.skill_cards is required before persist")
+
+    selected_card = next(
+        (
+            item
+            for item in skill_cards
+            if isinstance(item, dict) and item.get("id") == selected_skill_id
+        ),
+        None,
+    )
+    if selected_card is None:
+        raise ValueError(f"skill_id '{selected_skill_id}' is not available in resolved skill context")
+
+    output_schema = required_output_schema_by_skill.get(selected_skill_id)
+    if not isinstance(output_schema, str) or not output_schema.strip():
+        raise ValueError(f"resolved.required_output_schema_by_skill['{selected_skill_id}'] is required before persist")
+
+    runtime: dict[str, Any] = {"output_schema": output_schema.strip()}
+    output_slot = selected_card.get("output_slot")
+    if isinstance(output_slot, str) and output_slot.strip():
+        runtime["output_slot"] = output_slot.strip()
+    return buddy_id, {"id": selected_skill_id, "runtime": runtime}
 
 
 def _strip_run_fields(result: dict[str, Any]) -> dict[str, Any]:
@@ -713,6 +755,58 @@ def _ensure_task_binding(
     updated_task = register_task_to_track(explicit_track_id, task["id"])
     writes = [_task_object_path(updated_task["id"]), _track_object_path(explicit_track_id)]
     return updated_task, explicit_track_id, writes
+
+
+def _materialize_task_for_persist(
+    *,
+    buddy_id: str,
+    switch_payload: dict[str, Any],
+    resolution: dict[str, Any],
+) -> tuple[dict[str, Any], str, str | None]:
+    task_mode = resolution.get("mode")
+    task_id = resolution.get("task_id")
+    if task_mode not in {"create", "reuse"}:
+        raise ValueError("resolved.task_resolution.mode must be 'create' or 'reuse'")
+
+    run_id = f"run-{uuid.uuid4().hex[:10]}"
+    switch_task_id = switch_payload.get("task_id")
+    created_task_id_for_recovery: str | None = None
+
+    if task_mode == "create":
+        if task_id is not None:
+            raise ValueError("resolved.task_resolution.task_id must be null for create mode")
+        if switch_task_id is not None:
+            raise ValueError("resolved.switch.task_id must be null for create mode")
+        create_token = resolution.get("create_token")
+        if not isinstance(create_token, str) or not create_token.strip():
+            raise ValueError("resolved.task_resolution.create_token is required for create mode")
+        create_token = create_token.strip()
+        generated_task_id = _derive_task_id(
+            buddy_id,
+            "",
+            create_token=create_token,
+        )
+        task = create_task(
+            generated_task_id,
+            _derive_task_title(switch_payload.get("demand") or ""),
+            buddy=buddy_id,
+            track_id=None,
+            status="active",
+            summary="",
+            initial_run_id=run_id,
+        )
+        created_task_id_for_recovery = task["id"]
+        return task, run_id, created_task_id_for_recovery
+
+    if not isinstance(task_id, str) or not task_id:
+        raise ValueError("resolved.task_resolution.task_id must be a non-empty string for reuse mode")
+    task = get_task(task_id)
+    if task is None:
+        raise ValueError(f"task not found: {task_id}")
+    if task["buddy"] != buddy_id:
+        raise ValueError(f"task '{task_id}' belongs to '{task['buddy']}', not '{buddy_id}'")
+    add_run_to_task(task_id, run_id)
+    return get_task(task_id) or task, run_id, None
 
 
 def _persist_track_manager(
@@ -951,79 +1045,26 @@ def persist_switch(
     *,
     skill_id: str | None,
     result: dict[str, Any],
-    manifest_path: Path = DEFAULT_MANIFEST,
 ) -> dict[str, Any]:
-    if not resolved.get("ok"):
-        raise ValueError("resolved payload must be successful before persist")
-
-    selected_skill_id = _pick_skill_id(resolved, skill_id)
-    eligible_skills = resolved.get("eligible_skills", [])
-    if selected_skill_id not in eligible_skills:
-        raise ValueError(
-            f"skill_id '{selected_skill_id}' is not eligible for this switch. Eligible: {', '.join(eligible_skills)}"
-        )
-
-    manifest = load_manifest(manifest_path)
-    switch_payload = resolved.get("switch") or {}
-    buddy_id = switch_payload.get("buddy")
-    if not isinstance(buddy_id, str) or not buddy_id:
-        raise ValueError("resolved.switch.buddy is required")
-    buddy = require_buddy(manifest, buddy_id)
-    if selected_skill_id not in buddy.get("skills", []):
-        raise ValueError(f"skill_id '{selected_skill_id}' is not declared for buddy '{buddy_id}'")
-
-    skill = next(skill for skill in buddy_skill_docs(manifest, buddy_id) if skill["id"] == selected_skill_id)
+    buddy_id, skill = _resolve_persist_skill(
+        resolved=resolved,
+        requested_skill_id=skill_id,
+    )
+    selected_skill_id = skill["id"]
     schema = load_output_schema(skill["runtime"]["output_schema"])
     errors = validate_output_payload(result, schema)
     if errors:
         raise ValueError("result payload failed schema validation: " + "; ".join(errors))
 
+    switch_payload = resolved.get("switch") or {}
     resolution = dict(resolved.get("task_resolution") or {})
-    task_mode = resolution.get("mode")
-    task_id = resolution.get("task_id")
-    if task_mode not in {"create", "reuse"}:
-        raise ValueError("resolved.task_resolution.mode must be 'create' or 'reuse'")
-    if task_mode == "reuse" and (not isinstance(task_id, str) or not task_id):
-        raise ValueError("resolved.task_resolution.task_id must be a non-empty string for reuse mode")
-
-    run_id = f"run-{uuid.uuid4().hex[:10]}"
     explicit_track_id = switch_payload.get("track_id")
-    switch_task_id = switch_payload.get("task_id")
-    created_task_id_for_recovery: str | None = None
-
-    if task_mode == "create":
-        if task_id is not None:
-            raise ValueError("resolved.task_resolution.task_id must be null for create mode")
-        if switch_task_id is not None:
-            raise ValueError("resolved.switch.task_id must be null for create mode")
-        create_token = resolution.get("create_token")
-        if not isinstance(create_token, str) or not create_token.strip():
-            raise ValueError("resolved.task_resolution.create_token is required for create mode")
-        create_token = create_token.strip()
-        generated_task_id = _derive_task_id(
-            buddy_id,
-            "",
-            create_token=create_token,
-        )
-        task = create_task(
-            generated_task_id,
-            _derive_task_title(switch_payload.get("demand") or ""),
-            buddy=buddy_id,
-            track_id=None,
-            status="active",
-            summary="",
-            initial_run_id=run_id,
-        )
-        task_id = task["id"]
-        created_task_id_for_recovery = task_id
-    else:
-        task = get_task(task_id)
-        if task is None:
-            raise ValueError(f"task not found: {task_id}")
-        if task["buddy"] != buddy_id:
-            raise ValueError(f"task '{task_id}' belongs to '{task['buddy']}', not '{buddy_id}'")
-        add_run_to_task(task_id, run_id)
-        task = get_task(task_id) or task
+    task_mode = resolution.get("mode")
+    task, run_id, created_task_id_for_recovery = _materialize_task_for_persist(
+        buddy_id=buddy_id,
+        switch_payload=switch_payload,
+        resolution=resolution,
+    )
 
     try:
         task, effective_track_id, _ = _ensure_task_binding(task=task, explicit_track_id=explicit_track_id)
@@ -1073,7 +1114,7 @@ def _cmd_persist(args: argparse.Namespace) -> int:
         stdin_text = sys.stdin.read() if args.resolved == "-" or args.result == "-" else None
         resolved = _read_json_input(args.resolved, stdin_text=stdin_text if args.resolved == "-" else None)
         result = _read_json_input(args.result, stdin_text=stdin_text if args.result == "-" else None)
-        payload = persist_switch(resolved, skill_id=args.skill_id, result=result, manifest_path=args.manifest)
+        payload = persist_switch(resolved, skill_id=args.skill_id, result=result)
     except (ManifestError, ValueError, OSError, OutputSchemaError, json.JSONDecodeError) as exc:
         payload = runtime_error("E_RUNTIME_PERSIST", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))
