@@ -51,113 +51,11 @@ MARKET_SCHEMA_PATHS = (
     ROOT / "framework" / "schemas" / "market" / "channel-discovery.json",
     ROOT / "framework" / "schemas" / "market" / "launch-prep.json",
 )
-CANONICAL_MARKET_TEMPLATES = {
-    ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery" / "assets" / "interview-brief-template.md": (
-        "## Research Question",
-        "## Target Segments",
-        "## Interview Goals",
-        "## Recruiting Criteria",
-        "- must_have:",
-        "- nice_to_have:",
-        "- exclude_if:",
-        "## Interview Guide",
-        "## Hypotheses To Test",
-        "## Evidence",
-        "- source_id:",
-        "- claim_excerpt:",
-        "## Source Traceability",
-        "- conclusion:",
-        "- source_ids:",
-        "## Patterns And Insights",
-        "## Risks And Unknowns",
-        "## Recommended Next Step",
-        "- action:",
-        "- rationale:",
-        "## Conclusion",
-    ),
-    ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy" / "assets" / "positioning-brief-template.md": (
-        "## Research Question",
-        "## Target Audience",
-        "- primary:",
-        "- context:",
-        "- trigger:",
-        "## Status Quo And Alternatives",
-        "## Differentiated Capabilities",
-        "## Value Claims",
-        "- claim:",
-        "- audience_value:",
-        "- evidence_basis:",
-        "## Positioning Statement",
-        "## Message House",
-        "- core_message:",
-        "- supporting_points:",
-        "## Homepage Angles",
-        "## Evidence",
-        "- source_id:",
-        "- claim_excerpt:",
-        "## Source Traceability",
-        "- conclusion:",
-        "- source_ids:",
-        "## Risks And Unknowns",
-        "## Conclusion",
-    ),
-    ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "assets" / "channel-plan-template.md": (
-        "## Research Question",
-        "## Candidate Channels",
-        "## Selection Criteria",
-        "## Channel Scores",
-        "## Recommended Primary Channel",
-        "- channel:",
-        "- why:",
-        "- preconditions:",
-        "## Recommended Secondary Channel",
-        "## Experiment Plan",
-        "- goal:",
-        "- offer:",
-        "- audience:",
-        "- steps:",
-        "- timebox:",
-        "## Kill Signals",
-        "## Evidence",
-        "- source_id:",
-        "- claim_excerpt:",
-        "## Source Traceability",
-        "- conclusion:",
-        "- source_ids:",
-        "## Risks And Unknowns",
-        "## Conclusion",
-    ),
-    ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "assets" / "launch-prep-template.md": (
-        "## Research Question",
-        "## Launch Goal",
-        "- primary_goal:",
-        "- timebox:",
-        "## Target Audience",
-        "- primary:",
-        "- why_now:",
-        "## Selected Channel",
-        "- channel:",
-        "- reason:",
-        "## Launch Assets",
-        "## Instrumentation Plan",
-        "- signals_to_track:",
-        "- capture_method:",
-        "- review_cadence:",
-        "## Feedback Collection Plan",
-        "- collection_methods:",
-        "- follow_up_path:",
-        "- response_owner:",
-        "## Success Signals",
-        "## Failure Signals",
-        "## Evidence",
-        "- source_id:",
-        "- claim_excerpt:",
-        "## Source Traceability",
-        "- conclusion:",
-        "- source_ids:",
-        "## Risks And Unknowns",
-        "## Conclusion",
-    ),
+NEW_MARKET_TEMPLATE_SCHEMAS = {
+    ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery" / "assets" / "interview-brief-template.md": ROOT / "framework" / "schemas" / "market" / "customer-discovery.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy" / "assets" / "positioning-brief-template.md": ROOT / "framework" / "schemas" / "market" / "positioning-copy.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "assets" / "channel-plan-template.md": ROOT / "framework" / "schemas" / "market" / "channel-discovery.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "assets" / "launch-prep-template.md": ROOT / "framework" / "schemas" / "market" / "launch-prep.json",
 }
 
 
@@ -189,6 +87,50 @@ def _read_string_array_field(path: Path, field_name: str) -> list[str]:
             values.append(cleaned)
 
     raise AssertionError(f"missing closed array field '{field_name}' in {path.relative_to(ROOT)}")
+
+
+def _markdown_section(text: str, heading: str) -> str:
+    marker = f"## {heading}"
+    lines = text.splitlines()
+    try:
+        start_index = lines.index(marker)
+    except ValueError as exc:
+        raise AssertionError(f"missing section '{heading}'") from exc
+
+    section_lines: list[str] = []
+    for line in lines[start_index + 1 :]:
+        if line.startswith("## "):
+            break
+        section_lines.append(line)
+    return "\n".join(section_lines)
+
+
+def _schema_heading(field_name: str) -> str:
+    return "## " + field_name.replace("_", " ").title()
+
+
+def _required_template_tokens(schema: dict[str, object]) -> list[str]:
+    schema_type = schema.get("type")
+    if schema_type == "object":
+        props = schema.get("properties", {})
+        required = schema.get("required", [])
+        if not isinstance(props, dict) or not isinstance(required, list):
+            return []
+        tokens: list[str] = []
+        for key in required:
+            if not isinstance(key, str):
+                continue
+            tokens.append(f"{key}:")
+            child = props.get(key)
+            if isinstance(child, dict):
+                tokens.extend(_required_template_tokens(child))
+        return list(dict.fromkeys(tokens))
+
+    if schema_type == "array":
+        items = schema.get("items")
+        if isinstance(items, dict):
+            return _required_template_tokens(items)
+    return []
 
 
 class RepoConsistencyTests(unittest.TestCase):
@@ -427,12 +369,63 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("conclusion", traceability_required)
                 self.assertNotIn("claim", traceability_required)
 
-    def test_new_market_templates_expose_canonical_schema_fields(self) -> None:
-        for path, required_tokens in CANONICAL_MARKET_TEMPLATES.items():
+    def test_market_contract_separates_skill_ids_from_output_slots_and_common_fields(self) -> None:
+        contract_path = ROOT / "framework" / "contracts" / "market.md"
+        text = contract_path.read_text(encoding="utf-8")
+
+        must_do_section = _markdown_section(text, "Must Do")
+        select_line = next(line for line in must_do_section.splitlines() if "Select the executable market skill" in line)
+        for skill_id in (
+            "research-scan",
+            "pmf-recon",
+            "customer-discovery",
+            "positioning-copy",
+            "channel-discovery",
+            "launch-prep",
+        ):
+            self.assertIn(skill_id, select_line)
+        for slot_name in ("market-scan", "pmf-report", "positioning-brief", "channel-plan"):
+            self.assertNotIn(slot_name, select_line)
+
+        slot_section = _markdown_section(text, "Output Slot Taxonomy")
+        for slot_name in (
+            "market-scan",
+            "pmf-report",
+            "customer-discovery",
+            "positioning-brief",
+            "channel-plan",
+            "launch-prep",
+        ):
+            self.assertIn(slot_name, slot_section)
+
+        output_section = _markdown_section(text, "Required Output Structure")
+        for common_field in ("research_question", "evidence", "source_traceability", "conclusion"):
+            self.assertIn(common_field, output_section)
+        for non_common_field in ("research_strategy", "channel_plan", "iteration_log"):
+            self.assertNotIn(non_common_field, output_section)
+
+    def test_new_market_templates_expose_schema_derived_contract_fields(self) -> None:
+        for path, schema_path in NEW_MARKET_TEMPLATE_SCHEMAS.items():
             with self.subTest(template=str(path.relative_to(ROOT))):
                 text = path.read_text(encoding="utf-8").lower()
-                for token in required_tokens:
-                    self.assertIn(token.lower(), text, msg=f"missing canonical field '{token}' in {path.relative_to(ROOT)}")
+                schema = json.loads(schema_path.read_text(encoding="utf-8"))
+                artifact_content = schema["properties"]["artifact_content"]
+                required_fields = artifact_content["required"]
+                props = artifact_content["properties"]
+
+                for field_name in required_fields:
+                    self.assertIn(
+                        _schema_heading(field_name).lower(),
+                        text,
+                        msg=f"missing section for '{field_name}' in {path.relative_to(ROOT)}",
+                    )
+                    field_schema = props[field_name]
+                    for token in _required_template_tokens(field_schema):
+                        self.assertIn(
+                            token.lower(),
+                            text,
+                            msg=f"missing schema-derived token '{token}' in {path.relative_to(ROOT)}",
+                        )
 
     def test_every_skill_package_has_metadata_and_instruction_files(self) -> None:
         expected_packages = (

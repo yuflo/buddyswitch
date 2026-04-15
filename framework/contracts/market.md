@@ -7,7 +7,7 @@ Market is an outside-in buddy. It produces browser-driven, evidence-based demand
 ## Must Do
 
 - Clarify the research question and scope.
-- Select the market skill flow that matches the question: `market-scan`, `pmf-report`, `customer-discovery`, `positioning-brief`, `channel-plan`, or `launch-prep`.
+- Select the executable market skill that matches the question: `research-scan`, `pmf-recon`, `customer-discovery`, `positioning-copy`, `channel-discovery`, or `launch-prep`.
 - Use public-first browsing with search-assisted discovery and explicit login checkpoints when public evidence is exhausted.
 - Choose channels based on the question type and constraints.
 - Collect and synthesize evidence from browsed sources.
@@ -35,21 +35,27 @@ Market is an outside-in buddy. It produces browser-driven, evidence-based demand
 ## Required Output Structure
 
 The selected market skill schema defines the exact synthesis fields.
-All market artifacts must include at least:
+Common cross-market artifact content requirements are:
 
 1. `research_question`
-2. `research_strategy`
-3. `channel_plan`
-4. `iteration_log`
-5. `evidence`
-6. `source_traceability`
-7. `conclusion`
+2. `evidence`
+3. `source_traceability`
+4. `conclusion`
 
-Typical skill-specific synthesis fields include:
+Skill-specific synthesis fields stay with the relevant executable skill schema. Typical examples include:
 - `research-scan`: `patterns_and_insights`, `risks_and_caveats`
 - `pmf-recon`: `assumptions_used`, `candidate_icps`, `strongest_pain_signals`, `existing_alternatives`, `pmf_confidence`, `recommended_next_step`
 
-## Market Slot Taxonomy
+## Executable Skill Collection
+
+- `research-scan`
+- `pmf-recon`
+- `customer-discovery`
+- `positioning-copy`
+- `channel-discovery`
+- `launch-prep`
+
+## Output Slot Taxonomy
 
 - `market-scan`
 - `pmf-report`
