@@ -76,12 +76,15 @@ Current control-layer expectations:
   6. build `track_artifact_index` from canonical `track -> task -> artifact` links when a track is present
   7. reject explicit requests for retired markdown outputs under `artifacts/*.md` or `runs/summaries/**`
   8. run deterministic artifact selection from `track_artifact_index` (when present) and return complete `artifact_selection_by_skill` / `run_instructions_by_skill` maps for all eligible skills
-  9. return `artifact_selection` / `run_instructions` only when they align with an implicit single-skill resolve, plus `eligible_skills`, compact `skill_cards`, task context, track context, `track_artifact_index`, output schema paths, invocation details, and explicit next actions
+  9. return top-level `artifact_selection` only when it aligns with an implicit single-skill resolve; keep top-level `run_instructions` available for neutral host guidance; also return `eligible_skills`, compact `skill_cards`, task context, track context, `track_artifact_index`, output schema paths, invocation details, and explicit next actions
 
 Current runtime defaults:
 
 - single-skill buddies may expose `implicit_skill_id`
 - multi-skill buddies never auto-select in runtime
+- top-level `artifact_selection` is `None` for multi-skill resolves
+- top-level `run_instructions` remains available as neutral host guidance for multi-skill resolves
+- chosen-skill-specific selected inputs and read commands come from `artifact_selection_by_skill[chosen_skill_id]` and `run_instructions_by_skill[chosen_skill_id]`
 - `buddy -> skills` is the main routing authority in runtime
 - buddy `permissions` stay as object-authority metadata for manual/debug mutation APIs
 - `required_tools` and `required_env` are advisory skill metadata for the host session

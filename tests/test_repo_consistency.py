@@ -227,6 +227,15 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("read `track_artifact_index` and `artifact_selection`", text)
         self.assertNotIn("artifact_selection.selected_inputs", text)
 
+    def test_switch_spec_describes_neutral_top_level_run_instructions_for_multi_skill_resolves(self) -> None:
+        text = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")
+
+        self.assertIn("top-level `artifact_selection` is `None` for multi-skill resolves", text)
+        self.assertIn("top-level `run_instructions` remains available as neutral host guidance", text)
+        self.assertIn("chosen-skill-specific selected inputs and read commands come from", text)
+        self.assertIn("artifact_selection_by_skill[chosen_skill_id]", text)
+        self.assertIn("run_instructions_by_skill[chosen_skill_id]", text)
+
     def test_contracts_and_skills_define_summary_selection_semantics(self) -> None:
         contracts = (
             ROOT / "framework" / "contracts" / "market.md",
