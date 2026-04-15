@@ -82,9 +82,16 @@ Default terminal summary contract:
 
 ## Framework Docs
 
+- Architecture overview: `framework/docs/architecture-overview.md`
 - Switch spec: `framework/docs/switch-spec.md`
 - Track registry: `framework/docs/track-registry.md`
 - Skill architecture target: `framework/docs/skill-architecture-best-practices.md`
+
+## Development Notes
+
+Working notes, plans, reviews, and whiteboards live under:
+
+- `docs/README.md`
 
 ## Example Commands
 

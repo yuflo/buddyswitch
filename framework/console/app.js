@@ -6,6 +6,7 @@ const emptyWorkspace = {
   objects_root: null,
   buddies: [],
   tracks: [],
+  standalone_tasks: [],
   tasks: [],
   artifacts: [],
   run_audits: [],
@@ -37,6 +38,7 @@ const dataStatus = document.getElementById("dataStatus");
 let workspace = normalizeWorkspaceData(emptyWorkspace);
 let selectedTrack = null;
 let selectedTaskId = null;
+let selectedStandalone = false;
 
 function normalizeWorkspaceData(rawData) {
   return {
@@ -44,6 +46,7 @@ function normalizeWorkspaceData(rawData) {
     ...(rawData || {}),
     buddies: Array.isArray(rawData?.buddies) ? rawData.buddies : [],
     tracks: Array.isArray(rawData?.tracks) ? rawData.tracks : [],
+    standalone_tasks: Array.isArray(rawData?.standalone_tasks) ? rawData.standalone_tasks : [],
     tasks: Array.isArray(rawData?.tasks) ? rawData.tasks : [],
     artifacts: Array.isArray(rawData?.artifacts) ? rawData.artifacts : [],
     run_audits: Array.isArray(rawData?.run_audits) ? rawData.run_audits : [],
@@ -138,6 +141,16 @@ function orderedTrackTasks(track) {
   });
 }
 
+function standaloneTasks() {
+  if (workspace.standalone_tasks.length > 0) {
+    return sortByLatest(workspace.standalone_tasks);
+  }
+  const trackedTaskIds = new Set(workspace.tracks.flatMap((track) => asArray(track?.task_ids)));
+  return sortByLatest(
+    workspace.tasks.filter((task) => !task?.track_id && !trackedTaskIds.has(task.id)),
+  );
+}
+
 function getTaskArtifacts(task) {
   const artifactsById = artifactMap();
   const seen = new Set();
@@ -196,6 +209,10 @@ function latestArtifactForTrack(track) {
   return getTrackArtifacts(track)[0] || null;
 }
 
+function latestRunForTask(task) {
+  return getTaskRuns(task)[0] || null;
+}
+
 function latestRunForTrack(track) {
   return getTrackRuns(track)[0] || null;
 }
@@ -208,21 +225,56 @@ function selectedTaskForTrack(track) {
   return tasks.find((task) => task.id === selectedTaskId) || latestTaskForTrack(track) || tasks[0];
 }
 
+function selectedStandaloneTask() {
+  const tasks = standaloneTasks();
+  if (tasks.length === 0) {
+    return null;
+  }
+  return tasks.find((task) => task.id === selectedTaskId) || tasks[0];
+}
+
 function chooseDefaultTask(track) {
   const task = latestTaskForTrack(track) || orderedTrackTasks(track)[0] || null;
   selectedTaskId = task?.id || null;
 }
 
+function chooseDefaultStandaloneTask() {
+  selectedTaskId = standaloneTasks()[0]?.id || null;
+}
+
 function applyWorkspaceData(nextWorkspace) {
-  const selectedTrackId = selectedTrack?.id || null;
+  const selectedTrackId = selectedStandalone ? null : selectedTrack?.id || null;
   const previousTaskId = selectedTaskId;
+  const preserveStandaloneSelection = selectedStandalone;
   workspace = normalizeWorkspaceData(nextWorkspace);
-  selectedTrack = workspace.tracks.find((track) => track.id === selectedTrackId) || workspace.tracks[0] || null;
-  const tasks = orderedTrackTasks(selectedTrack);
-  selectedTaskId = tasks.some((task) => task.id === previousTaskId) ? previousTaskId : null;
-  if (!selectedTaskId) {
-    chooseDefaultTask(selectedTrack);
+  if (preserveStandaloneSelection) {
+    const nextStandaloneTask = standaloneTasks().find((task) => task.id === previousTaskId) || standaloneTasks()[0] || null;
+    if (nextStandaloneTask) {
+      selectedStandalone = true;
+      selectedTrack = null;
+      selectedTaskId = nextStandaloneTask.id;
+      return;
+    }
   }
+
+  selectedTrack = workspace.tracks.find((track) => track.id === selectedTrackId) || workspace.tracks[0] || null;
+  selectedStandalone = false;
+
+  if (selectedTrack) {
+    const tasks = orderedTrackTasks(selectedTrack);
+    selectedTaskId = tasks.some((task) => task.id === previousTaskId) ? previousTaskId : null;
+    if (!selectedTaskId) {
+      chooseDefaultTask(selectedTrack);
+    }
+    return;
+  }
+
+  const availableStandaloneTasks = standaloneTasks();
+  selectedTaskId = availableStandaloneTasks.some((task) => task.id === previousTaskId) ? previousTaskId : null;
+  if (!selectedTaskId) {
+    chooseDefaultStandaloneTask();
+  }
+  selectedStandalone = Boolean(selectedTaskId);
 }
 
 function canFetchLiveWorkspace() {
@@ -341,6 +393,19 @@ function deriveSwitchCommandsForTrack(track) {
   };
 }
 
+function deriveSwitchCommandsForTask(task) {
+  const latestRun = latestRunForTask(task);
+  const references = normalizeReferenceSwitches(latestRun);
+  const template = deriveTemplateSwitch(latestRun, references);
+  return {
+    recommended: deriveRecommendedSwitch(latestRun, references, template, null),
+    template,
+    continueTask: references.continue_current_task || template,
+    continueTaskInTrack: references.continue_current_task_in_track || "",
+    handoff: references.handoff_to_next_buddy || "",
+  };
+}
+
 function artifactTitle(artifact) {
   return artifact?.title || artifact?.id || "No material";
 }
@@ -443,7 +508,7 @@ function renderPillList(parent, items) {
 function renderTrackButton(track) {
   const button = createEl("button", "topic-button");
   button.type = "button";
-  button.classList.toggle("is-active", selectedTrack?.id === track.id);
+  button.classList.toggle("is-active", !selectedStandalone && selectedTrack?.id === track.id);
 
   const tasks = orderedTrackTasks(track);
   const artifacts = getTrackArtifacts(track);
@@ -463,6 +528,7 @@ function renderTrackButton(track) {
   renderPillList(button, [statusNoteForTrack(track), track.updated_at || "no timestamp"]);
 
   button.addEventListener("click", () => {
+    selectedStandalone = false;
     selectedTrack = track;
     chooseDefaultTask(track);
     render();
@@ -470,16 +536,57 @@ function renderTrackButton(track) {
   trackList.append(button);
 }
 
+function renderStandaloneTaskButton(task) {
+  const button = createEl("button", "topic-button");
+  button.type = "button";
+  button.classList.toggle("is-active", selectedStandalone && selectedTaskId === task.id);
+
+  const latestRun = latestRunForTask(task);
+  const latestArtifact = getTaskArtifacts(task)[0] || null;
+  button.append(
+    createEl("strong", "", task.title || task.id),
+    createEl("span", "topic-summary", clampText(task.summary || "No task summary", 110)),
+    createEl("span", "topic-meta", `${buddyLabel(task.buddy)} | ${task.status || "active"} | standalone`),
+    createEl("span", "topic-meta", `Latest run: ${latestRun?.run_id || task.latest_run_id || "none"}`),
+    createEl("span", "topic-meta", `Latest material: ${clampText(artifactTitle(latestArtifact), 90)}`),
+  );
+  renderPillList(button, [latestRun?.updated_at || task.updated_at || "no timestamp"]);
+
+  button.addEventListener("click", () => {
+    selectedStandalone = true;
+    selectedTrack = null;
+    selectedTaskId = task.id;
+    render();
+  });
+  trackList.append(button);
+}
+
 function renderTracks() {
   trackList.replaceChildren();
-  setText(trackCount, String(workspace.tracks.length));
+  const tracks = workspace.tracks;
+  const looseTasks = standaloneTasks();
+  setText(trackCount, String(tracks.length + looseTasks.length));
 
-  if (workspace.tracks.length === 0) {
-    trackList.append(createEl("p", "note", "No tracks found. Start with: switch pm: create a track for <project goal>"));
+  if (tracks.length === 0 && looseTasks.length === 0) {
+    trackList.append(createEl("p", "note", "No work items found. Start with: switch pm: create a track for <project goal>"));
     return;
   }
 
-  workspace.tracks.forEach(renderTrackButton);
+  if (tracks.length > 0) {
+    if (looseTasks.length > 0) {
+      trackList.append(createEl("p", "note", "Tracks"));
+    }
+    tracks.forEach(renderTrackButton);
+  } else {
+    trackList.append(createEl("p", "note", "No tracks found. Showing standalone tasks below."));
+  }
+
+  if (looseTasks.length > 0) {
+    if (tracks.length > 0) {
+      trackList.append(createEl("p", "note", "Standalone tasks"));
+    }
+    looseTasks.forEach(renderStandaloneTaskButton);
+  }
 }
 
 function renderTrackSummary(track) {
@@ -501,6 +608,27 @@ function renderTrackSummary(track) {
   renderKeyValue(trackSummary, "Tasks", String(tasks.length));
   renderKeyValue(trackSummary, "Materials", String(artifacts.length));
   renderKeyValue(trackSummary, "Latest run", latestRun?.run_id || "none");
+  renderKeyValue(trackSummary, "Latest material", artifactTitle(latestArtifact));
+  renderKeyValue(trackSummary, "Next", commands.recommended || "No recommended command available");
+}
+
+function renderStandaloneSummary(task) {
+  trackSummary.replaceChildren();
+  if (!task) {
+    trackSummary.append(createEl("p", "note", "No standalone task selected."));
+    return;
+  }
+
+  const artifacts = getTaskArtifacts(task);
+  const latestRun = latestRunForTask(task);
+  const latestArtifact = artifacts[0] || null;
+  const commands = deriveSwitchCommandsForTask(task);
+
+  renderKeyValue(trackSummary, "Task", task.title || task.id);
+  renderKeyValue(trackSummary, "Buddy", buddyLabel(task.buddy));
+  renderKeyValue(trackSummary, "State", task.status || "active");
+  renderKeyValue(trackSummary, "Materials", String(artifacts.length));
+  renderKeyValue(trackSummary, "Latest run", latestRun?.run_id || task.latest_run_id || "none");
   renderKeyValue(trackSummary, "Latest material", artifactTitle(latestArtifact));
   renderKeyValue(trackSummary, "Next", commands.recommended || "No recommended command available");
 }
@@ -533,6 +661,7 @@ function renderTasks(track) {
       createEl("p", "task-summary line-clamp-2", artifactSummary(artifact, "No material has been persisted for this task yet")),
     );
     button.addEventListener("click", () => {
+      selectedStandalone = false;
       selectedTaskId = task.id;
       render();
     });
@@ -547,6 +676,40 @@ function renderTasks(track) {
       createEl("p", "task-summary", "This task id is referenced by the track but no task object was found."),
     );
     taskList.append(missing);
+  });
+}
+
+function renderStandaloneTasks() {
+  taskList.replaceChildren();
+  const tasks = standaloneTasks();
+  setText(selectedTaskCount, String(tasks.length));
+
+  if (tasks.length === 0) {
+    taskList.append(createEl("p", "note", "No standalone tasks found."));
+    return;
+  }
+
+  tasks.forEach((task) => {
+    const artifact = getTaskArtifacts(task)[0] || task.latest_artifact || null;
+    const button = createEl("button", "task-card");
+    button.type = "button";
+    button.classList.toggle("is-active", selectedTaskId === task.id);
+    button.append(
+      createEl("span", "task-eyebrow", `${buddyLabel(task.buddy)} | ${task.status || "active"} | standalone`),
+      createEl("strong", "", task.title || task.id),
+      createEl("code", "task-id", task.id),
+      createEl("span", "task-meta", `Updated: ${task.updated_at || "no timestamp"} | Artifacts: ${taskArtifactCount(task)} | Latest run: ${taskRunLabel(task)}`),
+      createEl("p", "task-summary line-clamp-2", clampText(task.summary || "No task summary", 220)),
+      createEl("span", "task-material", `Latest material: ${artifactTitle(artifact)}`),
+      createEl("p", "task-summary line-clamp-2", artifactSummary(artifact, "No material has been persisted for this task yet")),
+    );
+    button.addEventListener("click", () => {
+      selectedStandalone = true;
+      selectedTrack = null;
+      selectedTaskId = task.id;
+      render();
+    });
+    taskList.append(button);
   });
 }
 
@@ -618,9 +781,8 @@ function renderMaterialHighlights(parent, artifact) {
   appendListSection(parent, "Open Questions", contentLines(content, ["open_questions"]));
 }
 
-function renderTaskMaterials(track) {
+function renderTaskMaterialsForTask(task) {
   taskMaterials.replaceChildren();
-  const task = selectedTaskForTrack(track);
   if (!task) {
     taskMaterials.append(createEl("p", "note", "Select a task to inspect its core materials."));
     return;
@@ -656,6 +818,10 @@ function renderTaskMaterials(track) {
   renderMaterialHighlights(taskMaterials, latestArtifact);
   renderArtifactHistory(taskMaterials, artifacts);
   renderRelatedRuns(taskMaterials, runs);
+}
+
+function renderTaskMaterials(track) {
+  renderTaskMaterialsForTask(selectedTaskForTrack(track));
 }
 
 function renderTrackProgress(track) {
@@ -703,6 +869,27 @@ function renderTrackProgress(track) {
   }
 }
 
+function renderStandaloneProgress(task) {
+  trackProgress.replaceChildren();
+  if (!task) {
+    trackProgress.append(createEl("p", "note", "No standalone task selected."));
+    return;
+  }
+
+  const artifacts = getTaskArtifacts(task);
+  const latestRun = latestRunForTask(task);
+  const latestArtifact = artifacts[0] || null;
+
+  appendListSection(trackProgress, "Latest Action", [latestRun?.execution_summary || latestRun?.demand || task.summary || ""]);
+  appendListSection(trackProgress, "Material Snapshot", [artifactSummary(latestArtifact, "No material has been persisted for this task yet")]);
+  appendListSection(trackProgress, "Visible Limitations", collectKnownLimitations(artifacts));
+  appendListSection(trackProgress, "Data Issues", missingArtifactIds(task).map((artifactId) => `Missing artifact object: ${artifactId}`));
+
+  if (!trackProgress.children.length) {
+    trackProgress.append(createEl("p", "note", "No progress notes available yet."));
+  }
+}
+
 function renderNextCommands(track) {
   switchCommands.replaceChildren();
   if (!track) {
@@ -711,6 +898,27 @@ function renderNextCommands(track) {
   }
 
   const commands = deriveSwitchCommandsForTrack(track);
+  renderLabeledCommand(switchCommands, "Recommended", commands.recommended, true);
+  renderLabeledCommand(switchCommands, "Template", commands.template);
+  if (commands.continueTask && commands.continueTask !== commands.template) {
+    renderLabeledCommand(switchCommands, "Continue current task", commands.continueTask);
+  }
+  if (commands.continueTaskInTrack && commands.continueTaskInTrack !== commands.template) {
+    renderLabeledCommand(switchCommands, "Continue task in track", commands.continueTaskInTrack);
+  }
+  if (commands.handoff && commands.handoff !== commands.recommended) {
+    renderLabeledCommand(switchCommands, "Handoff", commands.handoff);
+  }
+}
+
+function renderStandaloneCommands(task) {
+  switchCommands.replaceChildren();
+  if (!task) {
+    switchCommands.append(createEl("p", "note", "No standalone task selected."));
+    return;
+  }
+
+  const commands = deriveSwitchCommandsForTask(task);
   renderLabeledCommand(switchCommands, "Recommended", commands.recommended, true);
   renderLabeledCommand(switchCommands, "Template", commands.template);
   if (commands.continueTask && commands.continueTask !== commands.template) {
@@ -760,6 +968,50 @@ function renderRunHistory(track) {
     const references = normalizeReferenceSwitches(audit);
     const template = deriveTemplateSwitch(audit, references);
     const recommended = deriveRecommendedSwitch(audit, references, template, track);
+    const header = createEl("div", "run-header");
+    header.append(
+      createEl("strong", "", `${audit.buddy || "unknown"} / ${audit.skill_id || "unknown"}`),
+      createEl("span", "run-time", audit.updated_at || "no timestamp"),
+    );
+    item.append(
+      header,
+      createEl("p", "summary-line line-clamp-2", `Demand: ${clampText(audit.demand || "No demand", 180)}`),
+      createEl("p", "summary-line line-clamp-2", `Result: ${clampText(audit.execution_summary || audit.status || "No summary", 180)}`),
+    );
+    const grid = createEl("div", "receipt-grid");
+    renderKeyValue(grid, "Persisted", audit.status === "ok" ? "ok" : "failed");
+    renderKeyValue(grid, "Task", formatTaskLabel(audit));
+    renderKeyValue(grid, "Artifact", formatArtifactLabel(audit));
+    renderKeyValue(grid, "Run", audit.run_id || "run-unknown");
+    item.append(grid);
+    if (recommended) {
+      const commandList = createEl("div", "command-list compact-command");
+      renderReadOnlyCommand(commandList, "Recommended then", recommended);
+      item.append(commandList);
+    }
+    runAuditList.append(item);
+  });
+}
+
+function renderRunHistoryForTask(task) {
+  runAuditList.replaceChildren();
+  const runs = getTaskRuns(task);
+  setText(runAuditCount, String(runs.length));
+
+  if (!task) {
+    runAuditList.append(createEl("p", "note", "No standalone task selected."));
+    return;
+  }
+  if (runs.length === 0) {
+    runAuditList.append(createEl("p", "note", "No run history for this task."));
+    return;
+  }
+
+  runs.slice(0, 8).forEach((audit) => {
+    const item = createEl("article", "summary-item run-card");
+    const references = normalizeReferenceSwitches(audit);
+    const template = deriveTemplateSwitch(audit, references);
+    const recommended = deriveRecommendedSwitch(audit, references, template, null);
     const header = createEl("div", "run-header");
     header.append(
       createEl("strong", "", `${audit.buddy || "unknown"} / ${audit.skill_id || "unknown"}`),
@@ -841,12 +1093,54 @@ function renderSourceDetails(track) {
   sourceDetails.append(raw);
 }
 
+function renderStandaloneSourceDetails(task) {
+  sourceDetails.replaceChildren();
+  const summary = createEl("summary", "", "Object paths and raw source");
+  sourceDetails.append(summary);
+
+  if (!task) {
+    sourceDetails.append(createEl("p", "note", "No source details available."));
+    return;
+  }
+
+  const selectedArtifacts = getTaskArtifacts(task);
+  const selectedRuns = getTaskRuns(task);
+  const sourceGrid = createEl("div", "source-grid");
+  renderKeyValue(sourceGrid, "Manifest", workspace.manifest_path || "none");
+  renderKeyValue(sourceGrid, "Objects root", workspace.objects_root || "none");
+  renderKeyValue(sourceGrid, "Task", task.object_path || `buddyswitch/objects/tasks/${task.id}.json`);
+  selectedArtifacts.slice(0, 4).forEach((artifact, index) => {
+    renderKeyValue(sourceGrid, `Artifact ${index + 1}`, artifact.object_path || `buddyswitch/objects/artifacts/${artifact.id}.json`);
+  });
+  selectedRuns.slice(0, 4).forEach((run, index) => {
+    renderKeyValue(sourceGrid, `Run ${index + 1}`, run.path || `buddyswitch/content/runs/${run.run_id}.json`);
+  });
+  sourceDetails.append(sourceGrid);
+
+  const cleanup = createEl("section", "material-section");
+  cleanup.append(createEl("h4", "", "Cleanup dry-run commands"));
+  const commandList = createEl("div", "command-list");
+  [
+    `scripts/cleanup_buddyswitch.sh --agent ${task.buddy}`,
+    "scripts/cleanup_buddyswitch.sh --all-agents",
+    "scripts/cleanup_buddyswitch.sh --project app",
+    "scripts/cleanup_buddyswitch.sh --all-storage",
+  ].forEach((command) => renderCommand(commandList, command));
+  cleanup.append(commandList);
+  sourceDetails.append(cleanup);
+
+  const raw = createEl("details", "nested-details");
+  raw.append(createEl("summary", "", "Raw selected task material JSON"));
+  raw.append(createEl("pre", "artifact-path", safeJson(selectedArtifacts[0]?.content || {})));
+  sourceDetails.append(raw);
+}
+
 function renderSelectedTrack() {
-  if (!selectedTrack) {
-    setText(selectedType, "Selected track");
-    setText(topicTitle, "No track");
+  if (!selectedTrack && !selectedStandaloneTask()) {
+    setText(selectedType, "Selected work item");
+    setText(topicTitle, "No item");
     setText(topicSlug, "-");
-    trackSummary.replaceChildren(createEl("p", "note", "No track data available."));
+    trackSummary.replaceChildren(createEl("p", "note", "No track or standalone task data available."));
     taskList.replaceChildren(createEl("p", "note", "No task data available."));
     taskMaterials.replaceChildren(createEl("p", "note", "No task selected."));
     trackProgress.replaceChildren(createEl("p", "note", "No progress notes available."));
@@ -856,7 +1150,25 @@ function renderSelectedTrack() {
     return;
   }
 
+  if (!selectedTrack) {
+    const task = selectedStandaloneTask();
+    selectedStandalone = Boolean(task);
+    selectedTaskId = task?.id || null;
+    setText(selectedType, `Standalone Task (${task?.status || "active"})`);
+    setText(topicTitle, task?.title || task?.id || "No item");
+    setText(topicSlug, task?.id || "-");
+    renderStandaloneSummary(task);
+    renderStandaloneTasks();
+    renderTaskMaterialsForTask(task);
+    renderStandaloneProgress(task);
+    renderStandaloneCommands(task);
+    renderRunHistoryForTask(task);
+    renderStandaloneSourceDetails(task);
+    return;
+  }
+
   const selectedTask = selectedTaskForTrack(selectedTrack);
+  selectedStandalone = false;
   selectedTaskId = selectedTask?.id || null;
   setText(selectedType, `Track (${selectedTrack.status || "active"})`);
   setText(topicTitle, selectedTrack.title || selectedTrack.id);
@@ -872,9 +1184,10 @@ function renderSelectedTrack() {
 
 function renderWorkspaceOverview() {
   setText(generatedAt, workspace.generated_at || "not generated");
+  const looseTasks = standaloneTasks().length;
   setText(
     workspaceCounts,
-    `Tracks ${workspace.tracks.length} | Tasks ${workspace.tasks.length} | Artifacts ${workspace.artifacts.length} | Runs ${workspace.run_audits.length}`,
+    `Tracks ${workspace.tracks.length} | Standalone ${looseTasks} | Tasks ${workspace.tasks.length} | Artifacts ${workspace.artifacts.length} | Runs ${workspace.run_audits.length}`,
   );
   setText(projectCode, projectCodePath);
 }

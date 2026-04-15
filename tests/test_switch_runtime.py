@@ -485,6 +485,32 @@ class WorkspaceDataTests(unittest.TestCase):
         self.assertEqual(view["current_artifacts"]["prd"]["id"], "art-prd")
         self.assertNotIn("latest_artifact", view)
 
+    def test_build_workspace_data_exposes_standalone_tasks(self) -> None:
+        track = create_track("track-workspace-linked", "Linked Track")
+        tracked_task = create_task(
+            "task-dev-workspace-linked",
+            "Tracked Task",
+            buddy="dev",
+            track_id=track["id"],
+            initial_run_id="run-seed-workspace-linked",
+        )
+        standalone_task = create_task(
+            "task-market-standalone-workspace",
+            "Standalone Market Task",
+            buddy="market",
+            initial_run_id="run-seed-standalone-workspace",
+        )
+        self._remember(f"buddyswitch/objects/tracks/{track['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{tracked_task['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{standalone_task['id']}.json")
+
+        payload = workspace_data.build_workspace_data()
+
+        self.assertIn("standalone_tasks", payload)
+        standalone_ids = [task["id"] for task in payload["standalone_tasks"]]
+        self.assertIn("task-market-standalone-workspace", standalone_ids)
+        self.assertNotIn("task-dev-workspace-linked", standalone_ids)
+
     def test_scan_run_audits_includes_reference_switches(self) -> None:
         run_id = f"run-workspace-audit-{uuid.uuid4().hex[:8]}"
         run_path = ROOT / f"buddyswitch/content/runs/{run_id}.json"

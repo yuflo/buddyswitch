@@ -25,21 +25,21 @@
     </header>
 
     <section class="layout" aria-label="Workspace context">
-      <aside class="sidebar" aria-label="Workspace tracks">
+      <aside class="sidebar" aria-label="Workspace work items">
         <div class="sidebar-section">
           <div class="section-head">
-            <h2>Tracks</h2>
+            <h2>Work Items</h2>
             <span id="trackCount">0</span>
           </div>
-          <p class="note">Project lines with task and material summaries.</p>
+          <p class="note">Tracks and standalone tasks from BuddySwitch objects.</p>
           <div id="trackList" class="topic-list"></div>
         </div>
       </aside>
 
-      <section class="detail" aria-label="Selected track">
+      <section class="detail" aria-label="Selected work item">
         <div class="topic-head">
           <div>
-            <p class="eyebrow" id="selectedType">Selected track</p>
+            <p class="eyebrow" id="selectedType">Selected work item</p>
             <h2 id="topicTitle">No item</h2>
           </div>
           <code id="topicSlug">-</code>
@@ -47,7 +47,7 @@
 
         <section class="panel">
           <div class="section-head">
-            <h3>Track Summary</h3>
+            <h3>Selection Summary</h3>
           </div>
           <div id="trackSummary" class="summary-grid"></div>
         </section>
@@ -57,7 +57,7 @@
             <h3>Tasks</h3>
             <span id="selectedTaskCount">0</span>
           </div>
-          <p class="note">Tasks attached to this track, grouped by the current project flow.</p>
+          <p class="note">Tasks for the selected context. Standalone tasks also appear here.</p>
           <div id="taskList" class="task-list"></div>
         </section>
 
@@ -95,7 +95,7 @@
           <h2>Run History</h2>
           <span id="runAuditCount">0</span>
         </div>
-        <p class="note">Recent runs for the selected track. Global audits stay in source details.</p>
+        <p class="note">Recent runs for the selected track or standalone task.</p>
         <div id="runAuditList" class="summary-list"></div>
       </aside>
     </section>

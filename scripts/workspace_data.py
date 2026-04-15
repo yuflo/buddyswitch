@@ -174,6 +174,18 @@ def build_workspace_data() -> dict[str, Any]:
     tasks = [build_task_view(task, artifact_map) for task in list_tasks()]
     task_map = {task["id"]: task for task in tasks}
     tracks = build_track_views(list_tracks(), task_map, artifact_map)
+    tracked_task_ids = {
+        task_id
+        for track in tracks
+        for task_id in track.get("task_ids", [])
+        if isinstance(task_id, str) and task_id
+    }
+    standalone_tasks = [
+        task
+        for task in tasks
+        if not task.get("track_id") and task["id"] not in tracked_task_ids
+    ]
+    standalone_tasks.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
 
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -184,6 +196,7 @@ def build_workspace_data() -> dict[str, Any]:
             for buddy in manifest.get("buddies", [])
         ],
         "tracks": tracks,
+        "standalone_tasks": standalone_tasks,
         "tasks": tasks,
         "artifacts": artifacts,
         "run_audits": scan_run_audits(),
