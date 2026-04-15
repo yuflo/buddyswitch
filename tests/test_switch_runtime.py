@@ -487,6 +487,92 @@ class ResolveRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["run_instructions"]["selected_inputs"], [])
         self.assertEqual(payload["run_instructions"]["artifact_read_commands"], [])
 
+    def test_resolve_design_selects_market_context_slots_from_track(self) -> None:
+        track = create_track("track-design-first-touch", "Track Design First Touch")
+        design_task = create_task(
+            "task-design-first-touch",
+            "Design First Touch",
+            buddy="design",
+            track_id=track["id"],
+            initial_run_id="run-seed-design-first-touch",
+        )
+        pm_task = create_task(
+            "task-pm-first-touch",
+            "PM First Touch",
+            buddy="pm",
+            track_id=track["id"],
+            initial_run_id="run-seed-pm-first-touch",
+        )
+        market_task = create_task(
+            "task-market-first-touch",
+            "Market First Touch",
+            buddy="market",
+            track_id=track["id"],
+            initial_run_id="run-seed-market-first-touch",
+        )
+        prd_artifact = create_artifact(
+            artifact_id="art-task-pm-first-touch-prd-r1",
+            title="PRD First Touch",
+            buddy="pm",
+            skill_id="write-prd",
+            slot="prd",
+            task_id=pm_task["id"],
+            source_run_id="run-pm-first-touch-prd-r1",
+            summary="Current PRD for first-touch work.",
+            content={"problem": "Define onboarding and landing flow."},
+        )
+        positioning_artifact = create_artifact(
+            artifact_id="art-task-market-first-touch-positioning-brief-r1",
+            title="Positioning Brief First Touch",
+            buddy="market",
+            skill_id="positioning-copy",
+            slot="positioning-brief",
+            task_id=market_task["id"],
+            source_run_id="run-market-first-touch-positioning-r1",
+            summary="Current positioning brief for first-touch work.",
+            content={"positioning_statement": "Confidence before code."},
+        )
+        launch_artifact = create_artifact(
+            artifact_id="art-task-market-first-touch-launch-prep-r1",
+            title="Launch Prep First Touch",
+            buddy="market",
+            skill_id="launch-prep",
+            slot="launch-prep",
+            task_id=market_task["id"],
+            source_run_id="run-market-first-touch-launch-r1",
+            summary="Current launch prep for first-touch work.",
+            content={"launch_goal": {"primary_goal": "Collect qualified feedback", "timebox": "10 days"}},
+        )
+        self._remember(f"buddyswitch/objects/tracks/{track['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{design_task['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{pm_task['id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{market_task['id']}.json")
+        self._remember(f"buddyswitch/objects/artifacts/{prd_artifact['id']}.json")
+        self._remember(f"buddyswitch/objects/artifacts/{positioning_artifact['id']}.json")
+        self._remember(f"buddyswitch/objects/artifacts/{launch_artifact['id']}.json")
+
+        payload = switch_runtime.resolve_switch(
+            "switch design(task-design-first-touch) -> track-design-first-touch: continue IA spec for landing and onboarding"
+        )
+
+        self.assertEqual(payload["artifact_selection"]["selection_mode"], "slot-current-v2")
+        self.assertEqual(
+            [(item["slot"], item["artifact_id"]) for item in payload["artifact_selection"]["selected_inputs"]],
+            [
+                ("prd", "art-task-pm-first-touch-prd-r1"),
+                ("positioning-brief", "art-task-market-first-touch-positioning-brief-r1"),
+                ("launch-prep", "art-task-market-first-touch-launch-prep-r1"),
+            ],
+        )
+        self.assertEqual(
+            [(item["slot"], item["artifact_id"]) for item in payload["run_instructions"]["selected_inputs"]],
+            [
+                ("prd", "art-task-pm-first-touch-prd-r1"),
+                ("positioning-brief", "art-task-market-first-touch-positioning-brief-r1"),
+                ("launch-prep", "art-task-market-first-touch-launch-prep-r1"),
+            ],
+        )
+
 
 class WorkspaceDataTests(unittest.TestCase):
     def setUp(self) -> None:

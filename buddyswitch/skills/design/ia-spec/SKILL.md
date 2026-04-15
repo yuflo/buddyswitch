@@ -15,7 +15,7 @@
 
 ## Inputs
 - PRD or equivalent requirement artifact.
-- Optional `positioning-brief` and `launch-prep` artifacts when first-touch context matters.
+- `positioning-brief` and `launch-prep` are explicit upstream inputs for this skill. Treat them as part of the expected design handoff, especially for landing, onboarding, and other first-touch work.
 - Platform and component constraints.
 - Existing patterns, references, or screenshots.
 - Optional track context or summary hint.
@@ -27,7 +27,7 @@
 
 ## Steps
 
-1. Build IA map from the PRD and any relevant positioning or launch context.
+1. Build IA map from the PRD plus the upstream positioning and launch context this skill consumes.
 2. Define primary user flows end to end.
 3. Specify key screens and their responsibilities.
 4. Cover key states and transitions.
@@ -36,7 +36,7 @@
 
 ## Verification
 - Confirm the design output follows the approved product scope instead of redefining it.
-- When the task is about landing, onboarding, or another first-touch experience, use `positioning-brief` and `launch-prep` inputs to shape messaging order, context-setting, and feedback hooks.
+- Confirm the IA incorporates the explicit upstream `positioning-brief` and `launch-prep` inputs when they are present in the task handoff, especially for landing, onboarding, or other first-touch work.
 - Confirm key states and transitions are covered for the main flows.
 - Confirm unresolved design risks are called out explicitly.
 

@@ -4,11 +4,18 @@
 from __future__ import annotations
 
 import json
+import sys
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+import env_manifest  # noqa: E402
+
 CANONICAL_PATHS = (
     ROOT / "README.md",
     ROOT / "AGENTS.md",
@@ -57,36 +64,6 @@ NEW_MARKET_TEMPLATE_SCHEMAS = {
     ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "assets" / "channel-plan-template.md": ROOT / "framework" / "schemas" / "market" / "channel-discovery.json",
     ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "assets" / "launch-prep-template.md": ROOT / "framework" / "schemas" / "market" / "launch-prep.json",
 }
-
-
-def _read_string_array_field(path: Path, field_name: str) -> list[str]:
-    lines = path.read_text(encoding="utf-8").splitlines()
-    collecting = False
-    values: list[str] = []
-
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not collecting:
-            if line.startswith(f"{field_name} = ["):
-                collecting = True
-                suffix = line.split("[", 1)[1]
-                if "]" in suffix:
-                    inner = suffix.rsplit("]", 1)[0]
-                    for item in inner.split(","):
-                        cleaned = item.strip().strip('"')
-                        if cleaned:
-                            values.append(cleaned)
-                    return values
-                continue
-            continue
-
-        if line.startswith("]"):
-            return values
-        cleaned = line.rstrip(",").strip().strip('"')
-        if cleaned:
-            values.append(cleaned)
-
-    raise AssertionError(f"missing closed array field '{field_name}' in {path.relative_to(ROOT)}")
 
 
 def _markdown_section(text: str, heading: str) -> str:
@@ -353,8 +330,23 @@ class RepoConsistencyTests(unittest.TestCase):
 
         for path, expected_slots in cases.items():
             with self.subTest(skill_toml=str(path.relative_to(ROOT))):
-                self.assertEqual(_read_string_array_field(path, "input_slots"), expected_slots)
-                self.assertEqual(_read_string_array_field(path, "consumes"), expected_slots)
+                parsed = env_manifest._load_toml(path)  # type: ignore[attr-defined]
+                self.assertEqual(parsed["input_slots"], expected_slots)
+                self.assertEqual(parsed["consumes"], expected_slots)
+
+    def test_design_docs_treat_market_context_as_explicit_upstream_inputs(self) -> None:
+        targets = (
+            ROOT / "buddyswitch" / "skills" / "design" / "ia-spec" / "SKILL.md",
+            ROOT / "framework" / "contracts" / "design.md",
+        )
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in targets)
+
+        self.assertNotIn("Optional `positioning-brief` and `launch-prep`", combined)
+        self.assertIn("explicit upstream", combined.lower())
+        self.assertIn("positioning-brief", combined)
+        self.assertIn("launch-prep", combined)
+        self.assertIn("landing", combined.lower())
+        self.assertIn("onboarding", combined.lower())
 
     def test_market_schemas_share_canonical_evidence_and_traceability_fields(self) -> None:
         for path in MARKET_SCHEMA_PATHS:
