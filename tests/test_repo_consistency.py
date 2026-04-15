@@ -21,6 +21,10 @@ TEXT_SUFFIXES = {".md", ".toml", ".py", ".json"}
 ARTIFACT_SKILL_DOCS = (
     ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "SKILL.md",
+    ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery" / "SKILL.md",
+    ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy" / "SKILL.md",
+    ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "SKILL.md",
+    ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "design" / "ia-spec" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "SKILL.md",
@@ -29,6 +33,10 @@ ARTIFACT_SKILL_DOCS = (
 SKILL_TOMLS = (
     ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "skill.toml",
+    ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery" / "skill.toml",
+    ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy" / "skill.toml",
+    ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "skill.toml",
+    ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "design" / "ia-spec" / "skill.toml",
@@ -170,11 +178,13 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("durable output paths", shared_text, msg="missing durable output path section in shared runtime rules")
 
         for path in ARTIFACT_SKILL_DOCS:
-            text = path.read_text(encoding="utf-8").lower()
-            self.assertIn("framework/docs/skill-runtime-shared-rules.md", text, msg=f"missing shared runtime rules reference in {path.relative_to(ROOT)}")
-            self.assertNotIn("## execution summary rule", text, msg=f"execution summary rule should be shared in {path.relative_to(ROOT)}")
-            self.assertNotIn("## track/object handling", text, msg=f"track/object handling should be shared in {path.relative_to(ROOT)}")
-            self.assertNotIn("## output path", text, msg=f"output path should be shared in {path.relative_to(ROOT)}")
+            with self.subTest(skill_doc=str(path.relative_to(ROOT))):
+                self.assertTrue(path.exists(), msg=f"missing skill doc in {path.relative_to(ROOT)}")
+                text = path.read_text(encoding="utf-8").lower()
+                self.assertIn("framework/docs/skill-runtime-shared-rules.md", text, msg=f"missing shared runtime rules reference in {path.relative_to(ROOT)}")
+                self.assertNotIn("## execution summary rule", text, msg=f"execution summary rule should be shared in {path.relative_to(ROOT)}")
+                self.assertNotIn("## track/object handling", text, msg=f"track/object handling should be shared in {path.relative_to(ROOT)}")
+                self.assertNotIn("## output path", text, msg=f"output path should be shared in {path.relative_to(ROOT)}")
 
     def test_skill_toml_descriptions_use_activation_style(self) -> None:
         disallowed_summary_tokens = (
@@ -186,41 +196,45 @@ class RepoConsistencyTests(unittest.TestCase):
             "artifact.summary",
         )
         for path in SKILL_TOMLS:
-            text = path.read_text(encoding="utf-8").splitlines()
-            description_lines = [line for line in text if line.startswith("description = ")]
-            self.assertEqual(1, len(description_lines), msg=f"expected one description in {path.relative_to(ROOT)}")
-            self.assertTrue(
-                description_lines[0].startswith('description = "Use when '),
-                msg=f"description must use activation style in {path.relative_to(ROOT)}",
-            )
-            lowered = description_lines[0].lower()
-            for token in disallowed_summary_tokens:
-                self.assertNotIn(
-                    token,
-                    lowered,
-                    msg=f"description should not summarize workflow details in {path.relative_to(ROOT)}",
+            with self.subTest(skill_toml=str(path.relative_to(ROOT))):
+                self.assertTrue(path.exists(), msg=f"missing skill.toml in {path.relative_to(ROOT)}")
+                text = path.read_text(encoding="utf-8").splitlines()
+                description_lines = [line for line in text if line.startswith("description = ")]
+                self.assertEqual(1, len(description_lines), msg=f"expected one description in {path.relative_to(ROOT)}")
+                self.assertTrue(
+                    description_lines[0].startswith('description = "Use when '),
+                    msg=f"description must use activation style in {path.relative_to(ROOT)}",
                 )
+                lowered = description_lines[0].lower()
+                for token in disallowed_summary_tokens:
+                    self.assertNotIn(
+                        token,
+                        lowered,
+                        msg=f"description should not summarize workflow details in {path.relative_to(ROOT)}",
+                    )
 
     def test_skill_toml_output_schemas_exist_and_are_parseable_json(self) -> None:
         for path in SKILL_TOMLS:
-            schema_path = None
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if line.startswith("output_schema = "):
-                    schema_path = line.split("=", 1)[1].strip().strip('"')
-                    break
-            self.assertIsNotNone(schema_path, msg=f"missing output_schema in {path.relative_to(ROOT)}")
-            resolved_schema = ROOT / schema_path
-            self.assertTrue(
-                resolved_schema.exists(),
-                msg=f"missing output schema for {path.relative_to(ROOT)}: {schema_path}",
-            )
-            with resolved_schema.open("r", encoding="utf-8") as handle:
-                parsed_schema = json.load(handle)
-            self.assertIsInstance(
-                parsed_schema,
-                dict,
-                msg=f"output schema must be a JSON object in {resolved_schema.relative_to(ROOT)}",
-            )
+            with self.subTest(skill_toml=str(path.relative_to(ROOT))):
+                self.assertTrue(path.exists(), msg=f"missing skill.toml in {path.relative_to(ROOT)}")
+                schema_path = None
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("output_schema = "):
+                        schema_path = line.split("=", 1)[1].strip().strip('"')
+                        break
+                self.assertIsNotNone(schema_path, msg=f"missing output_schema in {path.relative_to(ROOT)}")
+                resolved_schema = ROOT / schema_path
+                self.assertTrue(
+                    resolved_schema.exists(),
+                    msg=f"missing output schema for {path.relative_to(ROOT)}: {schema_path}",
+                )
+                with resolved_schema.open("r", encoding="utf-8") as handle:
+                    parsed_schema = json.load(handle)
+                self.assertIsInstance(
+                    parsed_schema,
+                    dict,
+                    msg=f"output schema must be a JSON object in {resolved_schema.relative_to(ROOT)}",
+                )
 
     def test_every_skill_package_has_metadata_and_instruction_files(self) -> None:
         expected_packages = (
