@@ -81,8 +81,17 @@ class RouterTests(unittest.TestCase):
         )
         self.assertEqual(payload["profile"]["id"], "market")
         self.assertEqual(payload["profile"]["authority"]["permission_scope"], "manual_debug_apis")
-        self.assertIn("research-scan", payload["profile"]["authority"]["routing_skills"])
-        self.assertIn("pmf-recon", payload["profile"]["authority"]["routing_skills"])
+        self.assertEqual(
+            payload["profile"]["authority"]["routing_skills"],
+            [
+                "research-scan",
+                "pmf-recon",
+                "customer-discovery",
+                "positioning-copy",
+                "channel-discovery",
+                "launch-prep",
+            ],
+        )
         self.assertTrue(payload["profile"]["skills"])
 
 

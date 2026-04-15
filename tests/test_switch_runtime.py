@@ -114,18 +114,38 @@ class ResolveRuntimeTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["invocation"]["buddy"], "market")
-        self.assertEqual(payload["eligible_skills"], ["research-scan", "pmf-recon"])
+        self.assertEqual(
+            payload["eligible_skills"],
+            [
+                "research-scan",
+                "pmf-recon",
+                "customer-discovery",
+                "positioning-copy",
+                "channel-discovery",
+                "launch-prep",
+            ],
+        )
         self.assertIsNone(payload["implicit_skill_id"])
 
         ids = [card["id"] for card in payload["skill_cards"]]
-        self.assertEqual(ids, ["research-scan", "pmf-recon"])
+        self.assertEqual(
+            ids,
+            [
+                "research-scan",
+                "pmf-recon",
+                "customer-discovery",
+                "positioning-copy",
+                "channel-discovery",
+                "launch-prep",
+            ],
+        )
 
         pmf_card = next(card for card in payload["skill_cards"] if card["id"] == "pmf-recon")
         self.assertEqual(
             pmf_card["instruction_path"],
             "buddyswitch/skills/market/pmf-recon/SKILL.md",
         )
-        self.assertEqual(pmf_card["output_slot"], "research")
+        self.assertEqual(pmf_card["output_slot"], "pmf-report")
         self.assertEqual(
             pmf_card["input_slots"],
             ["research-question", "links", "prior-artifacts"],
