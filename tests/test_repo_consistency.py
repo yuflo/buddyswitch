@@ -237,8 +237,9 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "buddyswitch" / "skills" / "test" / "smoke-test",
         )
         for package_root in expected_packages:
-            self.assertTrue((package_root / "skill.toml").exists(), msg=f"missing skill.toml in {package_root}")
-            self.assertTrue((package_root / "SKILL.md").exists(), msg=f"missing SKILL.md in {package_root}")
+            with self.subTest(package=str(package_root.relative_to(ROOT))):
+                self.assertTrue((package_root / "skill.toml").exists(), msg=f"missing skill.toml in {package_root}")
+                self.assertTrue((package_root / "SKILL.md").exists(), msg=f"missing SKILL.md in {package_root}")
 
     def test_skill_instructions_are_markdown_only_without_frontmatter_metadata(self) -> None:
         expected_packages = (
@@ -255,11 +256,13 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "buddyswitch" / "skills" / "test" / "smoke-test",
         )
         for package_root in expected_packages:
-            skill_doc = package_root / "SKILL.md"
-            lines = skill_doc.read_text(encoding="utf-8").splitlines()
-            self.assertTrue(lines, msg=f"empty SKILL.md in {package_root}")
-            self.assertNotEqual(lines[0].strip(), "---", msg=f"frontmatter not allowed in {skill_doc.relative_to(ROOT)}")
-            self.assertTrue(lines[0].startswith("# "), msg=f"SKILL.md must start with heading in {skill_doc.relative_to(ROOT)}")
+            with self.subTest(package=str(package_root.relative_to(ROOT))):
+                skill_doc = package_root / "SKILL.md"
+                self.assertTrue(skill_doc.exists(), msg=f"missing SKILL.md in {package_root}")
+                lines = skill_doc.read_text(encoding="utf-8").splitlines()
+                self.assertTrue(lines, msg=f"empty SKILL.md in {package_root}")
+                self.assertNotEqual(lines[0].strip(), "---", msg=f"frontmatter not allowed in {skill_doc.relative_to(ROOT)}")
+                self.assertTrue(lines[0].startswith("# "), msg=f"SKILL.md must start with heading in {skill_doc.relative_to(ROOT)}")
 
     def test_template_references_are_materialized_in_assets(self) -> None:
         expected_assets = (

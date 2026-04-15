@@ -290,25 +290,25 @@ class ArtifactSelectionTests(unittest.TestCase):
         self.assertEqual(selected["selected_inputs"], [])
 
     def test_selection_supports_market_v1_slots_for_pm(self) -> None:
-        required_slots = [
-            "market-scan",
-            "pmf-report",
-            "customer-discovery",
-            "positioning-brief",
-            "channel-plan",
-            "launch-prep",
+        required_slot_artifacts = [
+            ("market-scan", "art-task-market-v1-market-scan-r1"),
+            ("pmf-report", "art-task-market-v1-pmf-report-r1"),
+            ("customer-discovery", "art-task-market-v1-customer-discovery-r1"),
+            ("positioning-brief", "art-task-market-v1-positioning-brief-r1"),
+            ("channel-plan", "art-task-market-v1-channel-plan-r1"),
+            ("launch-prep", "art-task-market-v1-launch-prep-r1"),
         ]
         selected = artifact_selection.select_artifacts_for_run(
             current_buddy="pm",
             demand="Define market buddy v1 scope",
-            required_slots=required_slots,
+            required_slots=[slot for slot, _ in required_slot_artifacts],
             track_artifact_index=self.market_track_artifact_index,
             current_task_id="task-pm-market-v1",
         )
 
         self.assertEqual(
-            [item["slot"] for item in selected["selected_inputs"]],
-            required_slots,
+            [(item["slot"], item["artifact_id"]) for item in selected["selected_inputs"]],
+            required_slot_artifacts,
         )
 
 
