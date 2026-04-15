@@ -437,22 +437,19 @@ def _build_selection_contexts_by_skill(
     skills: list[dict[str, Any]],
     task_id: str,
     track_artifact_index: dict[str, Any] | None,
-) -> tuple[dict[str, dict[str, Any] | None], dict[str, dict[str, Any]], list[str]]:
-    artifact_selection_by_skill: dict[str, dict[str, Any] | None] = {}
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    artifact_selection_by_skill: dict[str, dict[str, Any]] = {}
     run_instructions_by_skill: dict[str, dict[str, Any]] = {}
-    slot_consuming_skill_ids: list[str] = []
 
     for skill in skills:
         required_slots = _skill_required_slots(skill)
-        if not required_slots:
-            continue
         skill_id = skill["id"]
-        slot_consuming_skill_ids.append(skill_id)
-        selection = _build_artifact_selection_context(
+        selection = select_artifacts_for_run(
+            current_buddy="",
             demand=demand,
             required_slots=required_slots,
-            task_id=task_id,
             track_artifact_index=track_artifact_index,
+            current_task_id=task_id,
         )
         artifact_selection_by_skill[skill_id] = selection
         run_instructions_by_skill[skill_id] = _build_run_instructions(
@@ -461,7 +458,7 @@ def _build_selection_contexts_by_skill(
             selected_skill_id=skill_id,
         )
 
-    return artifact_selection_by_skill, run_instructions_by_skill, slot_consuming_skill_ids
+    return artifact_selection_by_skill, run_instructions_by_skill
 
 
 def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
@@ -530,6 +527,7 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
         raise ValueError(f"No eligible skills remain for buddy '{buddy_id}'.")
 
     implicit_skill_id = eligible_skill_ids[0] if len(eligible_skill_ids) == 1 else None
+    implicit_skill = next((skill for skill in eligible_skills if skill["id"] == implicit_skill_id), None)
     normalized_text = parsed.get("normalized_text")
     switch_payload = {
         "buddy": buddy_id,
@@ -542,24 +540,24 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
 
     track_context = _build_track_context(effective_track_id)
     track_artifact_index = build_track_artifact_index(effective_track_id)
-    artifact_selection_by_skill, run_instructions_by_skill, slot_consuming_skill_ids = _build_selection_contexts_by_skill(
+    artifact_selection_by_skill, run_instructions_by_skill = _build_selection_contexts_by_skill(
         demand=demand,
         skills=eligible_skills,
         task_id=resolved_task_id,
         track_artifact_index=track_artifact_index,
     )
-
-    artifact_selection_skill_id: str | None = None
-    if implicit_skill_id and implicit_skill_id in artifact_selection_by_skill:
-        artifact_selection_skill_id = implicit_skill_id
-    elif not implicit_skill_id and len(slot_consuming_skill_ids) == 1:
-        artifact_selection_skill_id = slot_consuming_skill_ids[0]
-
-    artifact_selection = (
-        artifact_selection_by_skill.get(artifact_selection_skill_id)
-        if artifact_selection_skill_id is not None
-        else None
+    artifact_selection = _build_artifact_selection_context(
+        demand=demand,
+        required_slots=(
+            _skill_required_slots(implicit_skill)
+            if implicit_skill
+            else []
+        ),
+        task_id=resolved_task_id,
+        track_artifact_index=track_artifact_index,
     )
+    if implicit_skill is None:
+        artifact_selection = None
 
     return {
         "ok": True,
@@ -587,7 +585,6 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
         "run_instructions": _build_run_instructions(
             implicit_skill_id,
             artifact_selection,
-            selected_skill_id=artifact_selection_skill_id if implicit_skill_id is None else None,
         ),
         "run_instructions_by_skill": run_instructions_by_skill,
     }

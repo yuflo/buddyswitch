@@ -670,24 +670,23 @@ class ResolveRuntimeTests(unittest.TestCase):
 
         self.assertIsNone(payload["implicit_skill_id"])
         self.assertEqual(payload["eligible_skills"], ["write-prd", "track-manager"])
+        self.assertIsNone(payload["artifact_selection"])
+        self.assertEqual(payload["run_instructions"]["selected_inputs"], [])
+        self.assertEqual(payload["run_instructions"]["artifact_read_commands"], [])
+        self.assertEqual(
+            payload["run_instructions"]["next_actions"][0],
+            "Choose one skill_id from eligible_skills.",
+        )
         self.assertEqual(
             sorted(payload["artifact_selection_by_skill"].keys()),
-            ["write-prd"],
+            ["track-manager", "write-prd"],
         )
         self.assertEqual(
             sorted(payload["run_instructions_by_skill"].keys()),
-            ["write-prd"],
-        )
-        self.assertEqual(
-            [(item["slot"], item["artifact_id"]) for item in payload["artifact_selection"]["selected_inputs"]],
-            expected_inputs,
+            ["track-manager", "write-prd"],
         )
         self.assertEqual(
             [(item["slot"], item["artifact_id"]) for item in payload["artifact_selection_by_skill"]["write-prd"]["selected_inputs"]],
-            expected_inputs,
-        )
-        self.assertEqual(
-            [(item["slot"], item["artifact_id"]) for item in payload["run_instructions"]["selected_inputs"]],
             expected_inputs,
         )
         self.assertEqual(
@@ -695,8 +694,31 @@ class ResolveRuntimeTests(unittest.TestCase):
             expected_inputs,
         )
         self.assertEqual(
-            payload["run_instructions"]["artifact_read_commands"],
+            payload["artifact_selection_by_skill"]["track-manager"]["selected_inputs"],
+            [],
+        )
+        self.assertEqual(
+            payload["run_instructions_by_skill"]["track-manager"]["selected_inputs"],
+            [],
+        )
+        self.assertEqual(
+            payload["run_instructions_by_skill"]["track-manager"]["artifact_read_commands"],
+            [],
+        )
+        self.assertEqual(
+            payload["artifact_selection_by_skill"]["write-prd"]["selection_mode"],
+            payload["artifact_selection_by_skill"]["track-manager"]["selection_mode"],
+        )
+        self.assertEqual(
             payload["run_instructions_by_skill"]["write-prd"]["artifact_read_commands"],
+            [
+                "python3 scripts/env_artifacts.py get art-task-market-pm-handoff-market-scan-r1",
+                "python3 scripts/env_artifacts.py get art-task-market-pm-handoff-pmf-report-r1",
+                "python3 scripts/env_artifacts.py get art-task-market-pm-handoff-customer-discovery-r1",
+                "python3 scripts/env_artifacts.py get art-task-market-pm-handoff-positioning-brief-r1",
+                "python3 scripts/env_artifacts.py get art-task-market-pm-handoff-channel-plan-r1",
+                "python3 scripts/env_artifacts.py get art-task-market-pm-handoff-launch-prep-r1",
+            ],
         )
 
     def test_resolve_design_prefers_coherent_market_bundle_across_tasks(self) -> None:
