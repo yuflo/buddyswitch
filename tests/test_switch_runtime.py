@@ -176,6 +176,35 @@ class ResolveRuntimeTests(unittest.TestCase):
                 ["research-question", "links", "prior-artifacts"],
             )
 
+    def test_pm_and_design_skill_cards_use_explicit_market_inputs(self) -> None:
+        pm_payload = switch_runtime.resolve_switch(
+            "switch pm: Draft the PRD for a validated market opportunity"
+        )
+        design_payload = switch_runtime.resolve_switch(
+            "switch design: Create the IA spec for a first-touch onboarding flow"
+        )
+
+        pm_card = pm_payload["skill_cards"][0]
+        design_card = design_payload["skill_cards"][0]
+
+        self.assertEqual(
+            pm_card["input_slots"],
+            [
+                "market-scan",
+                "pmf-report",
+                "customer-discovery",
+                "positioning-brief",
+                "channel-plan",
+                "launch-prep",
+                "requirements",
+                "track",
+            ],
+        )
+        self.assertEqual(
+            design_card["input_slots"],
+            ["prd", "positioning-brief", "launch-prep", "requirements", "track"],
+        )
+
     def test_skill_card_uses_package_metadata_for_description_and_objects(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             package_root = Path(temp_dir) / "demo-skill"
@@ -733,6 +762,251 @@ class PersistRuntimeTests(unittest.TestCase):
             },
         }
 
+    def _customer_discovery_result(self) -> dict[str, object]:
+        return {
+            "execution_summary": "Prepared a customer discovery brief from public market evidence.",
+            "working_notes": ["Kept the interview scope narrow and evidence-backed."],
+            "deliverables_or_changed_files": [],
+            "artifact_content": {
+                "research_question": "Which indie developers should be prioritized for early interviews?",
+                "target_segments": [
+                    {
+                        "segment": "Indie developers validating new SaaS ideas",
+                        "pain_context": "They lack confidence in what to validate before building.",
+                        "why_this_segment": "They can act quickly on structured interview plans.",
+                    }
+                ],
+                "interview_goals": [
+                    "Validate the most urgent demand-validation pain",
+                    "Learn how developers currently gather customer signals",
+                ],
+                "recruiting_criteria": {
+                    "must_have": ["Recently evaluated or launched a new product idea"],
+                    "nice_to_have": ["Shares validation lessons in public communities"],
+                    "exclude_if": ["Has no recent product-validation experience"],
+                },
+                "interview_guide": [
+                    {
+                        "section": "Current workflow",
+                        "goal": "Understand how validation happens today.",
+                        "prompts": ["Walk me through the last time you validated a product idea."],
+                    }
+                ],
+                "hypotheses_to_test": ["Developers default to ad-hoc validation because structured options feel too heavy."],
+                "evidence": [
+                    {
+                        "source_id": "src-disc-1",
+                        "url": "https://example.com/discovery-source",
+                        "source_type": "forum-thread",
+                        "accessed_at": "2026-04-15T10:00:00+08:00",
+                        "claim_excerpt": "I keep guessing what users want because I do not have a repeatable discovery process.",
+                    }
+                ],
+                "source_traceability": [
+                    {
+                        "conclusion": "Interview prompts should focus on current validation habits before solution reactions.",
+                        "source_ids": ["src-disc-1"],
+                    }
+                ],
+                "patterns_and_insights": ["Discovery pain is strongest around repeatability and prioritization."],
+                "risks_and_unknowns": ["Recruiting may skew toward public builders rather than quieter but similar buyers."],
+                "recommended_next_step": {
+                    "action": "Recruit five interviews with recent indie launches.",
+                    "rationale": "This is enough to test whether the workflow pain is urgent and repeated.",
+                },
+                "conclusion": "The next customer discovery round should center on repeatable validation habits and switching triggers.",
+            },
+        }
+
+    def _positioning_copy_result(self) -> dict[str, object]:
+        return {
+            "execution_summary": "Converted market evidence into a positioning brief for first-touch messaging.",
+            "working_notes": ["Kept the message house tied to observed pains and alternatives."],
+            "deliverables_or_changed_files": [],
+            "artifact_content": {
+                "research_question": "What positioning should an early demand-validation tool use for indie developers?",
+                "target_audience": {
+                    "primary": "Indie developers validating SaaS ideas",
+                    "context": "They are juggling build decisions with weak user feedback.",
+                    "trigger": "They need faster confidence before committing to development work.",
+                },
+                "status_quo_and_alternatives": [
+                    {
+                        "option": "Manual interviews and community posts",
+                        "type": "workflow",
+                        "why_it_persists": "It is familiar and low-cost to start.",
+                        "limitations": ["Feedback arrives slowly", "Signals are hard to compare over time"],
+                    }
+                ],
+                "differentiated_capabilities": ["Turns demand signals into a repeatable evidence log", "Keeps early validation lightweight for solo builders"],
+                "value_claims": [
+                    {
+                        "claim": "Validate product ideas with a lighter process than manual outreach alone.",
+                        "audience_value": "Developers get faster confidence about what to test next.",
+                        "evidence_basis": ["src-pos-1"],
+                    }
+                ],
+                "positioning_statement": "For indie developers validating new SaaS ideas, BuddySwitch keeps demand discovery structured without turning it into a heavy research project.",
+                "message_house": {
+                    "core_message": "Structured demand discovery for builders who move fast.",
+                    "supporting_points": ["Capture repeatable evidence, not vague impressions", "Focus on the sharpest pain before building"],
+                },
+                "homepage_angles": [
+                    {
+                        "angle": "Confidence before code",
+                        "headline_direction": "Know what is worth building before you build it.",
+                        "why_it_might_work": "It speaks directly to the repeated uncertainty found in public founder discussions.",
+                    }
+                ],
+                "evidence": [
+                    {
+                        "source_id": "src-pos-1",
+                        "url": "https://example.com/positioning-source",
+                        "source_type": "forum-thread",
+                        "accessed_at": "2026-04-15T10:10:00+08:00",
+                        "claim_excerpt": "I need clearer proof of demand before I spend another weekend building.",
+                    }
+                ],
+                "source_traceability": [
+                    {
+                        "conclusion": "First-touch copy should emphasize confidence and speed rather than feature depth.",
+                        "source_ids": ["src-pos-1"],
+                    }
+                ],
+                "risks_and_unknowns": ["Positioning still assumes confidence is a stronger hook than speed for this segment."],
+                "conclusion": "The strongest positioning angle is structured confidence before development effort.",
+            },
+        }
+
+    def _channel_discovery_result(self) -> dict[str, object]:
+        return {
+            "execution_summary": "Ranked believable early channels for the first market experiment.",
+            "working_notes": ["Kept the experiment plan constrained to one primary and one backup channel."],
+            "deliverables_or_changed_files": [],
+            "artifact_content": {
+                "research_question": "Which acquisition channel should be tested first for this indie developer audience?",
+                "candidate_channels": [
+                    {
+                        "channel": "Founder communities",
+                        "why_it_is_plausible": "The target audience already discusses validation pain there.",
+                        "constraints": ["Requires direct founder participation"],
+                    }
+                ],
+                "selection_criteria": ["Reach the right builders quickly", "Earn trust through context-rich posts"],
+                "channel_scores": [
+                    {
+                        "channel": "Founder communities",
+                        "scores": {
+                            "reachability": 4,
+                            "credibility": 4,
+                            "speed": 4,
+                            "cost": 5,
+                            "signal_quality": 4,
+                        },
+                        "summary": "Strong fit because the audience already shares validation pain openly in these spaces.",
+                    }
+                ],
+                "recommended_primary_channel": {
+                    "channel": "Founder communities",
+                    "why": "It offers the best balance of trust, speed, and direct feedback for this audience.",
+                    "preconditions": ["Prepare a concrete founder post with one clear CTA"],
+                },
+                "recommended_secondary_channel": {
+                    "channel": "Indie developer newsletters",
+                    "why": "Useful backup if community reach stalls after the first test.",
+                    "preconditions": ["Find newsletter operators who already cover validation workflows"],
+                },
+                "experiment_plan": {
+                    "goal": "Generate qualified conversations about current validation workflow pain.",
+                    "offer": "A lightweight demand-discovery workflow preview.",
+                    "audience": "Indie developers validating new SaaS ideas",
+                    "steps": ["Publish a founder post", "Collect replies", "Follow up with respondents"],
+                    "timebox": "7 days",
+                    "success_signal": "At least five qualified responses from builders in scope",
+                },
+                "kill_signals": ["No qualified replies after two well-placed posts", "Replies focus on unrelated founder problems"],
+                "evidence": [
+                    {
+                        "source_id": "src-chan-1",
+                        "url": "https://example.com/channel-source",
+                        "source_type": "community-post",
+                        "accessed_at": "2026-04-15T10:20:00+08:00",
+                        "claim_excerpt": "Founders here swap validation tactics and ask for concrete feedback loops all the time.",
+                    }
+                ],
+                "source_traceability": [
+                    {
+                        "conclusion": "Founder communities are the most credible first channel because they already host the target pain discussion.",
+                        "source_ids": ["src-chan-1"],
+                    }
+                ],
+                "risks_and_unknowns": ["The same audience may saturate quickly if the message is too generic."],
+                "conclusion": "Start with founder communities and keep a newsletter outreach backup ready.",
+            },
+        }
+
+    def _launch_prep_result(self) -> dict[str, object]:
+        return {
+            "execution_summary": "Prepared a launch brief for the first feedback-oriented release.",
+            "working_notes": ["Kept the feedback loop explicit before any broader announcement."],
+            "deliverables_or_changed_files": [],
+            "artifact_content": {
+                "research_question": "How should the first launch be staged to maximize useful feedback?",
+                "launch_goal": {
+                    "primary_goal": "Collect qualified feedback from early indie developer prospects.",
+                    "timebox": "10 days",
+                    "secondary_goal": "Test whether the positioning angle drives replies.",
+                },
+                "target_audience": {
+                    "primary": "Indie developers validating SaaS ideas",
+                    "why_now": "They are already searching for faster ways to validate before building.",
+                    "reach_notes": "Reach them through founder communities and direct follow-up threads.",
+                },
+                "selected_channel": {
+                    "channel": "Founder communities",
+                    "reason": "This is where the target audience already discusses validation pain openly.",
+                    "constraints": ["Needs concise founder-led copy and a manual reply workflow"],
+                },
+                "launch_assets": [
+                    {
+                        "asset": "Validation landing page",
+                        "purpose": "Explain the workflow and collect interested replies.",
+                        "owner": "founder",
+                        "notes": "Keep the CTA focused on feedback, not signups alone.",
+                    }
+                ],
+                "instrumentation_plan": {
+                    "signals_to_track": ["Replies", "Qualified conversations", "Landing page CTA clicks"],
+                    "capture_method": "Manual tracking sheet with daily updates",
+                    "review_cadence": "Daily during the first 10 days",
+                },
+                "feedback_collection_plan": {
+                    "collection_methods": ["Reply form", "Direct email follow-up"],
+                    "follow_up_path": "Invite qualified responders into short follow-up calls",
+                    "response_owner": "founder",
+                },
+                "success_signals": ["Five qualified conversations", "Consistent resonance with the confidence-before-code angle"],
+                "failure_signals": ["Traffic without replies", "Replies that do not describe the target pain"],
+                "evidence": [
+                    {
+                        "source_id": "src-launch-1",
+                        "url": "https://example.com/launch-source",
+                        "source_type": "community-post",
+                        "accessed_at": "2026-04-15T10:30:00+08:00",
+                        "claim_excerpt": "Founders respond when the ask is specific and the feedback loop is obvious.",
+                    }
+                ],
+                "source_traceability": [
+                    {
+                        "conclusion": "The launch should lead with a narrow feedback ask and an explicit follow-up path.",
+                        "source_ids": ["src-launch-1"],
+                    }
+                ],
+                "risks_and_unknowns": ["The founder may not have enough time to sustain fast follow-up without a strict daily cadence."],
+                "conclusion": "A narrow, feedback-led launch is the right first release shape for this market test.",
+            },
+        }
+
     def test_persist_creates_task_and_run_bound_artifact(self) -> None:
         resolved = switch_runtime.resolve_switch("switch dev: Implement the approved onboarding improvements in projects/app")
         payload = switch_runtime.persist_switch(resolved, skill_id=None, result=self._artifact_result())
@@ -984,6 +1258,36 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertIn("disk full", message)
         self.assertIn(f"created task_id: {expected_task_id}", message)
         self.assertIn(f"recover with switch dev({expected_task_id}): <demand>", message)
+
+    def test_persist_new_market_skills_with_explicit_slots(self) -> None:
+        cases = [
+            ("customer-discovery", self._customer_discovery_result, "customer-discovery", "interview_goals"),
+            ("positioning-copy", self._positioning_copy_result, "positioning-brief", "positioning_statement"),
+            ("channel-discovery", self._channel_discovery_result, "channel-plan", "experiment_plan"),
+            ("launch-prep", self._launch_prep_result, "launch-prep", "launch_goal"),
+        ]
+
+        for skill_id, result_factory, expected_slot, content_key in cases:
+            with self.subTest(skill_id=skill_id):
+                resolved = switch_runtime.resolve_switch(
+                    "switch market: Continue the market evidence handoff for the current opportunity"
+                )
+
+                payload = switch_runtime.persist_switch(
+                    resolved,
+                    skill_id=skill_id,
+                    result=result_factory(),
+                )
+                self._remember_persisted_paths(payload)
+
+                artifact_json = json.loads((ROOT / payload["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
+                run_json = json.loads((ROOT / payload["paths"]["run"]).read_text(encoding="utf-8"))
+
+                self.assertEqual(payload["skill_id"], skill_id)
+                self.assertEqual(artifact_json["slot"], expected_slot)
+                self.assertIn(content_key, artifact_json["content"])
+                self.assertEqual(run_json["skill_id"], skill_id)
+                self.assertEqual(run_json["artifact_ids"], [payload["artifact_id"]])
 
     def test_persist_reuses_task_and_binds_to_track(self) -> None:
         track = create_track("track-dev-binding", "Track Binding")

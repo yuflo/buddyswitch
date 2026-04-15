@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Turn research and product context into a clear product definition that is implementation-ready.
+Turn explicit market evidence and product context into a clear product definition that is implementation-ready.
 
 ## Must Do
 
@@ -22,7 +22,7 @@ Turn research and product context into a clear product definition that is implem
 
 ## Input Expectations
 
-- Research artifact(s) and context.
+- Market evidence artifacts when available: `market-scan`, `pmf-report`, `customer-discovery`, `positioning-brief`, `channel-plan`, and `launch-prep`.
 - User/business requirements.
 - Existing constraints and assumptions.
 - Optional track context or summary hint.

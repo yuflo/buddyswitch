@@ -4,10 +4,28 @@ description = "Use when the task is drafting a PRD, defining MVP scope, or turni
 objects = ["task", "artifact"]
 produces_artifact = true
 output_slot = "prd"
-input_slots = ["research", "requirements", "track"]
+input_slots = [
+  "market-scan",
+  "pmf-report",
+  "customer-discovery",
+  "positioning-brief",
+  "channel-plan",
+  "launch-prep",
+  "requirements",
+  "track",
+]
 output_schema = "framework/schemas/pm/write-prd.json"
 produces = ["prd", "scope"]
-consumes = ["research", "requirements", "track"]
+consumes = [
+  "market-scan",
+  "pmf-report",
+  "customer-discovery",
+  "positioning-brief",
+  "channel-plan",
+  "launch-prep",
+  "requirements",
+  "track",
+]
 side_effect_level = "medium"
 required_tools = []
 required_env = []

@@ -4,48 +4,65 @@
 # Positioning Brief
 
 ## Research Question
-- 
+research_question:
 
 ## Target Audience
-- Primary audience:
-- Buying or adoption context:
+- primary:
+- context:
+- trigger:
 
 ## Status Quo And Alternatives
-- Current workaround:
-- Existing products:
-- Why the status quo persists:
+1.
+- option:
+- type:
+- why_it_persists:
+- limitations:
+  - 
 
 ## Differentiated Capabilities
 - 
 - 
-- 
+
 
 ## Value Claims
-- Claim:
-- Evidence:
+1.
+- claim:
+- audience_value:
+- evidence_basis:
+  - src-1
 
 ## Positioning Statement
-- For:
-- Who:
-- Our product:
-- Unlike:
-- Because:
+positioning_statement:
 
 ## Message House
-- Core message:
-- Supporting point 1:
-- Supporting point 2:
-- Supporting point 3:
+- core_message:
+- supporting_points:
+  - 
 
 ## Homepage Angles
 1. 
-2. 
-3. 
+ - angle:
+ - headline_direction:
+ - why_it_might_work:
+
+## Evidence
+1.
+- source_id:
+- url:
+- source_type:
+- accessed_at:
+- claim_excerpt:
+
+## Source Traceability
+1.
+- conclusion:
+- source_ids:
+  - src-1
 
 ## Risks And Unknowns
 - 
-- 
+
 
 ## Conclusion
-- 
+conclusion:
 ```

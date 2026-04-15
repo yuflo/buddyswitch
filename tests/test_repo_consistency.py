@@ -43,6 +43,152 @@ SKILL_TOMLS = (
     ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "skill.toml",
 )
+MARKET_SCHEMA_PATHS = (
+    ROOT / "framework" / "schemas" / "market" / "research-scan.json",
+    ROOT / "framework" / "schemas" / "market" / "pmf-recon.json",
+    ROOT / "framework" / "schemas" / "market" / "customer-discovery.json",
+    ROOT / "framework" / "schemas" / "market" / "positioning-copy.json",
+    ROOT / "framework" / "schemas" / "market" / "channel-discovery.json",
+    ROOT / "framework" / "schemas" / "market" / "launch-prep.json",
+)
+CANONICAL_MARKET_TEMPLATES = {
+    ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery" / "assets" / "interview-brief-template.md": (
+        "## Research Question",
+        "## Target Segments",
+        "## Interview Goals",
+        "## Recruiting Criteria",
+        "- must_have:",
+        "- nice_to_have:",
+        "- exclude_if:",
+        "## Interview Guide",
+        "## Hypotheses To Test",
+        "## Evidence",
+        "- source_id:",
+        "- claim_excerpt:",
+        "## Source Traceability",
+        "- conclusion:",
+        "- source_ids:",
+        "## Patterns And Insights",
+        "## Risks And Unknowns",
+        "## Recommended Next Step",
+        "- action:",
+        "- rationale:",
+        "## Conclusion",
+    ),
+    ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy" / "assets" / "positioning-brief-template.md": (
+        "## Research Question",
+        "## Target Audience",
+        "- primary:",
+        "- context:",
+        "- trigger:",
+        "## Status Quo And Alternatives",
+        "## Differentiated Capabilities",
+        "## Value Claims",
+        "- claim:",
+        "- audience_value:",
+        "- evidence_basis:",
+        "## Positioning Statement",
+        "## Message House",
+        "- core_message:",
+        "- supporting_points:",
+        "## Homepage Angles",
+        "## Evidence",
+        "- source_id:",
+        "- claim_excerpt:",
+        "## Source Traceability",
+        "- conclusion:",
+        "- source_ids:",
+        "## Risks And Unknowns",
+        "## Conclusion",
+    ),
+    ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "assets" / "channel-plan-template.md": (
+        "## Research Question",
+        "## Candidate Channels",
+        "## Selection Criteria",
+        "## Channel Scores",
+        "## Recommended Primary Channel",
+        "- channel:",
+        "- why:",
+        "- preconditions:",
+        "## Recommended Secondary Channel",
+        "## Experiment Plan",
+        "- goal:",
+        "- offer:",
+        "- audience:",
+        "- steps:",
+        "- timebox:",
+        "## Kill Signals",
+        "## Evidence",
+        "- source_id:",
+        "- claim_excerpt:",
+        "## Source Traceability",
+        "- conclusion:",
+        "- source_ids:",
+        "## Risks And Unknowns",
+        "## Conclusion",
+    ),
+    ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "assets" / "launch-prep-template.md": (
+        "## Research Question",
+        "## Launch Goal",
+        "- primary_goal:",
+        "- timebox:",
+        "## Target Audience",
+        "- primary:",
+        "- why_now:",
+        "## Selected Channel",
+        "- channel:",
+        "- reason:",
+        "## Launch Assets",
+        "## Instrumentation Plan",
+        "- signals_to_track:",
+        "- capture_method:",
+        "- review_cadence:",
+        "## Feedback Collection Plan",
+        "- collection_methods:",
+        "- follow_up_path:",
+        "- response_owner:",
+        "## Success Signals",
+        "## Failure Signals",
+        "## Evidence",
+        "- source_id:",
+        "- claim_excerpt:",
+        "## Source Traceability",
+        "- conclusion:",
+        "- source_ids:",
+        "## Risks And Unknowns",
+        "## Conclusion",
+    ),
+}
+
+
+def _read_string_array_field(path: Path, field_name: str) -> list[str]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    collecting = False
+    values: list[str] = []
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not collecting:
+            if line.startswith(f"{field_name} = ["):
+                collecting = True
+                suffix = line.split("[", 1)[1]
+                if "]" in suffix:
+                    inner = suffix.rsplit("]", 1)[0]
+                    for item in inner.split(","):
+                        cleaned = item.strip().strip('"')
+                        if cleaned:
+                            values.append(cleaned)
+                    return values
+                continue
+            continue
+
+        if line.startswith("]"):
+            return values
+        cleaned = line.rstrip(",").strip().strip('"')
+        if cleaned:
+            values.append(cleaned)
+
+    raise AssertionError(f"missing closed array field '{field_name}' in {path.relative_to(ROOT)}")
 
 
 class RepoConsistencyTests(unittest.TestCase):
@@ -241,6 +387,52 @@ class RepoConsistencyTests(unittest.TestCase):
                     dict,
                     msg=f"output schema must be a JSON object in {resolved_schema.relative_to(ROOT)}",
                 )
+
+    def test_pm_and_design_skill_metadata_use_explicit_market_inputs(self) -> None:
+        cases = {
+            ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "skill.toml": [
+                "market-scan",
+                "pmf-report",
+                "customer-discovery",
+                "positioning-brief",
+                "channel-plan",
+                "launch-prep",
+                "requirements",
+                "track",
+            ],
+            ROOT / "buddyswitch" / "skills" / "design" / "ia-spec" / "skill.toml": [
+                "prd",
+                "positioning-brief",
+                "launch-prep",
+                "requirements",
+                "track",
+            ],
+        }
+
+        for path, expected_slots in cases.items():
+            with self.subTest(skill_toml=str(path.relative_to(ROOT))):
+                self.assertEqual(_read_string_array_field(path, "input_slots"), expected_slots)
+                self.assertEqual(_read_string_array_field(path, "consumes"), expected_slots)
+
+    def test_market_schemas_share_canonical_evidence_and_traceability_fields(self) -> None:
+        for path in MARKET_SCHEMA_PATHS:
+            with self.subTest(schema=str(path.relative_to(ROOT))):
+                schema = json.loads(path.read_text(encoding="utf-8"))
+                artifact_content = schema["properties"]["artifact_content"]
+                evidence_required = artifact_content["properties"]["evidence"]["items"]["required"]
+                traceability_required = artifact_content["properties"]["source_traceability"]["items"]["required"]
+
+                self.assertIn("claim_excerpt", evidence_required)
+                self.assertNotIn("summary", evidence_required)
+                self.assertIn("conclusion", traceability_required)
+                self.assertNotIn("claim", traceability_required)
+
+    def test_new_market_templates_expose_canonical_schema_fields(self) -> None:
+        for path, required_tokens in CANONICAL_MARKET_TEMPLATES.items():
+            with self.subTest(template=str(path.relative_to(ROOT))):
+                text = path.read_text(encoding="utf-8").lower()
+                for token in required_tokens:
+                    self.assertIn(token.lower(), text, msg=f"missing canonical field '{token}' in {path.relative_to(ROOT)}")
 
     def test_every_skill_package_has_metadata_and_instruction_files(self) -> None:
         expected_packages = (

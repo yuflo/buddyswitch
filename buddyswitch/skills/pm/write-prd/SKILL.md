@@ -1,7 +1,7 @@
 # write-prd
 
 ## Purpose
-- Produce a scoped MVP PRD that turns validated research and requirements into a concrete product definition anchored to a track.
+- Produce a scoped MVP PRD that turns explicit market evidence and requirements into a concrete product definition anchored to a track.
 
 ## Use when
 - The task is about drafting a PRD, defining MVP scope, clarifying acceptance criteria, or writing product requirements.
@@ -14,7 +14,7 @@
 - There is no clear product-definition demand and the user is only asking for track lifecycle administration.
 
 ## Inputs
-- Research artifacts and product context.
+- Explicit market evidence artifacts when they exist: `market-scan`, `pmf-report`, `customer-discovery`, `positioning-brief`, `channel-plan`, and `launch-prep`.
 - Track context and existing task/artifact context when relevant.
 - Constraints, assumptions, and requirements.
 - Optional track context or summary hint.
@@ -26,7 +26,7 @@
 
 ## Steps
 
-1. Define problem and user value from available evidence.
+1. Define problem and user value from the available market evidence and requirements.
 2. Draft goals and non-goals with clear boundaries.
 3. Define users and scenarios.
 4. Split scope into P0 and P1.
@@ -35,6 +35,7 @@
 
 ## Verification
 - Use track context when available, but keep the PRD demand clear enough to stand on its own.
+- Prefer explicit market artifacts over a generic research summary so PM can trace the problem statement back to actual market evidence.
 - Confirm the output is product-definition content rather than design or implementation detail.
 - Confirm scope is split clearly enough for downstream buddies to act on it.
 

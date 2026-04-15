@@ -22,6 +22,7 @@ Produce interaction and structure specifications that make implementation decisi
 ## Input Expectations
 
 - PRD or equivalent requirements.
+- Optional `positioning-brief` and `launch-prep` artifacts when the design task covers landing, onboarding, or another first-touch experience.
 - Product and platform constraints.
 - Optional references (screenshots, patterns, components).
 - Optional track context or summary hint.

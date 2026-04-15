@@ -106,14 +106,14 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["source_id", "url", "source_type", "accessed_at", "summary"],
+            "required": ["source_id", "url", "source_type", "accessed_at", "claim_excerpt"],
             "additionalProperties": false,
             "properties": {
               "source_id": { "type": "string" },
               "url": { "type": "string" },
               "source_type": { "type": "string" },
               "accessed_at": { "type": "string" },
-              "summary": { "type": "string" }
+              "claim_excerpt": { "type": "string" }
             }
           }
         },
@@ -121,10 +121,10 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["claim", "source_ids"],
+            "required": ["conclusion", "source_ids"],
             "additionalProperties": false,
             "properties": {
-              "claim": { "type": "string" },
+              "conclusion": { "type": "string" },
               "source_ids": { "type": "array", "items": { "type": "string" } }
             }
           }

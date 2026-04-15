@@ -4,47 +4,74 @@
 # Channel Discovery Plan
 
 ## Research Question
-- 
+research_question:
 
 ## Candidate Channels
 1. 
-2. 
-3. 
+ - channel:
+ - why_it_is_plausible:
+ - constraints:
+   - 
 
 ## Selection Criteria
-- Audience reachability:
-- Speed to learning:
-- Credibility for the audience:
-- Execution cost:
-- Signal quality:
+- 
+- 
 
 ## Channel Scores
-- Channel:
-- Score summary:
-- Why:
+1.
+- channel:
+- scores:
+  - reachability:
+  - credibility:
+  - speed:
+  - cost:
+  - signal_quality:
+- summary:
 
 ## Recommended Primary Channel
-- 
+- channel:
+- why:
+- preconditions:
+  - 
 
 ## Recommended Secondary Channel
-- 
+- channel:
+- why:
+- preconditions:
+  - 
 
 ## Experiment Plan
-- Goal:
-- Offer or CTA:
-- Audience:
-- Steps:
-- Timebox:
+- goal:
+- offer:
+- audience:
+- steps:
+  - 
+- timebox:
+- success_signal:
 
 ## Kill Signals
 - 
 - 
-- 
+
+
+## Evidence
+1.
+- source_id:
+- url:
+- source_type:
+- accessed_at:
+- claim_excerpt:
+
+## Source Traceability
+1.
+- conclusion:
+- source_ids:
+  - src-1
 
 ## Risks And Unknowns
 - 
-- 
+
 
 ## Conclusion
-- 
+conclusion:
 ```

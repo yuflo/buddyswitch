@@ -4,50 +4,63 @@
 # Customer Discovery Brief
 
 ## Research Question
-- 
+research_question:
 
 ## Target Segments
-- Segment:
-- Why this segment now:
+1.
+- segment:
+- pain_context:
+- why_this_segment:
 
 ## Interview Goals
 - 
 - 
-- 
 
 ## Recruiting Criteria
-- Must have:
-- Nice to have:
-- Exclusions:
+- must_have:
+  - 
+- nice_to_have:
+  - 
+- exclude_if:
+  - 
 
 ## Interview Guide
-1. Context and role
-2. Current workflow
-3. Pain and workarounds
-4. Alternatives and switching triggers
-5. Priority and urgency
-6. Closing follow-up
+1.
+- section:
+- goal:
+- prompts:
+  - 
 
 ## Hypotheses To Test
 - 
 - 
-- 
 
-## Evidence And Traceability
-- Source:
-- Why it matters:
+## Evidence
+1.
+- source_id:
+- url:
+- source_type:
+- accessed_at:
+- claim_excerpt:
+
+## Source Traceability
+1.
+- conclusion:
+- source_ids:
+  - src-1
 
 ## Patterns And Insights
 - 
-- 
+
 
 ## Risks And Unknowns
 - 
-- 
+
 
 ## Recommended Next Step
-- 
+- action:
+- rationale:
 
 ## Conclusion
-- 
+conclusion:
 ```
