@@ -279,7 +279,8 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "assets" / "test-report-template.md",
         )
         for path in expected_assets:
-            self.assertTrue(path.exists(), msg=f"missing template asset: {path.relative_to(ROOT)}")
+            with self.subTest(asset=str(path.relative_to(ROOT))):
+                self.assertTrue(path.exists(), msg=f"missing template asset: {path.relative_to(ROOT)}")
 
     def test_active_docs_use_slot_revision_and_package_contract_language(self) -> None:
         targets = (

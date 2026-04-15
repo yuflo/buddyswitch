@@ -140,6 +140,9 @@ class ResolveRuntimeTests(unittest.TestCase):
             ],
         )
 
+        research_card = next(card for card in payload["skill_cards"] if card["id"] == "research-scan")
+        self.assertEqual(research_card["output_slot"], "market-scan")
+
         pmf_card = next(card for card in payload["skill_cards"] if card["id"] == "pmf-recon")
         self.assertEqual(
             pmf_card["instruction_path"],
