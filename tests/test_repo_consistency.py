@@ -179,7 +179,9 @@ class RepoConsistencyTests(unittest.TestCase):
 
         for path in ARTIFACT_SKILL_DOCS:
             with self.subTest(skill_doc=str(path.relative_to(ROOT))):
-                self.assertTrue(path.exists(), msg=f"missing skill doc in {path.relative_to(ROOT)}")
+                if not path.exists():
+                    # Existence failures are owned by the dedicated package/file existence tests.
+                    continue
                 text = path.read_text(encoding="utf-8").lower()
                 self.assertIn("framework/docs/skill-runtime-shared-rules.md", text, msg=f"missing shared runtime rules reference in {path.relative_to(ROOT)}")
                 self.assertNotIn("## execution summary rule", text, msg=f"execution summary rule should be shared in {path.relative_to(ROOT)}")
@@ -197,7 +199,9 @@ class RepoConsistencyTests(unittest.TestCase):
         )
         for path in SKILL_TOMLS:
             with self.subTest(skill_toml=str(path.relative_to(ROOT))):
-                self.assertTrue(path.exists(), msg=f"missing skill.toml in {path.relative_to(ROOT)}")
+                if not path.exists():
+                    # Existence failures are owned by the dedicated package/file existence tests.
+                    continue
                 text = path.read_text(encoding="utf-8").splitlines()
                 description_lines = [line for line in text if line.startswith("description = ")]
                 self.assertEqual(1, len(description_lines), msg=f"expected one description in {path.relative_to(ROOT)}")
@@ -216,7 +220,9 @@ class RepoConsistencyTests(unittest.TestCase):
     def test_skill_toml_output_schemas_exist_and_are_parseable_json(self) -> None:
         for path in SKILL_TOMLS:
             with self.subTest(skill_toml=str(path.relative_to(ROOT))):
-                self.assertTrue(path.exists(), msg=f"missing skill.toml in {path.relative_to(ROOT)}")
+                if not path.exists():
+                    # Existence failures are owned by the dedicated package/file existence tests.
+                    continue
                 schema_path = None
                 for line in path.read_text(encoding="utf-8").splitlines():
                     if line.startswith("output_schema = "):
@@ -272,7 +278,9 @@ class RepoConsistencyTests(unittest.TestCase):
         for package_root in expected_packages:
             with self.subTest(package=str(package_root.relative_to(ROOT))):
                 skill_doc = package_root / "SKILL.md"
-                self.assertTrue(skill_doc.exists(), msg=f"missing SKILL.md in {package_root}")
+                if not skill_doc.exists():
+                    # Existence failures are owned by the dedicated package/file existence tests.
+                    continue
                 lines = skill_doc.read_text(encoding="utf-8").splitlines()
                 self.assertTrue(lines, msg=f"empty SKILL.md in {package_root}")
                 self.assertNotEqual(lines[0].strip(), "---", msg=f"frontmatter not allowed in {skill_doc.relative_to(ROOT)}")
