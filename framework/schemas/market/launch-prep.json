@@ -109,9 +109,7 @@
               "claim_excerpt",
               "page_title",
               "auth_state",
-              "query_or_filter_used",
-              "interaction_steps_summary",
-              "screenshot_ref_or_snapshot_ref"
+              "query_or_filter_used"
             ],
             "additionalProperties": false,
             "properties": {

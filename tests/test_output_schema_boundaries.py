@@ -182,11 +182,11 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
             "$.artifact_content.evidence[0]: missing required property 'query_or_filter_used'",
             errors,
         )
-        self.assertIn(
+        self.assertNotIn(
             "$.artifact_content.evidence[0]: missing required property 'interaction_steps_summary'",
             errors,
         )
-        self.assertIn(
+        self.assertNotIn(
             "$.artifact_content.evidence[0]: missing required property 'screenshot_ref_or_snapshot_ref'",
             errors,
         )

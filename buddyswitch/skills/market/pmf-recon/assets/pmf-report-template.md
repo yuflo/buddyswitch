@@ -39,8 +39,6 @@ research_question:
 - page_title:
 - auth_state: public / logged_in / paywalled / unknown
 - query_or_filter_used:
-- interaction_steps_summary:
-- screenshot_ref_or_snapshot_ref:
 - segment:
 - pain_category:
 - alternative:

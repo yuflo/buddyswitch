@@ -100,8 +100,6 @@ MARKET_EVIDENCE_FIELDS = (
     "page_title",
     "auth_state",
     "query_or_filter_used",
-    "interaction_steps_summary",
-    "screenshot_ref_or_snapshot_ref",
 )
 NEW_MARKET_TEMPLATE_SCHEMAS = {
     ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "assets" / "research-report-template.md": ROOT / "framework" / "schemas" / "market" / "research-scan.json",
