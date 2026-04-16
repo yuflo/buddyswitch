@@ -99,6 +99,98 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
         }
         self.assertNotEqual(output_schema.validate_output_payload(payload, schema), [])
 
+    def test_market_schema_rejects_suggested_next_switch(self) -> None:
+        schema = output_schema.load_output_schema("framework/schemas/market/research-scan.json")
+        payload = {
+            "execution_summary": "Completed market scan",
+            "working_notes": [],
+            "deliverables_or_changed_files": [],
+            "suggested_next_switch": "switch pm: scope the opportunity",
+            "artifact_content": {
+                "research_question": "Do founders need faster validation loops?",
+                "research_strategy": {
+                    "complexity_tier": "quick",
+                    "rationale": "Boundary test only.",
+                    "collection_mode": "browser-first",
+                    "inclusion_notes": [],
+                },
+                "channel_plan": [],
+                "iteration_log": [],
+                "evidence": [],
+                "source_traceability": [],
+                "patterns_and_insights": [],
+                "risks_and_caveats": [],
+                "conclusion": "Too thin for a real conclusion.",
+            },
+        }
+
+        self.assertNotEqual(output_schema.validate_output_payload(payload, schema), [])
+
+    def test_market_schema_requires_medium_strength_evidence_fields(self) -> None:
+        schema = output_schema.load_output_schema("framework/schemas/market/pmf-recon.json")
+        payload = {
+            "execution_summary": "Validated PMF signals",
+            "working_notes": [],
+            "deliverables_or_changed_files": [],
+            "artifact_content": {
+                "research_question": "Do founders need workflow validation help?",
+                "research_strategy": {
+                    "depth": "standard",
+                    "rationale": "Test evidence boundaries.",
+                    "collection_mode": "browser-native",
+                    "initial_hypotheses": [],
+                    "source_category_targets": [],
+                },
+                "channel_plan": [],
+                "iteration_log": [],
+                "evidence": [
+                    {
+                        "source_id": "src-1",
+                        "url": "https://example.com/post",
+                        "source_type": "forum",
+                        "accessed_at": "2026-04-16T12:00:00+08:00",
+                        "claim_excerpt": "This is painful.",
+                        "segment": "founders",
+                        "pain_category": "validation",
+                    }
+                ],
+                "source_traceability": [{"conclusion": "Found demand.", "source_ids": ["src-1"]}],
+                "assumptions_used": [],
+                "candidate_icps": [],
+                "strongest_pain_signals": [],
+                "existing_alternatives": [],
+                "why_current_solutions_fall_short": [],
+                "pmf_confidence": {"level": "medium", "rationale": "Preliminary evidence only."},
+                "recommended_next_step": {"action": "interviews", "rationale": "Need direct validation."},
+                "suggested_interview_angles": [],
+                "risks_and_unknowns": [],
+                "conclusion": "Promising but incomplete.",
+            },
+        }
+
+        errors = output_schema.validate_output_payload(payload, schema)
+
+        self.assertIn(
+            "$.artifact_content.evidence[0]: missing required property 'page_title'",
+            errors,
+        )
+        self.assertIn(
+            "$.artifact_content.evidence[0]: missing required property 'auth_state'",
+            errors,
+        )
+        self.assertIn(
+            "$.artifact_content.evidence[0]: missing required property 'query_or_filter_used'",
+            errors,
+        )
+        self.assertIn(
+            "$.artifact_content.evidence[0]: missing required property 'interaction_steps_summary'",
+            errors,
+        )
+        self.assertIn(
+            "$.artifact_content.evidence[0]: missing required property 'screenshot_ref_or_snapshot_ref'",
+            errors,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

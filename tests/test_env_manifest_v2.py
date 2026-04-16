@@ -19,6 +19,79 @@ import env_manifest  # noqa: E402
 
 
 class SkillPackageLoaderTests(unittest.TestCase):
+    def _load_demo_market_manifest(self, skill_toml_body: str) -> dict[str, object]:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            package_root = Path(temp_dir) / "demo-skill"
+            package_root.mkdir()
+            (package_root / "skill.toml").write_text(textwrap.dedent(skill_toml_body), encoding="utf-8")
+            (package_root / "SKILL.md").write_text(
+                textwrap.dedent(
+                    """\
+                    # demo-skill
+
+                    ## Purpose
+                    - Validate market demand.
+
+                    ## Use when
+                    - The task is about market research.
+
+                    ## Do not use when
+                    - The task is implementation or testing.
+
+                    ## Inputs
+                    - Research question context.
+
+                    ## Outputs
+                    - A structured market scan result.
+
+                    ## Verification
+                    - Confirm evidence quality and open questions.
+
+                    ## Examples
+                    - `switch market: validate a workflow`
+
+                    ## Counterexamples
+                    - `switch dev: implement the workflow`
+
+                    ## Gotchas
+                    - Keep evidence grounded in sources.
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            manifest_path = Path(temp_dir) / "manifest.toml"
+            manifest_path.write_text(
+                textwrap.dedent(
+                    f"""\
+                    schema_version = 1
+
+                    [env]
+                    id = "demo"
+                    label = "Demo"
+
+                    [[adapters]]
+                    id = "codex"
+                    path = "scripts/codex_router.py"
+                    description = "Demo router."
+
+                    [[skills]]
+                    id = "demo-skill"
+                    path = "{package_root.relative_to(ROOT).as_posix()}"
+
+                    [[buddies]]
+                    id = "market"
+                    label = "Market"
+                    scope = "Owns market research."
+                    skills = ["demo-skill"]
+                    permissions = ["task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            return env_manifest.load_manifest(manifest_path)
+
     def test_load_manifest_reads_skill_package_root(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             package_root = Path(temp_dir) / "demo-skill"
@@ -118,6 +191,102 @@ class SkillPackageLoaderTests(unittest.TestCase):
         self.assertEqual(runtime["output_slot"], "prd")
         self.assertTrue(runtime["produces_artifact"])
         self.assertEqual(runtime["input_slots"], ["research-report"])
+
+    def test_load_manifest_reads_optional_host_execution_metadata(self) -> None:
+        manifest = self._load_demo_market_manifest(
+            """\
+            id = "demo-skill"
+            buddy = "market"
+            description = "Use when demo market work is requested."
+            objects = ["task", "artifact"]
+            produces_artifact = true
+            output_slot = "market-scan"
+            input_slots = ["research-question"]
+            output_schema = "framework/schemas/market/research-scan.json"
+            produces = ["market-scan"]
+            consumes = ["research-question"]
+            side_effect_level = "medium"
+            required_tools = []
+            required_env = []
+            execution_mode = "market-browser-native"
+            browser_mode = "headed-only"
+            browser_profile = "shared-market"
+            login_policy = "mandatory-takeover"
+            fallback_policy = "no-silent-degrade"
+            session_continuity = "shared-cockpit"
+            evidence_capture_level = "medium"
+            allowed_task_kinds = ["research"]
+            """
+        )
+
+        runtime = manifest["skills"][0]["runtime"]
+        self.assertEqual(
+            runtime["host_execution"],
+            {
+                "execution_mode": "market-browser-native",
+                "browser_mode": "headed-only",
+                "browser_profile": "shared-market",
+                "login_policy": "mandatory-takeover",
+                "fallback_policy": "no-silent-degrade",
+                "session_continuity": "shared-cockpit",
+                "evidence_capture_level": "medium",
+            },
+        )
+
+    def test_load_manifest_rejects_market_skill_with_missing_cockpit_metadata(self) -> None:
+        with self.assertRaisesRegex(env_manifest.ManifestError, "browser_profile"):
+            self._load_demo_market_manifest(
+                """\
+                id = "demo-skill"
+                buddy = "market"
+                description = "Use when demo market work is requested."
+                objects = ["task", "artifact"]
+                produces_artifact = true
+                output_slot = "market-scan"
+                input_slots = ["research-question"]
+                output_schema = "framework/schemas/market/research-scan.json"
+                produces = ["market-scan"]
+                consumes = ["research-question"]
+                side_effect_level = "medium"
+                required_tools = []
+                required_env = []
+                execution_mode = "market-browser-native"
+                browser_mode = "headed-only"
+                login_policy = "mandatory-takeover"
+                fallback_policy = "no-silent-degrade"
+                session_continuity = "shared-cockpit"
+                evidence_capture_level = "medium"
+                allowed_task_kinds = ["research"]
+                """
+            )
+
+    def test_load_manifest_rejects_market_skill_with_invalid_cockpit_metadata_value(self) -> None:
+        with self.assertRaisesRegex(env_manifest.ManifestError, "login_policy"):
+            self._load_demo_market_manifest(
+                """\
+                id = "demo-skill"
+                buddy = "market"
+                description = "Use when demo market work is requested."
+                objects = ["task", "artifact"]
+                produces_artifact = true
+                output_slot = "market-scan"
+                input_slots = ["research-question"]
+                output_schema = "framework/schemas/market/research-scan.json"
+                produces = ["market-scan"]
+                consumes = ["research-question"]
+                side_effect_level = "medium"
+                required_tools = []
+                required_env = []
+                execution_mode = "market-browser-native"
+                browser_mode = "headed-only"
+                browser_profile = "shared-market"
+                login_policy = "optional"
+                fallback_policy = "no-silent-degrade"
+                session_continuity = "shared-cockpit"
+                evidence_capture_level = "medium"
+                allowed_task_kinds = ["research"]
+                """
+            )
 
     def test_load_manifest_rejects_non_directory_skill_path(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:

@@ -8,7 +8,9 @@ Market is an outside-in buddy. It produces browser-driven, evidence-based demand
 
 - Clarify the research question and scope.
 - Select the executable market skill that matches the question: `research-scan`, `pmf-recon`, `customer-discovery`, `positioning-copy`, `channel-discovery`, or `launch-prep`.
-- Use public-first browsing with search-assisted discovery and explicit login checkpoints when public evidence is exhausted.
+- Run the selected market skill in the shared headed cockpit defined in `framework/docs/market-research-cockpit.md`; the same cockpit contract applies across all six market skills.
+- Use browser profile `shared-market` with session continuity across market runs.
+- Enforce mandatory login takeover for critical sources before continuing evidence capture.
 - Choose channels based on the question type and constraints.
 - Collect and synthesize evidence from browsed sources.
 - Highlight caveats and uncertainty.
@@ -22,7 +24,9 @@ Market is an outside-in buddy. It produces browser-driven, evidence-based demand
 - Implement product code.
 - Guess missing evidence as facts.
 - Claim unsupported findings without source mapping.
-- Continue through login-required sources without user confirmation.
+- Continue through critical login-required sources without mandatory takeover.
+- Silently downgrade to low-density public alternatives when critical sources are blocked.
+- Treat cockpit session state as a second source of truth.
 
 ## Input Expectations
 
@@ -55,6 +59,14 @@ Skill-specific synthesis fields stay with the relevant executable skill schema. 
 - `channel-discovery`
 - `launch-prep`
 
+## Market Research Cockpit Rules
+
+- The six market skills above share one execution-time cockpit, not six isolated browser stacks.
+- The cockpit must run headed (`browser_mode=headed-only`) and use profile `shared-market`.
+- Login handling for critical sources is mandatory takeover (`login_policy=mandatory-takeover`).
+- Fallback handling is `fallback_policy=no-silent-degrade`: no silent downgrade to low-density public alternatives.
+- The cockpit is execution-time only. Canonical outputs remain BuddySwitch task, artifact, and run objects.
+
 ## Output Slot Taxonomy
 
 - `market-scan`
@@ -73,6 +85,12 @@ Skill-specific synthesis fields stay with the relevant executable skill schema. 
   - `source_type` (for example: official, x, reddit, news, community)
   - `accessed_at`
   - `claim_excerpt`
+  - `page_title`
+  - `auth_state`
+  - `query_or_filter_used`
+  - `interaction_steps_summary`
+  - `screenshot_ref_or_snapshot_ref`
+- Some skill schemas also require additional evidence keys (for example `segment` and `pain_category` in `pmf-recon`).
 
 ## Iteration And Access Handling
 
@@ -88,10 +106,11 @@ Skill-specific synthesis fields stay with the relevant executable skill schema. 
   4. round synthesis
   5. query refinement
 - For login-required sources:
-  - enter a login checkpoint and wait for user confirmation
+  - for critical sources, require mandatory takeover in the shared headed cockpit before continuing
 - For blocked sources:
   - record blockage and impact
-  - use public alternatives
+  - do not silently downgrade to low-density public alternatives
+  - request takeover or explicit user-approved downgrade path
   - mark evidence quality downgrade
 
 ## Chat Return Blocks
@@ -100,7 +119,8 @@ Every run should return:
 1. execution summary
 2. working notes
 3. deliverables or changed files
-4. suggested next switch (optional)
+
+Follow-up switch suggestions come from BuddySwitch receipt rendering, not from the market structured result payload.
 
 Terminal final output must follow `Receipt -> Commands -> Summary`:
 - `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`)
@@ -134,3 +154,4 @@ Bad example:
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - `buddyswitch/content/runs/<run-id>.json`
+- Cockpit browser/session state is execution-time only and never canonical persistence.
