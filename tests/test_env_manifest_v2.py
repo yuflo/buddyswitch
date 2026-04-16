@@ -267,6 +267,34 @@ class SkillPackageLoaderTests(unittest.TestCase):
                 """
             )
 
+        with self.assertRaisesRegex(env_manifest.ManifestError, "discovery_mode"):
+            self._load_demo_market_manifest(
+                """\
+                id = "demo-skill"
+                buddy = "market"
+                description = "Use when demo market work is requested."
+                objects = ["task", "artifact"]
+                produces_artifact = true
+                output_slot = "market-scan"
+                input_slots = ["research-question"]
+                output_schema = "framework/schemas/market/research-scan.json"
+                produces = ["market-scan"]
+                consumes = ["research-question"]
+                side_effect_level = "medium"
+                required_tools = ["chrome-devtools-market"]
+                required_env = []
+                execution_mode = "market-browser-native"
+                browser_mode = "headed-only"
+                browser_profile = "shared-market"
+                browser_executor = "chrome-devtools-market"
+                login_policy = "mandatory-takeover"
+                fallback_policy = "no-silent-degrade"
+                session_continuity = "shared-cockpit"
+                evidence_capture_level = "medium"
+                allowed_task_kinds = ["research"]
+                """
+            )
+
     def test_load_manifest_rejects_market_skill_with_invalid_cockpit_metadata_value(self) -> None:
         with self.assertRaisesRegex(env_manifest.ManifestError, "login_policy"):
             self._load_demo_market_manifest(
@@ -290,6 +318,36 @@ class SkillPackageLoaderTests(unittest.TestCase):
                 browser_executor = "chrome-devtools-market"
                 discovery_mode = "browser-native"
                 login_policy = "optional"
+                fallback_policy = "no-silent-degrade"
+                session_continuity = "shared-cockpit"
+                evidence_capture_level = "medium"
+                allowed_task_kinds = ["research"]
+                """
+            )
+
+    def test_load_manifest_rejects_market_skill_with_invalid_discovery_mode_value(self) -> None:
+        with self.assertRaisesRegex(env_manifest.ManifestError, "discovery_mode"):
+            self._load_demo_market_manifest(
+                """\
+                id = "demo-skill"
+                buddy = "market"
+                description = "Use when demo market work is requested."
+                objects = ["task", "artifact"]
+                produces_artifact = true
+                output_slot = "market-scan"
+                input_slots = ["research-question"]
+                output_schema = "framework/schemas/market/research-scan.json"
+                produces = ["market-scan"]
+                consumes = ["research-question"]
+                side_effect_level = "medium"
+                required_tools = ["chrome-devtools-market"]
+                required_env = []
+                execution_mode = "market-browser-native"
+                browser_mode = "headed-only"
+                browser_profile = "shared-market"
+                browser_executor = "chrome-devtools-market"
+                discovery_mode = "manual"
+                login_policy = "mandatory-takeover"
                 fallback_policy = "no-silent-degrade"
                 session_continuity = "shared-cockpit"
                 evidence_capture_level = "medium"
