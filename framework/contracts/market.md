@@ -95,6 +95,7 @@ Skill-specific synthesis fields stay with the relevant executable skill schema. 
   - `page_title`
   - `auth_state`
   - `query_or_filter_used`
+- For later phases or richer evidence capture, source entries may also include:
   - `interaction_steps_summary`
   - `screenshot_ref_or_snapshot_ref`
 - Some skill schemas also require additional evidence keys (for example `segment` and `pain_category` in `pmf-recon`).

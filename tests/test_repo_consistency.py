@@ -101,6 +101,10 @@ MARKET_EVIDENCE_FIELDS = (
     "auth_state",
     "query_or_filter_used",
 )
+OPTIONAL_MARKET_EVIDENCE_FIELDS = (
+    "interaction_steps_summary",
+    "screenshot_ref_or_snapshot_ref",
+)
 NEW_MARKET_TEMPLATE_SCHEMAS = {
     ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "assets" / "research-report-template.md": ROOT / "framework" / "schemas" / "market" / "research-scan.json",
     ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "assets" / "pmf-report-template.md": ROOT / "framework" / "schemas" / "market" / "pmf-recon.json",
@@ -478,9 +482,14 @@ class RepoConsistencyTests(unittest.TestCase):
         for path in MARKET_SCHEMA_PATHS:
             with self.subTest(schema=str(path.relative_to(ROOT))):
                 schema = json.loads(path.read_text(encoding="utf-8"))
-                evidence_required = schema["properties"]["artifact_content"]["properties"]["evidence"]["items"]["required"]
+                evidence_item = schema["properties"]["artifact_content"]["properties"]["evidence"]["items"]
+                evidence_required = evidence_item["required"]
+                evidence_properties = evidence_item["properties"]
                 for field_name in MARKET_EVIDENCE_FIELDS:
                     self.assertIn(field_name, evidence_required, msg=f"{path.relative_to(ROOT)} missing {field_name}")
+                for field_name in OPTIONAL_MARKET_EVIDENCE_FIELDS:
+                    self.assertIn(field_name, evidence_properties, msg=f"{path.relative_to(ROOT)} missing optional property {field_name}")
+                    self.assertNotIn(field_name, evidence_required, msg=f"{path.relative_to(ROOT)} should not require {field_name}")
 
     def test_market_contract_separates_skill_ids_from_output_slots_and_common_fields(self) -> None:
         contract_path = ROOT / "framework" / "contracts" / "market.md"
@@ -524,6 +533,9 @@ class RepoConsistencyTests(unittest.TestCase):
             "Evidence And Traceability Requirements",
         )
         for field_name in MARKET_EVIDENCE_FIELDS:
+            self.assertIn(field_name, evidence_section)
+        self.assertIn("may also include", evidence_section)
+        for field_name in OPTIONAL_MARKET_EVIDENCE_FIELDS:
             self.assertIn(field_name, evidence_section)
 
     def test_market_contract_describes_shared_cockpit_without_implying_multi_skill_runs(self) -> None:
