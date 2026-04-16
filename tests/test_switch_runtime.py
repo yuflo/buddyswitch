@@ -176,6 +176,48 @@ class ResolveRuntimeTests(unittest.TestCase):
                 ["research-question", "links", "prior-artifacts"],
             )
 
+    def test_multi_skill_design_buddy_returns_no_implicit_skill(self) -> None:
+        payload = switch_runtime.resolve_switch(
+            "switch design: Produce a first-pass design for an AI-first workflow tool"
+        )
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["invocation"]["buddy"], "design")
+        self.assertIsNone(payload["implicit_skill_id"])
+        self.assertEqual(
+            payload["eligible_skills"],
+            [
+                "product-design-spec",
+                "experience-shaping",
+                "activation-and-first-value",
+                "initiative-and-intervention",
+                "execution-boundaries",
+                "memory-and-context",
+                "conversation-and-clarity",
+                "recovery-and-escalation",
+                "design-critique",
+            ],
+        )
+
+    def test_product_design_spec_uses_explicit_market_inputs(self) -> None:
+        payload = switch_runtime.resolve_switch(
+            "switch design: Draft the product design for an AI-first onboarding flow"
+        )
+        card = next(card for card in payload["skill_cards"] if card["id"] == "product-design-spec")
+
+        self.assertEqual(
+            card["input_slots"],
+            ["prd", "positioning-brief", "launch-prep", "requirements", "track"],
+        )
+
+    def test_design_critique_uses_design_spec_inputs(self) -> None:
+        payload = switch_runtime.resolve_switch(
+            "switch design: Review the current product design and call out the biggest issues"
+        )
+        card = next(card for card in payload["skill_cards"] if card["id"] == "design-critique")
+
+        self.assertEqual(card["input_slots"], ["design-spec", "prd", "requirements", "track"])
+
     def test_pm_and_design_skill_cards_use_explicit_market_inputs(self) -> None:
         pm_payload = switch_runtime.resolve_switch(
             "switch pm: Draft the PRD for a validated market opportunity"
@@ -352,6 +394,7 @@ class ResolveRuntimeTests(unittest.TestCase):
             title="PM PRD V1",
             buddy="pm",
             skill_id="write-prd",
+            slot="prd",
             task_id=task["id"],
             source_run_id="run-index-resolve-v1",
             summary="First requirement summary.",
@@ -362,6 +405,7 @@ class ResolveRuntimeTests(unittest.TestCase):
             title="PM PRD V2",
             buddy="pm",
             skill_id="write-prd",
+            slot="prd",
             task_id=task["id"],
             source_run_id="run-index-resolve-v2",
             summary="Second requirement summary.",
@@ -386,7 +430,7 @@ class ResolveRuntimeTests(unittest.TestCase):
         task_row = index["tasks"][0]
         self.assertEqual(task_row["task_id"], "task-pm-index-resolve")
         self.assertEqual(
-            task_row["artifact_slots"]["write-prd"]["current_artifact_id"],
+            task_row["artifact_slots"]["prd"]["current_artifact_id"],
             "art-task-pm-index-resolve-prd-2",
         )
         self.assertEqual(
@@ -394,12 +438,22 @@ class ResolveRuntimeTests(unittest.TestCase):
             ["art-task-pm-index-resolve-prd-2", "art-task-pm-index-resolve-prd"],
         )
         self.assertEqual([item["is_current"] for item in task_row["artifacts"]], [True, False])
-        self.assertEqual(payload["artifact_selection"]["selected_inputs"], [])
-        self.assertEqual(payload["artifact_selection"]["selection_mode"], "slot-current-v2")
+        self.assertIsNone(payload["artifact_selection"])
         self.assertEqual(payload["run_instructions"]["selected_inputs"], [])
+        selection = payload["artifact_selection_by_skill"]["product-design-spec"]
+        instructions = payload["run_instructions_by_skill"]["product-design-spec"]
         self.assertEqual(
-            payload["run_instructions"]["artifact_read_commands"],
-            [],
+            [(item["slot"], item["artifact_id"]) for item in selection["selected_inputs"]],
+            [("prd", "art-task-pm-index-resolve-prd-2")],
+        )
+        self.assertEqual(selection["selection_mode"], "slot-current-v2")
+        self.assertEqual(
+            [(item["slot"], item["artifact_id"]) for item in instructions["selected_inputs"]],
+            [("prd", "art-task-pm-index-resolve-prd-2")],
+        )
+        self.assertEqual(
+            instructions["artifact_read_commands"],
+            ["python3 scripts/env_artifacts.py get art-task-pm-index-resolve-prd-2"],
         )
 
     def test_resolve_track_artifact_index_exposes_current_artifacts_by_slot(self) -> None:
@@ -555,9 +609,14 @@ class ResolveRuntimeTests(unittest.TestCase):
             "switch design(task-design-first-touch) -> track-design-first-touch: continue IA spec for landing and onboarding"
         )
 
-        self.assertEqual(payload["artifact_selection"]["selection_mode"], "slot-current-v2")
+        self.assertIsNone(payload["artifact_selection"])
+        self.assertEqual(payload["run_instructions"]["selected_inputs"], [])
+        selection = payload["artifact_selection_by_skill"]["product-design-spec"]
+        instructions = payload["run_instructions_by_skill"]["product-design-spec"]
+
+        self.assertEqual(selection["selection_mode"], "slot-current-v2")
         self.assertEqual(
-            [(item["slot"], item["artifact_id"]) for item in payload["artifact_selection"]["selected_inputs"]],
+            [(item["slot"], item["artifact_id"]) for item in selection["selected_inputs"]],
             [
                 ("prd", "art-task-pm-first-touch-prd-r1"),
                 ("positioning-brief", "art-task-market-first-touch-positioning-brief-r1"),
@@ -565,7 +624,7 @@ class ResolveRuntimeTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            [(item["slot"], item["artifact_id"]) for item in payload["run_instructions"]["selected_inputs"]],
+            [(item["slot"], item["artifact_id"]) for item in instructions["selected_inputs"]],
             [
                 ("prd", "art-task-pm-first-touch-prd-r1"),
                 ("positioning-brief", "art-task-market-first-touch-positioning-brief-r1"),
@@ -809,8 +868,11 @@ class ResolveRuntimeTests(unittest.TestCase):
             "switch design(task-design-bundle-aware) -> track-design-bundle-aware: continue the IA spec with the active market handoff"
         )
 
+        selection = payload["artifact_selection_by_skill"]["product-design-spec"]
+        instructions = payload["run_instructions_by_skill"]["product-design-spec"]
+
         self.assertEqual(
-            [(item["slot"], item["artifact_id"]) for item in payload["artifact_selection"]["selected_inputs"]],
+            [(item["slot"], item["artifact_id"]) for item in selection["selected_inputs"]],
             [
                 ("prd", "art-task-pm-bundle-aware-prd-r1"),
                 ("positioning-brief", "art-task-market-bundle-a-positioning-brief-r1"),
@@ -818,7 +880,7 @@ class ResolveRuntimeTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            [(item["slot"], item["artifact_id"]) for item in payload["run_instructions"]["selected_inputs"]],
+            [(item["slot"], item["artifact_id"]) for item in instructions["selected_inputs"]],
             [
                 ("prd", "art-task-pm-bundle-aware-prd-r1"),
                 ("positioning-brief", "art-task-market-bundle-a-positioning-brief-r1"),

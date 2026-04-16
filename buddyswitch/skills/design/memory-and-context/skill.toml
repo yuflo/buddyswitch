@@ -1,0 +1,14 @@
+id = "memory-and-context"
+buddy = "design"
+description = "Use when the task is defining remembered context, visible context, and user control over AI memory."
+objects = ["task", "artifact"]
+produces_artifact = true
+output_slot = "memory-spec"
+input_slots = ["prd", "design-spec", "requirements", "track"]
+output_schema = "framework/schemas/design/memory-and-context.json"
+produces = ["memory-spec"]
+consumes = ["prd", "design-spec", "requirements", "track"]
+side_effect_level = "medium"
+required_tools = []
+required_env = []
+allowed_task_kinds = ["design"]

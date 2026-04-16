@@ -78,7 +78,7 @@ def _index_fixture() -> dict:
                         "revision": 2,
                         "supersedes_artifact_id": "art-task-design-onboarding-design-spec-r1",
                         "summary": "Current design spec",
-                        "skill_id": "ia-spec",
+                        "skill_id": "product-design-spec",
                         "updated_at": "2026-04-13T09:20:00+08:00",
                         "is_current": True,
                     }
@@ -325,6 +325,98 @@ class ArtifactSelectionTests(unittest.TestCase):
             [
                 ("prd", "art-task-pm-onboarding-prd-r3"),
                 ("design-spec", "art-task-design-onboarding-design-spec-r2"),
+            ],
+        )
+
+    def test_selection_prefers_current_revision_for_design_follow_up_slots(self) -> None:
+        track_artifact_index = {
+            "track_id": "track-design-flow",
+            "track_title": "Design Flow",
+            "track_summary": "Design follow-up selection demo",
+            "updated_at": "2026-04-15T15:00:00+08:00",
+            "tasks": [
+                {
+                    "task_id": "task-pm-flow",
+                    "buddy": "pm",
+                    "task_title": "PM Flow",
+                    "task_summary": "PM flow summary",
+                    "artifact_slots": {
+                        "prd": {
+                            "current_artifact_id": "art-task-pm-flow-prd-r2",
+                            "revision_count": 2,
+                        }
+                    },
+                    "artifacts": [
+                        {
+                            "artifact_id": "art-task-pm-flow-prd-r2",
+                            "title": "PRD r2",
+                            "slot": "prd",
+                            "revision": 2,
+                            "supersedes_artifact_id": "art-task-pm-flow-prd-r1",
+                            "summary": "Current PRD for flow follow-up",
+                            "skill_id": "write-prd",
+                            "updated_at": "2026-04-15T14:00:00+08:00",
+                            "is_current": True,
+                        }
+                    ],
+                },
+                {
+                    "task_id": "task-design-flow",
+                    "buddy": "design",
+                    "task_title": "Design Flow",
+                    "task_summary": "Design flow summary",
+                    "artifact_slots": {
+                        "design-spec": {
+                            "current_artifact_id": "art-task-design-flow-design-spec-r3",
+                            "revision_count": 3,
+                        },
+                        "activation-spec": {
+                            "current_artifact_id": "art-task-design-flow-activation-spec-r1",
+                            "revision_count": 1,
+                        },
+                    },
+                    "artifacts": [
+                        {
+                            "artifact_id": "art-task-design-flow-design-spec-r3",
+                            "title": "Design Spec r3",
+                            "slot": "design-spec",
+                            "revision": 3,
+                            "supersedes_artifact_id": "art-task-design-flow-design-spec-r2",
+                            "summary": "Current design spec for flow follow-up",
+                            "skill_id": "product-design-spec",
+                            "updated_at": "2026-04-15T14:30:00+08:00",
+                            "is_current": True,
+                        },
+                        {
+                            "artifact_id": "art-task-design-flow-activation-spec-r1",
+                            "title": "Activation Spec r1",
+                            "slot": "activation-spec",
+                            "revision": 1,
+                            "supersedes_artifact_id": None,
+                            "summary": "Current activation spec for flow follow-up",
+                            "skill_id": "activation-and-first-value",
+                            "updated_at": "2026-04-15T14:35:00+08:00",
+                            "is_current": True,
+                        },
+                    ],
+                },
+            ],
+        }
+
+        selected = artifact_selection.select_artifacts_for_run(
+            current_buddy="design",
+            demand="Continue activation refinement",
+            required_slots=["prd", "design-spec", "activation-spec"],
+            track_artifact_index=track_artifact_index,
+            current_task_id="task-design-flow",
+        )
+
+        self.assertEqual(
+            [(item["slot"], item["artifact_id"]) for item in selected["selected_inputs"]],
+            [
+                ("prd", "art-task-pm-flow-prd-r2"),
+                ("design-spec", "art-task-design-flow-design-spec-r3"),
+                ("activation-spec", "art-task-design-flow-activation-spec-r1"),
             ],
         )
 

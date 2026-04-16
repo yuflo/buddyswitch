@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "required": [
+    "execution_summary",
+    "working_notes",
+    "deliverables_or_changed_files",
+    "artifact_content"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "execution_summary": { "type": "string" },
+    "working_notes": { "type": "array", "items": { "type": "string" } },
+    "deliverables_or_changed_files": { "type": "array", "items": { "type": "string" } },
+    "artifact_content": {
+      "type": "object",
+      "required": ["findings", "strengths", "open_questions", "recommended_next_moves"],
+      "additionalProperties": false,
+      "properties": {
+        "findings": { "type": "array", "items": { "type": "string" } },
+        "strengths": { "type": "array", "items": { "type": "string" } },
+        "open_questions": { "type": "array", "items": { "type": "string" } },
+        "recommended_next_moves": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

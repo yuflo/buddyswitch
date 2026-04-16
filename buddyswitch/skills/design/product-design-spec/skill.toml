@@ -1,12 +1,12 @@
-id = "ia-spec"
+id = "product-design-spec"
 buddy = "design"
-description = "Use when the task is creating IA, user flow, interaction, or design specification artifacts."
+description = "Use when the task is creating a first-pass product design specification for a functional AI product."
 objects = ["task", "artifact"]
 produces_artifact = true
 output_slot = "design-spec"
 input_slots = ["prd", "positioning-brief", "launch-prep", "requirements", "track"]
-output_schema = "framework/schemas/design/ia-spec.json"
-produces = ["design-spec", "ia", "interaction-flow"]
+output_schema = "framework/schemas/design/product-design-spec.json"
+produces = ["design-spec", "interaction-spec"]
 consumes = ["prd", "positioning-brief", "launch-prep", "requirements", "track"]
 side_effect_level = "medium"
 required_tools = []

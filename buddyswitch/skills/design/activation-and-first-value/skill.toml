@@ -1,0 +1,14 @@
+id = "activation-and-first-value"
+buddy = "design"
+description = "Use when the task is improving first-run experience, onboarding, empty states, or time-to-value for a functional AI product."
+objects = ["task", "artifact"]
+produces_artifact = true
+output_slot = "activation-spec"
+input_slots = ["prd", "positioning-brief", "launch-prep", "design-spec", "requirements", "track"]
+output_schema = "framework/schemas/design/activation-and-first-value.json"
+produces = ["activation-spec"]
+consumes = ["prd", "positioning-brief", "launch-prep", "design-spec", "requirements", "track"]
+side_effect_level = "medium"
+required_tools = []
+required_env = []
+allowed_task_kinds = ["design"]
