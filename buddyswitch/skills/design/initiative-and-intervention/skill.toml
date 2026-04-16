@@ -1,0 +1,14 @@
+id = "initiative-and-intervention"
+buddy = "design"
+description = "Use when the task is defining when AI should intervene, suggest, act, or stay silent."
+objects = ["task", "artifact"]
+produces_artifact = true
+output_slot = "initiative-spec"
+input_slots = ["prd", "design-spec", "requirements", "track"]
+output_schema = "framework/schemas/design/initiative-and-intervention.json"
+produces = ["initiative-spec"]
+consumes = ["prd", "design-spec", "requirements", "track"]
+side_effect_level = "medium"
+required_tools = []
+required_env = []
+allowed_task_kinds = ["design"]

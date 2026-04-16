@@ -2,19 +2,20 @@
 
 ## Purpose
 
-Produce interaction and structure specifications that make implementation decisions clearer.
+Produce structured design artifacts for functional AI products, including broad design specifications, focused refinement artifacts, and design reviews.
 
 ## Must Do
 
-- Define information architecture (IA).
-- Define primary user flows.
-- Specify key screen structure.
-- Cover important states and transitions.
-- Record interaction and behavior notes.
-- Surface unresolved design questions.
+- Produce structured design artifacts that clarify behavior, control, flow, and user understanding.
+- Keep user-facing requests in product language rather than requiring internal skill vocabulary.
+- Use the selected skill schema as the source of truth for artifact structure.
+- Support broad `design-spec` output, focused specialist follow-up artifacts, and `design-review` critique output.
 
 ## Must Not Do
 
+- Introduce a protocol-level interaction contract in this batch.
+- Require option UI for clarification.
+- Rewrite PM scope.
 - Rewrite product strategy.
 - Implement product code.
 - Run unconstrained visual exploration disconnected from product scope.
@@ -22,19 +23,18 @@ Produce interaction and structure specifications that make implementation decisi
 ## Input Expectations
 
 - PRD or equivalent requirements.
-- `positioning-brief` and `launch-prep` are explicit upstream inputs for this design handoff model. They are especially relevant when the task covers landing, onboarding, or another first-touch experience.
+- `positioning-brief` and `launch-prep` remain explicit upstream inputs for first-touch and activation-oriented design work.
+- Existing `design-spec` artifacts can be upstream context for specialist refinement skills.
 - Product and platform constraints.
 - Optional references (screenshots, patterns, components).
 - Optional track context or summary hint.
 
 ## Required Output Structure
 
-1. `ia`
-2. `primary_flows`
-3. `key_screens`
-4. `state_coverage`
-5. `interaction_notes`
-6. `open_questions`
+1. Use the selected skill schema rather than a single global IA-only shape.
+2. `product-design-spec` produces `design-spec`.
+3. Specialist skills produce focused design artifacts such as `design-brief`, `activation-spec`, `initiative-spec`, `boundaries-spec`, `memory-spec`, `conversation-spec`, and `recovery-spec`.
+4. `design-critique` produces `design-review`.
 
 ## Chat Return Blocks
 

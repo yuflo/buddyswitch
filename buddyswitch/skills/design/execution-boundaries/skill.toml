@@ -1,0 +1,14 @@
+id = "execution-boundaries"
+buddy = "design"
+description = "Use when the task is defining permissions, confirmation points, and user control boundaries for AI actions."
+objects = ["task", "artifact"]
+produces_artifact = true
+output_slot = "boundaries-spec"
+input_slots = ["prd", "design-spec", "requirements", "track"]
+output_schema = "framework/schemas/design/execution-boundaries.json"
+produces = ["boundaries-spec"]
+consumes = ["prd", "design-spec", "requirements", "track"]
+side_effect_level = "medium"
+required_tools = []
+required_env = []
+allowed_task_kinds = ["design"]
