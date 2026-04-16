@@ -1,7 +1,7 @@
 # pmf-recon
 
 ## Execution Order
-1. Before any market research, open a visible browser and work inside that browser-first environment.
+1. Before any market research, run discovery in the visible `chrome-devtools-market` browser and keep the workflow `browser-native`.
 2. Read all selected upstream inputs before forming new market claims.
 3. If a critical source requires login, pause for mandatory takeover.
 4. Do not continue with snippet-only or text-only research when the skill contract requires browser-native work.
@@ -37,7 +37,7 @@
 
 ## Research Defaults
 
-- Collection mode: `browser-first + search-assist`.
+- Collection mode: `browser-native` in-browser search followed by real result-page traversal (details/comments/related pages when relevant).
 - Start with user-language sources before polished market messaging.
 - Prefer public sources first and log any access downgrade in the artifact.
 - Read `references/source-map.md`, `references/evidence-rubric.md`, and `references/interview-prompts.md` as needed.
@@ -51,14 +51,18 @@
 ## Access And Blocking Rules
 
 - If a critical source requires login, require mandatory takeover in the shared headed cockpit before continuing.
-- If blocked by paywall, rate-limit, region lock, or anti-bot controls, record blockage and impact, do not silently downgrade to low-density public alternatives, and request takeover or explicit user-approved downgrade.
+- If blocked by paywall, rate-limit, region lock, or anti-bot controls, record blockage and impact, do not silently downgrade to low-density public alternatives, do not use silent search API/snippet/crawler fallback, and request takeover or explicit user-approved one-off downgrade.
 - Any approved downgrade path must be labeled as an evidence quality downgrade.
 
 ## Market Research Cockpit Runtime
 
 - This skill follows `framework/docs/market-research-cockpit.md`.
+- It uses `chrome-devtools-market` as the browser executor.
 - It runs in a shared headed cockpit (`browser_mode=headed-only`) with profile `shared-market`.
+- Discovery mode is `browser-native`: search in the browser and continue into real result pages, details, comments, and related pages where relevant.
 - Critical-source login is mandatory takeover, and fallback policy is no silent degrade.
+- Do not use silent search API/snippet/crawler fallback.
+- If browser-native access is genuinely blocked, only explicit user-approved one-off downgrade is allowed.
 - The cockpit is execution-time only; canonical outputs remain BuddySwitch task/artifact/run objects.
 
 ## Steps
@@ -105,7 +109,8 @@
 - Do not turn PMF research into implementation advice.
 - Do not invent commitment signals, buyer intent, or willingness-to-pay evidence.
 - For critical sources, require mandatory takeover before continuing past login gates.
-- Do not silently downgrade to low-density public alternatives; record explicit evidence downgrade when approved.
+- Do not silently downgrade to low-density public alternatives; record explicit evidence downgrade only for user-approved one-off downgrade.
+- Do not use silent search API/snippet/crawler fallback.
 
 ## Examples
 - `switch market: Validate whether an AI note-taking tool for consultants has enough PMF signal to test`

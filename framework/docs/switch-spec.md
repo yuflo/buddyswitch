@@ -104,6 +104,13 @@ Current runtime defaults:
 - run audit payloads are written to `buddyswitch/content/runs/**`
 - derived markdown artifacts and run summaries are retired
 
+Market runtime note:
+- market skills declare `browser_executor = "chrome-devtools-market"` and `discovery_mode = "browser-native"` in skill metadata
+- `required_tools` remains advisory even for market skills; it warns the host rather than enforcing execution order
+- host execution for market runs must stay browser-native: search in the browser and continue into real pages (details, comments, related pages when relevant)
+- no silent search API/snippet/crawler fallback is allowed; only explicit `user-approved` one-off downgrade is permitted when browser-native access is genuinely blocked
+- the enforceable host contract for market runs lives in `selected_skill_packet.execution_constraints` and `selected_skill_packet.execution_steps`, not in `required_tools`
+
 ## Execution Preparation
 
 `prepare-execution` is the canonical step between `resolve` and `persist`.
@@ -120,6 +127,7 @@ The packet fields are stable:
 - `execution_steps`
 
 `execution_steps` is the ordered human-facing execution contract for the host session.
+For market runs, `execution_constraints` carries the Chrome MCP/browser-native/no-silent-degrade contract while `execution_steps` carries the ordered browsing workflow the host must follow.
 The host must execute the packet in-session; BuddySwitch does not execute host tools itself.
 
 ## Host Codex Responsibilities

@@ -9,7 +9,12 @@
 
 - Complexity tier: quick / standard / deep
 - Tier rationale:
-- Collection mode: browser-first + search-assist
+- Browser executor: chrome-devtools-market
+- Discovery mode: browser-native
+- Evidence source: real webpage browsing in the Chrome MCP session, not snippet-only or crawler-only synthesis
+- Collection mode: in-browser search -> real result pages -> details/comments/related pages (when relevant)
+- Fallback policy: no silent search API/snippet/crawler fallback
+- If browser-native access is genuinely blocked: explicit user-approved one-off downgrade only
 - Source inclusion/exclusion constraints:
 
 ## channel_plan

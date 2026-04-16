@@ -4,7 +4,7 @@
 
 Define the shared execution contract for market research skills without changing BuddySwitch object authority or skill boundaries.
 
-`prepare-execution` materializes a `selected_skill_packet` whose injected instructions and execution constraints make browser-first behavior explicit to the host.
+`prepare-execution` materializes a `selected_skill_packet` whose injected instructions and execution constraints make `browser-native` behavior explicit to the host.
 BuddySwitch does not open browser tools itself; it remains the control layer while the host stays the only executor.
 
 ## Per-Run Contract
@@ -32,6 +32,8 @@ All six market skills must carry identical host execution metadata in `skill.tom
 - `execution_mode = "market-browser-native"`
 - `browser_mode = "headed-only"`
 - `browser_profile = "shared-market"`
+- `browser_executor = "chrome-devtools-market"`
+- `discovery_mode = "browser-native"`
 - `login_policy = "mandatory-takeover"`
 - `fallback_policy = "no-silent-degrade"`
 - `session_continuity = "shared-cockpit"`
@@ -40,18 +42,21 @@ All six market skills must carry identical host execution metadata in `skill.tom
 ## Runtime Rules
 
 1. Shared headed cockpit
-- All six skills run in one shared headed cockpit profile (`shared-market`) with session continuity (`shared-cockpit`).
+- All six skills run in one shared headed cockpit profile (`shared-market`) with session continuity (`shared-cockpit`) through `chrome-devtools-market`.
+- Discovery is `browser-native`: search happens in the browser and continues into real result pages, details, comments, and related pages when relevant.
 - The cockpit is execution-time infrastructure for browsing and evidence capture only.
 
 2. Mandatory login takeover for critical sources
 - Critical evidence sources that require login must use mandatory takeover.
 - The host/user performs the takeover in the same headed session; the skill does not bypass or fake access.
 
-3. No silent downgrade
+3. No silent downgrade or hidden fallback
 - `no-silent-degrade` means no silent downgrade to low-density public alternatives when critical sources are blocked.
-- If access is blocked, the run must explicitly record the evidence gap, impact, and next action (takeover request or unresolved risk).
+- No silent search API/snippet/crawler fallback is allowed.
+- If `browser-native` access is genuinely blocked, only one explicit `user-approved` one-off downgrade is allowed and must be recorded with evidence impact.
 
 4. Ordered host execution
+- `selected_skill_packet.execution_constraints` carries the host-facing Chrome MCP contract (`chrome-devtools-market`, `browser-native`, mandatory takeover, and no-silent-degrade).
 - `selected_skill_packet.execution_steps` is the ordered runtime contract for the selected skill.
 - The host may not replace that packet with manual reconstruction or ad hoc market-specific shortcuts.
 

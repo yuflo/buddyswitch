@@ -9,8 +9,10 @@ Market is an outside-in buddy. It produces browser-driven, evidence-based demand
 - Clarify the research question and scope.
 - Select the executable market skill that matches the question: `research-scan`, `pmf-recon`, `customer-discovery`, `positioning-copy`, `channel-discovery`, or `launch-prep`.
 - Run the selected market skill in the shared headed cockpit defined in `framework/docs/market-research-cockpit.md`; the same cockpit contract applies across all six market skills.
+- Use `chrome-devtools-market` as the browser executor and keep discovery `browser-native`.
 - Use browser profile `shared-market` with session continuity across market runs.
 - Enforce mandatory login takeover for critical sources before continuing evidence capture.
+- Perform discovery in-browser: search in the browser, then continue into real result pages, details, comments, and related pages when relevant.
 - Choose channels based on the question type and constraints.
 - Collect and synthesize evidence from browsed sources.
 - Highlight caveats and uncertainty.
@@ -26,6 +28,7 @@ Market is an outside-in buddy. It produces browser-driven, evidence-based demand
 - Claim unsupported findings without source mapping.
 - Continue through critical login-required sources without mandatory takeover.
 - Silently downgrade to low-density public alternatives when critical sources are blocked.
+- Use silent search API/snippet/crawler fallback instead of in-browser evidence capture.
 - Treat cockpit session state as a second source of truth.
 
 ## Input Expectations
@@ -63,8 +66,12 @@ Skill-specific synthesis fields stay with the relevant executable skill schema. 
 
 - The six market skills above share one execution-time cockpit, not six isolated browser stacks.
 - The cockpit must run headed (`browser_mode=headed-only`) and use profile `shared-market`.
+- The cockpit browser executor is `chrome-devtools-market`.
+- Discovery mode is `browser-native` and requires real page traversal after in-browser search.
 - Login handling for critical sources is mandatory takeover (`login_policy=mandatory-takeover`).
 - Fallback handling is `fallback_policy=no-silent-degrade`: no silent downgrade to low-density public alternatives.
+- No silent search API/snippet/crawler fallback is allowed.
+- If browser-native access is genuinely blocked, only explicit `user-approved` one-off downgrade is allowed.
 - The cockpit is execution-time only. Canonical outputs remain BuddySwitch task, artifact, and run objects.
 
 ## Output Slot Taxonomy
@@ -110,7 +117,8 @@ Skill-specific synthesis fields stay with the relevant executable skill schema. 
 - For blocked sources:
   - record blockage and impact
   - do not silently downgrade to low-density public alternatives
-  - request takeover or explicit user-approved downgrade path
+  - no silent search API/snippet/crawler fallback
+  - request takeover or explicit user-approved one-off downgrade path
   - mark evidence quality downgrade
 
 ## Chat Return Blocks

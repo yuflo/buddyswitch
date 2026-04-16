@@ -1,7 +1,7 @@
 # research-scan
 
 ## Execution Order
-1. Before any market research, open a visible browser and work inside that browser-first environment.
+1. Before any market research, run discovery in the visible `chrome-devtools-market` browser and keep the workflow `browser-native`.
 2. Read all selected upstream inputs before forming new market claims.
 3. If a critical source requires login, pause for mandatory takeover.
 4. Do not continue with snippet-only or text-only research when the skill contract requires browser-native work.
@@ -38,7 +38,7 @@
 
 ## Research Defaults
 
-- Collection mode: `browser-first + search-assist`.
+- Collection mode: `browser-native` in-browser search followed by real result-page traversal (details/comments/related pages when relevant).
 - Unless user explicitly excludes them, include both:
   - `x.com`
   - `reddit`
@@ -70,13 +70,18 @@ For each round, run this fixed loop:
 - No silent degrade:
   - if blocked by paywall/rate-limit/region/anti-bot, record the blockage and impact
   - do not silently downgrade to low-density public alternatives
-  - request takeover or explicit user-approved downgrade, then mark evidence quality downgrade in `risks_and_caveats`
+  - no silent search API/snippet/crawler fallback
+  - request takeover or explicit user-approved one-off downgrade, then mark evidence quality downgrade in `risks_and_caveats`
 
 ## Market Research Cockpit Runtime
 
 - This skill follows `framework/docs/market-research-cockpit.md`.
+- It uses `chrome-devtools-market` as the browser executor.
 - It runs in a shared headed cockpit (`browser_mode=headed-only`) with profile `shared-market`.
+- Discovery mode is `browser-native`: search in the browser and continue into real result pages, details, comments, and related pages where relevant.
 - Critical-source login is mandatory takeover, and fallback policy is no silent degrade.
+- Do not use silent search API/snippet/crawler fallback.
+- If browser-native access is genuinely blocked, only explicit user-approved one-off downgrade is allowed.
 - The cockpit is execution-time only; canonical outputs remain BuddySwitch task/artifact/run objects.
 
 ## Steps
@@ -116,7 +121,8 @@ For each round, run this fixed loop:
 - Do not invent evidence.
 - Do not skip required channels unless user explicitly excludes them.
 - For critical sources, require mandatory takeover before continuing past login gates.
-- Do not silently downgrade to low-density public alternatives; record explicit evidence downgrade when approved.
+- Do not silently downgrade to low-density public alternatives; record explicit evidence downgrade only for user-approved one-off downgrade.
+- Do not use silent search API/snippet/crawler fallback.
 
 ## Examples
 - `switch market: Research demand for AI companion live spaces`
