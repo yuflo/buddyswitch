@@ -551,8 +551,6 @@ class RepoConsistencyTests(unittest.TestCase):
 
     def test_dev0039_docs_keep_only_active_selected_skill_plans(self) -> None:
         docs_dir = ROOT / "docs" / "dev0039"
-        if not docs_dir.exists():
-            self.skipTest("docs/dev0039 is absent in the current worktree")
         names = {path.name for path in docs_dir.glob("*.md")}
 
         self.assertIn("2026-04-16-selected-skill-injection-execution-plan.md", names)
@@ -593,8 +591,6 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "docs" / "dev0039" / "2026-04-16-selected-skill-injection-execution-plan.md",
             ROOT / "docs" / "dev0039" / "2026-04-16-selected-skill-injection-closure-cleanup-plan.md",
         )
-        if not all(path.exists() for path in docs):
-            self.skipTest("active dev0039 selected-skill plan docs are absent in the current worktree")
         combined = "\n".join(path.read_text(encoding="utf-8") for path in docs).lower()
 
         self.assertIn("selected_skill_packet", combined)
