@@ -26,6 +26,28 @@ import switch_runtime  # noqa: E402
 import workspace_data  # noqa: E402
 from env_store import create_artifact, create_task, create_track, get_track, require_id, validate_artifact, validate_track  # noqa: E402
 
+EXPECTED_MARKET_HOST_EXECUTION = {
+    "execution_mode": "market-browser-native",
+    "browser_mode": "headed-only",
+    "browser_profile": "shared-market",
+    "browser_executor": "chrome-devtools-market",
+    "discovery_mode": "browser-native",
+    "login_policy": "mandatory-takeover",
+    "fallback_policy": "no-silent-degrade",
+    "session_continuity": "shared-cockpit",
+    "evidence_capture_level": "medium",
+}
+
+EXPECTED_MARKET_EXECUTION_STEPS = [
+    "Use the chrome-devtools-market browser before any market research.",
+    "Read selected inputs by slot before other work.",
+    "Perform discovery inside the browser: browse search results, destination pages, detail pages, and comment threads before synthesizing.",
+    "Pause for takeover if a critical source requires login.",
+    "If browser access remains blocked, ask for explicit user approval before any one-time downgrade.",
+    "Do not continue with snippet-only or text-only research.",
+    "Only after the steps above should you synthesize findings into the structured result.",
+]
+
 
 class EnvStoreRetiredFieldTests(unittest.TestCase):
     def test_validate_track_rejects_legacy_artifact_ids_field(self) -> None:
@@ -177,20 +199,12 @@ class ResolveRuntimeTests(unittest.TestCase):
             )
             self.assertEqual(
                 pmf_card.get("host_execution"),
-                {
-                    "execution_mode": "market-browser-native",
-                    "browser_mode": "headed-only",
-                    "browser_profile": "shared-market",
-                    "login_policy": "mandatory-takeover",
-                    "fallback_policy": "no-silent-degrade",
-                    "session_continuity": "shared-cockpit",
-                    "evidence_capture_level": "medium",
-                },
+                EXPECTED_MARKET_HOST_EXECUTION,
             )
             pmf_instructions = payload["run_instructions_by_skill"]["pmf-recon"]
             self.assertEqual(
-                pmf_instructions["host_execution"]["browser_mode"],
-                "headed-only",
+                pmf_instructions["host_execution"],
+                EXPECTED_MARKET_HOST_EXECUTION,
             )
             self.assertIn(
                 "After choosing skill_id, call prepare-execution to materialize selected_skill_packet.",
@@ -943,12 +957,9 @@ class ExecutionPreparationTests(unittest.TestCase):
         self.assertEqual(packet["buddy"], "market")
         self.assertEqual(packet["skill_instructions"]["name"], "research-scan")
         self.assertTrue(packet["skill_instructions"]["contents"].startswith("# "))
-        self.assertEqual(packet["execution_constraints"]["browser_mode"], "headed-only")
+        self.assertEqual(packet["execution_constraints"], EXPECTED_MARKET_HOST_EXECUTION)
         self.assertEqual(packet["selected_inputs"], [])
-        self.assertIn(
-            "Open a visible browser before any market research.",
-            packet["execution_steps"],
-        )
+        self.assertEqual(packet["execution_steps"], EXPECTED_MARKET_EXECUTION_STEPS)
         self.assertIn(
             "Inject selected_skill_packet.skill_instructions verbatim into the current host turn.",
             prepared["host_next_actions"],
@@ -978,7 +989,8 @@ class ExecutionPreparationTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         packet = payload["selected_skill_packet"]
         self.assertEqual(packet["skill_id"], "research-scan")
-        self.assertEqual(packet["execution_constraints"]["browser_mode"], "headed-only")
+        self.assertEqual(packet["execution_constraints"], EXPECTED_MARKET_HOST_EXECUTION)
+        self.assertEqual(packet["execution_steps"], EXPECTED_MARKET_EXECUTION_STEPS)
 
     def test_prepare_execution_ignores_tampered_instruction_path_from_resolved_payload(self) -> None:
         resolved = switch_runtime.resolve_switch(
@@ -1051,13 +1063,7 @@ class ExecutionPreparationTests(unittest.TestCase):
 
         self.assertEqual(
             prepared["selected_skill_packet"]["execution_steps"],
-            [
-                "Open a visible browser before any market research.",
-                "Read selected inputs by slot before other work.",
-                "Pause for takeover if a critical source requires login.",
-                "Do not continue with snippet-only or text-only research.",
-                "Only after the steps above should you synthesize findings into the structured result.",
-            ],
+            EXPECTED_MARKET_EXECUTION_STEPS,
         )
 
 

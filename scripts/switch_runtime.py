@@ -15,6 +15,7 @@ from typing import Any
 from env_manifest import (
     ADVISORY_RUNTIME_METADATA_POLICY,
     DEFAULT_MANIFEST,
+    MARKET_COCKPIT_HOST_EXECUTION,
     ManifestError,
     buddy_authority_profile,
     buddy_skill_docs,
@@ -342,19 +343,30 @@ def _build_execution_steps(
     host_execution: dict[str, Any],
     selected_inputs: list[dict[str, Any]],
 ) -> list[str]:
-    steps: list[str] = []
     if host_execution.get("execution_mode") == "market-browser-native":
-        steps.append("Open a visible browser before any market research.")
-        if selected_inputs:
-            steps.append("Read selected inputs by slot before other work.")
-        steps.extend(
-            [
-                "Pause for takeover if a critical source requires login.",
-                "Do not continue with snippet-only or text-only research.",
-                "Only after the steps above should you synthesize findings into the structured result.",
-            ]
-        )
-        return steps
+        mismatched_fields = [
+            key
+            for key, expected in MARKET_COCKPIT_HOST_EXECUTION.items()
+            if host_execution.get(key) != expected
+        ]
+        if mismatched_fields:
+            mismatch_details = ", ".join(
+                f"{key}={host_execution.get(key)!r}" for key in mismatched_fields
+            )
+            raise ValueError(
+                "Market host_execution must remain fail-closed to Chrome MCP/browser-native discovery "
+                f"with no silent degrade. Mismatched fields: {mismatch_details}"
+            )
+        return [
+            "Use the chrome-devtools-market browser before any market research.",
+            "Read selected inputs by slot before other work.",
+            "Perform discovery inside the browser: browse search results, destination pages, detail pages, and comment threads before synthesizing.",
+            "Pause for takeover if a critical source requires login.",
+            "If browser access remains blocked, ask for explicit user approval before any one-time downgrade.",
+            "Do not continue with snippet-only or text-only research.",
+            "Only after the steps above should you synthesize findings into the structured result.",
+        ]
+    steps: list[str] = []
     if selected_inputs:
         steps.append("Read selected inputs by slot before other work.")
     return steps
