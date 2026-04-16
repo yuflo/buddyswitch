@@ -38,6 +38,24 @@ GUIDANCE_HEADINGS = {
     "counterexamples": "counterexamples",
     "gotchas": "gotchas",
 }
+HOST_EXECUTION_FIELDS = (
+    "execution_mode",
+    "browser_mode",
+    "browser_profile",
+    "login_policy",
+    "fallback_policy",
+    "session_continuity",
+    "evidence_capture_level",
+)
+MARKET_COCKPIT_HOST_EXECUTION = {
+    "execution_mode": "market-browser-native",
+    "browser_mode": "headed-only",
+    "browser_profile": "shared-market",
+    "login_policy": "mandatory-takeover",
+    "fallback_policy": "no-silent-degrade",
+    "session_continuity": "shared-cockpit",
+    "evidence_capture_level": "medium",
+}
 
 
 class ManifestError(ValueError):
@@ -215,6 +233,36 @@ def _require_string(node: dict[str, Any], key: str, label: str) -> str:
     return value.strip()
 
 
+def _optional_string(node: dict[str, Any], key: str, label: str) -> str | None:
+    value = node.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ManifestError(f"{label}.{key} must be a non-empty string when provided")
+    return value.strip()
+
+
+def _validate_market_host_execution(
+    *,
+    metadata_path: Path,
+    metadata_buddy: str,
+    host_execution: dict[str, str],
+) -> None:
+    if metadata_buddy.strip() != "market":
+        return
+
+    for key, expected_value in MARKET_COCKPIT_HOST_EXECUTION.items():
+        actual_value = host_execution.get(key)
+        if actual_value is None:
+            raise ManifestError(
+                f"{metadata_path.relative_to(ROOT)}:{key} is required for market cockpit skills"
+            )
+        if actual_value != expected_value:
+            raise ManifestError(
+                f"{metadata_path.relative_to(ROOT)}:{key} must be '{expected_value}' for market cockpit skills"
+            )
+
+
 def _require_string_list(node: dict[str, Any], key: str, label: str) -> list[str]:
     value = node.get(key)
     if not isinstance(value, list) or not value:
@@ -314,6 +362,7 @@ def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
     metadata = _load_toml(metadata_path)
     if not isinstance(metadata, dict):
         raise ManifestError(f"{metadata_path.relative_to(ROOT)} must contain a TOML object")
+    metadata_label = str(metadata_path.relative_to(ROOT))
 
     required = ("id", "buddy", "description", "objects", "produces_artifact", "input_slots", "output_schema")
     missing = [key for key in required if key not in metadata]
@@ -378,11 +427,11 @@ def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
 
     required_tools = _normalize_string_list(
         metadata.get("required_tools", []),
-        label=f"{metadata_path.relative_to(ROOT)}:required_tools",
+        label=f"{metadata_label}:required_tools",
     )
     required_env = _normalize_string_list(
         metadata.get("required_env", []),
-        label=f"{metadata_path.relative_to(ROOT)}:required_env",
+        label=f"{metadata_label}:required_env",
     )
     produces = _normalize_string_list(
         metadata.get("produces", []),
@@ -394,7 +443,17 @@ def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
     )
     allowed_task_kinds = _normalize_string_list(
         metadata.get("allowed_task_kinds", []),
-        label=f"{metadata_path.relative_to(ROOT)}:allowed_task_kinds",
+        label=f"{metadata_label}:allowed_task_kinds",
+    )
+    host_execution = {
+        key: value
+        for key in HOST_EXECUTION_FIELDS
+        if (value := _optional_string(metadata, key, metadata_label)) is not None
+    }
+    _validate_market_host_execution(
+        metadata_path=metadata_path,
+        metadata_buddy=metadata_buddy,
+        host_execution=host_execution,
     )
 
     instruction_lines = instruction_path.read_text(encoding="utf-8").splitlines()
@@ -425,6 +484,7 @@ def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
         "side_effect_level": side_effect_level.strip() if isinstance(side_effect_level, str) else None,
         "required_tools": required_tools,
         "required_env": required_env,
+        "host_execution": host_execution,
         "produces": produces,
         "consumes": consumes,
         "allowed_task_kinds": allowed_task_kinds,

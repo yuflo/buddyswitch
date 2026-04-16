@@ -1,5 +1,12 @@
 # launch-prep
 
+## Execution Order
+1. Before any market research, open a visible browser and work inside that browser-first environment.
+2. Read all selected upstream inputs before forming new market claims.
+3. If a critical source requires login, pause for mandatory takeover.
+4. Do not continue with snippet-only or text-only research when the skill contract requires browser-native work.
+5. Only after the steps above should you synthesize findings into the structured result.
+
 ## Purpose
 - Produce a first-launch preparation brief that connects PMF, positioning, and channel decisions into a validation-ready launch plan with instrumentation and feedback loops.
 
@@ -24,6 +31,14 @@
 - A launch-prep artifact object with launch goal, audience, selected channel, launch assets, instrumentation plan, feedback collection plan, success and failure signals, and conclusion.
 - A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
 - Explicit notes when launch confidence depends on assumptions rather than observed evidence.
+
+## Market Research Cockpit Runtime
+
+- This skill follows `framework/docs/market-research-cockpit.md`.
+- It runs in a shared headed cockpit (`browser_mode=headed-only`) with profile `shared-market`.
+- Critical-source login is mandatory takeover, and fallback policy is no silent degrade.
+- Do not silently downgrade to low-density public alternatives when critical launch evidence is blocked.
+- The cockpit is execution-time only; canonical outputs remain BuddySwitch task/artifact/run objects.
 
 ## Verification
 - Confirm this is launch preparation, not product shipping.
@@ -54,7 +69,8 @@
 
 - This is launch preparation, not product shipping.
 - This is not growth automation.
-- Stop before login-required analytics or admin systems unless the user confirms access.
+- For critical analytics/admin sources, require mandatory takeover before continuing past login gates.
+- Do not silently downgrade to low-density public alternatives; record explicit evidence downgrade when approved.
 - Do not imply operational readiness that the current evidence does not support.
 
 ## Examples

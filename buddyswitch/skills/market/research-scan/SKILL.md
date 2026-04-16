@@ -1,5 +1,12 @@
 # research-scan
 
+## Execution Order
+1. Before any market research, open a visible browser and work inside that browser-first environment.
+2. Read all selected upstream inputs before forming new market claims.
+3. If a critical source requires login, pause for mandatory takeover.
+4. Do not continue with snippet-only or text-only research when the skill contract requires browser-native work.
+5. Only after the steps above should you synthesize findings into the structured result.
+
 ## Purpose
 - Produce evidence-backed market research with explicit source traceability and a clear synthesis of patterns, risks, and conclusions.
 
@@ -57,13 +64,20 @@ For each round, run this fixed loop:
 
 ## Access And Blocking Rules
 
-- Login checkpoint:
-  - if a key source needs login, pause and ask user confirmation with target URL and reason
-  - continue only after user confirmation
-- Blocking fallback:
-  - if blocked by paywall/rate-limit/region/anti-bot, record the blockage
-  - switch to public alternatives
-  - mark evidence quality downgrade in `risks_and_caveats`
+- Mandatory takeover:
+  - if a critical source needs login, require mandatory takeover in the shared headed cockpit
+  - continue only after takeover is completed in-session
+- No silent degrade:
+  - if blocked by paywall/rate-limit/region/anti-bot, record the blockage and impact
+  - do not silently downgrade to low-density public alternatives
+  - request takeover or explicit user-approved downgrade, then mark evidence quality downgrade in `risks_and_caveats`
+
+## Market Research Cockpit Runtime
+
+- This skill follows `framework/docs/market-research-cockpit.md`.
+- It runs in a shared headed cockpit (`browser_mode=headed-only`) with profile `shared-market`.
+- Critical-source login is mandatory takeover, and fallback policy is no silent degrade.
+- The cockpit is execution-time only; canonical outputs remain BuddySwitch task/artifact/run objects.
 
 ## Steps
 
@@ -101,7 +115,8 @@ For each round, run this fixed loop:
 - Do not propose implementation details as if they were validated evidence.
 - Do not invent evidence.
 - Do not skip required channels unless user explicitly excludes them.
-- Do not continue past login-required sources without user confirmation.
+- For critical sources, require mandatory takeover before continuing past login gates.
+- Do not silently downgrade to low-density public alternatives; record explicit evidence downgrade when approved.
 
 ## Examples
 - `switch market: Research demand for AI companion live spaces`

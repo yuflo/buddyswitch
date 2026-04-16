@@ -45,22 +45,25 @@ When user sends `switch <buddy>...: <demand>`:
    - other buddies can read tracks and create/update artifacts through their resolved task
    - every persisted run must belong to a task
 6. Resolve through `scripts/switch_runtime.py resolve` to get `eligible_skills`, skill cards, context, defaults, and output schema paths.
-7. Let the host Codex session choose one `skill_id` from `eligible_skills`, then use `buddyswitch/skills/<buddy>/<skill>/SKILL.md`.
-8. Persist through `scripts/switch_runtime.py persist` when you need BuddySwitch state and canonical run audit persistence.
-9. Render terminal final output in three sections, in this exact order: `Receipt`, `Commands`, `Summary`.
-10. `Receipt` section rules:
+7. Let the host Codex session choose one `skill_id` from `eligible_skills`.
+8. Immediately call `scripts/switch_runtime.py prepare-execution --resolved <file> --skill-id <skill_id>` to materialize `selected_skill_packet`.
+9. Inject `selected_skill_packet.skill_instructions` verbatim into the host turn, treat `selected_skill_packet.execution_steps` as ordered requirements, then execute the run in-session.
+10. Persist through `scripts/switch_runtime.py persist` when you need BuddySwitch state and canonical run audit persistence.
+11. BuddySwitch does not execute host tools; it remains the control layer and only supplies runtime packets plus canonical persistence.
+12. Render terminal final output in three sections, in this exact order: `Receipt`, `Commands`, `Summary`.
+13. `Receipt` section rules:
     - `Persisted: ok|failed`
     - `Task: <task_title> [<task_id>]` (required)
     - `Track: <track_title> [<track_id>]` (show only when track exists)
     - `Artifact: <artifact_id|none>`
     - `Run: <run_id>` (required)
     - `Related Runs: <run_id_1>, <run_id_2>` (optional, only when present)
-11. `Commands` section rules:
+14. `Commands` section rules:
     - Show one `Template:` command from `reference_switches`:
       - use `continue_current_task_in_track` when present, otherwise `continue_current_task`.
     - Show one `Recommended:` command:
       - prefer `handoff_to_next_buddy`, else `continue_current_task_in_track`, else `continue_current_task`.
-12. `Summary` section rules:
+15. `Summary` section rules:
     - Keep execution summary to 1-2 lines.
     - Open questions max 4 items.
     - Do not lead with long object path lists; object paths are debug-only details.
@@ -71,6 +74,8 @@ Default runtime behavior:
 - Artifact object path: `buddyswitch/objects/artifacts/<artifact-id>.json`
 - Run audit path: `buddyswitch/content/runs/<run-id>.json`
 - Users do not need to provide output file paths.
+- `prepare-execution` is the canonical runtime step between `resolve` and `persist`.
+- `selected_skill_packet` is runtime data for host execution, not canonical object state.
 - Default terminal summaries must follow the `Receipt -> Commands -> Summary` contract and keep full object paths as debug-only details.
 - Requests to write BuddySwitch-managed outputs into `artifacts/*.md` or `runs/summaries/**` must be rejected.
 

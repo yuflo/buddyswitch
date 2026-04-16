@@ -175,6 +175,43 @@ class ResolveRuntimeTests(unittest.TestCase):
                 pmf_card.get("input_slots"),
                 ["research-question", "links", "prior-artifacts"],
             )
+            self.assertEqual(
+                pmf_card.get("host_execution"),
+                {
+                    "execution_mode": "market-browser-native",
+                    "browser_mode": "headed-only",
+                    "browser_profile": "shared-market",
+                    "login_policy": "mandatory-takeover",
+                    "fallback_policy": "no-silent-degrade",
+                    "session_continuity": "shared-cockpit",
+                    "evidence_capture_level": "medium",
+                },
+            )
+            pmf_instructions = payload["run_instructions_by_skill"]["pmf-recon"]
+            self.assertEqual(
+                pmf_instructions["host_execution"]["browser_mode"],
+                "headed-only",
+            )
+            self.assertIn(
+                "After choosing skill_id, call prepare-execution to materialize selected_skill_packet.",
+                pmf_instructions["next_actions"],
+            )
+            self.assertIn(
+                "Inject selected_skill_packet.skill_instructions verbatim into the current host turn.",
+                pmf_instructions["next_actions"],
+            )
+            self.assertNotIn(
+                "Attach to the shared market cockpit before running browser research.",
+                pmf_instructions["next_actions"],
+            )
+            self.assertNotIn(
+                "Use the shared-market browser profile and headed browser mode.",
+                pmf_instructions["next_actions"],
+            )
+            self.assertNotIn(
+                "If a critical source requires login, pause for mandatory takeover instead of silently degrading to weaker public sources.",
+                pmf_instructions["next_actions"],
+            )
 
     def test_pm_and_design_skill_cards_use_explicit_market_inputs(self) -> None:
         pm_payload = switch_runtime.resolve_switch(
@@ -827,6 +864,141 @@ class ResolveRuntimeTests(unittest.TestCase):
         )
 
 
+class ExecutionPreparationTests(unittest.TestCase):
+    def test_prepare_execution_returns_selected_skill_packet(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch market: Validate whether indie developers need a lightweight demand-validation workflow before building"
+        )
+
+        prepared = switch_runtime.prepare_execution_payload(
+            resolved,
+            skill_id="research-scan",
+        )
+
+        self.assertTrue(prepared["ok"])
+        packet = prepared["selected_skill_packet"]
+        self.assertEqual(packet["skill_id"], "research-scan")
+        self.assertEqual(packet["buddy"], "market")
+        self.assertEqual(packet["skill_instructions"]["name"], "research-scan")
+        self.assertTrue(packet["skill_instructions"]["contents"].startswith("# "))
+        self.assertEqual(packet["execution_constraints"]["browser_mode"], "headed-only")
+        self.assertEqual(packet["selected_inputs"], [])
+        self.assertIn(
+            "Open a visible browser before any market research.",
+            packet["execution_steps"],
+        )
+        self.assertIn(
+            "Inject selected_skill_packet.skill_instructions verbatim into the current host turn.",
+            prepared["host_next_actions"],
+        )
+
+    def test_cmd_prepare_execution_writes_selected_skill_packet(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch market: Validate whether indie developers need a lightweight demand-validation workflow before building"
+        )
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            temp_root = Path(temp_dir)
+            resolved_path = temp_root / "resolved.json"
+            resolved_path.write_text(json.dumps(resolved, ensure_ascii=True), encoding="utf-8")
+
+            args = argparse.Namespace(
+                resolved=str(resolved_path),
+                skill_id="research-scan",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = switch_runtime._cmd_prepare_execution(args)
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["ok"])
+        packet = payload["selected_skill_packet"]
+        self.assertEqual(packet["skill_id"], "research-scan")
+        self.assertEqual(packet["execution_constraints"]["browser_mode"], "headed-only")
+
+    def test_prepare_execution_ignores_tampered_instruction_path_from_resolved_payload(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch market: Validate whether indie developers need a lightweight demand-validation workflow before building"
+        )
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            temp_root = Path(temp_dir)
+            tampered_path = temp_root / "tampered-instructions.md"
+            tampered_path.write_text("do not inject this file", encoding="utf-8")
+
+            for card in resolved["skill_cards"]:
+                if card["id"] == "research-scan":
+                    card["instruction_path"] = str(tampered_path.relative_to(ROOT))
+                    break
+
+            prepared = switch_runtime.prepare_execution_payload(
+                resolved,
+                skill_id="research-scan",
+            )
+
+        packet = prepared["selected_skill_packet"]
+        self.assertEqual(
+            packet["instruction_path"],
+            "buddyswitch/skills/market/research-scan/SKILL.md",
+        )
+        self.assertTrue(packet["skill_instructions"]["contents"].startswith("# research-scan"))
+        self.assertNotEqual(packet["skill_instructions"]["contents"], "do not inject this file")
+
+    def test_prepare_execution_rebuilds_selected_inputs_from_current_context(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch market: Validate whether indie developers need a lightweight demand-validation workflow before building"
+        )
+        resolved["artifact_selection_by_skill"]["research-scan"] = {
+            "selected_inputs": [
+                {
+                    "slot": "prior-artifacts",
+                    "artifact_id": "art-market-tampered",
+                }
+            ]
+        }
+
+        prepared = switch_runtime.prepare_execution_payload(
+            resolved,
+            skill_id="research-scan",
+        )
+
+        self.assertEqual(prepared["selected_skill_packet"]["selected_inputs"], [])
+
+    def test_prepare_execution_orders_browser_before_selected_inputs_for_market_runs(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch market: Validate whether indie developers need a lightweight demand-validation workflow before building"
+        )
+
+        with patch(
+            "switch_runtime._build_artifact_selection_context",
+            return_value={
+                "selected_inputs": [
+                    {
+                        "slot": "prior-artifacts",
+                        "artifact_id": "art-market-prior",
+                    }
+                ]
+            },
+        ):
+            prepared = switch_runtime.prepare_execution_payload(
+                resolved,
+                skill_id="research-scan",
+            )
+
+        self.assertEqual(
+            prepared["selected_skill_packet"]["execution_steps"],
+            [
+                "Open a visible browser before any market research.",
+                "Read selected inputs by slot before other work.",
+                "Pause for takeover if a critical source requires login.",
+                "Do not continue with snippet-only or text-only research.",
+                "Only after the steps above should you synthesize findings into the structured result.",
+            ],
+        )
+
+
 class WorkspaceDataTests(unittest.TestCase):
     def setUp(self) -> None:
         self.created_paths: list[Path] = []
@@ -1027,6 +1199,33 @@ class PersistRuntimeTests(unittest.TestCase):
             },
         }
 
+    def _market_evidence(
+        self,
+        *,
+        source_id: str,
+        url: str,
+        source_type: str,
+        accessed_at: str,
+        claim_excerpt: str,
+        page_title: str,
+        query_or_filter_used: str,
+        interaction_steps_summary: str,
+        screenshot_ref_or_snapshot_ref: str,
+        auth_state: str = "public",
+    ) -> dict[str, str]:
+        return {
+            "source_id": source_id,
+            "url": url,
+            "source_type": source_type,
+            "accessed_at": accessed_at,
+            "claim_excerpt": claim_excerpt,
+            "page_title": page_title,
+            "auth_state": auth_state,
+            "query_or_filter_used": query_or_filter_used,
+            "interaction_steps_summary": interaction_steps_summary,
+            "screenshot_ref_or_snapshot_ref": screenshot_ref_or_snapshot_ref,
+        }
+
     def _pmf_recon_result(self) -> dict[str, object]:
         return {
             "execution_summary": "Completed a narrow PMF recon pass for the idea.",
@@ -1054,11 +1253,17 @@ class PersistRuntimeTests(unittest.TestCase):
                 ],
                 "evidence": [
                     {
-                        "source_id": "src-1",
-                        "url": "https://example.com/source-1",
-                        "source_type": "forum-thread",
-                        "accessed_at": "2026-04-14T10:00:00+08:00",
-                        "claim_excerpt": "I keep building without enough real demand signals.",
+                        **self._market_evidence(
+                            source_id="src-1",
+                            url="https://example.com/source-1",
+                            source_type="forum-thread",
+                            accessed_at="2026-04-14T10:00:00+08:00",
+                            claim_excerpt="I keep building without enough real demand signals.",
+                            page_title="Founders discussing weak validation loops",
+                            query_or_filter_used="site search: demand validation founders",
+                            interaction_steps_summary="Opened thread, expanded replies, and captured the clearest demand-validation complaint.",
+                            screenshot_ref_or_snapshot_ref="snapshot://pmf-recon-src-1",
+                        ),
                         "segment": "indie developers",
                         "pain_category": "demand-validation",
                         "confidence": "medium",
@@ -1133,13 +1338,17 @@ class PersistRuntimeTests(unittest.TestCase):
                 ],
                 "hypotheses_to_test": ["Developers default to ad-hoc validation because structured options feel too heavy."],
                 "evidence": [
-                    {
-                        "source_id": "src-disc-1",
-                        "url": "https://example.com/discovery-source",
-                        "source_type": "forum-thread",
-                        "accessed_at": "2026-04-15T10:00:00+08:00",
-                        "claim_excerpt": "I keep guessing what users want because I do not have a repeatable discovery process.",
-                    }
+                    self._market_evidence(
+                        source_id="src-disc-1",
+                        url="https://example.com/discovery-source",
+                        source_type="forum-thread",
+                        accessed_at="2026-04-15T10:00:00+08:00",
+                        claim_excerpt="I keep guessing what users want because I do not have a repeatable discovery process.",
+                        page_title="Founder thread on repeatable discovery habits",
+                        query_or_filter_used="forum search: repeatable discovery process",
+                        interaction_steps_summary="Opened discovery thread, read the top responses, and captured the repeated process complaint.",
+                        screenshot_ref_or_snapshot_ref="snapshot://customer-discovery-src-disc-1",
+                    )
                 ],
                 "source_traceability": [
                     {
@@ -1198,13 +1407,17 @@ class PersistRuntimeTests(unittest.TestCase):
                     }
                 ],
                 "evidence": [
-                    {
-                        "source_id": "src-pos-1",
-                        "url": "https://example.com/positioning-source",
-                        "source_type": "forum-thread",
-                        "accessed_at": "2026-04-15T10:10:00+08:00",
-                        "claim_excerpt": "I need clearer proof of demand before I spend another weekend building.",
-                    }
+                    self._market_evidence(
+                        source_id="src-pos-1",
+                        url="https://example.com/positioning-source",
+                        source_type="forum-thread",
+                        accessed_at="2026-04-15T10:10:00+08:00",
+                        claim_excerpt="I need clearer proof of demand before I spend another weekend building.",
+                        page_title="Founder post about confidence before building",
+                        query_or_filter_used="community filter: validation confidence",
+                        interaction_steps_summary="Filtered to recent founder posts and captured the strongest confidence-before-building quote.",
+                        screenshot_ref_or_snapshot_ref="snapshot://positioning-src-pos-1",
+                    )
                 ],
                 "source_traceability": [
                     {
@@ -1265,13 +1478,17 @@ class PersistRuntimeTests(unittest.TestCase):
                 },
                 "kill_signals": ["No qualified replies after two well-placed posts", "Replies focus on unrelated founder problems"],
                 "evidence": [
-                    {
-                        "source_id": "src-chan-1",
-                        "url": "https://example.com/channel-source",
-                        "source_type": "community-post",
-                        "accessed_at": "2026-04-15T10:20:00+08:00",
-                        "claim_excerpt": "Founders here swap validation tactics and ask for concrete feedback loops all the time.",
-                    }
+                    self._market_evidence(
+                        source_id="src-chan-1",
+                        url="https://example.com/channel-source",
+                        source_type="community-post",
+                        accessed_at="2026-04-15T10:20:00+08:00",
+                        claim_excerpt="Founders here swap validation tactics and ask for concrete feedback loops all the time.",
+                        page_title="Community thread sharing validation tactics",
+                        query_or_filter_used="community browse: validation workflow",
+                        interaction_steps_summary="Opened the community thread, compared reply volume, and noted repeated requests for feedback loops.",
+                        screenshot_ref_or_snapshot_ref="snapshot://channel-src-chan-1",
+                    )
                 ],
                 "source_traceability": [
                     {
@@ -1327,13 +1544,17 @@ class PersistRuntimeTests(unittest.TestCase):
                 "success_signals": ["Five qualified conversations", "Consistent resonance with the confidence-before-code angle"],
                 "failure_signals": ["Traffic without replies", "Replies that do not describe the target pain"],
                 "evidence": [
-                    {
-                        "source_id": "src-launch-1",
-                        "url": "https://example.com/launch-source",
-                        "source_type": "community-post",
-                        "accessed_at": "2026-04-15T10:30:00+08:00",
-                        "claim_excerpt": "Founders respond when the ask is specific and the feedback loop is obvious.",
-                    }
+                    self._market_evidence(
+                        source_id="src-launch-1",
+                        url="https://example.com/launch-source",
+                        source_type="community-post",
+                        accessed_at="2026-04-15T10:30:00+08:00",
+                        claim_excerpt="Founders respond when the ask is specific and the feedback loop is obvious.",
+                        page_title="Launch thread showing response patterns",
+                        query_or_filter_used="community sort: top launch discussions",
+                        interaction_steps_summary="Reviewed launch discussion patterns and captured the clearest response-shape quote.",
+                        screenshot_ref_or_snapshot_ref="snapshot://launch-src-launch-1",
+                    )
                 ],
                 "source_traceability": [
                     {

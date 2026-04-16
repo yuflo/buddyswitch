@@ -58,7 +58,30 @@ MARKET_SCHEMA_PATHS = (
     ROOT / "framework" / "schemas" / "market" / "channel-discovery.json",
     ROOT / "framework" / "schemas" / "market" / "launch-prep.json",
 )
+MARKET_COCKPIT_METADATA = {
+    "execution_mode": "market-browser-native",
+    "browser_mode": "headed-only",
+    "browser_profile": "shared-market",
+    "login_policy": "mandatory-takeover",
+    "fallback_policy": "no-silent-degrade",
+    "session_continuity": "shared-cockpit",
+    "evidence_capture_level": "medium",
+}
+MARKET_EVIDENCE_FIELDS = (
+    "source_id",
+    "url",
+    "source_type",
+    "accessed_at",
+    "claim_excerpt",
+    "page_title",
+    "auth_state",
+    "query_or_filter_used",
+    "interaction_steps_summary",
+    "screenshot_ref_or_snapshot_ref",
+)
 NEW_MARKET_TEMPLATE_SCHEMAS = {
+    ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "assets" / "research-report-template.md": ROOT / "framework" / "schemas" / "market" / "research-scan.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "assets" / "pmf-report-template.md": ROOT / "framework" / "schemas" / "market" / "pmf-recon.json",
     ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery" / "assets" / "interview-brief-template.md": ROOT / "framework" / "schemas" / "market" / "customer-discovery.json",
     ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy" / "assets" / "positioning-brief-template.md": ROOT / "framework" / "schemas" / "market" / "positioning-copy.json",
     ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "assets" / "channel-plan-template.md": ROOT / "framework" / "schemas" / "market" / "channel-discovery.json",
@@ -143,6 +166,7 @@ class RepoConsistencyTests(unittest.TestCase):
         targets = (
             ROOT / "AGENTS.md",
             ROOT / "README.md",
+            ROOT / ".codex" / "agents" / "router.toml",
             ROOT / "framework" / "docs" / "switch-spec.md",
             ROOT / "framework" / "docs" / "skill-architecture-best-practices.md",
         )
@@ -150,6 +174,8 @@ class RepoConsistencyTests(unittest.TestCase):
 
         self.assertNotIn("Use the strict directive:", combined)
         self.assertNotIn("Parse with strict syntax only.", combined)
+        self.assertNotIn("is the only canonical ui", combined.lower())
+        self.assertNotIn("keep strict syntax handling", combined.lower())
         self.assertIn("canonical", combined.lower())
         self.assertIn("minor cli spacing variation", combined.lower())
         self.assertIn("advisory", combined.lower())
@@ -378,6 +404,39 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("conclusion", traceability_required)
                 self.assertNotIn("claim", traceability_required)
 
+    def test_market_skills_share_market_cockpit_execution_metadata(self) -> None:
+        for path in SKILL_TOMLS[:6]:
+            with self.subTest(skill_toml=str(path.relative_to(ROOT))):
+                parsed = env_manifest._load_toml(path)  # type: ignore[attr-defined]
+                for key, value in MARKET_COCKPIT_METADATA.items():
+                    self.assertEqual(parsed[key], value, msg=f"{path.relative_to(ROOT)} missing {key}={value}")
+
+    def test_market_skill_docs_reference_shared_cockpit_doc(self) -> None:
+        for path in ARTIFACT_SKILL_DOCS[:6]:
+            with self.subTest(skill_doc=str(path.relative_to(ROOT))):
+                text = path.read_text(encoding="utf-8").lower()
+                self.assertIn("framework/docs/market-research-cockpit.md", text)
+                self.assertIn("headed", text)
+                self.assertIn("mandatory takeover", text)
+                self.assertIn("shared-market", text)
+
+    def test_market_skill_docs_start_with_execution_order(self) -> None:
+        for path in ARTIFACT_SKILL_DOCS[:6]:
+            with self.subTest(skill_doc=str(path.relative_to(ROOT))):
+                text = path.read_text(encoding="utf-8").lower()
+                self.assertIn("## execution order", text)
+                self.assertIn("before any market research", text)
+                self.assertIn("pause for mandatory takeover", text)
+                self.assertIn("do not continue with snippet-only or text-only research", text)
+
+    def test_market_schemas_share_market_cockpit_evidence_fields(self) -> None:
+        for path in MARKET_SCHEMA_PATHS:
+            with self.subTest(schema=str(path.relative_to(ROOT))):
+                schema = json.loads(path.read_text(encoding="utf-8"))
+                evidence_required = schema["properties"]["artifact_content"]["properties"]["evidence"]["items"]["required"]
+                for field_name in MARKET_EVIDENCE_FIELDS:
+                    self.assertIn(field_name, evidence_required, msg=f"{path.relative_to(ROOT)} missing {field_name}")
+
     def test_market_contract_separates_skill_ids_from_output_slots_and_common_fields(self) -> None:
         contract_path = ROOT / "framework" / "contracts" / "market.md"
         text = contract_path.read_text(encoding="utf-8")
@@ -412,6 +471,88 @@ class RepoConsistencyTests(unittest.TestCase):
             self.assertIn(common_field, output_section)
         for non_common_field in ("research_strategy", "channel_plan", "iteration_log"):
             self.assertNotIn(non_common_field, output_section)
+
+    def test_market_contract_lists_medium_strength_evidence_fields(self) -> None:
+        contract_path = ROOT / "framework" / "contracts" / "market.md"
+        evidence_section = _markdown_section(
+            contract_path.read_text(encoding="utf-8"),
+            "Evidence And Traceability Requirements",
+        )
+        for field_name in MARKET_EVIDENCE_FIELDS:
+            self.assertIn(field_name, evidence_section)
+
+    def test_market_contract_describes_shared_cockpit_without_implying_multi_skill_runs(self) -> None:
+        contract_text = (ROOT / "framework" / "contracts" / "market.md").read_text(encoding="utf-8").lower()
+        self.assertIn("run the selected market skill in the shared headed cockpit", contract_text)
+        self.assertNotIn("run all six market skills", contract_text)
+
+    def test_market_contract_chat_return_blocks_match_schema_surface(self) -> None:
+        chat_return_section = _markdown_section(
+            (ROOT / "framework" / "contracts" / "market.md").read_text(encoding="utf-8"),
+            "Chat Return Blocks",
+        ).lower()
+        self.assertNotIn("suggested next switch", chat_return_section)
+
+    def test_market_cockpit_doc_defines_selected_skill_execution_boundary(self) -> None:
+        cockpit_doc = (ROOT / "framework" / "docs" / "market-research-cockpit.md").read_text(
+            encoding="utf-8"
+        ).lower()
+        self.assertIn("selected_skill_packet", cockpit_doc)
+        self.assertIn("host stays the only executor", cockpit_doc)
+        self.assertIn("these six skills stay separate", cockpit_doc)
+        self.assertIn("not a second source of truth", cockpit_doc)
+
+    def test_dev0039_docs_keep_only_active_selected_skill_plans(self) -> None:
+        docs_dir = ROOT / "docs" / "dev0039"
+        names = {path.name for path in docs_dir.glob("*.md")}
+
+        self.assertIn("2026-04-16-selected-skill-injection-execution-plan.md", names)
+        self.assertIn("2026-04-16-selected-skill-injection-closure-cleanup-plan.md", names)
+        self.assertNotIn("2026-04-16-market-research-cockpit-design.md", names)
+        self.assertNotIn("2026-04-16-market-cockpit-host-execution-bridge-plan.md", names)
+        self.assertNotIn("2026-04-16-market-research-cockpit-implementation-plan.md", names)
+
+    def test_switch_spec_documents_selected_skill_packet_fields(self) -> None:
+        switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
+        self.assertIn("execution_steps", switch_spec)
+        self.assertIn("execution_constraints", switch_spec)
+        self.assertIn("output_schema_path", switch_spec)
+
+    def test_switch_spec_defers_runtime_order_to_execution_steps(self) -> None:
+        switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
+        self.assertIn("treat `selected_skill_packet.execution_steps` as ordered requirements", switch_spec)
+        self.assertNotIn("read `selected_skill_packet.selected_inputs` by slot before other work", switch_spec)
+
+    def test_top_level_docs_define_selected_skill_packet_flow(self) -> None:
+        combined = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (
+                ROOT / "AGENTS.md",
+                ROOT / "README.md",
+                ROOT / ".codex" / "agents" / "router.toml",
+                ROOT / "framework" / "docs" / "switch-spec.md",
+            )
+        ).lower()
+
+        self.assertIn("prepare-execution", combined)
+        self.assertIn("selected_skill_packet", combined)
+        self.assertIn("inject `selected_skill_packet.skill_instructions` verbatim", combined)
+        self.assertIn("buddyswitch does not execute host tools", combined)
+
+    def test_dev0039_active_plans_define_selected_skill_packet_flow(self) -> None:
+        docs = (
+            ROOT / "docs" / "dev0039" / "2026-04-16-selected-skill-injection-execution-plan.md",
+            ROOT / "docs" / "dev0039" / "2026-04-16-selected-skill-injection-closure-cleanup-plan.md",
+        )
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in docs).lower()
+
+        self.assertIn("selected_skill_packet", combined)
+        self.assertIn("explicit skill injection", combined)
+        self.assertIn("buddyswitch does not execute host tools", combined)
+
+    def test_switch_spec_lists_prepare_execution_runtime_error(self) -> None:
+        switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")
+        self.assertIn("E_RUNTIME_PREPARE_EXECUTION", switch_spec)
 
     def test_new_market_templates_expose_schema_derived_contract_fields(self) -> None:
         for path, schema_path in NEW_MARKET_TEMPLATE_SCHEMAS.items():

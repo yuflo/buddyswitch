@@ -101,14 +101,30 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["source_id", "url", "source_type", "accessed_at", "claim_excerpt"],
+            "required": [
+              "source_id",
+              "url",
+              "source_type",
+              "accessed_at",
+              "claim_excerpt",
+              "page_title",
+              "auth_state",
+              "query_or_filter_used",
+              "interaction_steps_summary",
+              "screenshot_ref_or_snapshot_ref"
+            ],
             "additionalProperties": false,
             "properties": {
               "source_id": { "type": "string" },
               "url": { "type": "string" },
               "source_type": { "type": "string" },
               "accessed_at": { "type": "string" },
-              "claim_excerpt": { "type": "string" }
+              "claim_excerpt": { "type": "string" },
+              "page_title": { "type": "string" },
+              "auth_state": { "type": "string", "enum": ["public", "logged_in", "paywalled", "unknown"] },
+              "query_or_filter_used": { "type": "string" },
+              "interaction_steps_summary": { "type": "string" },
+              "screenshot_ref_or_snapshot_ref": { "type": "string" }
             }
           }
         },
