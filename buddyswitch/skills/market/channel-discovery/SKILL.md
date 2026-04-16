@@ -1,5 +1,12 @@
 # channel-discovery
 
+## Execution Order
+1. Before any market research, open a visible browser and work inside that browser-first environment.
+2. Read all selected upstream inputs before forming new market claims.
+3. If a critical source requires login, pause for mandatory takeover.
+4. Do not continue with snippet-only or text-only research when the skill contract requires browser-native work.
+5. Only after the steps above should you synthesize findings into the structured result.
+
 ## Purpose
 - Produce a first-channel plan that compares believable acquisition options, scores them against explicit criteria, and recommends a small experiment with clear kill signals.
 
@@ -24,6 +31,14 @@
 - A channel-discovery artifact object with candidate channels, scoring criteria, ranked options, recommended channels, experiment plan, kill signals, and conclusion.
 - A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
 - Explicit notes when channel confidence is limited by missing evidence or thin reachability data.
+
+## Market Research Cockpit Runtime
+
+- This skill follows `framework/docs/market-research-cockpit.md`.
+- It runs in a shared headed cockpit (`browser_mode=headed-only`) with profile `shared-market`.
+- Critical-source login is mandatory takeover, and fallback policy is no silent degrade.
+- Do not silently downgrade to low-density public alternatives when critical channel evidence is blocked.
+- The cockpit is execution-time only; canonical outputs remain BuddySwitch task/artifact/run objects.
 
 ## Verification
 - Confirm candidate channels are compared against explicit selection criteria.
@@ -53,6 +68,8 @@
 
 - Prefer believable, reachable first channels over abstract "best practices."
 - Keep the experiment narrow enough to learn quickly.
+- For critical sources, require mandatory takeover before continuing past login gates.
+- Do not silently downgrade to low-density public alternatives; record explicit evidence downgrade when approved.
 - Do not turn channel choice into growth automation or a multi-quarter marketing plan.
 - Do not invent channel reach, conversion assumptions, or distribution access.
 

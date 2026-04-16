@@ -1,5 +1,12 @@
 # positioning-copy
 
+## Execution Order
+1. Before any market research, open a visible browser and work inside that browser-first environment.
+2. Read all selected upstream inputs before forming new market claims.
+3. If a critical source requires login, pause for mandatory takeover.
+4. Do not continue with snippet-only or text-only research when the skill contract requires browser-native work.
+5. Only after the steps above should you synthesize findings into the structured result.
+
 ## Purpose
 - Produce evidence-grounded positioning artifacts that help a founder explain who the product is for, what it replaces, why it is differentiated, and which copy angles are worth testing.
 
@@ -24,6 +31,14 @@
 - A positioning artifact object with target audience framing, alternatives, differentiated capabilities, value claims, message house, homepage angles, and evidence traceability.
 - Founder-usable copy artifacts, not visual design specifications.
 - A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
+
+## Market Research Cockpit Runtime
+
+- This skill follows `framework/docs/market-research-cockpit.md`.
+- It runs in a shared headed cockpit (`browser_mode=headed-only`) with profile `shared-market`.
+- Critical-source login is mandatory takeover, and fallback policy is no silent degrade.
+- Do not silently downgrade to low-density public alternatives when critical evidence refresh is blocked.
+- The cockpit is execution-time only; canonical outputs remain BuddySwitch task/artifact/run objects.
 
 ## Verification
 - Confirm the positioning statement and message house are grounded in evidence from `market-scan`, `pmf-report`, and `customer-discovery` where available.
@@ -53,6 +68,8 @@
 
 - Output founder-usable copy artifacts, not visual design specs.
 - Ground claims in evidence from `market-scan`, `pmf-report`, and `customer-discovery`.
+- For critical sources, require mandatory takeover before continuing past login gates.
+- Do not silently downgrade to low-density public alternatives; record explicit evidence downgrade when approved.
 - Do not invent proof points.
 - Do not imply traction, conversion, or customer validation that the evidence does not support.
 

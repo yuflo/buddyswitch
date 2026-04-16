@@ -189,6 +189,7 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
     guidance = runtime.get("guidance", {})
     required_tools = runtime.get("required_tools", [])
     required_env = runtime.get("required_env", [])
+    host_execution = dict(runtime.get("host_execution", {}))
     output_slot = runtime.get("output_slot")
     input_slots = runtime.get("input_slots")
     if not isinstance(input_slots, list):
@@ -206,6 +207,7 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
         "side_effect_level": runtime.get("side_effect_level"),
         "required_tools": required_tools,
         "required_env": required_env,
+        "host_execution": host_execution,
         "runtime_requirements": {
             "required_tools": required_tools,
             "required_env": required_env,
@@ -234,12 +236,14 @@ def _build_run_instructions(
     artifact_selection: dict[str, Any] | None,
     *,
     selected_skill_id: str | None = None,
+    host_execution: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     selected_inputs: list[dict[str, Any]] = []
     if isinstance(artifact_selection, dict):
         raw_inputs = artifact_selection.get("selected_inputs")
         if isinstance(raw_inputs, list):
             selected_inputs = [item for item in raw_inputs if isinstance(item, dict)]
+    host_execution = dict(host_execution or {})
 
     next_actions: list[str]
     if implicit_skill_id:
@@ -262,7 +266,9 @@ def _build_run_instructions(
         next_actions.append(f"Read selected inputs by slot: {joined_slots}.")
     next_actions.extend(
         [
-            "Read the selected buddyswitch/skills/<buddy>/<skill>/SKILL.md in the current Codex CLI session.",
+            "After choosing skill_id, call prepare-execution to materialize selected_skill_packet.",
+            "Inject selected_skill_packet.skill_instructions verbatim into the current host turn.",
+            "Treat selected_skill_packet.execution_steps as ordered requirements for this run.",
             "Produce a structured result payload matching required_output_schema_by_skill[skill_id].",
             "Call persist when you want BuddySwitch to write task/artifact/track state and run audit metadata.",
         ]
@@ -284,9 +290,170 @@ def _build_run_instructions(
         "resolve_notes": [
             "resolve parses the invocation, derives candidates and context, and does not write BuddySwitch state."
         ],
+        "host_execution": host_execution,
         "selected_inputs": selected_inputs,
         "artifact_read_commands": artifact_read_commands,
         "next_actions": next_actions,
+    }
+
+
+def _normalize_instruction_path(instruction_path: str) -> str:
+    if not isinstance(instruction_path, str) or not instruction_path.strip():
+        raise ValueError("instruction_path must be a non-empty string")
+    candidate = (ROOT / instruction_path.strip()).resolve()
+    try:
+        relative = candidate.relative_to(ROOT)
+    except ValueError as exc:
+        raise ValueError("instruction_path must stay within the repository root") from exc
+    if relative.name != "SKILL.md" or relative.parts[:2] != ("buddyswitch", "skills"):
+        raise ValueError("instruction_path must point to buddyswitch/skills/.../SKILL.md")
+    if not candidate.is_file():
+        raise FileNotFoundError(f"instruction_path '{relative.as_posix()}' was not found")
+    return relative.as_posix()
+
+
+def _load_skill_instruction_text(instruction_path: str) -> str:
+    return (ROOT / instruction_path).read_text(encoding="utf-8")
+
+
+def _resolve_execution_skill(
+    *,
+    buddy_id: str,
+    skill_id: str,
+    manifest_path: Path,
+) -> dict[str, Any]:
+    manifest = load_manifest(manifest_path)
+    require_buddy(manifest, buddy_id)
+    selected_skill = next(
+        (
+            skill
+            for skill in buddy_skill_docs(manifest, buddy_id)
+            if skill["id"] == skill_id
+        ),
+        None,
+    )
+    if selected_skill is None:
+        raise ValueError(f"skill_id '{skill_id}' is not available for buddy '{buddy_id}' in the manifest")
+    return selected_skill
+
+
+def _build_execution_steps(
+    *,
+    host_execution: dict[str, Any],
+    selected_inputs: list[dict[str, Any]],
+) -> list[str]:
+    steps: list[str] = []
+    if host_execution.get("execution_mode") == "market-browser-native":
+        steps.append("Open a visible browser before any market research.")
+        if selected_inputs:
+            steps.append("Read selected inputs by slot before other work.")
+        steps.extend(
+            [
+                "Pause for takeover if a critical source requires login.",
+                "Do not continue with snippet-only or text-only research.",
+                "Only after the steps above should you synthesize findings into the structured result.",
+            ]
+        )
+        return steps
+    if selected_inputs:
+        steps.append("Read selected inputs by slot before other work.")
+    return steps
+
+
+def _rebuild_selected_inputs_for_execution(
+    *,
+    resolved: dict[str, Any],
+    selected_skill: dict[str, Any],
+) -> list[dict[str, Any]]:
+    switch_payload = resolved.get("switch") or {}
+    demand = switch_payload.get("demand")
+    if not isinstance(demand, str) or not demand.strip():
+        raise ValueError("resolved.switch.demand is required")
+
+    task_id = switch_payload.get("task_id")
+    if not isinstance(task_id, str) or not task_id.strip():
+        task_id = None
+
+    effective_track_id = resolved.get("effective_track_id")
+    if not isinstance(effective_track_id, str) or not effective_track_id.strip():
+        effective_track_id = None
+
+    selection = _build_artifact_selection_context(
+        demand=demand,
+        required_slots=_skill_required_slots(selected_skill),
+        task_id=task_id,
+        track_artifact_index=build_track_artifact_index(effective_track_id),
+    )
+    if not isinstance(selection, dict):
+        return []
+
+    raw_inputs = selection.get("selected_inputs")
+    if not isinstance(raw_inputs, list):
+        return []
+    return [item for item in raw_inputs if isinstance(item, dict)]
+
+
+def prepare_execution_payload(
+    resolved: dict[str, Any],
+    *,
+    skill_id: str,
+    manifest_path: Path = DEFAULT_MANIFEST,
+) -> dict[str, Any]:
+    if not resolved.get("ok"):
+        raise ValueError("resolved payload must be successful before prepare-execution")
+
+    switch_payload = resolved.get("switch") or {}
+    buddy_id = switch_payload.get("buddy")
+    if not isinstance(buddy_id, str) or not buddy_id:
+        raise ValueError("resolved.switch.buddy is required")
+
+    _resolve_persist_skill(
+        resolved=resolved,
+        requested_skill_id=skill_id,
+    )
+    selected_skill = _resolve_execution_skill(
+        buddy_id=buddy_id,
+        skill_id=skill_id,
+        manifest_path=manifest_path,
+    )
+    instruction_path = _normalize_instruction_path(
+        selected_skill["runtime"].get("instruction_path", selected_skill["path"])
+    )
+    output_schema_path = selected_skill["runtime"].get("output_schema")
+    if not isinstance(output_schema_path, str) or not output_schema_path.strip():
+        raise ValueError(f"Skill '{skill_id}' must define output_schema in the manifest")
+
+    selected_inputs = _rebuild_selected_inputs_for_execution(
+        resolved=resolved,
+        selected_skill=selected_skill,
+    )
+
+    host_execution = dict(selected_skill["runtime"].get("host_execution", {}))
+    packet = {
+        "skill_id": skill_id,
+        "buddy": buddy_id,
+        "instruction_path": instruction_path,
+        "skill_instructions": {
+            "name": skill_id,
+            "path": instruction_path,
+            "contents": _load_skill_instruction_text(instruction_path),
+        },
+        "selected_inputs": selected_inputs,
+        "output_schema_path": output_schema_path.strip(),
+        "execution_constraints": host_execution,
+        "execution_steps": _build_execution_steps(
+            host_execution=host_execution,
+            selected_inputs=selected_inputs,
+        ),
+    }
+    return {
+        "ok": True,
+        "selected_skill_packet": packet,
+        "host_next_actions": [
+            "Inject selected_skill_packet.skill_instructions verbatim into the current host turn.",
+            "Treat selected_skill_packet.execution_steps as ordered requirements.",
+            "Do not reconstruct the skill manually from disk after packet generation.",
+        ],
     }
 
 
@@ -476,6 +643,7 @@ def _build_selection_contexts_by_skill(
             implicit_skill_id if skill_id == implicit_skill_id else None,
             selection,
             selected_skill_id=skill_id if skill_id != implicit_skill_id else None,
+            host_execution=skill["runtime"].get("host_execution", {}),
         )
 
     return artifact_selection_by_skill, run_instructions_by_skill
@@ -608,6 +776,7 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
         "run_instructions": _build_run_instructions(
             implicit_skill_id,
             artifact_selection,
+            host_execution=implicit_skill["runtime"].get("host_execution", {}) if implicit_skill else {},
         ),
         "run_instructions_by_skill": run_instructions_by_skill,
     }
@@ -1121,6 +1290,20 @@ def _cmd_persist(args: argparse.Namespace) -> int:
     return 0 if payload.get("ok") else 1
 
 
+def _cmd_prepare_execution(args: argparse.Namespace) -> int:
+    try:
+        resolved = _read_json_input(args.resolved)
+        payload = prepare_execution_payload(
+            resolved,
+            skill_id=args.skill_id,
+            manifest_path=getattr(args, "manifest", DEFAULT_MANIFEST),
+        )
+    except (ManifestError, ValueError, OSError, OutputSchemaError, json.JSONDecodeError) as exc:
+        payload = runtime_error("E_RUNTIME_PREPARE_EXECUTION", str(exc))
+    print(json.dumps(payload, ensure_ascii=True, indent=2))
+    return 0 if payload.get("ok") else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="BuddySwitch runtime.")
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
@@ -1135,6 +1318,14 @@ def build_parser() -> argparse.ArgumentParser:
     persist_cmd.add_argument("--result", required=True, help="Structured result JSON file, or '-' for stdin")
     persist_cmd.add_argument("--skill-id", help="Chosen skill id. Optional only when resolve returned implicit_skill_id.")
     persist_cmd.set_defaults(func=_cmd_persist)
+
+    prepare_cmd = subparsers.add_parser(
+        "prepare-execution",
+        help="Materialize a selected-skill packet after resolve and skill selection.",
+    )
+    prepare_cmd.add_argument("--resolved", required=True, help="Resolved JSON payload file")
+    prepare_cmd.add_argument("--skill-id", required=True, help="Chosen skill id from eligible_skills.")
+    prepare_cmd.set_defaults(func=_cmd_prepare_execution)
 
     return parser
 

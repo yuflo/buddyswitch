@@ -1,5 +1,12 @@
 # pmf-recon
 
+## Execution Order
+1. Before any market research, open a visible browser and work inside that browser-first environment.
+2. Read all selected upstream inputs before forming new market claims.
+3. If a critical source requires login, pause for mandatory takeover.
+4. Do not continue with snippet-only or text-only research when the skill contract requires browser-native work.
+5. Only after the steps above should you synthesize findings into the structured result.
+
 ## Purpose
 - Produce evidence-backed PMF research that identifies the sharpest ICP, strongest pain signals, current alternatives, and the next validation move.
 
@@ -43,8 +50,16 @@
 
 ## Access And Blocking Rules
 
-- If a valuable source requires login, stop and ask the user to log in before continuing.
-- If blocked by paywall, rate-limit, region lock, or anti-bot controls, record the blockage, switch to public alternatives, and mark the evidence downgrade.
+- If a critical source requires login, require mandatory takeover in the shared headed cockpit before continuing.
+- If blocked by paywall, rate-limit, region lock, or anti-bot controls, record blockage and impact, do not silently downgrade to low-density public alternatives, and request takeover or explicit user-approved downgrade.
+- Any approved downgrade path must be labeled as an evidence quality downgrade.
+
+## Market Research Cockpit Runtime
+
+- This skill follows `framework/docs/market-research-cockpit.md`.
+- It runs in a shared headed cockpit (`browser_mode=headed-only`) with profile `shared-market`.
+- Critical-source login is mandatory takeover, and fallback policy is no silent degrade.
+- The cockpit is execution-time only; canonical outputs remain BuddySwitch task/artifact/run objects.
 
 ## Steps
 
@@ -89,7 +104,8 @@
 - Do not write PRD content.
 - Do not turn PMF research into implementation advice.
 - Do not invent commitment signals, buyer intent, or willingness-to-pay evidence.
-- Do not continue past login-required sources without user confirmation.
+- For critical sources, require mandatory takeover before continuing past login gates.
+- Do not silently downgrade to low-density public alternatives; record explicit evidence downgrade when approved.
 
 ## Examples
 - `switch market: Validate whether an AI note-taking tool for consultants has enough PMF signal to test`

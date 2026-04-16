@@ -12,8 +12,9 @@ BuddySwitch runs as an orchestration layer inside the host Codex CLI session.
    - `python3 scripts/switch_runtime.py resolve "switch market: quick market research for AI scheduler landing page"`
 4. Inside the current Codex session:
    - choose one `skill_id` from `eligible_skills`
-   - read the selected skill package instruction file `buddyswitch/skills/.../SKILL.md`
-   - run the workflow and produce a structured result matching the reported schema
+   - call `python3 scripts/switch_runtime.py prepare-execution --resolved resolved.json --skill-id <skill_id>`
+   - inject `selected_skill_packet.skill_instructions` verbatim and treat `selected_skill_packet.execution_steps` as ordered requirements
+   - execute the run in-session and produce a structured result matching the reported schema
 5. Persist the structured result:
    - `python3 scripts/switch_runtime.py persist --resolved resolved.json --skill-id implement-task --result result.json`
 6. Start Context Panel:
@@ -51,7 +52,7 @@ Users are not required to provide output paths in demand text; runtime defaults 
 
 ## Env APIs
 
-- Switch runtime: `scripts/switch_runtime.py` (`resolve|persist`)
+- Switch runtime: `scripts/switch_runtime.py` (`resolve|prepare-execution|persist`)
 - Output schema validator: `scripts/output_schema.py`
 - Manifest inspection: `scripts/env_manifest.py`
 - Track CRUD/advance (manual/debug): `scripts/env_tracks.py`
@@ -67,7 +68,9 @@ Users are not required to provide output paths in demand text; runtime defaults 
 - `required_tools` and `required_env` are advisory skill metadata for the host session. They stay visible in `skill_cards`, but they do not reject resolve candidates.
 - `resolve` returns `eligible_skills`, compact `skill_cards`, task context, optional track context, output schema paths, invocation details, and explicit next actions. `resolve` itself does not write BuddySwitch state.
 - Single-skill buddies may expose `implicit_skill_id`; multi-skill buddies never auto-select in runtime.
-- The host Codex session chooses `skill_id`, executes the selected skill, and emits structured output.
+- The host Codex session chooses `skill_id`, then calls `prepare-execution` to materialize `selected_skill_packet`.
+- The host injects `selected_skill_packet.skill_instructions` verbatim, executes the run, and emits structured output.
+- BuddySwitch does not execute host tools; browser, shell, and MCP tool actions stay in the host session.
 - `persist` is a minimal technical gate: it validates selected-skill identity, schema shape, and safe state references, then writes task objects, artifact objects with canonical content, optional track references through tasks, and run audit JSON under `buddyswitch/content/runs/`.
 - Successful `persist` receipts include `task_title`, nullable `track_title`, `reference_switches`, `related_run_ids`, and `recommended_switch` so hosts can render concise copy-ready follow-up commands.
 - Explicit requests to write BuddySwitch outputs into `artifacts/*.md` or `runs/summaries/**` are rejected. Derived markdown outputs are retired.

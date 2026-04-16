@@ -3,70 +3,94 @@
 ```markdown
 # PMF Recon Report
 
-## Idea Summary
-- Product idea:
-- Assumed user:
-- Assumed workflow:
-- Research depth:
+## Research Question
+research_question:
 
-## Executive Summary
-[2-4 paragraphs on whether there appears to be a meaningful problem worth testing, for whom, and why.]
+## Research Strategy
+- depth: quick / standard / deep
+- rationale:
+- collection_mode:
+- initial_hypotheses:
+  -
+- source_category_targets:
+  -
+
+## Channel Plan
+- 
+- 
+
+## Iteration Log
+1.
+- round:
+- focus:
+- sources_checked:
+  -
+- evidence_captured:
+- synthesis:
+- next_adjustment:
+
+## Evidence
+1.
+- source_id:
+- url:
+- source_type:
+- accessed_at:
+- claim_excerpt:
+- page_title:
+- auth_state: public / logged_in / paywalled / unknown
+- query_or_filter_used:
+- interaction_steps_summary:
+- screenshot_ref_or_snapshot_ref:
+- segment:
+- pain_category:
+- alternative:
+- commitment_signal:
+- confidence: low / medium / high
+
+## Source Traceability
+1.
+- conclusion:
+- source_ids:
+  - src-1
 
 ## Assumptions Used
-- 
-- 
-- 
+-
 
-## Candidate ICPs
-1. 
-2. 
-3. 
+## Candidate Icps
+1.
+- segment:
+- pain_summary:
+- why_now_or_why_this_segment:
+- buying_signal:
+- reachability:
 
 ## Strongest Pain Signals
-- **Signal 1**:
-- **Signal 2**:
-- **Signal 3**:
+-
 
 ## Existing Alternatives
-- Competitor / workaround 1:
-- Competitor / workaround 2:
-- Competitor / workaround 3:
+1.
+- name:
+- type:
+- gaps:
+  -
 
 ## Why Current Solutions Fall Short
 - 
-- 
-- 
 
-## Evidence Highlights
-- [Source + what it showed]
-- [Source + what it showed]
-- [Source + what it showed]
-
-## PMF Confidence
-- Low / Medium / High
-- Why:
-
-## Risks and Unknowns
-- 
-- 
-- 
+## Pmf Confidence
+- level: low / medium / high
+- rationale:
 
 ## Recommended Next Step
-Choose one primary next step and justify it.
-- User interviews
-- Concierge / manual test
-- Landing page + waitlist
-- MVP build
-- Pricing test
-- Stop / reposition
+- action: interviews / concierge / landing-page / mvp / pricing-test / stop-or-reposition
+- rationale:
 
 ## Suggested Interview Angles
 - 
-- 
+
+## Risks And Unknowns
 - 
 
-## Source List
-- 
-- 
-- 
+## Conclusion
+conclusion:
 ```

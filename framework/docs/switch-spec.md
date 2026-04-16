@@ -31,14 +31,15 @@ Rules:
 
 ## Runtime Model
 
-BuddySwitch uses four primitives:
+BuddySwitch uses five primitives:
 
 1. `parse`
 2. `resolve`
-3. `run`
-4. `persist`
+3. `prepare-execution`
+4. `run`
+5. `persist`
 
-`parse`, `resolve`, and `persist` belong to BuddySwitch.
+`parse`, `resolve`, `prepare-execution`, and `persist` belong to BuddySwitch.
 `run` belongs to the host Codex session.
 
 ## Failure Action Vocabulary
@@ -103,25 +104,50 @@ Current runtime defaults:
 - run audit payloads are written to `buddyswitch/content/runs/**`
 - derived markdown artifacts and run summaries are retired
 
+## Execution Preparation
+
+`prepare-execution` is the canonical step between `resolve` and `persist`.
+It converts the chosen skill into `selected_skill_packet`.
+The packet fields are stable:
+
+- `skill_id`
+- `buddy`
+- `instruction_path`
+- `skill_instructions`
+- `selected_inputs`
+- `output_schema_path`
+- `execution_constraints`
+- `execution_steps`
+
+`execution_steps` is the ordered human-facing execution contract for the host session.
+The host must execute the packet in-session; BuddySwitch does not execute host tools itself.
+
 ## Host Codex Responsibilities
 
 After `resolve`:
 
 1. choose exactly one `skill_id` from `eligible_skills`
 2. set `chosen_skill_id = skill_id`
-3. read `artifact_selection_by_skill[chosen_skill_id]` and `run_instructions_by_skill[chosen_skill_id]`
-4. read the selected skill package instruction file `buddyswitch/skills/<buddy>/<skill>/SKILL.md`
-5. execute the workflow in-session
-6. produce a structured result payload matching `required_output_schema_by_skill[chosen_skill_id]`
-7. call `scripts/switch_runtime.py persist`
+3. review `artifact_selection_by_skill[chosen_skill_id]` and `run_instructions_by_skill[chosen_skill_id]` only as pre-execution selection context
+4. call `scripts/switch_runtime.py prepare-execution --resolved <file> --skill-id <chosen_skill_id>` to materialize `selected_skill_packet`
+5. treat `selected_skill_packet.selected_inputs` as the canonical input bundle for the run
+6. inject `selected_skill_packet.skill_instructions` verbatim and treat `selected_skill_packet.execution_steps` as ordered requirements
+7. execute the workflow in-session by following `selected_skill_packet.execution_steps` in order
+8. produce a structured result payload matching `required_output_schema_by_skill[chosen_skill_id]`
+9. call `scripts/switch_runtime.py persist`
 
 Recommended fixed host flow for track-bound work:
 1. resolve switch
 2. choose `chosen_skill_id` from `eligible_skills`
-3. read `track_artifact_index`, `artifact_selection_by_skill[chosen_skill_id]`, and `run_instructions_by_skill[chosen_skill_id]`
-4. read selected artifact inputs by slot (from `artifact_selection_by_skill[chosen_skill_id].selected_inputs`) or use `run_instructions_by_skill[chosen_skill_id].artifact_read_commands`
-5. execute selected skill
-6. persist result
+3. review `track_artifact_index`, `artifact_selection_by_skill[chosen_skill_id]`, and `run_instructions_by_skill[chosen_skill_id]` only to choose the skill and preview likely upstream context
+4. call `prepare-execution`
+5. treat `selected_skill_packet.selected_inputs` as the canonical input bundle for the run
+6. inject `selected_skill_packet.skill_instructions` verbatim and execute the run in the current host session while following `selected_skill_packet.execution_steps` in order
+7. persist result
+
+Boundary for execution:
+- BuddySwitch supplies routing context, selected skill packets, and persistence.
+- The host remains the only executor of browser, shell, and MCP tool actions.
 
 ## Persist Behavior
 
@@ -194,6 +220,7 @@ Parsing should return explicit errors:
 Runtime should return explicit errors:
 
 - `E_RUNTIME_RESOLVE`
+- `E_RUNTIME_PREPARE_EXECUTION`
 - `E_RUNTIME_PERSIST`
 
 For syntax and unknown-buddy errors include:
