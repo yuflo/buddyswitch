@@ -343,20 +343,7 @@ def _build_execution_steps(
     host_execution: dict[str, Any],
     selected_inputs: list[dict[str, Any]],
 ) -> list[str]:
-    if host_execution.get("execution_mode") == "market-browser-native":
-        mismatched_fields = [
-            key
-            for key, expected in MARKET_COCKPIT_HOST_EXECUTION.items()
-            if host_execution.get(key) != expected
-        ]
-        if mismatched_fields:
-            mismatch_details = ", ".join(
-                f"{key}={host_execution.get(key)!r}" for key in mismatched_fields
-            )
-            raise ValueError(
-                "Market host_execution must remain fail-closed to Chrome MCP/browser-native discovery "
-                f"with no silent degrade. Mismatched fields: {mismatch_details}"
-            )
+    if host_execution == MARKET_COCKPIT_HOST_EXECUTION:
         return [
             "Use the chrome-devtools-market browser before any market research.",
             "Read selected inputs by slot before other work.",
@@ -370,6 +357,42 @@ def _build_execution_steps(
     if selected_inputs:
         steps.append("Read selected inputs by slot before other work.")
     return steps
+
+
+def _validate_market_host_execution(
+    *,
+    buddy_id: str,
+    host_execution: dict[str, Any],
+) -> None:
+    if buddy_id != "market":
+        return
+    if host_execution == MARKET_COCKPIT_HOST_EXECUTION:
+        return
+
+    expected_keys = set(MARKET_COCKPIT_HOST_EXECUTION)
+    actual_keys = set(host_execution)
+    missing_keys = sorted(expected_keys - actual_keys)
+    extra_keys = sorted(actual_keys - expected_keys)
+    mismatched_fields = sorted(
+        key
+        for key in expected_keys & actual_keys
+        if host_execution.get(key) != MARKET_COCKPIT_HOST_EXECUTION[key]
+    )
+    details: list[str] = []
+    if missing_keys:
+        details.append(f"missing keys: {', '.join(missing_keys)}")
+    if extra_keys:
+        details.append(f"extra keys: {', '.join(extra_keys)}")
+    if mismatched_fields:
+        details.append(
+            "mismatched values: "
+            + ", ".join(f"{key}={host_execution.get(key)!r}" for key in mismatched_fields)
+        )
+    detail_text = "; ".join(details) if details else "unexpected market host_execution contract"
+    raise ValueError(
+        "Market host_execution must remain fail-closed to Chrome MCP/browser-native discovery "
+        f"with no silent degrade. {detail_text}"
+    )
 
 
 def _rebuild_selected_inputs_for_execution(
@@ -441,6 +464,10 @@ def prepare_execution_payload(
     )
 
     host_execution = dict(selected_skill["runtime"].get("host_execution", {}))
+    _validate_market_host_execution(
+        buddy_id=buddy_id,
+        host_execution=host_execution,
+    )
     packet = {
         "skill_id": skill_id,
         "buddy": buddy_id,

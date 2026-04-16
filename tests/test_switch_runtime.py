@@ -49,6 +49,18 @@ EXPECTED_MARKET_EXECUTION_STEPS = [
 ]
 
 
+def _market_skill_with_host_execution(host_execution: dict[str, str]) -> dict[str, object]:
+    selected_skill = deepcopy(
+        switch_runtime._resolve_execution_skill(
+            buddy_id="market",
+            skill_id="research-scan",
+            manifest_path=switch_runtime.DEFAULT_MANIFEST,
+        )
+    )
+    selected_skill["runtime"]["host_execution"] = host_execution
+    return selected_skill
+
+
 class EnvStoreRetiredFieldTests(unittest.TestCase):
     def test_validate_track_rejects_legacy_artifact_ids_field(self) -> None:
         payload = {
@@ -1065,6 +1077,44 @@ class ExecutionPreparationTests(unittest.TestCase):
             prepared["selected_skill_packet"]["execution_steps"],
             EXPECTED_MARKET_EXECUTION_STEPS,
         )
+
+    def test_prepare_execution_rejects_market_host_execution_with_wrong_execution_mode(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch market: Validate whether indie developers need a lightweight demand-validation workflow before building"
+        )
+
+        tampered_skill = _market_skill_with_host_execution(
+            {
+                **EXPECTED_MARKET_HOST_EXECUTION,
+                "execution_mode": "browser-native",
+            }
+        )
+
+        with patch("switch_runtime._resolve_execution_skill", return_value=tampered_skill):
+            with self.assertRaisesRegex(ValueError, "Market host_execution must remain fail-closed"):
+                switch_runtime.prepare_execution_payload(
+                    resolved,
+                    skill_id="research-scan",
+                )
+
+    def test_prepare_execution_rejects_market_host_execution_with_extra_keys(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch market: Validate whether indie developers need a lightweight demand-validation workflow before building"
+        )
+
+        tampered_skill = _market_skill_with_host_execution(
+            {
+                **EXPECTED_MARKET_HOST_EXECUTION,
+                "unexpected": "value",
+            }
+        )
+
+        with patch("switch_runtime._resolve_execution_skill", return_value=tampered_skill):
+            with self.assertRaisesRegex(ValueError, "Market host_execution must remain fail-closed"):
+                switch_runtime.prepare_execution_payload(
+                    resolved,
+                    skill_id="research-scan",
+                )
 
 
 class WorkspaceDataTests(unittest.TestCase):
