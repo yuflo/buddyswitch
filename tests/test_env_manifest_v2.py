@@ -206,11 +206,13 @@ class SkillPackageLoaderTests(unittest.TestCase):
             produces = ["market-scan"]
             consumes = ["research-question"]
             side_effect_level = "medium"
-            required_tools = []
+            required_tools = ["chrome-devtools-market"]
             required_env = []
             execution_mode = "market-browser-native"
             browser_mode = "headed-only"
             browser_profile = "shared-market"
+            browser_executor = "chrome-devtools-market"
+            discovery_mode = "browser-native"
             login_policy = "mandatory-takeover"
             fallback_policy = "no-silent-degrade"
             session_continuity = "shared-cockpit"
@@ -220,12 +222,15 @@ class SkillPackageLoaderTests(unittest.TestCase):
         )
 
         runtime = manifest["skills"][0]["runtime"]
+        self.assertEqual(runtime["required_tools"], ["chrome-devtools-market"])
         self.assertEqual(
             runtime["host_execution"],
             {
                 "execution_mode": "market-browser-native",
                 "browser_mode": "headed-only",
                 "browser_profile": "shared-market",
+                "browser_executor": "chrome-devtools-market",
+                "discovery_mode": "browser-native",
                 "login_policy": "mandatory-takeover",
                 "fallback_policy": "no-silent-degrade",
                 "session_continuity": "shared-cockpit",
@@ -234,7 +239,7 @@ class SkillPackageLoaderTests(unittest.TestCase):
         )
 
     def test_load_manifest_rejects_market_skill_with_missing_cockpit_metadata(self) -> None:
-        with self.assertRaisesRegex(env_manifest.ManifestError, "browser_profile"):
+        with self.assertRaisesRegex(env_manifest.ManifestError, "browser_executor"):
             self._load_demo_market_manifest(
                 """\
                 id = "demo-skill"
@@ -248,10 +253,12 @@ class SkillPackageLoaderTests(unittest.TestCase):
                 produces = ["market-scan"]
                 consumes = ["research-question"]
                 side_effect_level = "medium"
-                required_tools = []
+                required_tools = ["chrome-devtools-market"]
                 required_env = []
                 execution_mode = "market-browser-native"
                 browser_mode = "headed-only"
+                browser_profile = "shared-market"
+                discovery_mode = "browser-native"
                 login_policy = "mandatory-takeover"
                 fallback_policy = "no-silent-degrade"
                 session_continuity = "shared-cockpit"
@@ -275,11 +282,13 @@ class SkillPackageLoaderTests(unittest.TestCase):
                 produces = ["market-scan"]
                 consumes = ["research-question"]
                 side_effect_level = "medium"
-                required_tools = []
+                required_tools = ["chrome-devtools-market"]
                 required_env = []
                 execution_mode = "market-browser-native"
                 browser_mode = "headed-only"
                 browser_profile = "shared-market"
+                browser_executor = "chrome-devtools-market"
+                discovery_mode = "browser-native"
                 login_policy = "optional"
                 fallback_policy = "no-silent-degrade"
                 session_continuity = "shared-cockpit"

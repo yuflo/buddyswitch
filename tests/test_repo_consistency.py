@@ -83,11 +83,14 @@ MARKET_COCKPIT_METADATA = {
     "execution_mode": "market-browser-native",
     "browser_mode": "headed-only",
     "browser_profile": "shared-market",
+    "browser_executor": "chrome-devtools-market",
+    "discovery_mode": "browser-native",
     "login_policy": "mandatory-takeover",
     "fallback_policy": "no-silent-degrade",
     "session_continuity": "shared-cockpit",
     "evidence_capture_level": "medium",
 }
+MARKET_REQUIRED_TOOLS = ["chrome-devtools-market"]
 MARKET_EVIDENCE_FIELDS = (
     "source_id",
     "url",
@@ -425,6 +428,11 @@ class RepoConsistencyTests(unittest.TestCase):
                 parsed = env_manifest._load_toml(path)  # type: ignore[attr-defined]
                 for key, value in MARKET_COCKPIT_METADATA.items():
                     self.assertEqual(parsed[key], value, msg=f"{path.relative_to(ROOT)} missing {key}={value}")
+                self.assertEqual(
+                    parsed["required_tools"],
+                    MARKET_REQUIRED_TOOLS,
+                    msg=f"{path.relative_to(ROOT)} missing required_tools={MARKET_REQUIRED_TOOLS}",
+                )
 
     def test_market_skill_docs_reference_shared_cockpit_doc(self) -> None:
         for path in ARTIFACT_SKILL_DOCS[:6]:
