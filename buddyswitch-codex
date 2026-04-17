@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${SCRIPT_DIR}"
+ENV_HELPER="${REPO_ROOT}/tools/launcher/env.sh"
+BROWSER_HELPER="${REPO_ROOT}/tools/launcher/browser_cockpit.sh"
+
+if [[ ! -f "${ENV_HELPER}" || ! -f "${BROWSER_HELPER}" ]]; then
+  echo "Launcher helpers are missing under tools/launcher." >&2
+  exit 1
+fi
+
+source "${ENV_HELPER}"
+source "${BROWSER_HELPER}"
+
+buddyswitch_env_init
+buddyswitch_browser_init_defaults
+
+print_help() {
+  cat <<EOF
+Usage:
+  buddyswitch-codex [codex args...]
+  buddyswitch-codex start [codex args...]
+  buddyswitch-codex reset --yes
+  buddyswitch-codex browser status [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex browser ensure [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex help
+
+Commands:
+  start   Launch codex in the shared BuddySwitch environment (default behavior)
+  reset   Remove the shared BuddySwitch environment (requires --yes)
+  browser Manage browser cockpit setup (status/ensure)
+  help    Show this help message
+
+Environment:
+  BUDDYSWITCH_SHARED_ROOT      Shared launcher root (default: ${BUDDYSWITCH_SHARED_ROOT})
+  BUDDYSWITCH_SOURCE_HOME      Source HOME for bootstrap (default: current HOME)
+  BUDDYSWITCH_SOURCE_CODEX_HOME
+                               Source CODEX_HOME for auth bootstrap
+  BUDDYSWITCH_BROWSER_PORT     Browser cockpit port (default: ${BUDDYSWITCH_BROWSER_PORT})
+  BUDDYSWITCH_BROWSER_PROFILE_DIR
+                               Browser profile dir (default: ${BUDDYSWITCH_BROWSER_PROFILE_DIR})
+  BUDDYSWITCH_BROWSER_LOG_FILE Browser Chrome log file (default: ${BUDDYSWITCH_BROWSER_LOG_FILE})
+
+Paths:
+  shared root: ${BUDDYSWITCH_SHARED_ROOT}
+  home: ${BUDDYSWITCH_HOME}
+  codex home: ${BUDDYSWITCH_CODEX_HOME}
+EOF
+}
+
+start_codex() {
+  buddyswitch_browser_bootstrap
+
+  local marker_path
+  marker_path="$(buddyswitch_write_launcher_marker)"
+  trap "buddyswitch_cleanup_pid_marker '${marker_path}'" EXIT INT TERM HUP
+
+  cd "${REPO_ROOT}"
+  buddyswitch_run_codex "$@"
+}
+
+reset_shared_env() {
+  local confirmed=0
+  local arg=""
+  for arg in "$@"; do
+    if [[ "${arg}" == "--yes" ]]; then
+      confirmed=1
+    else
+      echo "Unknown reset option: ${arg}" >&2
+      echo "Use: buddyswitch-codex reset --yes" >&2
+      return 2
+    fi
+  done
+
+  if [[ "${confirmed}" -ne 1 ]]; then
+    echo "Reset requires explicit confirmation." >&2
+    echo "Run: buddyswitch-codex reset --yes" >&2
+    return 1
+  fi
+
+  if ! buddyswitch_validate_reset_root; then
+    return 2
+  fi
+
+  local active_count
+  active_count="$(buddyswitch_count_active_launchers)"
+  if [[ "${active_count}" -gt 0 ]]; then
+    echo "Reset blocked: ${active_count} active buddyswitch-codex instance(s) detected." >&2
+    echo "Close active launcher sessions and retry." >&2
+    return 3
+  fi
+
+  if buddyswitch_browser_is_active; then
+    echo "Reset blocked: active browser cockpit detected." >&2
+    echo "Stop the browser cockpit and retry." >&2
+    return 3
+  fi
+
+  if [[ -d "${BUDDYSWITCH_SHARED_ROOT}" ]]; then
+    rm -rf "${BUDDYSWITCH_SHARED_ROOT}"
+    echo "Reset complete: removed ${BUDDYSWITCH_SHARED_ROOT}"
+  else
+    echo "Nothing to reset: ${BUDDYSWITCH_SHARED_ROOT} does not exist"
+  fi
+}
+
+main() {
+  local command="${1:-start}"
+  case "${command}" in
+    help|-h|--help)
+      print_help
+      ;;
+    reset)
+      shift || true
+      reset_shared_env "$@"
+      ;;
+    start)
+      shift || true
+      start_codex "$@"
+      ;;
+    browser)
+      shift || true
+      buddyswitch_browser_main "$@"
+      ;;
+    *)
+      start_codex "$@"
+      ;;
+  esac
+}
+
+main "$@"

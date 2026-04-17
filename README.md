@@ -405,19 +405,26 @@ Use the default browser MCP for general public browsing:
 codex mcp add chrome-devtools -- npx chrome-devtools-mcp@latest
 ```
 
-Use the market browser MCP when `switch market` needs a dedicated Chrome profile, manual takeover, or login/session continuity:
+BuddySwitch launcher sessions now bootstrap both browser capabilities automatically when you run:
 
 ```bash
-CODEX_BIN=codex-w1 bash scripts/setup_market_chrome_devtools.sh --install-mcp
+./buddyswitch-codex start
 ```
 
-Default market profile path:
+Use the browser subcommands only for diagnostics or manual repair:
+
+```bash
+./buddyswitch-codex browser status
+./buddyswitch-codex browser ensure
+```
+
+Default shared browser profile path:
 
 ```text
-~/.buddyswitch/chrome-market
+~/.codex-buddyswitch/chrome/shared-browser
 ```
 
-Override the profile path with `PROFILE_DIR=/your/path` when needed.
+Override the profile path with `BUDDYSWITCH_BROWSER_PROFILE_DIR=/your/path` when needed.
 
 ## Cleanup
 
