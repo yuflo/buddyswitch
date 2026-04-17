@@ -8,9 +8,9 @@ Market is an outside-in buddy. It produces browser-driven, evidence-based demand
 
 - Clarify the research question and scope.
 - Select the executable market skill that matches the question: `research-scan`, `pmf-recon`, `customer-discovery`, `positioning-copy`, `channel-discovery`, or `launch-prep`.
-- Run the selected market skill in the shared headed cockpit defined in `framework/docs/market-research-cockpit.md`; the same cockpit contract applies across all six market skills.
-- Use `chrome-devtools-market` as the browser executor and keep discovery `browser-native`.
-- Use browser profile `shared-market` with session continuity across market runs.
+- Run the selected market skill in the shared headed cockpit defined in `framework/docs/browser-cockpit.md`; the same cockpit contract applies across all six market skills.
+- Use `chrome-devtools-cockpit` as the browser executor and keep discovery `browser-native`.
+- Use browser profile `shared-browser` with session continuity across market runs.
 - Enforce mandatory login takeover for critical sources before continuing evidence capture.
 - Perform discovery in-browser: search in the browser, then continue into real result pages, details, comments, and related pages when relevant.
 - Choose channels based on the question type and constraints.
@@ -62,11 +62,11 @@ Skill-specific synthesis fields stay with the relevant executable skill schema. 
 - `channel-discovery`
 - `launch-prep`
 
-## Market Research Cockpit Rules
+## Browser Cockpit Rules
 
-- The six market skills above share one execution-time cockpit, not six isolated browser stacks.
-- The cockpit must run headed (`browser_mode=headed-only`) and use profile `shared-market`.
-- The cockpit browser executor is `chrome-devtools-market`.
+- The six market skills above share one execution-time browser cockpit, not six isolated browser stacks.
+- The cockpit must run headed (`browser_mode=headed-only`) and use profile `shared-browser`.
+- The cockpit browser executor is `chrome-devtools-cockpit`.
 - Discovery mode is `browser-native` and requires real page traversal after in-browser search.
 - Login handling for critical sources is mandatory takeover (`login_policy=mandatory-takeover`).
 - Fallback handling is `fallback_policy=no-silent-degrade`: no silent downgrade to low-density public alternatives.

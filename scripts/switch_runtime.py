@@ -14,8 +14,8 @@ from typing import Any
 
 from env_manifest import (
     ADVISORY_RUNTIME_METADATA_POLICY,
+    BROWSER_COCKPIT_HOST_EXECUTION,
     DEFAULT_MANIFEST,
-    MARKET_COCKPIT_HOST_EXECUTION,
     ManifestError,
     buddy_authority_profile,
     buddy_skill_docs,
@@ -343,9 +343,9 @@ def _build_execution_steps(
     host_execution: dict[str, Any],
     selected_inputs: list[dict[str, Any]],
 ) -> list[str]:
-    if host_execution == MARKET_COCKPIT_HOST_EXECUTION:
+    if host_execution == BROWSER_COCKPIT_HOST_EXECUTION:
         return [
-            "Use the chrome-devtools-market browser before any market research.",
+            "Use the chrome-devtools-cockpit browser before any market research.",
             "Read selected inputs by slot before other work.",
             "Perform discovery inside the browser: browse search results, destination pages, detail pages, and comment threads before synthesizing.",
             "Pause for takeover if a critical source requires login.",
@@ -366,17 +366,17 @@ def _validate_market_host_execution(
 ) -> None:
     if buddy_id != "market":
         return
-    if host_execution == MARKET_COCKPIT_HOST_EXECUTION:
+    if host_execution == BROWSER_COCKPIT_HOST_EXECUTION:
         return
 
-    expected_keys = set(MARKET_COCKPIT_HOST_EXECUTION)
+    expected_keys = set(BROWSER_COCKPIT_HOST_EXECUTION)
     actual_keys = set(host_execution)
     missing_keys = sorted(expected_keys - actual_keys)
     extra_keys = sorted(actual_keys - expected_keys)
     mismatched_fields = sorted(
         key
         for key in expected_keys & actual_keys
-        if host_execution.get(key) != MARKET_COCKPIT_HOST_EXECUTION[key]
+        if host_execution.get(key) != BROWSER_COCKPIT_HOST_EXECUTION[key]
     )
     details: list[str] = []
     if missing_keys:

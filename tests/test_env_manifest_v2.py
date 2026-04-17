@@ -206,12 +206,12 @@ class SkillPackageLoaderTests(unittest.TestCase):
             produces = ["market-scan"]
             consumes = ["research-question"]
             side_effect_level = "medium"
-            required_tools = ["chrome-devtools-market"]
+            required_tools = ["chrome-devtools-cockpit"]
             required_env = []
-            execution_mode = "market-browser-native"
+            execution_mode = "browser-cockpit-native"
             browser_mode = "headed-only"
-            browser_profile = "shared-market"
-            browser_executor = "chrome-devtools-market"
+            browser_profile = "shared-browser"
+            browser_executor = "chrome-devtools-cockpit"
             discovery_mode = "browser-native"
             login_policy = "mandatory-takeover"
             fallback_policy = "no-silent-degrade"
@@ -222,14 +222,14 @@ class SkillPackageLoaderTests(unittest.TestCase):
         )
 
         runtime = manifest["skills"][0]["runtime"]
-        self.assertEqual(runtime["required_tools"], ["chrome-devtools-market"])
+        self.assertEqual(runtime["required_tools"], ["chrome-devtools-cockpit"])
         self.assertEqual(
             runtime["host_execution"],
             {
-                "execution_mode": "market-browser-native",
+                "execution_mode": "browser-cockpit-native",
                 "browser_mode": "headed-only",
-                "browser_profile": "shared-market",
-                "browser_executor": "chrome-devtools-market",
+                "browser_profile": "shared-browser",
+                "browser_executor": "chrome-devtools-cockpit",
                 "discovery_mode": "browser-native",
                 "login_policy": "mandatory-takeover",
                 "fallback_policy": "no-silent-degrade",
@@ -253,11 +253,11 @@ class SkillPackageLoaderTests(unittest.TestCase):
                 produces = ["market-scan"]
                 consumes = ["research-question"]
                 side_effect_level = "medium"
-                required_tools = ["chrome-devtools-market"]
+                required_tools = ["chrome-devtools-cockpit"]
                 required_env = []
-                execution_mode = "market-browser-native"
+                execution_mode = "browser-cockpit-native"
                 browser_mode = "headed-only"
-                browser_profile = "shared-market"
+                browser_profile = "shared-browser"
                 discovery_mode = "browser-native"
                 login_policy = "mandatory-takeover"
                 fallback_policy = "no-silent-degrade"
@@ -281,12 +281,12 @@ class SkillPackageLoaderTests(unittest.TestCase):
                 produces = ["market-scan"]
                 consumes = ["research-question"]
                 side_effect_level = "medium"
-                required_tools = ["chrome-devtools-market"]
+                required_tools = ["chrome-devtools-cockpit"]
                 required_env = []
-                execution_mode = "market-browser-native"
+                execution_mode = "browser-cockpit-native"
                 browser_mode = "headed-only"
-                browser_profile = "shared-market"
-                browser_executor = "chrome-devtools-market"
+                browser_profile = "shared-browser"
+                browser_executor = "chrome-devtools-cockpit"
                 login_policy = "mandatory-takeover"
                 fallback_policy = "no-silent-degrade"
                 session_continuity = "shared-cockpit"
@@ -310,12 +310,12 @@ class SkillPackageLoaderTests(unittest.TestCase):
                 produces = ["market-scan"]
                 consumes = ["research-question"]
                 side_effect_level = "medium"
-                required_tools = ["chrome-devtools-market"]
+                required_tools = ["chrome-devtools-cockpit"]
                 required_env = []
-                execution_mode = "market-browser-native"
+                execution_mode = "browser-cockpit-native"
                 browser_mode = "headed-only"
-                browser_profile = "shared-market"
-                browser_executor = "chrome-devtools-market"
+                browser_profile = "shared-browser"
+                browser_executor = "chrome-devtools-cockpit"
                 discovery_mode = "browser-native"
                 login_policy = "optional"
                 fallback_policy = "no-silent-degrade"
@@ -340,12 +340,12 @@ class SkillPackageLoaderTests(unittest.TestCase):
                 produces = ["market-scan"]
                 consumes = ["research-question"]
                 side_effect_level = "medium"
-                required_tools = ["chrome-devtools-market"]
+                required_tools = ["chrome-devtools-cockpit"]
                 required_env = []
-                execution_mode = "market-browser-native"
+                execution_mode = "browser-cockpit-native"
                 browser_mode = "headed-only"
-                browser_profile = "shared-market"
-                browser_executor = "chrome-devtools-market"
+                browser_profile = "shared-browser"
+                browser_executor = "chrome-devtools-cockpit"
                 discovery_mode = "manual"
                 login_policy = "mandatory-takeover"
                 fallback_policy = "no-silent-degrade"

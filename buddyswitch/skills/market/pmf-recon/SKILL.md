@@ -1,7 +1,7 @@
 # pmf-recon
 
 ## Execution Order
-1. Before any market research, run discovery in the visible `chrome-devtools-market` browser and keep the workflow `browser-native`.
+1. Before any market research, run discovery in the visible `chrome-devtools-cockpit` browser and keep the workflow `browser-native`.
 2. Read all selected upstream inputs before forming new market claims.
 3. If a critical source requires login, pause for mandatory takeover.
 4. Do not continue with snippet-only or text-only research when the skill contract requires browser-native work.
@@ -56,9 +56,9 @@
 
 ## Market Research Cockpit Runtime
 
-- This skill follows `framework/docs/market-research-cockpit.md`.
-- It uses `chrome-devtools-market` as the browser executor.
-- It runs in a shared headed cockpit (`browser_mode=headed-only`) with profile `shared-market`.
+- This skill follows `framework/docs/browser-cockpit.md`.
+- It uses `chrome-devtools-cockpit` as the browser executor.
+- It runs in a shared headed cockpit (`browser_mode=headed-only`) with profile `shared-browser`.
 - Discovery mode is `browser-native`: search in the browser and continue into real result pages, details, comments, and related pages where relevant.
 - Critical-source login is mandatory takeover, and fallback policy is no silent degrade.
 - Do not use silent search API/snippet/crawler fallback.

@@ -1,4 +1,4 @@
-# Market Research Cockpit
+# Browser Cockpit
 
 ## Purpose
 
@@ -29,10 +29,10 @@ These six skills stay separate and keep their own output schemas, slots, and sco
 
 All six market skills must carry identical host execution metadata in `skill.toml`:
 
-- `execution_mode = "market-browser-native"`
+- `execution_mode = "browser-cockpit-native"`
 - `browser_mode = "headed-only"`
-- `browser_profile = "shared-market"`
-- `browser_executor = "chrome-devtools-market"`
+- `browser_profile = "shared-browser"`
+- `browser_executor = "chrome-devtools-cockpit"`
 - `discovery_mode = "browser-native"`
 - `login_policy = "mandatory-takeover"`
 - `fallback_policy = "no-silent-degrade"`
@@ -42,7 +42,7 @@ All six market skills must carry identical host execution metadata in `skill.tom
 ## Runtime Rules
 
 1. Shared headed cockpit
-- All six skills run in one shared headed cockpit profile (`shared-market`) with session continuity (`shared-cockpit`) through `chrome-devtools-market`.
+- All six skills run in one shared headed cockpit profile (`shared-browser`) with session continuity (`shared-cockpit`) through `chrome-devtools-cockpit`.
 - Discovery is `browser-native`: search happens in the browser and continues into real result pages, details, comments, and related pages when relevant.
 - The cockpit is execution-time infrastructure for browsing and evidence capture only.
 
@@ -56,9 +56,16 @@ All six market skills must carry identical host execution metadata in `skill.tom
 - If `browser-native` access is genuinely blocked, only one explicit `user-approved` one-off downgrade is allowed and must be recorded with evidence impact.
 
 4. Ordered host execution
-- `selected_skill_packet.execution_constraints` carries the host-facing Chrome MCP contract (`chrome-devtools-market`, `browser-native`, mandatory takeover, and no-silent-degrade).
+- `selected_skill_packet.execution_constraints` carries the host-facing Chrome MCP contract (`chrome-devtools-cockpit`, `browser-native`, mandatory takeover, and no-silent-degrade).
 - `selected_skill_packet.execution_steps` is the ordered runtime contract for the selected skill.
 - The host may not replace that packet with manual reconstruction or ad hoc market-specific shortcuts.
+
+## Cockpit Bootstrap
+
+- Preferred happy path: run `./buddyswitch-codex start`.
+- `start` bootstraps the BuddySwitch shared home, ensures `chrome-devtools`, ensures the shared headed cockpit endpoint, ensures `chrome-devtools-cockpit`, and then launches Codex.
+- Use `./buddyswitch-codex browser status` for a read-only readiness check.
+- Use `./buddyswitch-codex browser ensure` to repair or pre-warm the shared browser cockpit without launching a full Codex session.
 
 ## Source Of Truth Boundary
 

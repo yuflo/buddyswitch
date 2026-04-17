@@ -9,7 +9,7 @@
 
 - Complexity tier: quick / standard / deep
 - Tier rationale:
-- Browser executor: chrome-devtools-market
+- Browser executor: chrome-devtools-cockpit
 - Discovery mode: browser-native
 - Evidence source: real webpage browsing in the Chrome MCP session, not snippet-only or crawler-only synthesis
 - Collection mode: in-browser search -> real result pages -> details/comments/related pages (when relevant)

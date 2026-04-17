@@ -49,11 +49,11 @@ HOST_EXECUTION_FIELDS = (
     "session_continuity",
     "evidence_capture_level",
 )
-MARKET_COCKPIT_HOST_EXECUTION = {
-    "execution_mode": "market-browser-native",
+BROWSER_COCKPIT_HOST_EXECUTION = {
+    "execution_mode": "browser-cockpit-native",
     "browser_mode": "headed-only",
-    "browser_profile": "shared-market",
-    "browser_executor": "chrome-devtools-market",
+    "browser_profile": "shared-browser",
+    "browser_executor": "chrome-devtools-cockpit",
     "discovery_mode": "browser-native",
     "login_policy": "mandatory-takeover",
     "fallback_policy": "no-silent-degrade",
@@ -255,15 +255,15 @@ def _validate_market_host_execution(
     if metadata_buddy.strip() != "market":
         return
 
-    for key, expected_value in MARKET_COCKPIT_HOST_EXECUTION.items():
+    for key, expected_value in BROWSER_COCKPIT_HOST_EXECUTION.items():
         actual_value = host_execution.get(key)
         if actual_value is None:
             raise ManifestError(
-                f"{metadata_path.relative_to(ROOT)}:{key} is required for market cockpit skills"
+                f"{metadata_path.relative_to(ROOT)}:{key} is required for market skills using the browser cockpit"
             )
         if actual_value != expected_value:
             raise ManifestError(
-                f"{metadata_path.relative_to(ROOT)}:{key} must be '{expected_value}' for market cockpit skills"
+                f"{metadata_path.relative_to(ROOT)}:{key} must be '{expected_value}' for market skills using the browser cockpit"
             )
 
 

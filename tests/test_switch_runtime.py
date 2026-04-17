@@ -27,10 +27,10 @@ import workspace_data  # noqa: E402
 from env_store import create_artifact, create_task, create_track, get_track, require_id, validate_artifact, validate_track  # noqa: E402
 
 EXPECTED_MARKET_HOST_EXECUTION = {
-    "execution_mode": "market-browser-native",
+    "execution_mode": "browser-cockpit-native",
     "browser_mode": "headed-only",
-    "browser_profile": "shared-market",
-    "browser_executor": "chrome-devtools-market",
+    "browser_profile": "shared-browser",
+    "browser_executor": "chrome-devtools-cockpit",
     "discovery_mode": "browser-native",
     "login_policy": "mandatory-takeover",
     "fallback_policy": "no-silent-degrade",
@@ -39,7 +39,7 @@ EXPECTED_MARKET_HOST_EXECUTION = {
 }
 
 EXPECTED_MARKET_EXECUTION_STEPS = [
-    "Use the chrome-devtools-market browser before any market research.",
+    "Use the chrome-devtools-cockpit browser before any market research.",
     "Read selected inputs by slot before other work.",
     "Perform discovery inside the browser: browse search results, destination pages, detail pages, and comment threads before synthesizing.",
     "Pause for takeover if a critical source requires login.",
@@ -227,11 +227,11 @@ class ResolveRuntimeTests(unittest.TestCase):
                 pmf_instructions["next_actions"],
             )
             self.assertNotIn(
-                "Attach to the shared market cockpit before running browser research.",
+                "Attach to the shared browser cockpit before running browser research.",
                 pmf_instructions["next_actions"],
             )
             self.assertNotIn(
-                "Use the shared-market browser profile and headed browser mode.",
+                "Use the shared-browser browser profile and headed browser mode.",
                 pmf_instructions["next_actions"],
             )
             self.assertNotIn(

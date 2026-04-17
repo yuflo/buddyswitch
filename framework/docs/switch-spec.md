@@ -105,7 +105,7 @@ Current runtime defaults:
 - derived markdown artifacts and run summaries are retired
 
 Market runtime note:
-- market skills declare `browser_executor = "chrome-devtools-market"` and `discovery_mode = "browser-native"` in skill metadata
+- market skills declare `browser_executor = "chrome-devtools-cockpit"` and `discovery_mode = "browser-native"` in skill metadata
 - `required_tools` remains advisory even for market skills; it warns the host rather than enforcing execution order
 - host execution for market runs must stay browser-native: search in the browser and continue into real pages (details, comments, related pages when relevant)
 - no silent search API/snippet/crawler fallback is allowed; only explicit `user-approved` one-off downgrade is permitted when browser-native access is genuinely blocked
