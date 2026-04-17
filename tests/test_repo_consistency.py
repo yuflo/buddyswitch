@@ -79,18 +79,18 @@ MARKET_SCHEMA_PATHS = (
     ROOT / "framework" / "schemas" / "market" / "channel-discovery.json",
     ROOT / "framework" / "schemas" / "market" / "launch-prep.json",
 )
-MARKET_COCKPIT_METADATA = {
-    "execution_mode": "market-browser-native",
+BROWSER_COCKPIT_METADATA = {
+    "execution_mode": "browser-cockpit-native",
     "browser_mode": "headed-only",
-    "browser_profile": "shared-market",
-    "browser_executor": "chrome-devtools-market",
+    "browser_profile": "shared-browser",
+    "browser_executor": "chrome-devtools-cockpit",
     "discovery_mode": "browser-native",
     "login_policy": "mandatory-takeover",
     "fallback_policy": "no-silent-degrade",
     "session_continuity": "shared-cockpit",
     "evidence_capture_level": "medium",
 }
-MARKET_REQUIRED_TOOLS = ["chrome-devtools-market"]
+BROWSER_COCKPIT_REQUIRED_TOOLS = ["chrome-devtools-cockpit"]
 MARKET_EVIDENCE_FIELDS = (
     "source_id",
     "url",
@@ -114,7 +114,7 @@ NEW_MARKET_TEMPLATE_SCHEMAS = {
     ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "assets" / "launch-prep-template.md": ROOT / "framework" / "schemas" / "market" / "launch-prep.json",
 }
 ACTIVE_MARKET_CONTRACT_DOCS = (
-    ROOT / "framework" / "docs" / "market-research-cockpit.md",
+    ROOT / "framework" / "docs" / "browser-cockpit.md",
     ROOT / "framework" / "contracts" / "market.md",
     ROOT / "framework" / "docs" / "switch-spec.md",
     ROOT / "framework" / "templates" / "research-report.md",
@@ -440,22 +440,22 @@ class RepoConsistencyTests(unittest.TestCase):
         for path in SKILL_TOMLS[:6]:
             with self.subTest(skill_toml=str(path.relative_to(ROOT))):
                 parsed = env_manifest._load_toml(path)  # type: ignore[attr-defined]
-                for key, value in MARKET_COCKPIT_METADATA.items():
+                for key, value in BROWSER_COCKPIT_METADATA.items():
                     self.assertEqual(parsed[key], value, msg=f"{path.relative_to(ROOT)} missing {key}={value}")
                 self.assertEqual(
                     parsed["required_tools"],
-                    MARKET_REQUIRED_TOOLS,
-                    msg=f"{path.relative_to(ROOT)} missing required_tools={MARKET_REQUIRED_TOOLS}",
+                    BROWSER_COCKPIT_REQUIRED_TOOLS,
+                    msg=f"{path.relative_to(ROOT)} missing required_tools={BROWSER_COCKPIT_REQUIRED_TOOLS}",
                 )
 
     def test_market_skill_docs_reference_shared_cockpit_doc(self) -> None:
         for path in ARTIFACT_SKILL_DOCS[:6]:
             with self.subTest(skill_doc=str(path.relative_to(ROOT))):
                 text = path.read_text(encoding="utf-8").lower()
-                self.assertIn("framework/docs/market-research-cockpit.md", text)
+                self.assertIn("framework/docs/browser-cockpit.md", text)
                 self.assertIn("headed", text)
                 self.assertIn("mandatory takeover", text)
-                self.assertIn("shared-market", text)
+                self.assertIn("shared-browser", text)
 
     def test_market_skill_docs_start_with_execution_order(self) -> None:
         for path in ARTIFACT_SKILL_DOCS[:6]:
@@ -467,7 +467,7 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("do not continue with snippet-only or text-only research", text)
 
     def test_market_active_contract_docs_require_browser_native_wording(self) -> None:
-        required_tokens = ("chrome-devtools-market", "browser-native", "user-approved")
+        required_tokens = ("chrome-devtools-cockpit", "browser-native", "user-approved")
         forbidden_tokens = ("search-assist",)
 
         for path in ACTIVE_MARKET_CONTRACT_DOCS:
@@ -551,7 +551,7 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("suggested next switch", chat_return_section)
 
     def test_market_cockpit_doc_defines_selected_skill_execution_boundary(self) -> None:
-        cockpit_doc = (ROOT / "framework" / "docs" / "market-research-cockpit.md").read_text(
+        cockpit_doc = (ROOT / "framework" / "docs" / "browser-cockpit.md").read_text(
             encoding="utf-8"
         ).lower()
         self.assertIn("selected_skill_packet", cockpit_doc)
@@ -559,15 +559,12 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("these six skills stay separate", cockpit_doc)
         self.assertIn("not a second source of truth", cockpit_doc)
 
-    def test_dev0039_docs_keep_only_active_selected_skill_plans(self) -> None:
-        docs_dir = ROOT / "docs" / "dev0039"
+    def test_dev1626_docs_include_active_browser_cockpit_plans(self) -> None:
+        docs_dir = ROOT / "docs" / "dev1626"
         names = {path.name for path in docs_dir.glob("*.md")}
 
-        self.assertIn("2026-04-16-selected-skill-injection-execution-plan.md", names)
-        self.assertIn("2026-04-16-selected-skill-injection-closure-cleanup-plan.md", names)
-        self.assertNotIn("2026-04-16-market-research-cockpit-design.md", names)
-        self.assertNotIn("2026-04-16-market-cockpit-host-execution-bridge-plan.md", names)
-        self.assertNotIn("2026-04-16-market-research-cockpit-implementation-plan.md", names)
+        self.assertIn("2026-04-17-optimization-a-browser-cockpit-realignment-plan.md", names)
+        self.assertIn("2026-04-17-launcher-market-cockpit-migration-plan.md", names)
 
     def test_switch_spec_documents_selected_skill_packet_fields(self) -> None:
         switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
@@ -596,16 +593,21 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("inject `selected_skill_packet.skill_instructions` verbatim", combined)
         self.assertIn("buddyswitch does not execute host tools", combined)
 
-    def test_dev0039_active_plans_define_selected_skill_packet_flow(self) -> None:
-        docs = (
-            ROOT / "docs" / "dev0039" / "2026-04-16-selected-skill-injection-execution-plan.md",
-            ROOT / "docs" / "dev0039" / "2026-04-16-selected-skill-injection-closure-cleanup-plan.md",
-        )
-        combined = "\n".join(path.read_text(encoding="utf-8") for path in docs).lower()
+    def test_dev1626_active_plans_define_browser_cockpit_happy_path(self) -> None:
+        optimization = (
+            ROOT / "docs" / "dev1626" / "2026-04-17-optimization-a-browser-cockpit-realignment-plan.md"
+        ).read_text(encoding="utf-8").lower()
+        migration = (
+            ROOT / "docs" / "dev1626" / "2026-04-17-launcher-market-cockpit-migration-plan.md"
+        ).read_text(encoding="utf-8").lower()
 
-        self.assertIn("selected_skill_packet", combined)
-        self.assertIn("explicit skill injection", combined)
-        self.assertIn("buddyswitch does not execute host tools", combined)
+        self.assertIn("buddyswitch-codex start", optimization)
+        self.assertIn("browser status", optimization)
+        self.assertIn("browser ensure", optimization)
+        self.assertIn("chrome-devtools-cockpit", optimization)
+        self.assertIn("shared-browser", optimization)
+        self.assertIn("superseded by", migration)
+        self.assertIn("optimization-a-browser-cockpit-realignment-plan", migration)
 
     def test_switch_spec_lists_prepare_execution_runtime_error(self) -> None:
         switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")
