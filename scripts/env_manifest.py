@@ -60,6 +60,16 @@ BROWSER_COCKPIT_HOST_EXECUTION = {
     "session_continuity": "shared-cockpit",
     "evidence_capture_level": "medium",
 }
+TOOL_SCOPE_PROFILES = {
+    "market-browser-native": {
+        "profile": "market-browser-native",
+        "mode": "allowlist",
+        "allowed_tool_servers": ["chrome-devtools-cockpit"],
+        "downgrade_policy": "user-approved-one-off",
+        "temporary_allowed_tool_servers": ["web"],
+        "downgrade_reason": "browser-native-blocked",
+    }
+}
 
 
 class ManifestError(ValueError):
@@ -454,6 +464,14 @@ def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
         for key in HOST_EXECUTION_FIELDS
         if (value := _optional_string(metadata, key, metadata_label)) is not None
     }
+    tool_scope_profile = _optional_string(metadata, "tool_scope_profile", metadata_label)
+    tool_scope = None
+    if tool_scope_profile is not None:
+        if tool_scope_profile not in TOOL_SCOPE_PROFILES:
+            raise ManifestError(
+                f"{metadata_path.relative_to(ROOT)}:tool_scope_profile '{tool_scope_profile}' is unknown"
+            )
+        tool_scope = dict(TOOL_SCOPE_PROFILES[tool_scope_profile])
     _validate_market_host_execution(
         metadata_path=metadata_path,
         metadata_buddy=metadata_buddy,
@@ -489,6 +507,8 @@ def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
         "required_tools": required_tools,
         "required_env": required_env,
         "host_execution": host_execution,
+        "tool_scope_profile": tool_scope_profile,
+        "tool_scope": tool_scope,
         "produces": produces,
         "consumes": consumes,
         "allowed_task_kinds": allowed_task_kinds,

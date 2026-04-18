@@ -18,6 +18,16 @@ if str(SCRIPTS) not in sys.path:
 import env_manifest  # noqa: E402
 
 
+EXPECTED_MARKET_TOOL_SCOPE = {
+    "profile": "market-browser-native",
+    "mode": "allowlist",
+    "allowed_tool_servers": ["chrome-devtools-cockpit"],
+    "downgrade_policy": "user-approved-one-off",
+    "temporary_allowed_tool_servers": ["web"],
+    "downgrade_reason": "browser-native-blocked",
+}
+
+
 class SkillPackageLoaderTests(unittest.TestCase):
     def _load_demo_market_manifest(self, skill_toml_body: str) -> dict[str, object]:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
@@ -354,6 +364,40 @@ class SkillPackageLoaderTests(unittest.TestCase):
                 allowed_task_kinds = ["research"]
                 """
             )
+
+    def test_load_manifest_reads_market_tool_scope_profile(self) -> None:
+        manifest = self._load_demo_market_manifest(
+            """\
+            id = "demo-skill"
+            buddy = "market"
+            description = "Use when demo market work is requested."
+            objects = ["task", "artifact"]
+            produces_artifact = true
+            output_slot = "market-scan"
+            input_slots = ["research-question"]
+            output_schema = "framework/schemas/market/research-scan.json"
+            produces = ["market-scan"]
+            consumes = ["research-question"]
+            side_effect_level = "medium"
+            required_tools = ["chrome-devtools-cockpit"]
+            required_env = []
+            execution_mode = "browser-cockpit-native"
+            browser_mode = "headed-only"
+            browser_profile = "shared-browser"
+            browser_executor = "chrome-devtools-cockpit"
+            discovery_mode = "browser-native"
+            login_policy = "mandatory-takeover"
+            fallback_policy = "no-silent-degrade"
+            session_continuity = "shared-cockpit"
+            evidence_capture_level = "medium"
+            tool_scope_profile = "market-browser-native"
+            allowed_task_kinds = ["research"]
+            """
+        )
+
+        runtime = manifest["skills"][0]["runtime"]
+        self.assertEqual(runtime["tool_scope_profile"], "market-browser-native")
+        self.assertEqual(runtime["tool_scope"], EXPECTED_MARKET_TOOL_SCOPE)
 
     def test_load_manifest_rejects_non_directory_skill_path(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:

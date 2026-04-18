@@ -20,4 +20,5 @@ login_policy = "mandatory-takeover"
 fallback_policy = "no-silent-degrade"
 session_continuity = "shared-cockpit"
 evidence_capture_level = "medium"
+tool_scope_profile = "market-browser-native"
 allowed_task_kinds = ["research"]

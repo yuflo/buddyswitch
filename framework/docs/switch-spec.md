@@ -107,9 +107,10 @@ Current runtime defaults:
 Market runtime note:
 - market skills declare `browser_executor = "chrome-devtools-cockpit"` and `discovery_mode = "browser-native"` in skill metadata
 - `required_tools` remains advisory even for market skills; it warns the host rather than enforcing execution order
+- market skills may declare a declarative `tool_scope_profile`; runtime normalizes it into `tool_scope`
 - host execution for market runs must stay browser-native: search in the browser and continue into real pages (details, comments, related pages when relevant)
 - no silent search API/snippet/crawler fallback is allowed; only explicit `user-approved` one-off downgrade is permitted when browser-native access is genuinely blocked
-- the enforceable host contract for market runs lives in `selected_skill_packet.execution_constraints` and `selected_skill_packet.execution_steps`, not in `required_tools`
+- the host-facing execution boundary for market runs lives in `selected_skill_packet.execution_constraints`, `selected_skill_packet.tool_scope`, and `selected_skill_packet.execution_steps`, not in `required_tools`
 
 ## Execution Preparation
 
@@ -124,10 +125,11 @@ The packet fields are stable:
 - `selected_inputs`
 - `output_schema_path`
 - `execution_constraints`
+- `tool_scope`
 - `execution_steps`
 
 `execution_steps` is the ordered human-facing execution contract for the host session.
-For market runs, `execution_constraints` carries the Chrome MCP/browser-native/no-silent-degrade contract while `execution_steps` carries the ordered browsing workflow the host must follow.
+For market runs, `execution_constraints` carries the Chrome MCP/browser-native/no-silent-degrade contract, `tool_scope` carries the declarative host-facing tool boundary, and `execution_steps` carries the ordered browsing workflow the host must follow.
 The host must execute the packet in-session; BuddySwitch does not execute host tools itself.
 
 ## Host Codex Responsibilities
@@ -139,10 +141,11 @@ After `resolve`:
 3. review `artifact_selection_by_skill[chosen_skill_id]` and `run_instructions_by_skill[chosen_skill_id]` only as pre-execution selection context
 4. call `scripts/switch_runtime.py prepare-execution --resolved <file> --skill-id <chosen_skill_id>` to materialize `selected_skill_packet`
 5. treat `selected_skill_packet.selected_inputs` as the canonical input bundle for the run
-6. inject `selected_skill_packet.skill_instructions` verbatim and treat `selected_skill_packet.execution_steps` as ordered requirements
-7. execute the workflow in-session by following `selected_skill_packet.execution_steps` in order
-8. produce a structured result payload matching `required_output_schema_by_skill[chosen_skill_id]`
-9. call `scripts/switch_runtime.py persist`
+6. apply `selected_skill_packet.tool_scope` before starting the run
+7. inject `selected_skill_packet.skill_instructions` verbatim and treat `selected_skill_packet.execution_steps` as ordered requirements
+8. execute the workflow in-session by following `selected_skill_packet.execution_steps` in order
+9. produce a structured result payload matching `required_output_schema_by_skill[chosen_skill_id]`
+10. call `scripts/switch_runtime.py persist`
 
 Recommended fixed host flow for track-bound work:
 1. resolve switch
@@ -150,8 +153,9 @@ Recommended fixed host flow for track-bound work:
 3. review `track_artifact_index`, `artifact_selection_by_skill[chosen_skill_id]`, and `run_instructions_by_skill[chosen_skill_id]` only to choose the skill and preview likely upstream context
 4. call `prepare-execution`
 5. treat `selected_skill_packet.selected_inputs` as the canonical input bundle for the run
-6. inject `selected_skill_packet.skill_instructions` verbatim and execute the run in the current host session while following `selected_skill_packet.execution_steps` in order
-7. persist result
+6. apply `selected_skill_packet.tool_scope` before starting the run
+7. inject `selected_skill_packet.skill_instructions` verbatim and execute the run in the current host session while following `selected_skill_packet.execution_steps` in order
+8. persist result
 
 Boundary for execution:
 - BuddySwitch supplies routing context, selected skill packets, and persistence.

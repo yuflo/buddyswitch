@@ -191,6 +191,7 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
     required_tools = runtime.get("required_tools", [])
     required_env = runtime.get("required_env", [])
     host_execution = dict(runtime.get("host_execution", {}))
+    tool_scope = runtime.get("tool_scope")
     output_slot = runtime.get("output_slot")
     input_slots = runtime.get("input_slots")
     if not isinstance(input_slots, list):
@@ -209,6 +210,7 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
         "required_tools": required_tools,
         "required_env": required_env,
         "host_execution": host_execution,
+        "tool_scope": dict(tool_scope or {}),
         "runtime_requirements": {
             "required_tools": required_tools,
             "required_env": required_env,
@@ -464,6 +466,7 @@ def prepare_execution_payload(
     )
 
     host_execution = dict(selected_skill["runtime"].get("host_execution", {}))
+    tool_scope = dict(selected_skill["runtime"].get("tool_scope") or {})
     _validate_market_host_execution(
         buddy_id=buddy_id,
         host_execution=host_execution,
@@ -480,6 +483,7 @@ def prepare_execution_payload(
         "selected_inputs": selected_inputs,
         "output_schema_path": output_schema_path.strip(),
         "execution_constraints": host_execution,
+        "tool_scope": tool_scope,
         "execution_steps": _build_execution_steps(
             host_execution=host_execution,
             selected_inputs=selected_inputs,

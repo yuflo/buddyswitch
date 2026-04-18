@@ -91,6 +91,7 @@ BROWSER_COCKPIT_METADATA = {
     "evidence_capture_level": "medium",
 }
 BROWSER_COCKPIT_REQUIRED_TOOLS = ["chrome-devtools-cockpit"]
+EXPECTED_MARKET_TOOL_SCOPE_PROFILE = "market-browser-native"
 MARKET_EVIDENCE_FIELDS = (
     "source_id",
     "url",
@@ -446,6 +447,16 @@ class RepoConsistencyTests(unittest.TestCase):
                     parsed["required_tools"],
                     BROWSER_COCKPIT_REQUIRED_TOOLS,
                     msg=f"{path.relative_to(ROOT)} missing required_tools={BROWSER_COCKPIT_REQUIRED_TOOLS}",
+                )
+
+    def test_market_skills_share_market_tool_scope_profile(self) -> None:
+        for path in SKILL_TOMLS[:6]:
+            with self.subTest(skill_toml=str(path.relative_to(ROOT))):
+                parsed = env_manifest._load_toml(path)  # type: ignore[attr-defined]
+                self.assertEqual(
+                    parsed.get("tool_scope_profile"),
+                    EXPECTED_MARKET_TOOL_SCOPE_PROFILE,
+                    msg=f"{path.relative_to(ROOT)} missing tool_scope_profile={EXPECTED_MARKET_TOOL_SCOPE_PROFILE}",
                 )
 
     def test_market_skill_docs_reference_shared_cockpit_doc(self) -> None:

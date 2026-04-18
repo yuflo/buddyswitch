@@ -11,6 +11,7 @@ BuddySwitch does not open browser tools itself; it remains the control layer whi
 
 - The host chooses exactly one `market` `skill_id` for the run.
 - The host calls `prepare-execution` to materialize `selected_skill_packet` for that selected skill.
+- The host applies `selected_skill_packet.tool_scope` before any market research begins.
 - The host injects `selected_skill_packet.skill_instructions` and follows `selected_skill_packet.execution_steps` in order.
 - This cockpit contract applies to one selected skill at a time; it does not turn BuddySwitch into a multi-skill workflow engine.
 
@@ -57,6 +58,8 @@ All six market skills must carry identical host execution metadata in `skill.tom
 
 4. Ordered host execution
 - `selected_skill_packet.execution_constraints` carries the host-facing Chrome MCP contract (`chrome-devtools-cockpit`, `browser-native`, mandatory takeover, and no-silent-degrade).
+- `selected_skill_packet.tool_scope` carries the allowed tool-server scope for the run.
+- For `market-browser-native`, discovery starts with `chrome-devtools-cockpit`; browser-external search is outside the default scope unless an explicit `user-approved` one-off downgrade is granted.
 - `selected_skill_packet.execution_steps` is the ordered runtime contract for the selected skill.
 - The host may not replace that packet with manual reconstruction or ad hoc market-specific shortcuts.
 

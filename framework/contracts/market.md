@@ -9,6 +9,7 @@ Market is an outside-in buddy. It produces browser-driven, evidence-based demand
 - Clarify the research question and scope.
 - Select the executable market skill that matches the question: `research-scan`, `pmf-recon`, `customer-discovery`, `positioning-copy`, `channel-discovery`, or `launch-prep`.
 - Run the selected market skill in the shared headed cockpit defined in `framework/docs/browser-cockpit.md`; the same cockpit contract applies across all six market skills.
+- Honor the packet-level `tool_scope` returned by `prepare-execution` before any research begins.
 - Use `chrome-devtools-cockpit` as the browser executor and keep discovery `browser-native`.
 - Use browser profile `shared-browser` with session continuity across market runs.
 - Enforce mandatory login takeover for critical sources before continuing evidence capture.
@@ -65,13 +66,15 @@ Skill-specific synthesis fields stay with the relevant executable skill schema. 
 ## Browser Cockpit Rules
 
 - The six market skills above share one execution-time browser cockpit, not six isolated browser stacks.
+- The default packet-level profile is `market-browser-native`.
 - The cockpit must run headed (`browser_mode=headed-only`) and use profile `shared-browser`.
 - The cockpit browser executor is `chrome-devtools-cockpit`.
+- Packet-level `tool_scope` is the host-facing tool boundary for the selected run.
 - Discovery mode is `browser-native` and requires real page traversal after in-browser search.
 - Login handling for critical sources is mandatory takeover (`login_policy=mandatory-takeover`).
 - Fallback handling is `fallback_policy=no-silent-degrade`: no silent downgrade to low-density public alternatives.
 - No silent search API/snippet/crawler fallback is allowed.
-- If browser-native access is genuinely blocked, only explicit `user-approved` one-off downgrade is allowed.
+- If browser-native access is genuinely blocked, only explicit `user-approved` one-off downgrade may temporarily widen the default scope.
 - The cockpit is execution-time only. Canonical outputs remain BuddySwitch task, artifact, and run objects.
 
 ## Output Slot Taxonomy

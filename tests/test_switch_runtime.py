@@ -38,6 +38,15 @@ EXPECTED_MARKET_HOST_EXECUTION = {
     "evidence_capture_level": "medium",
 }
 
+EXPECTED_MARKET_TOOL_SCOPE = {
+    "profile": "market-browser-native",
+    "mode": "allowlist",
+    "allowed_tool_servers": ["chrome-devtools-cockpit"],
+    "downgrade_policy": "user-approved-one-off",
+    "temporary_allowed_tool_servers": ["web"],
+    "downgrade_reason": "browser-native-blocked",
+}
+
 EXPECTED_MARKET_EXECUTION_STEPS = [
     "Use the chrome-devtools-cockpit browser before any market research.",
     "Read selected inputs by slot before other work.",
@@ -212,6 +221,10 @@ class ResolveRuntimeTests(unittest.TestCase):
             self.assertEqual(
                 pmf_card.get("host_execution"),
                 EXPECTED_MARKET_HOST_EXECUTION,
+            )
+            self.assertEqual(
+                pmf_card.get("tool_scope"),
+                EXPECTED_MARKET_TOOL_SCOPE,
             )
             pmf_instructions = payload["run_instructions_by_skill"]["pmf-recon"]
             self.assertEqual(
@@ -970,6 +983,7 @@ class ExecutionPreparationTests(unittest.TestCase):
         self.assertEqual(packet["skill_instructions"]["name"], "research-scan")
         self.assertTrue(packet["skill_instructions"]["contents"].startswith("# "))
         self.assertEqual(packet["execution_constraints"], EXPECTED_MARKET_HOST_EXECUTION)
+        self.assertEqual(packet["tool_scope"], EXPECTED_MARKET_TOOL_SCOPE)
         self.assertEqual(packet["selected_inputs"], [])
         self.assertEqual(packet["execution_steps"], EXPECTED_MARKET_EXECUTION_STEPS)
         self.assertIn(
@@ -1002,6 +1016,7 @@ class ExecutionPreparationTests(unittest.TestCase):
         packet = payload["selected_skill_packet"]
         self.assertEqual(packet["skill_id"], "research-scan")
         self.assertEqual(packet["execution_constraints"], EXPECTED_MARKET_HOST_EXECUTION)
+        self.assertEqual(packet["tool_scope"], EXPECTED_MARKET_TOOL_SCOPE)
         self.assertEqual(packet["execution_steps"], EXPECTED_MARKET_EXECUTION_STEPS)
 
     def test_prepare_execution_ignores_tampered_instruction_path_from_resolved_payload(self) -> None:
