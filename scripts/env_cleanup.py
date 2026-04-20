@@ -410,9 +410,6 @@ def ensure_required_skeleton(root: Path) -> None:
     ):
         directory = root / relative_dir
         directory.mkdir(parents=True, exist_ok=True)
-        marker = directory / ".gitkeep"
-        if not marker.exists():
-            marker.write_text("", encoding="utf-8")
 
 
 def build_cleanup_plan(

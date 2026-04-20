@@ -258,8 +258,31 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("reference_switches", combined)
         self.assertIn("recommended_switch", combined)
         self.assertIn("related_run_ids", combined)
-        self.assertIn("continue_current_task", combined)
-        self.assertIn("debug", combined)
+
+    def test_root_agents_describes_execution_worktree_without_full_runtime_contract(self) -> None:
+        text = (ROOT / "AGENTS.md").read_text(encoding="utf-8").lower()
+
+        self.assertIn("execution worktree", text)
+        self.assertIn("repo root is for developing buddyswitch itself", text)
+        self.assertNotIn("inject `selected_skill_packet.skill_instructions` verbatim", text)
+
+    def test_runtime_agents_template_holds_full_runtime_contract(self) -> None:
+        text = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
+            encoding="utf-8"
+        ).lower()
+
+        self.assertIn("selected_skill_packet", text)
+        self.assertIn("receipt", text)
+        self.assertIn("commands", text)
+        self.assertIn("summary", text)
+
+    def test_readme_quick_start_distinguishes_development_and_launcher_modes(self) -> None:
+        text = (ROOT / "README.md").read_text(encoding="utf-8").lower()
+
+        self.assertIn("two modes exist", text)
+        self.assertIn("develop buddyswitch", text)
+        self.assertIn("./buddyswitch-codex start", text)
+        self.assertIn("${buddyswitch_shared_root}/workspace", text)
 
     def test_switch_spec_directs_multi_skill_hosts_to_per_skill_selection_maps(self) -> None:
         text = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")

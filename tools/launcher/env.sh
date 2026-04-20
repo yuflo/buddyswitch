@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+BUDDYSWITCH_LAUNCHER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUDDYSWITCH_WORKSPACE_HELPER="${BUDDYSWITCH_LAUNCHER_DIR}/workspace.sh"
+
+if [[ ! -f "${BUDDYSWITCH_WORKSPACE_HELPER}" ]]; then
+  echo "Workspace helper is missing under tools/launcher." >&2
+  exit 1
+fi
+
+source "${BUDDYSWITCH_WORKSPACE_HELPER}"
+
 buddyswitch_env_init() {
   local source_home source_codex_home shared_root
 
@@ -17,6 +27,9 @@ buddyswitch_env_init() {
   export BUDDYSWITCH_CODEX_HOME="${shared_root}/codex-home"
   export BUDDYSWITCH_XDG_CONFIG_HOME="${BUDDYSWITCH_HOME}/.config"
   export BUDDYSWITCH_RUN_STATE_DIR="${shared_root}/run"
+  export BUDDYSWITCH_REPO_ROOT="${BUDDYSWITCH_REPO_ROOT:-${REPO_ROOT:-$(cd "${BUDDYSWITCH_LAUNCHER_DIR}/../.." && pwd)}}"
+
+  buddyswitch_workspace_init_defaults
 }
 
 buddyswitch_ensure_shared_env() {
@@ -39,6 +52,8 @@ EOF
   if [[ ! -f "${BUDDYSWITCH_CODEX_HOME}/auth.json" && -f "${BUDDYSWITCH_SOURCE_CODEX_HOME}/auth.json" ]]; then
     cp "${BUDDYSWITCH_SOURCE_CODEX_HOME}/auth.json" "${BUDDYSWITCH_CODEX_HOME}/auth.json"
   fi
+
+  buddyswitch_workspace_prepare_execution_worktree
 }
 
 buddyswitch_codex_config_path() {

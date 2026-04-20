@@ -63,15 +63,9 @@ permissions = ["track.read", "track.create", "track.update", "task.read", "task.
 
         for relative_dir in (
             "artifacts",
-            "runs/raw/market",
-            "runs/raw/pm",
             "runs/summaries/market",
             "runs/summaries/pm",
             "projects/app/.runtime",
-            "buddyswitch/objects/tracks",
-            "buddyswitch/objects/tasks",
-            "buddyswitch/objects/artifacts",
-            "buddyswitch/content/runs",
         ):
             self._write_text(f"{relative_dir}/.gitkeep", "")
 
@@ -293,7 +287,7 @@ class CleanupBackendTests(unittest.TestCase):
         self.assertTrue(self.fixture.exists("buddyswitch/content/runs/bad-run.json"))
         track = self.fixture.read_json("buddyswitch/objects/tracks/track-demo.json")
         self.assertEqual(track["task_ids"], ["task-pm"])
-        self.assertTrue(self.fixture.exists("buddyswitch/content/runs/.gitkeep"))
+        self.assertFalse(self.fixture.exists("buddyswitch/content/runs/.gitkeep"))
 
     def test_all_storage_execute_deletes_all_generated_state_and_restores_skeleton(self) -> None:
         plan = env_cleanup.build_cleanup_plan(
@@ -322,15 +316,15 @@ class CleanupBackendTests(unittest.TestCase):
             self.assertFalse(self.fixture.exists(relative_path))
         self.assertTrue(self.fixture.exists("artifacts/art-market--demo.md"))
         self.assertTrue(self.fixture.exists("runs/summaries/market/market.md"))
+        self.assertTrue(self.fixture.exists("projects/app/.runtime/.gitkeep"))
         for marker in (
             "runs/raw/.gitkeep",
-            "projects/app/.runtime/.gitkeep",
             "buddyswitch/objects/tracks/.gitkeep",
             "buddyswitch/objects/tasks/.gitkeep",
             "buddyswitch/objects/artifacts/.gitkeep",
             "buddyswitch/content/runs/.gitkeep",
         ):
-            self.assertTrue(self.fixture.exists(marker))
+            self.assertFalse(self.fixture.exists(marker))
 
     def test_detach_artifact_from_task_updates_artifact_slots_from_remaining_revisions(self) -> None:
         self.fixture._write_json(
@@ -453,7 +447,7 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         self.assertFalse(self.fixture.exists("buddyswitch/content/runs/run-pm.json"))
         self.assertFalse(self.fixture.exists("buddyswitch/content/runs/bad-run.json"))
         self.assertFalse(self.fixture.exists("buddyswitch/objects/tracks/track-demo.json"))
-        self.assertTrue(self.fixture.exists("buddyswitch/content/runs/.gitkeep"))
+        self.assertFalse(self.fixture.exists("buddyswitch/content/runs/.gitkeep"))
 
 
 if __name__ == "__main__":

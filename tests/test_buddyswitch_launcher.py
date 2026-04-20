@@ -148,10 +148,11 @@ exit 0
             expected_home = source_home_path / ".codex-buddyswitch" / "home"
             expected_codex_home = source_home_path / ".codex-buddyswitch" / "codex-home"
             shared_root = source_home_path / ".codex-buddyswitch"
+            workspace_dir = shared_root / "workspace"
 
             for payload in payloads:
                 self.assertEqual(payload["argv"], ["debug", "prompt-input", "switch pm: draft prd"])
-                self.assertEqual(payload["cwd"], str(ROOT))
+                self.assertEqual(payload["cwd"], str(workspace_dir.resolve()))
                 self.assertEqual(payload["auth_json"], auth_payload)
                 self.assertIn("[skills.bundled]", payload["config_toml"])
                 self.assertIn("enabled = false", payload["config_toml"])
@@ -229,7 +230,7 @@ exit 0
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             workspace_dir = source_home_path / ".codex-buddyswitch" / "workspace"
-            self.assertEqual(payload["cwd"], str(workspace_dir))
+            self.assertEqual(payload["cwd"], str(workspace_dir.resolve()))
             agents_md = workspace_dir / "AGENTS.md"
             self.assertTrue(agents_md.exists(), "runtime workspace should include AGENTS.md")
             first_line = agents_md.read_text(encoding="utf-8").splitlines()[0]
@@ -396,6 +397,72 @@ exit 0
             )
             self.assertEqual(blocked_reset.returncode, 2)
             self.assertTrue((unsafe_root_path / "sentinel").exists(), "unsafe root must not be deleted")
+
+    def test_reset_removes_execution_worktree_with_shared_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            ready_file = temp_root_path / "browser-ready.flag"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
+
+            launch_result = subprocess.run(
+                [str(LAUNCHER), "start"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(launch_result.returncode, 0)
+
+            shared_root = source_home_path / ".codex-buddyswitch"
+            workspace_dir = shared_root / "workspace"
+            self.assertTrue(workspace_dir.exists(), "start should create execution worktree")
+
+            ready_file.unlink(missing_ok=True)
+            (shared_root / "run" / "browser-cockpit.pid").unlink(missing_ok=True)
+
+            reset_result = subprocess.run(
+                [str(LAUNCHER), "reset", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(reset_result.returncode, 0)
+            self.assertFalse(workspace_dir.exists(), "reset should remove the execution worktree")
+            self.assertFalse(shared_root.exists(), "reset should remove the shared launcher root")
 
 
 if __name__ == "__main__":

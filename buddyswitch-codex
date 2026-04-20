@@ -4,14 +4,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 ENV_HELPER="${REPO_ROOT}/tools/launcher/env.sh"
+WORKSPACE_HELPER="${REPO_ROOT}/tools/launcher/workspace.sh"
 BROWSER_HELPER="${REPO_ROOT}/tools/launcher/browser_cockpit.sh"
 
-if [[ ! -f "${ENV_HELPER}" || ! -f "${BROWSER_HELPER}" ]]; then
+if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" ]]; then
   echo "Launcher helpers are missing under tools/launcher." >&2
   exit 1
 fi
 
 source "${ENV_HELPER}"
+source "${WORKSPACE_HELPER}"
 source "${BROWSER_HELPER}"
 
 buddyswitch_env_init
@@ -52,12 +54,13 @@ EOF
 
 start_codex() {
   buddyswitch_browser_bootstrap
+  buddyswitch_workspace_prepare_execution_worktree
 
   local marker_path
   marker_path="$(buddyswitch_write_launcher_marker)"
   trap "buddyswitch_cleanup_pid_marker '${marker_path}'" EXIT INT TERM HUP
 
-  cd "${REPO_ROOT}"
+  cd "${BUDDYSWITCH_WORKSPACE_DIR}"
   buddyswitch_run_codex "$@"
 }
 

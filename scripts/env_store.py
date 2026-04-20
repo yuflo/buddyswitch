@@ -38,14 +38,6 @@ def ensure_dirs() -> None:
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
     RUN_CONTENT_DIR.mkdir(parents=True, exist_ok=True)
-    for marker in (
-        TRACKS_DIR / ".gitkeep",
-        TASKS_DIR / ".gitkeep",
-        ARTIFACT_OBJECTS_DIR / ".gitkeep",
-        RUN_CONTENT_DIR / ".gitkeep",
-    ):
-        if not marker.exists():
-            marker.write_text("", encoding="utf-8")
 
 
 def require_id(value: str, label: str) -> str:

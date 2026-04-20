@@ -4,7 +4,20 @@ BuddySwitch is an env-centric control layer that runs inside the host Codex sess
 
 ## 30-Second Quick Start
 
-1. Read `AGENTS.md` first. It defines the required `switch` handling contract for this repo.
+Two modes exist:
+
+1. **Develop BuddySwitch:** run `codex` from the repo root.
+2. **Run BuddySwitch product mode:** run `./buddyswitch-codex start`.
+
+The launcher-managed product mode uses:
+
+- `${BUDDYSWITCH_SHARED_ROOT}` for runtime environment isolation
+- `${BUDDYSWITCH_SHARED_ROOT}/workspace` for the execution worktree
+- `tools/launcher/assets/runtime-AGENTS.md` for the runtime workspace contract
+
+If you are developing BuddySwitch itself, start here:
+
+1. Read `AGENTS.md` first. It describes the repo-root development workspace.
 2. Validate the parser and router:
 
 ```bash
@@ -51,6 +64,12 @@ python3 scripts/serve_context_panel.py
 ```
 
 Then open `http://127.0.0.1:8765/`.
+
+If you need a launcher-managed product-mode session instead of repo-root development mode, run:
+
+```bash
+./buddyswitch-codex start
+```
 
 ## Daily Use
 

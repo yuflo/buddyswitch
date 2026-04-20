@@ -2,24 +2,9 @@
 runs/summaries/**
 !runs/summaries/.gitkeep
 
-runs/raw/**
-!runs/raw/.gitkeep
-
 # BuddySwitch generated state and artifacts
 artifacts/**
 !artifacts/.gitkeep
-
-buddyswitch/objects/artifacts/**
-!buddyswitch/objects/artifacts/.gitkeep
-
-buddyswitch/objects/tasks/**
-!buddyswitch/objects/tasks/.gitkeep
-
-buddyswitch/objects/tracks/**
-!buddyswitch/objects/tracks/.gitkeep
-
-buddyswitch/content/runs/**
-!buddyswitch/content/runs/.gitkeep
 
 # Project runtime noise (keep only skeleton marker)
 projects/app/.runtime/**
