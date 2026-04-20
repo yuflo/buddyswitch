@@ -233,6 +233,8 @@ class RepoConsistencyTests(unittest.TestCase):
 
     def test_main_checkout_does_not_keep_runtime_state_directories(self) -> None:
         runtime_dirs = (
+            ROOT / "buddyswitch" / "content",
+            ROOT / "buddyswitch" / "objects",
             ROOT / "runs" / "raw",
             ROOT / "projects" / "app" / ".runtime",
             ROOT / "buddyswitch" / "objects" / "tracks",
