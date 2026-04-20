@@ -157,6 +157,16 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             )
             workspace_dir = source_home_path / ".codex-buddyswitch" / "workspace"
             self.assertTrue(workspace_dir.exists(), "browser ensure should create runtime workspace skeleton")
+            payloads = [
+                json.loads(line)
+                for line in capture_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(
+                payloads[0]["home"],
+                str(source_home_path / ".codex-buddyswitch" / "home"),
+                "browser ensure should bootstrap from HOME-scoped runtime state, not main-checkout skeletons",
+            )
 
     def test_browser_status_does_not_create_shared_root(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
