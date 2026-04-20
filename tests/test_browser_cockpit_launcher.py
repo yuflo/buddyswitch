@@ -119,6 +119,45 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 self.assertEqual(payload["codex_home"], str(expected_codex_home))
                 self.assertEqual(payload["xdg_config_home"], str(expected_home / ".config"))
 
+    def test_browser_ensure_state_skeleton_creates_runtime_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+
+            ready_file = temp_root_path / "browser-ready.flag"
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+            self._write_fake_codex(fake_bin / "codex")
+
+            capture_path = temp_root_path / "calls.jsonl"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "browser", "ensure"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(
+                completed.returncode,
+                0,
+                msg=f"browser ensure failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+            )
+            workspace_dir = source_home_path / ".codex-buddyswitch" / "workspace"
+            self.assertTrue(workspace_dir.exists(), "browser ensure should create runtime workspace skeleton")
+
     def test_browser_status_does_not_create_shared_root(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
