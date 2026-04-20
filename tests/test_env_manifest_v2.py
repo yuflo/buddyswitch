@@ -202,6 +202,109 @@ class SkillPackageLoaderTests(unittest.TestCase):
         self.assertTrue(runtime["produces_artifact"])
         self.assertEqual(runtime["input_slots"], ["research-report"])
 
+    def test_manifest_allows_buddy_with_no_registered_skills(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            package_root = Path(temp_dir) / "demo-skill"
+            package_root.mkdir()
+            (package_root / "skill.toml").write_text(
+                textwrap.dedent(
+                    """\
+                    id = "demo-skill"
+                    buddy = "pm"
+                    description = "Demo skill package."
+                    objects = ["task", "artifact"]
+                    produces_artifact = true
+                    output_slot = "prd"
+                    input_slots = ["research-report"]
+                    output_schema = "framework/schemas/pm/write-prd.json"
+                    produces = ["prd"]
+                    consumes = ["research-report"]
+                    side_effect_level = "medium"
+                    required_tools = []
+                    required_env = []
+                    allowed_task_kinds = ["definition"]
+                    """
+                ),
+                encoding="utf-8",
+            )
+            (package_root / "SKILL.md").write_text(
+                textwrap.dedent(
+                    """\
+                    # demo-skill
+
+                    ## Purpose
+                    - Define product scope.
+
+                    ## Use when
+                    - The task is about product definition.
+
+                    ## Do not use when
+                    - The task is implementation or testing.
+
+                    ## Inputs
+                    - Research and scope context.
+
+                    ## Outputs
+                    - A structured PRD result.
+
+                    ## Verification
+                    - Confirm scope and open questions.
+
+                    ## Examples
+                    - `switch pm: define scope`
+
+                    ## Counterexamples
+                    - `switch dev: implement scope`
+
+                    ## Gotchas
+                    - Keep scope narrow.
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            manifest_path = Path(temp_dir) / "manifest.toml"
+            manifest_path.write_text(
+                textwrap.dedent(
+                    f"""\
+                    schema_version = 1
+
+                    [env]
+                    id = "demo"
+                    label = "Demo"
+
+                    [[adapters]]
+                    id = "codex"
+                    path = "scripts/codex_router.py"
+                    description = "Demo router."
+
+                    [[skills]]
+                    id = "demo-skill"
+                    path = "{package_root.relative_to(ROOT).as_posix()}"
+
+                    [[buddies]]
+                    id = "pm"
+                    label = "PM"
+                    scope = "Owns scope."
+                    skills = ["demo-skill"]
+                    permissions = ["task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
+
+                    [[buddies]]
+                    id = "design"
+                    label = "Design"
+                    scope = "Owns design direction."
+                    skills = []
+                    permissions = ["task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            manifest = env_manifest.load_manifest(manifest_path)
+
+        buddies = {buddy["id"]: buddy for buddy in manifest["buddies"]}
+        self.assertEqual(buddies["design"]["skills"], [])
+
     def test_load_manifest_reads_optional_host_execution_metadata(self) -> None:
         manifest = self._load_demo_market_manifest(
             """\

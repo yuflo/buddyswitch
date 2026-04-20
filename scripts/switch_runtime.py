@@ -757,7 +757,7 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
         required_output_schema_by_skill[skill["id"]] = skill["runtime"]["output_schema"]
 
     if not eligible_skill_ids:
-        raise ValueError(f"No eligible skills remain for buddy '{buddy_id}'.")
+        raise ValueError(f"Buddy '{buddy_id}' currently has no registered skills.")
 
     implicit_skill_id = eligible_skill_ids[0] if len(eligible_skill_ids) == 1 else None
     implicit_skill = next((skill for skill in eligible_skills if skill["id"] == implicit_skill_id), None)

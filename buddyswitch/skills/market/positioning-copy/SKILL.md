@@ -84,7 +84,7 @@
 - `switch market: Develop three evidence-grounded homepage angles from these market artifacts`
 
 ## Counterexamples
-- `switch design: Create the landing page visual spec for the operations assistant`
+- `switch pm: Create the landing page prototype direction for the operations assistant`
 - `switch market: Decide whether the operations assistant has enough PMF to pursue`
 - `switch market: Prepare discovery interviews for operations leads`
 

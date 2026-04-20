@@ -42,42 +42,6 @@ id = "track-manager"
 path = "buddyswitch/skills/pm/track-manager"
 
 [[skills]]
-id = "product-design-spec"
-path = "buddyswitch/skills/design/product-design-spec"
-
-[[skills]]
-id = "experience-shaping"
-path = "buddyswitch/skills/design/experience-shaping"
-
-[[skills]]
-id = "activation-and-first-value"
-path = "buddyswitch/skills/design/activation-and-first-value"
-
-[[skills]]
-id = "initiative-and-intervention"
-path = "buddyswitch/skills/design/initiative-and-intervention"
-
-[[skills]]
-id = "execution-boundaries"
-path = "buddyswitch/skills/design/execution-boundaries"
-
-[[skills]]
-id = "memory-and-context"
-path = "buddyswitch/skills/design/memory-and-context"
-
-[[skills]]
-id = "conversation-and-clarity"
-path = "buddyswitch/skills/design/conversation-and-clarity"
-
-[[skills]]
-id = "recovery-and-escalation"
-path = "buddyswitch/skills/design/recovery-and-escalation"
-
-[[skills]]
-id = "design-critique"
-path = "buddyswitch/skills/design/design-critique"
-
-[[skills]]
 id = "implement-task"
 path = "buddyswitch/skills/dev/implement-task"
 
@@ -122,18 +86,8 @@ permissions = [
 [[buddies]]
 id = "design"
 label = "Design"
-scope = "Shape end-to-end product experiences, interaction quality, and critique outcomes."
-skills = [
-  "product-design-spec",
-  "experience-shaping",
-  "activation-and-first-value",
-  "initiative-and-intervention",
-  "execution-boundaries",
-  "memory-and-context",
-  "conversation-and-clarity",
-  "recovery-and-escalation",
-  "design-critique",
-]
+scope = "Shape UI/UX prototype direction and design handoff outcomes."
+skills = []
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
 [[buddies]]

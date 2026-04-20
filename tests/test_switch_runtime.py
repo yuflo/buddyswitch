@@ -161,9 +161,13 @@ class ResolveRuntimeTests(unittest.TestCase):
         card = payload["skill_cards"][0]
         self.assertEqual(card["instruction_path"], "buddyswitch/skills/dev/implement-task/SKILL.md")
         self.assertEqual(card["output_slot"], "implementation-report")
-        self.assertEqual(card["input_slots"], ["prd", "design-spec", "task"])
+        self.assertEqual(card["input_slots"], ["prd", "task"])
         self.assertNotIn("default_artifact_kind", card)
         self.assertNotIn("auto_summary", card)
+
+    def test_design_buddy_can_exist_without_registered_skills(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Buddy 'design' currently has no registered skills"):
+            switch_runtime.resolve_switch("switch design: Start prototype exploration")
 
     def test_track_manager_skill_card_omits_output_slot_and_compat_fields(self) -> None:
         payload = switch_runtime.resolve_switch("switch pm: manage the active track")
@@ -252,58 +256,12 @@ class ResolveRuntimeTests(unittest.TestCase):
                 pmf_instructions["next_actions"],
             )
 
-    def test_multi_skill_design_buddy_returns_no_implicit_skill(self) -> None:
-        payload = switch_runtime.resolve_switch(
-            "switch design: Produce a first-pass design for an AI-first workflow tool"
-        )
-
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["invocation"]["buddy"], "design")
-        self.assertIsNone(payload["implicit_skill_id"])
-        self.assertEqual(
-            payload["eligible_skills"],
-            [
-                "product-design-spec",
-                "experience-shaping",
-                "activation-and-first-value",
-                "initiative-and-intervention",
-                "execution-boundaries",
-                "memory-and-context",
-                "conversation-and-clarity",
-                "recovery-and-escalation",
-                "design-critique",
-            ],
-        )
-
-    def test_product_design_spec_uses_explicit_market_inputs(self) -> None:
-        payload = switch_runtime.resolve_switch(
-            "switch design: Draft the product design for an AI-first onboarding flow"
-        )
-        card = next(card for card in payload["skill_cards"] if card["id"] == "product-design-spec")
-
-        self.assertEqual(
-            card["input_slots"],
-            ["prd", "positioning-brief", "launch-prep", "requirements", "track"],
-        )
-
-    def test_design_critique_uses_design_spec_inputs(self) -> None:
-        payload = switch_runtime.resolve_switch(
-            "switch design: Review the current product design and call out the biggest issues"
-        )
-        card = next(card for card in payload["skill_cards"] if card["id"] == "design-critique")
-
-        self.assertEqual(card["input_slots"], ["design-spec", "prd", "requirements", "track"])
-
-    def test_pm_and_design_skill_cards_use_explicit_market_inputs(self) -> None:
+    def test_pm_skill_card_uses_explicit_market_inputs(self) -> None:
         pm_payload = switch_runtime.resolve_switch(
             "switch pm: Draft the PRD for a validated market opportunity"
         )
-        design_payload = switch_runtime.resolve_switch(
-            "switch design: Create the IA spec for a first-touch onboarding flow"
-        )
 
         pm_card = pm_payload["skill_cards"][0]
-        design_card = design_payload["skill_cards"][0]
 
         self.assertEqual(
             pm_card["input_slots"],
@@ -317,10 +275,6 @@ class ResolveRuntimeTests(unittest.TestCase):
                 "requirements",
                 "track",
             ],
-        )
-        self.assertEqual(
-            design_card["input_slots"],
-            ["prd", "positioning-brief", "launch-prep", "requirements", "track"],
         )
 
     def test_skill_card_uses_package_metadata_for_description_and_objects(self) -> None:
@@ -492,46 +446,6 @@ class ResolveRuntimeTests(unittest.TestCase):
         self._remember(f"buddyswitch/objects/artifacts/{first_artifact['id']}.json")
         self._remember(f"buddyswitch/objects/artifacts/{second_artifact['id']}.json")
 
-        payload = switch_runtime.resolve_switch(
-            "switch design -> track-index-resolve: continue design handoff based on pm requirements"
-        )
-
-        self.assertTrue(payload["ok"])
-        self.assertIn("track_artifact_index", payload)
-        index = payload["track_artifact_index"]
-        self.assertIsInstance(index, dict)
-        assert isinstance(index, dict)
-        self.assertEqual(index["track_id"], "track-index-resolve")
-        self.assertEqual(len(index["tasks"]), 1)
-        task_row = index["tasks"][0]
-        self.assertEqual(task_row["task_id"], "task-pm-index-resolve")
-        self.assertEqual(
-            task_row["artifact_slots"]["prd"]["current_artifact_id"],
-            "art-task-pm-index-resolve-prd-2",
-        )
-        self.assertEqual(
-            [item["artifact_id"] for item in task_row["artifacts"]],
-            ["art-task-pm-index-resolve-prd-2", "art-task-pm-index-resolve-prd"],
-        )
-        self.assertEqual([item["is_current"] for item in task_row["artifacts"]], [True, False])
-        self.assertIsNone(payload["artifact_selection"])
-        self.assertEqual(payload["run_instructions"]["selected_inputs"], [])
-        selection = payload["artifact_selection_by_skill"]["product-design-spec"]
-        instructions = payload["run_instructions_by_skill"]["product-design-spec"]
-        self.assertEqual(
-            [(item["slot"], item["artifact_id"]) for item in selection["selected_inputs"]],
-            [("prd", "art-task-pm-index-resolve-prd-2")],
-        )
-        self.assertEqual(selection["selection_mode"], "slot-current-v2")
-        self.assertEqual(
-            [(item["slot"], item["artifact_id"]) for item in instructions["selected_inputs"]],
-            [("prd", "art-task-pm-index-resolve-prd-2")],
-        )
-        self.assertEqual(
-            instructions["artifact_read_commands"],
-            ["python3 scripts/env_artifacts.py get art-task-pm-index-resolve-prd-2"],
-        )
-
     def test_resolve_track_artifact_index_exposes_current_artifacts_by_slot(self) -> None:
         track = create_track("track-index-resolve-slot", "Track Index Resolve Slot")
         dev_task = create_task(
@@ -591,9 +505,9 @@ class ResolveRuntimeTests(unittest.TestCase):
     def test_resolve_track_index_includes_task_without_artifacts(self) -> None:
         track = create_track("track-empty-artifacts", "Track Empty Artifacts")
         task = create_task(
-            "task-design-empty-artifacts",
-            "Design Empty Artifacts",
-            buddy="design",
+            "task-pm-empty-artifacts",
+            "PM Empty Artifacts",
+            buddy="pm",
             track_id=track["id"],
             initial_run_id="run-seed-empty-artifacts",
         )
@@ -610,103 +524,12 @@ class ResolveRuntimeTests(unittest.TestCase):
         assert isinstance(index, dict)
         self.assertEqual(index["track_id"], "track-empty-artifacts")
         self.assertEqual(len(index["tasks"]), 1)
-        self.assertEqual(index["tasks"][0]["task_id"], "task-design-empty-artifacts")
+        self.assertEqual(index["tasks"][0]["task_id"], "task-pm-empty-artifacts")
         self.assertEqual(index["tasks"][0]["artifact_slots"], {})
         self.assertEqual(index["tasks"][0]["artifacts"], [])
         self.assertEqual(payload["artifact_selection"]["selected_inputs"], [])
         self.assertEqual(payload["run_instructions"]["selected_inputs"], [])
         self.assertEqual(payload["run_instructions"]["artifact_read_commands"], [])
-
-    def test_resolve_design_selects_market_context_slots_from_track(self) -> None:
-        track = create_track("track-design-first-touch", "Track Design First Touch")
-        design_task = create_task(
-            "task-design-first-touch",
-            "Design First Touch",
-            buddy="design",
-            track_id=track["id"],
-            initial_run_id="run-seed-design-first-touch",
-        )
-        pm_task = create_task(
-            "task-pm-first-touch",
-            "PM First Touch",
-            buddy="pm",
-            track_id=track["id"],
-            initial_run_id="run-seed-pm-first-touch",
-        )
-        market_task = create_task(
-            "task-market-first-touch",
-            "Market First Touch",
-            buddy="market",
-            track_id=track["id"],
-            initial_run_id="run-seed-market-first-touch",
-        )
-        prd_artifact = create_artifact(
-            artifact_id="art-task-pm-first-touch-prd-r1",
-            title="PRD First Touch",
-            buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
-            task_id=pm_task["id"],
-            source_run_id="run-pm-first-touch-prd-r1",
-            summary="Current PRD for first-touch work.",
-            content={"problem": "Define onboarding and landing flow."},
-        )
-        positioning_artifact = create_artifact(
-            artifact_id="art-task-market-first-touch-positioning-brief-r1",
-            title="Positioning Brief First Touch",
-            buddy="market",
-            skill_id="positioning-copy",
-            slot="positioning-brief",
-            task_id=market_task["id"],
-            source_run_id="run-market-first-touch-positioning-r1",
-            summary="Current positioning brief for first-touch work.",
-            content={"positioning_statement": "Confidence before code."},
-        )
-        launch_artifact = create_artifact(
-            artifact_id="art-task-market-first-touch-launch-prep-r1",
-            title="Launch Prep First Touch",
-            buddy="market",
-            skill_id="launch-prep",
-            slot="launch-prep",
-            task_id=market_task["id"],
-            source_run_id="run-market-first-touch-launch-r1",
-            summary="Current launch prep for first-touch work.",
-            content={"launch_goal": {"primary_goal": "Collect qualified feedback", "timebox": "10 days"}},
-        )
-        self._remember(f"buddyswitch/objects/tracks/{track['id']}.json")
-        self._remember(f"buddyswitch/objects/tasks/{design_task['id']}.json")
-        self._remember(f"buddyswitch/objects/tasks/{pm_task['id']}.json")
-        self._remember(f"buddyswitch/objects/tasks/{market_task['id']}.json")
-        self._remember(f"buddyswitch/objects/artifacts/{prd_artifact['id']}.json")
-        self._remember(f"buddyswitch/objects/artifacts/{positioning_artifact['id']}.json")
-        self._remember(f"buddyswitch/objects/artifacts/{launch_artifact['id']}.json")
-
-        payload = switch_runtime.resolve_switch(
-            "switch design(task-design-first-touch) -> track-design-first-touch: continue IA spec for landing and onboarding"
-        )
-
-        self.assertIsNone(payload["artifact_selection"])
-        self.assertEqual(payload["run_instructions"]["selected_inputs"], [])
-        selection = payload["artifact_selection_by_skill"]["product-design-spec"]
-        instructions = payload["run_instructions_by_skill"]["product-design-spec"]
-
-        self.assertEqual(selection["selection_mode"], "slot-current-v2")
-        self.assertEqual(
-            [(item["slot"], item["artifact_id"]) for item in selection["selected_inputs"]],
-            [
-                ("prd", "art-task-pm-first-touch-prd-r1"),
-                ("positioning-brief", "art-task-market-first-touch-positioning-brief-r1"),
-                ("launch-prep", "art-task-market-first-touch-launch-prep-r1"),
-            ],
-        )
-        self.assertEqual(
-            [(item["slot"], item["artifact_id"]) for item in instructions["selected_inputs"]],
-            [
-                ("prd", "art-task-pm-first-touch-prd-r1"),
-                ("positioning-brief", "art-task-market-first-touch-positioning-brief-r1"),
-                ("launch-prep", "art-task-market-first-touch-launch-prep-r1"),
-            ],
-        )
 
     def test_resolve_pm_surfaces_write_prd_selection_for_multi_skill_track_handoff(self) -> None:
         track = create_track("track-pm-market-handoff", "PM Market Handoff")
@@ -853,114 +676,6 @@ class ResolveRuntimeTests(unittest.TestCase):
                 "python3 scripts/env_artifacts.py get art-task-market-pm-handoff-positioning-brief-r1",
                 "python3 scripts/env_artifacts.py get art-task-market-pm-handoff-channel-plan-r1",
                 "python3 scripts/env_artifacts.py get art-task-market-pm-handoff-launch-prep-r1",
-            ],
-        )
-
-    def test_resolve_design_prefers_coherent_market_bundle_across_tasks(self) -> None:
-        track = create_track("track-design-bundle-aware", "Design Bundle Aware")
-        design_task = create_task(
-            "task-design-bundle-aware",
-            "Design Bundle Aware",
-            buddy="design",
-            track_id=track["id"],
-            initial_run_id="run-seed-design-bundle-aware",
-        )
-        pm_task = create_task(
-            "task-pm-bundle-aware",
-            "PM Bundle Aware",
-            buddy="pm",
-            track_id=track["id"],
-            initial_run_id="run-seed-pm-bundle-aware",
-        )
-        market_task_a = create_task(
-            "task-market-bundle-a",
-            "Market Bundle A",
-            buddy="market",
-            track_id=track["id"],
-            initial_run_id="run-seed-market-bundle-a",
-        )
-        market_task_b = create_task(
-            "task-market-bundle-b",
-            "Market Bundle B",
-            buddy="market",
-            track_id=track["id"],
-            initial_run_id="run-seed-market-bundle-b",
-        )
-        created_artifacts = [
-            create_artifact(
-                artifact_id="art-task-pm-bundle-aware-prd-r1",
-                title="PRD Bundle Aware",
-                buddy="pm",
-                skill_id="write-prd",
-                slot="prd",
-                task_id=pm_task["id"],
-                source_run_id="run-pm-bundle-aware-prd-r1",
-                summary="Current PRD for the bundle-aware design test.",
-                content={"problem": "Support the coherent onboarding bundle."},
-            ),
-            create_artifact(
-                artifact_id="art-task-market-bundle-a-positioning-brief-r1",
-                title="Bundle A Positioning Brief",
-                buddy="market",
-                skill_id="positioning-copy",
-                slot="positioning-brief",
-                task_id=market_task_a["id"],
-                source_run_id="run-market-bundle-a-positioning-r1",
-                summary="Task A positioning brief.",
-                content={"positioning_statement": "Bundle A message."},
-            ),
-            create_artifact(
-                artifact_id="art-task-market-bundle-a-launch-prep-r1",
-                title="Bundle A Launch Prep",
-                buddy="market",
-                skill_id="launch-prep",
-                slot="launch-prep",
-                task_id=market_task_a["id"],
-                source_run_id="run-market-bundle-a-launch-r1",
-                summary="Task A launch prep.",
-                content={"launch_goal": {"primary_goal": "Validate the coherent bundle", "timebox": "7 days"}},
-            ),
-            create_artifact(
-                artifact_id="art-task-market-bundle-b-positioning-brief-r1",
-                title="Bundle B Positioning Brief",
-                buddy="market",
-                skill_id="positioning-copy",
-                slot="positioning-brief",
-                task_id=market_task_b["id"],
-                source_run_id="run-market-bundle-b-positioning-r1",
-                summary="Task B newer but unrelated positioning brief.",
-                content={"positioning_statement": "Bundle B message."},
-            ),
-        ]
-        self._remember(f"buddyswitch/objects/tracks/{track['id']}.json")
-        self._remember(f"buddyswitch/objects/tasks/{design_task['id']}.json")
-        self._remember(f"buddyswitch/objects/tasks/{pm_task['id']}.json")
-        self._remember(f"buddyswitch/objects/tasks/{market_task_a['id']}.json")
-        self._remember(f"buddyswitch/objects/tasks/{market_task_b['id']}.json")
-        for artifact in created_artifacts:
-            self._remember(f"buddyswitch/objects/artifacts/{artifact['id']}.json")
-
-        payload = switch_runtime.resolve_switch(
-            "switch design(task-design-bundle-aware) -> track-design-bundle-aware: continue the IA spec with the active market handoff"
-        )
-
-        selection = payload["artifact_selection_by_skill"]["product-design-spec"]
-        instructions = payload["run_instructions_by_skill"]["product-design-spec"]
-
-        self.assertEqual(
-            [(item["slot"], item["artifact_id"]) for item in selection["selected_inputs"]],
-            [
-                ("prd", "art-task-pm-bundle-aware-prd-r1"),
-                ("positioning-brief", "art-task-market-bundle-a-positioning-brief-r1"),
-                ("launch-prep", "art-task-market-bundle-a-launch-prep-r1"),
-            ],
-        )
-        self.assertEqual(
-            [(item["slot"], item["artifact_id"]) for item in instructions["selected_inputs"]],
-            [
-                ("prd", "art-task-pm-bundle-aware-prd-r1"),
-                ("positioning-brief", "art-task-market-bundle-a-positioning-brief-r1"),
-                ("launch-prep", "art-task-market-bundle-a-launch-prep-r1"),
             ],
         )
 
@@ -2187,7 +1902,7 @@ class PersistRuntimeTests(unittest.TestCase):
                 "title": "Track Task Manager Create",
                 "status": "active",
                 "current_buddy": "pm",
-                "next_buddy": "design",
+                "next_buddy": "dev",
                 "summary": "Initial track creation.",
             },
         }
@@ -2202,7 +1917,7 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertIn("handoff_to_next_buddy", payload["reference_switches"])
         self.assertEqual(
             payload["reference_switches"]["handoff_to_next_buddy"],
-            "switch design -> track-task-manager-create: <demand>",
+            "switch dev -> track-task-manager-create: <demand>",
         )
         self.assertEqual(payload["recommended_switch"], payload["reference_switches"]["handoff_to_next_buddy"])
         track_json = json.loads((ROOT / payload["paths"]["track"]).read_text(encoding="utf-8"))

@@ -25,27 +25,6 @@ CANONICAL_PATHS = (
     ROOT / "buddyswitch" / "manifest.toml",
 )
 TEXT_SUFFIXES = {".md", ".toml", ".py", ".json"}
-DESIGN_SKILL_PACKAGE_ROOTS = (
-    ROOT / "buddyswitch" / "skills" / "design" / "product-design-spec",
-    ROOT / "buddyswitch" / "skills" / "design" / "experience-shaping",
-    ROOT / "buddyswitch" / "skills" / "design" / "activation-and-first-value",
-    ROOT / "buddyswitch" / "skills" / "design" / "initiative-and-intervention",
-    ROOT / "buddyswitch" / "skills" / "design" / "execution-boundaries",
-    ROOT / "buddyswitch" / "skills" / "design" / "memory-and-context",
-    ROOT / "buddyswitch" / "skills" / "design" / "conversation-and-clarity",
-    ROOT / "buddyswitch" / "skills" / "design" / "recovery-and-escalation",
-    ROOT / "buddyswitch" / "skills" / "design" / "design-critique",
-)
-DESIGN_SKILL_PACKAGE_ROOTS_BY_NAME = {package_root.name: package_root for package_root in DESIGN_SKILL_PACKAGE_ROOTS}
-DESIGN_SPECIALIST_TEMPLATE_PATHS = (
-    DESIGN_SKILL_PACKAGE_ROOTS_BY_NAME["experience-shaping"] / "assets" / "design-brief-template.md",
-    DESIGN_SKILL_PACKAGE_ROOTS_BY_NAME["activation-and-first-value"] / "assets" / "activation-spec-template.md",
-    DESIGN_SKILL_PACKAGE_ROOTS_BY_NAME["initiative-and-intervention"] / "assets" / "initiative-spec-template.md",
-    DESIGN_SKILL_PACKAGE_ROOTS_BY_NAME["execution-boundaries"] / "assets" / "boundaries-spec-template.md",
-    DESIGN_SKILL_PACKAGE_ROOTS_BY_NAME["memory-and-context"] / "assets" / "memory-spec-template.md",
-    DESIGN_SKILL_PACKAGE_ROOTS_BY_NAME["conversation-and-clarity"] / "assets" / "conversation-spec-template.md",
-    DESIGN_SKILL_PACKAGE_ROOTS_BY_NAME["recovery-and-escalation"] / "assets" / "recovery-spec-template.md",
-)
 ARTIFACT_SKILL_DOCS = (
     ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "SKILL.md",
@@ -54,7 +33,6 @@ ARTIFACT_SKILL_DOCS = (
     ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "SKILL.md",
-    *(package_root / "SKILL.md" for package_root in DESIGN_SKILL_PACKAGE_ROOTS),
     ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "SKILL.md",
 )
@@ -67,7 +45,6 @@ SKILL_TOMLS = (
     ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "skill.toml",
-    *(package_root / "skill.toml" for package_root in DESIGN_SKILL_PACKAGE_ROOTS),
     ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "skill.toml",
 )
@@ -305,7 +282,6 @@ class RepoConsistencyTests(unittest.TestCase):
         contracts = (
             ROOT / "framework" / "contracts" / "market.md",
             ROOT / "framework" / "contracts" / "pm.md",
-            ROOT / "framework" / "contracts" / "design.md",
             ROOT / "framework" / "contracts" / "dev.md",
             ROOT / "framework" / "contracts" / "test.md",
         )
@@ -389,40 +365,22 @@ class RepoConsistencyTests(unittest.TestCase):
                     msg=f"output schema must be a JSON object in {resolved_schema.relative_to(ROOT)}",
                 )
 
-    def test_pm_and_design_skill_metadata_use_explicit_market_inputs(self) -> None:
-        cases = {
-            ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "skill.toml": [
-                "market-scan",
-                "pmf-report",
-                "customer-discovery",
-                "positioning-brief",
-                "channel-plan",
-                "launch-prep",
-                "requirements",
-                "track",
-            ],
-            ROOT / "buddyswitch" / "skills" / "design" / "product-design-spec" / "skill.toml": [
-                "prd",
-                "positioning-brief",
-                "launch-prep",
-                "requirements",
-                "track",
-            ],
-        }
+    def test_pm_skill_metadata_uses_explicit_market_inputs(self) -> None:
+        path = ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "skill.toml"
+        expected_slots = [
+            "market-scan",
+            "pmf-report",
+            "customer-discovery",
+            "positioning-brief",
+            "channel-plan",
+            "launch-prep",
+            "requirements",
+            "track",
+        ]
 
-        for path, expected_slots in cases.items():
-            with self.subTest(skill_toml=str(path.relative_to(ROOT))):
-                parsed = env_manifest._load_toml(path)  # type: ignore[attr-defined]
-                self.assertEqual(parsed["input_slots"], expected_slots)
-                self.assertEqual(parsed["consumes"], expected_slots)
-
-    def test_design_contract_describes_functional_ai_product_design_system(self) -> None:
-        text = (ROOT / "framework" / "contracts" / "design.md").read_text(encoding="utf-8").lower()
-
-        self.assertIn("functional ai product", text)
-        self.assertIn("design-spec", text)
-        self.assertIn("design-review", text)
-        self.assertNotIn("define information architecture (ia).", text)
+        parsed = env_manifest._load_toml(path)  # type: ignore[attr-defined]
+        self.assertEqual(parsed["input_slots"], expected_slots)
+        self.assertEqual(parsed["consumes"], expected_slots)
 
     def test_market_schemas_share_canonical_evidence_and_traceability_fields(self) -> None:
         for path in MARKET_SCHEMA_PATHS:
@@ -657,7 +615,6 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "buddyswitch" / "skills" / "market" / "launch-prep",
             ROOT / "buddyswitch" / "skills" / "pm" / "write-prd",
             ROOT / "buddyswitch" / "skills" / "pm" / "track-manager",
-            *DESIGN_SKILL_PACKAGE_ROOTS,
             ROOT / "buddyswitch" / "skills" / "dev" / "implement-task",
             ROOT / "buddyswitch" / "skills" / "test" / "smoke-test",
         )
@@ -676,7 +633,6 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "buddyswitch" / "skills" / "market" / "launch-prep",
             ROOT / "buddyswitch" / "skills" / "pm" / "write-prd",
             ROOT / "buddyswitch" / "skills" / "pm" / "track-manager",
-            *DESIGN_SKILL_PACKAGE_ROOTS,
             ROOT / "buddyswitch" / "skills" / "dev" / "implement-task",
             ROOT / "buddyswitch" / "skills" / "test" / "smoke-test",
         )
@@ -701,9 +657,6 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "assets" / "channel-plan-template.md",
             ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "assets" / "launch-prep-template.md",
             ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "assets" / "prd-template.md",
-            DESIGN_SKILL_PACKAGE_ROOTS_BY_NAME["product-design-spec"] / "assets" / "design-spec-template.md",
-            DESIGN_SKILL_PACKAGE_ROOTS_BY_NAME["design-critique"] / "assets" / "design-review-template.md",
-            *DESIGN_SPECIALIST_TEMPLATE_PATHS,
             ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "assets" / "implementation-report-template.md",
             ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "assets" / "test-report-template.md",
         )

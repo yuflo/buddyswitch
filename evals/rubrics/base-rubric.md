@@ -11,7 +11,6 @@ No weighted score in v1.
 ## Required Cases
 
 - `01-switch-pm-prd.md`
-- `02-switch-design-state-coverage.md`
 - `03-switch-dev-boundary.md`
 - `04-switch-test-structure.md`
 - `05-invalid-switch-error.md`
@@ -22,7 +21,7 @@ No weighted score in v1.
 
 ## Run-Level Verdict
 
-- `PASS`: all 9 required cases pass.
+- `PASS`: all 8 required cases pass.
 - `FAIL`: any required case fails.
 
 ## Failure Logging Format

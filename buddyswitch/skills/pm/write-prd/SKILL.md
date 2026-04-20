@@ -73,7 +73,7 @@
 
 ## Counterexamples
 - `switch pm -> track-creator-livestream: create track and set next_buddy design`
-- `switch design: produce IA spec for the onboarding rewrite`
+- `switch pm: refine the onboarding prototype and flow`
 - `switch market: research competitor positioning for creator livestream tools`
 
 ## Gotchas

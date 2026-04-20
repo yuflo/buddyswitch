@@ -46,7 +46,6 @@ Run the 10-case suite after any change to:
 ## Case Results
 
 - 01-switch-pm-prd: pass/fail
-- 02-switch-design-state-coverage: pass/fail
 - 03-switch-dev-boundary: pass/fail
 - 04-switch-test-structure: pass/fail
 - 05-invalid-switch-error: pass/fail

@@ -9,7 +9,7 @@
 - The task needs a durable track-operation audit in BuddySwitch state.
 
 ## Do Not Use When
-- The primary deliverable is a PRD, design spec, implementation change, research report, or test report.
+- The primary deliverable is a PRD, design artifact, implementation change, research report, or test report.
 - The user is asking to read track context only as background for another artifact-producing skill.
 - The task is really about changing product scope rather than manipulating track state.
 
@@ -48,7 +48,7 @@
 
 ## Counterexamples
 - `switch pm: draft the MVP PRD for onboarding rewrite`
-- `switch design: continue onboarding-rewrite track and produce IA spec`
+- `switch pm: continue onboarding-rewrite track and refine the prototype flow`
 - `switch dev: implement the approved onboarding rewrite scope`
 
 ## Gotchas

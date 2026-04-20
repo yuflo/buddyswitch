@@ -20,7 +20,7 @@ Supported forms:
 Examples:
 - `switch market: Research demand for AI companion live spaces`
 - `switch pm -> track-ai-companion: Define MVP scope`
-- `switch design(task-design-ai-companion): Continue IA spec`
+- `switch pm(task-pm-ai-companion): Continue scope refinement`
 - `switch dev(task-dev-ai-companion) -> track-ai-companion: Implement the approved P0 scope in projects/app`
 - `switch test: Run smoke checks for the latest implementation`
 

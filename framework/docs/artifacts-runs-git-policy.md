@@ -16,7 +16,7 @@ Model constraints:
 Task objects group runs and artifact objects. Artifact objects are the source of truth for reusable buddy outputs:
 - research reports
 - PRDs
-- design specs
+- design artifacts
 - implementation reports
 - test reports
 

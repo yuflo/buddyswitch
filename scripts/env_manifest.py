@@ -277,10 +277,11 @@ def _validate_market_host_execution(
             )
 
 
-def _require_string_list(node: dict[str, Any], key: str, label: str) -> list[str]:
+def _require_string_list(node: dict[str, Any], key: str, label: str, *, allow_empty: bool = False) -> list[str]:
     value = node.get(key)
-    if not isinstance(value, list) or not value:
-        raise ManifestError(f"{label}.{key} must be a non-empty list")
+    if not isinstance(value, list) or (not allow_empty and not value):
+        message = f"{label}.{key} must be a list" if allow_empty else f"{label}.{key} must be a non-empty list"
+        raise ManifestError(message)
     cleaned: list[str] = []
     for item in value:
         if not isinstance(item, str) or not item.strip():
@@ -583,7 +584,7 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         buddy_ids.add(buddy_id)
         _require_string(buddy, "label", label)
         _require_string(buddy, "scope", label)
-        declared_skills = _require_string_list(buddy, "skills", label)
+        declared_skills = _require_string_list(buddy, "skills", label, allow_empty=True)
         permissions = _require_string_list(buddy, "permissions", label)
         for permission in permissions:
             _validate_permission(permission, label)

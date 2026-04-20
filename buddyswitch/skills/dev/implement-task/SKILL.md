@@ -6,7 +6,7 @@
 ## Use when
 - The task is about building, coding, fixing, integrating, refactoring within scope, or changing behavior in `projects/app/`.
 - The user wants code changes plus verification results.
-- The request references approved scope, PRD, design contract, or concrete application behavior.
+- The request references approved scope, a PRD, a prototype handoff, or concrete application behavior.
 
 ## Do Not Use When
 - The user wants product scoping, design specification, market research, or test-only execution.
@@ -15,7 +15,7 @@
 
 ## Inputs
 - Task request and expected behavior.
-- PRD and design context when available.
+- PRD and other approved handoff context when available.
 - Target code paths and technical constraints.
 - Optional track context or summary hint.
 
@@ -60,11 +60,11 @@
 ## Examples
 - `switch dev: Implement the approved P0 creator profile flow in projects/app`
 - `switch dev: Fix the regression in onboarding CTA behavior and report verification`
-- `switch dev: Build the playlist reorder interaction from the design spec`
+- `switch dev: Build the playlist reorder interaction from the approved handoff`
 
 ## Counterexamples
 - `switch pm: Define the MVP scope for creator profile`
-- `switch design: Produce the IA spec for playlist reorder`
+- `switch pm: Clarify the product scope for playlist reorder`
 - `switch test: Run smoke checks for the onboarding CTA regression`
 
 ## Gotchas
