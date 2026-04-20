@@ -25,6 +25,7 @@ if str(SCRIPTS) not in sys.path:
 import switch_runtime  # noqa: E402
 import workspace_data  # noqa: E402
 from env_store import create_artifact, create_task, create_track, get_track, require_id, validate_artifact, validate_track  # noqa: E402
+from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 EXPECTED_MARKET_HOST_EXECUTION = {
     "execution_mode": "browser-cockpit-native",
@@ -106,17 +107,34 @@ class EnvStoreRetiredFieldTests(unittest.TestCase):
             validate_artifact(payload)
 
 
-class ResolveRuntimeTests(unittest.TestCase):
+class RuntimeWriteBoundaryTests(unittest.TestCase):
+    def test_repo_root_create_task_requires_runtime_workspace(self) -> None:
+        task_id = f"task-dev-write-guard-{uuid.uuid4().hex[:8]}"
+        with self.assertRaisesRegex(
+            ValueError,
+            r"BuddySwitch runtime writes are blocked in the source checkout.*\./buddyswitch-codex start",
+        ):
+            create_task(
+                task_id,
+                "Repo Root Guard",
+                buddy="dev",
+                initial_run_id="run-write-guard",
+            )
+
+
+class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self.created_paths: list[Path] = []
 
     def tearDown(self) -> None:
         for path in sorted(self.created_paths, reverse=True):
             if path.exists():
                 path.unlink()
+        super().tearDown()
 
     def _remember(self, repo_path: str) -> None:
-        self.created_paths.append(ROOT / repo_path)
+        self.created_paths.append(self._runtime_path(repo_path))
 
     def test_single_skill_buddy_returns_implicit_skill(self) -> None:
         payload = switch_runtime.resolve_switch(
@@ -847,17 +865,19 @@ class ExecutionPreparationTests(unittest.TestCase):
                 )
 
 
-class WorkspaceDataTests(unittest.TestCase):
+class WorkspaceDataTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self.created_paths: list[Path] = []
 
     def tearDown(self) -> None:
         for path in sorted(self.created_paths, reverse=True):
             if path.exists():
                 path.unlink()
+        super().tearDown()
 
     def _remember(self, repo_path: str) -> None:
-        self.created_paths.append(ROOT / repo_path)
+        self.created_paths.append(self._runtime_path(repo_path))
 
     def test_artifact_view_uses_object_path_only(self) -> None:
         artifact = {
@@ -946,7 +966,7 @@ class WorkspaceDataTests(unittest.TestCase):
 
     def test_scan_run_audits_includes_reference_switches(self) -> None:
         run_id = f"run-workspace-audit-{uuid.uuid4().hex[:8]}"
-        run_path = ROOT / f"buddyswitch/content/runs/{run_id}.json"
+        run_path = self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")
         run_path.parent.mkdir(parents=True, exist_ok=True)
         run_path.write_text(
             json.dumps(
@@ -994,17 +1014,19 @@ class WorkspaceDataTests(unittest.TestCase):
         self.assertNotIn("suggested_next_switch", row)
 
 
-class PersistRuntimeTests(unittest.TestCase):
+class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self.created_paths: list[Path] = []
 
     def tearDown(self) -> None:
         for path in sorted(self.created_paths, reverse=True):
             if path.exists():
                 path.unlink()
+        super().tearDown()
 
     def _remember(self, repo_path: str) -> None:
-        self.created_paths.append(ROOT / repo_path)
+        self.created_paths.append(self._runtime_path(repo_path))
 
     def _remember_persisted_paths(self, payload: dict[str, object]) -> None:
         paths = payload.get("paths", {})
@@ -1491,9 +1513,9 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["recommended_switch"], payload["reference_switches"]["continue_current_task"])
         self._remember_persisted_paths(payload)
 
-        artifact_json = json.loads((ROOT / payload["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
-        task_json = json.loads((ROOT / payload["paths"]["task"]).read_text(encoding="utf-8"))
-        run_json = json.loads((ROOT / payload["paths"]["run"]).read_text(encoding="utf-8"))
+        artifact_json = json.loads(self._runtime_path(payload["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
+        task_json = json.loads(self._runtime_path(payload["paths"]["task"]).read_text(encoding="utf-8"))
+        run_json = json.loads(self._runtime_path(payload["paths"]["run"]).read_text(encoding="utf-8"))
 
         self.assertEqual(artifact_json["task_id"], payload["task_id"])
         self.assertEqual(artifact_json["source_run_id"], payload["run_id"])
@@ -1518,9 +1540,9 @@ class PersistRuntimeTests(unittest.TestCase):
         resolved = switch_runtime.resolve_switch(
             "switch market: Validate an AI tool idea for indie developers"
         )
-        task_dir = ROOT / "buddyswitch" / "objects" / "tasks"
-        artifact_dir = ROOT / "buddyswitch" / "objects" / "artifacts"
-        run_dir = ROOT / "buddyswitch" / "content" / "runs"
+        task_dir = self._runtime_path("buddyswitch/objects/tasks")
+        artifact_dir = self._runtime_path("buddyswitch/objects/artifacts")
+        run_dir = self._runtime_path("buddyswitch/content/runs")
         before_tasks = {path.name for path in task_dir.glob("task-*.json")}
         before_artifacts = {path.name for path in artifact_dir.glob("art-*.json")}
         before_runs = {path.name for path in run_dir.glob("run-*.json")}
@@ -1594,9 +1616,9 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["recommended_switch"], payload["reference_switches"]["continue_current_task"])
         self._remember_persisted_paths(payload)
 
-        artifact_json = json.loads((ROOT / payload["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
-        task_json = json.loads((ROOT / payload["paths"]["task"]).read_text(encoding="utf-8"))
-        run_json = json.loads((ROOT / payload["paths"]["run"]).read_text(encoding="utf-8"))
+        artifact_json = json.loads(self._runtime_path(payload["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
+        task_json = json.loads(self._runtime_path(payload["paths"]["task"]).read_text(encoding="utf-8"))
+        run_json = json.loads(self._runtime_path(payload["paths"]["run"]).read_text(encoding="utf-8"))
 
         self.assertEqual(artifact_json["task_id"], payload["task_id"])
         self.assertEqual(artifact_json["source_run_id"], payload["run_id"])
@@ -1642,7 +1664,7 @@ class PersistRuntimeTests(unittest.TestCase):
         self.assertIsNone(resolved["switch"]["task_id"])
         self._assert_generated_task_id(payload["task_id"], buddy="dev")
 
-        run_json = json.loads((ROOT / payload["paths"]["run"]).read_text(encoding="utf-8"))
+        run_json = json.loads(self._runtime_path(payload["paths"]["run"]).read_text(encoding="utf-8"))
         self.assertEqual(run_json["resolved_task_id"], payload["task_id"])
         self.assertIsNone(run_json["switch"]["task_id"])
 
@@ -1692,9 +1714,9 @@ class PersistRuntimeTests(unittest.TestCase):
         resolved = switch_runtime.resolve_switch(
             "switch dev: Implement the approved onboarding improvements in projects/app"
         )
-        task_dir = ROOT / "buddyswitch" / "objects" / "tasks"
-        run_dir = ROOT / "buddyswitch" / "content" / "runs"
-        artifact_dir = ROOT / "buddyswitch" / "objects" / "artifacts"
+        task_dir = self._runtime_path("buddyswitch/objects/tasks")
+        run_dir = self._runtime_path("buddyswitch/content/runs")
+        artifact_dir = self._runtime_path("buddyswitch/objects/artifacts")
         before_tasks = {path.name for path in task_dir.glob("task-*.json")}
         before_runs = {path.name for path in run_dir.glob("run-*.json")}
         before_artifacts = {path.name for path in artifact_dir.glob("art-*.json")}
@@ -1821,8 +1843,8 @@ class PersistRuntimeTests(unittest.TestCase):
                 )
                 self._remember_persisted_paths(payload)
 
-                artifact_json = json.loads((ROOT / payload["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
-                run_json = json.loads((ROOT / payload["paths"]["run"]).read_text(encoding="utf-8"))
+                artifact_json = json.loads(self._runtime_path(payload["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
+                run_json = json.loads(self._runtime_path(payload["paths"]["run"]).read_text(encoding="utf-8"))
 
                 self.assertEqual(payload["skill_id"], skill_id)
                 self.assertEqual(artifact_json["slot"], expected_slot)
@@ -1920,7 +1942,7 @@ class PersistRuntimeTests(unittest.TestCase):
             "switch dev -> track-task-manager-create: <demand>",
         )
         self.assertEqual(payload["recommended_switch"], payload["reference_switches"]["handoff_to_next_buddy"])
-        track_json = json.loads((ROOT / payload["paths"]["track"]).read_text(encoding="utf-8"))
+        track_json = json.loads(self._runtime_path(payload["paths"]["track"]).read_text(encoding="utf-8"))
         self.assertIn(payload["task_id"], track_json["task_ids"])
 
     def test_persist_related_runs_surface_previous_task_runs(self) -> None:

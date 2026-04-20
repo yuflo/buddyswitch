@@ -9,14 +9,15 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env_store import create_artifact, create_task, delete_artifact, get_artifact, get_task, update_artifact  # noqa: E402
+from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
-class ArtifactSlotLifecycleTests(unittest.TestCase):
+class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _task_path(self, task_id: str) -> Path:
-        return ROOT / "buddyswitch" / "objects" / "tasks" / f"{task_id}.json"
+        return self._runtime_path(f"buddyswitch/objects/tasks/{task_id}.json")
 
     def _artifact_path(self, artifact_id: str) -> Path:
-        return ROOT / "buddyswitch" / "objects" / "artifacts" / f"{artifact_id}.json"
+        return self._runtime_path(f"buddyswitch/objects/artifacts/{artifact_id}.json")
 
     def _cleanup_fixtures(self) -> None:
         for task_id in ("task-pm-v2-slot", "task-pm-v2-revision", "task-pm-v2-move-source", "task-pm-v2-move-dest"):
@@ -37,10 +38,12 @@ class ArtifactSlotLifecycleTests(unittest.TestCase):
                 path.unlink()
 
     def setUp(self) -> None:
+        super().setUp()
         self._cleanup_fixtures()
 
     def tearDown(self) -> None:
         self._cleanup_fixtures()
+        super().tearDown()
 
     def test_create_task_initializes_artifact_slots(self) -> None:
         task = create_task(

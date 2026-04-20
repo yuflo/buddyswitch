@@ -62,7 +62,7 @@
 - cleanup 已切到 task-centric：
   - 支持 task object 清理
   - `agent` 清理时会做 task/track、artifact/task 关系剥离
-  - all-storage 会恢复 `buddyswitch/objects/tasks/.gitkeep`
+  - all-storage 只清 launcher runtime workspace，不再恢复 repo-root skeleton
 
 涉及文件：
 

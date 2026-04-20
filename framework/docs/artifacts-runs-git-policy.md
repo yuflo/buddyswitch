@@ -11,6 +11,8 @@ Model constraints:
 
 ## 2. Output Boundary
 
+These paths are runtime-workspace-relative. They belong under the launcher-owned execution workspace, not the source checkout.
+
 ### `buddyswitch/objects/artifacts/` (canonical artifact outputs)
 
 Task objects group runs and artifact objects. Artifact objects are the source of truth for reusable buddy outputs:
@@ -57,10 +59,10 @@ Do not write these files into `projects/app/` source folders.
 
 ### Do not commit by default
 
-- generated state under `buddyswitch/objects/**` (except `.gitkeep`)
-- generated run audit content under `buddyswitch/content/runs/**` (except `.gitkeep`)
+- generated state under `buddyswitch/objects/**`
+- generated run audit content under `buddyswitch/content/runs/**`
 - `runs/raw/**`
-- `projects/app/.runtime/**` (except `.gitkeep`)
+- `projects/app/.runtime/**`
 - temporary logs and traces
 - scratch dumps
 - machine-local clutter

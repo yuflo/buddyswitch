@@ -231,6 +231,37 @@ class RepoConsistencyTests(unittest.TestCase):
         gitignore_text = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertNotIn("!projects/app/.runtime/.gitkeep", gitignore_text)
 
+    def test_main_checkout_does_not_keep_runtime_state_directories(self) -> None:
+        runtime_dirs = (
+            ROOT / "runs" / "raw",
+            ROOT / "projects" / "app" / ".runtime",
+            ROOT / "buddyswitch" / "objects" / "tracks",
+            ROOT / "buddyswitch" / "objects" / "tasks",
+            ROOT / "buddyswitch" / "objects" / "artifacts",
+            ROOT / "buddyswitch" / "content" / "runs",
+            ROOT / "buddyswitch" / "content" / "artifacts",
+        )
+        for path in runtime_dirs:
+            self.assertFalse(path.exists(), msg=f"main checkout should not retain runtime dir {path.relative_to(ROOT)}")
+
+    def test_main_checkout_gitignore_does_not_silence_runtime_workspace_dirs(self) -> None:
+        gitignore_text = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        self.assertNotIn("projects/app/.runtime/**", gitignore_text)
+        self.assertNotIn("artifacts/**", gitignore_text)
+        self.assertNotIn("runs/summaries/**", gitignore_text)
+
+    def test_runtime_storage_docs_point_to_launcher_workspace_without_gitkeep_language(self) -> None:
+        targets = (
+            ROOT / "README.md",
+            ROOT / "framework" / "docs" / "artifacts-runs-git-policy.md",
+            ROOT / "evals" / "cases" / "07-cleanup-storage-script.md",
+            ROOT / "docs" / "reviews" / "buddyswitch-control-layer" / "10-phase-3-task-centric-runtime-plan.md",
+            ROOT / "docs" / "reviews" / "buddyswitch-control-layer" / "11-phase-3-implementation-handoff.md",
+        )
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in targets).lower()
+        self.assertIn("launcher runtime workspace", combined)
+        self.assertNotIn(".gitkeep", combined)
+
     def test_active_docs_and_skills_do_not_use_track_mode_field(self) -> None:
         targets = (
             ROOT / "README.md",

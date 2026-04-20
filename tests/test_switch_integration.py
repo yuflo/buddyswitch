@@ -17,20 +17,10 @@ if str(SCRIPTS) not in sys.path:
 import codex_router  # noqa: E402
 import parse_switch  # noqa: E402
 import switch_runtime  # noqa: E402
+from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
-class SwitchFlowIntegrationTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.created_paths: list[Path] = []
-
-    def tearDown(self) -> None:
-        for path in sorted(self.created_paths, reverse=True):
-            if path.exists():
-                path.unlink()
-
-    def _remember(self, repo_path: str) -> None:
-        self.created_paths.append(ROOT / repo_path)
-
+class SwitchFlowIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_tolerant_switch_flow_resolves_and_persists(self) -> None:
         text = "switch dev : Implement the approved onboarding improvements in projects/app"
 
@@ -71,17 +61,13 @@ class SwitchFlowIntegrationTests(unittest.TestCase):
         self.assertIn("recommended_switch", persisted)
         self.assertEqual(persisted["related_run_ids"], [])
 
-        self._remember(persisted["paths"]["artifacts"][0])
-        self._remember(persisted["paths"]["task"])
-        self._remember(persisted["paths"]["run"])
-
         self.assertIn(persisted["paths"]["artifacts"][0], persisted["writes"])
         self.assertIn(persisted["paths"]["task"], persisted["writes"])
         self.assertIn(persisted["paths"]["run"], persisted["writes"])
         self.assertNotIn("artifact_markdown", persisted["paths"])
         self.assertNotIn("summary", persisted["paths"])
         self.assertNotIn("suggested_next_switch", persisted)
-        run_json = json.loads((ROOT / persisted["paths"]["run"]).read_text(encoding="utf-8"))
+        run_json = json.loads(self._runtime_path(persisted["paths"]["run"]).read_text(encoding="utf-8"))
         self.assertNotIn("suggested_next_switch", run_json)
         self.assertEqual(
             persisted["recommended_switch"],

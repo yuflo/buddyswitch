@@ -20,6 +20,7 @@ TASKS_DIR = OBJECTS_ROOT / "tasks"
 ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
 CONTENT_ROOT = ROOT / "buddyswitch" / "content"
 RUN_CONTENT_DIR = CONTENT_ROOT / "runs"
+RUNTIME_WORKSPACE_AGENTS_HEADER = "# BuddySwitch Runtime Workspace"
 VALID_TRACK_STATUS = ("active", "blocked", "done", "archived")
 VALID_TASK_STATUS = ("active", "blocked", "done", "archived")
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -33,7 +34,31 @@ def rel(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
 
 
-def ensure_dirs() -> None:
+def runtime_workspace_agents_file(root: Path | None = None) -> Path:
+    return (ROOT if root is None else root) / "AGENTS.md"
+
+
+def is_runtime_workspace(root: Path | None = None) -> bool:
+    agents_path = runtime_workspace_agents_file(root)
+    try:
+        first_line = agents_path.read_text(encoding="utf-8").splitlines()[0].strip()
+    except (IndexError, OSError):
+        return False
+    return first_line == RUNTIME_WORKSPACE_AGENTS_HEADER
+
+
+def require_runtime_workspace_write_root(root: Path | None = None) -> None:
+    candidate = ROOT if root is None else root
+    if is_runtime_workspace(candidate):
+        return
+    raise ValueError(
+        "BuddySwitch runtime writes are blocked in the source checkout. "
+        "Start the launcher workspace with ./buddyswitch-codex start and rerun there."
+    )
+
+
+def ensure_runtime_dirs() -> None:
+    require_runtime_workspace_write_root()
     TRACKS_DIR.mkdir(parents=True, exist_ok=True)
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -315,7 +340,6 @@ def _current_task_artifact_id(task: dict[str, Any]) -> str | None:
 
 
 def list_tracks() -> list[dict[str, Any]]:
-    ensure_dirs()
     rows: list[dict[str, Any]] = []
     for path in TRACKS_DIR.glob("*.json"):
         rows.append(validate_track(_read_json(path)))
@@ -324,7 +348,6 @@ def list_tracks() -> list[dict[str, Any]]:
 
 
 def list_tasks() -> list[dict[str, Any]]:
-    ensure_dirs()
     rows: list[dict[str, Any]] = []
     for path in TASKS_DIR.glob("*.json"):
         rows.append(validate_task(_read_json(path)))
@@ -333,7 +356,6 @@ def list_tasks() -> list[dict[str, Any]]:
 
 
 def list_artifacts() -> list[dict[str, Any]]:
-    ensure_dirs()
     rows: list[dict[str, Any]] = []
     for path in ARTIFACT_OBJECTS_DIR.glob("*.json"):
         rows.append(validate_artifact(_read_json(path)))
@@ -434,21 +456,21 @@ def get_artifact(artifact_id: str) -> dict[str, Any] | None:
 
 
 def save_track(track: dict[str, Any]) -> dict[str, Any]:
-    ensure_dirs()
+    ensure_runtime_dirs()
     normalized = validate_track(track)
     _write_json(track_file(normalized["id"]), normalized)
     return normalized
 
 
 def save_task(task: dict[str, Any]) -> dict[str, Any]:
-    ensure_dirs()
+    ensure_runtime_dirs()
     normalized = validate_task(task)
     _write_json(task_file(normalized["id"]), normalized)
     return normalized
 
 
 def save_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
-    ensure_dirs()
+    ensure_runtime_dirs()
     normalized = validate_artifact(artifact)
     _write_json(artifact_file(normalized["id"]), normalized)
     return normalized
@@ -732,7 +754,6 @@ def create_artifact(
     content: dict[str, Any] | None = None,
     auto_register: bool = True,
 ) -> dict[str, Any]:
-    ensure_dirs()
     if not auto_register:
         raise ValueError("auto_register=False is not supported for v2 slot-aware artifact creation")
     task = get_task(task_id)
@@ -827,6 +848,7 @@ def update_artifact(
 
 
 def delete_artifact(artifact_id: str, *, delete_file: bool = False) -> dict[str, Any]:
+    require_runtime_workspace_write_root()
     artifact = get_artifact(artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
@@ -863,7 +885,7 @@ def delete_all_artifacts(*, delete_files: bool = False, dry_run: bool = False) -
 
 
 def save_run_content(run_id: str, payload: dict[str, Any]) -> str:
-    ensure_dirs()
+    ensure_runtime_dirs()
     path = ROOT / run_content_path(run_id)
     _write_json(path, payload)
     return rel(path)

@@ -1,14 +1,3 @@
-# BuddySwitch run noise (keep repo skeleton only during rapid iteration)
-runs/summaries/**
-!runs/summaries/.gitkeep
-
-# BuddySwitch generated state and artifacts
-artifacts/**
-!artifacts/.gitkeep
-
-# Project runtime noise (keep only skeleton marker)
-projects/app/.runtime/**
-
 # Test runner output
 test-results/
 playwright-report/

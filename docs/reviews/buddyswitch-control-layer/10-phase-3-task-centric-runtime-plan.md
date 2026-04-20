@@ -307,7 +307,7 @@ manual/debug API 的 authority 规则：
 更新 `scripts/env_cleanup.py` 与 `scripts/cleanup_buddyswitch.sh` 对应行为：
 
 - 新增 `task_objects` cleanup category
-- skeleton 新增 `buddyswitch/objects/tasks/.gitkeep`
+- launcher runtime workspace bootstrap 负责准备 `buddyswitch/objects/tasks/`
 - cleanup 发现并删除 task objects
 - 删除 task 时同步从所属 track 的 `task_ids` 中移除
 - 删除 artifact 时同步从 task 的 `artifact_ids` 中移除

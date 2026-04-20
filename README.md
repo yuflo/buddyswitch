@@ -97,6 +97,8 @@ python3 scripts/switch_runtime.py prepare-execution \
 
 ### Persist a structured result
 
+Run `persist` only from the launcher-owned runtime workspace. The repo-root development checkout blocks BuddySwitch runtime writes; start it with `./buddyswitch-codex start` first.
+
 ```bash
 python3 scripts/switch_runtime.py persist \
   --resolved /tmp/buddyswitch-resolved.json \
@@ -124,7 +126,7 @@ scripts/cleanup_buddyswitch.sh --project app
 scripts/cleanup_buddyswitch.sh --all-storage
 ```
 
-Defaults are dry-run. Add `--execute` to apply deletion.
+Defaults are dry-run. Add `--execute` to apply deletion. Cleanup targets the launcher runtime workspace under `~/.codex-buddyswitch/workspace`; it does not clean the repo-root development checkout.
 
 ## What BuddySwitch Is
 
@@ -302,11 +304,11 @@ These paths matter most when you are orienting yourself in the repo:
 - `framework/docs/`
   Architecture and framework specifications.
 - `projects/app/`
-  Main app code. Runtime-only temporary data belongs in `projects/app/.runtime/`.
+  Main app code. Runtime-only temporary data belongs in `projects/app/.runtime/` inside the launcher runtime workspace, not in the source checkout.
 
 ## Core Storage and Object Authority
 
-Canonical storage lives here:
+Canonical storage lives under the launcher runtime workspace using these relative paths:
 
 - Env manifest: `buddyswitch/manifest.toml`
 - Track objects: `buddyswitch/objects/tracks/*.json`
@@ -462,9 +464,9 @@ Useful modes:
 - `--all-agents`
   Clears BuddySwitch env state for all buddies, including run audit content.
 - `--project app`
-  Only clears `projects/app/.runtime/`.
+  Only clears `projects/app/.runtime/` inside the launcher runtime workspace.
 - `--all-storage`
-  Clears the full local BuddySwitch storage surface.
+  Clears the full launcher-managed BuddySwitch storage surface.
 
 ## Terminal Output Contract
 

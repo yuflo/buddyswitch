@@ -18,7 +18,7 @@ scripts/cleanup_buddyswitch.sh --all-storage --force
 ## Preconditions
 
 - `scripts/cleanup_buddyswitch.sh` exists and is executable.
-- `projects/app/.runtime/.gitkeep` exists.
+- A launcher runtime workspace already exists, for example after `./buddyswitch-codex start`.
 - `README.md` includes manual cleanup usage.
 
 ## Manual Steps
@@ -40,10 +40,10 @@ scripts/cleanup_buddyswitch.sh --all-storage --force
 - Default behavior is preview-only.
 - `--force` without `--execute` is rejected.
 - Cleanup scope is limited to:
-  - `runs/raw/**`
-  - `buddyswitch/content/runs/**`
-  - `projects/app/.runtime/**`
-  - `buddyswitch/objects/**`
+  - launcher workspace `runs/raw/**`
+  - launcher workspace `buddyswitch/content/runs/**`
+  - launcher workspace `projects/app/.runtime/**`
+  - launcher workspace `buddyswitch/objects/**`
 - Agent/all-agent cleanup can remove artifact objects/files through `scripts/env_artifacts.py`.
 
 ## Fail Signals
