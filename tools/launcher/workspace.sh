@@ -100,6 +100,22 @@ projects/app/.runtime/**
 EOF
 }
 
+buddyswitch_workspace_ensure_state_skeleton() {
+  local workspace_dir relative_dir
+
+  workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
+  while IFS= read -r relative_dir; do
+    mkdir -p "${workspace_dir}/${relative_dir}"
+  done <<'EOF'
+runs/raw
+projects/app/.runtime
+buddyswitch/objects/tracks
+buddyswitch/objects/tasks
+buddyswitch/objects/artifacts
+buddyswitch/content/runs
+EOF
+}
+
 buddyswitch_workspace_install_guardrail_hooks() {
   local hooks_root workspace_dir git_dir config_worktree
 
@@ -137,6 +153,7 @@ EOF
 buddyswitch_workspace_prepare_execution_worktree() {
   buddyswitch_workspace_init_defaults
   buddyswitch_workspace_ensure_execution_worktree
+  buddyswitch_workspace_ensure_state_skeleton
   buddyswitch_workspace_install_runtime_agents
   buddyswitch_workspace_install_local_excludes
   buddyswitch_workspace_install_guardrail_hooks

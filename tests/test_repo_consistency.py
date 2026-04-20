@@ -225,6 +225,12 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("legacy " + "artifact content", combined)
         self.assertNotIn("buddyswitch/content/" + "artifacts", combined)
 
+    def test_main_checkout_does_not_track_legacy_runtime_placeholders(self) -> None:
+        self.assertFalse((ROOT / "buddyswitch" / "content" / "artifacts" / ".gitkeep").exists())
+        self.assertFalse((ROOT / "projects" / "app" / ".runtime" / ".gitkeep").exists())
+        gitignore_text = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        self.assertNotIn("!projects/app/.runtime/.gitkeep", gitignore_text)
+
     def test_active_docs_and_skills_do_not_use_track_mode_field(self) -> None:
         targets = (
             ROOT / "README.md",

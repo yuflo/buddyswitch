@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -407,17 +408,29 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         self.addCleanup(self.temp_dir.cleanup)
         self.repo_root = Path(self.temp_dir.name)
         self.fixture = CleanupFixture(self.repo_root)
+        self.shared_root = self.repo_root / ".codex-buddyswitch"
+        self.workspace_dir = self.shared_root / "workspace"
+        self.workspace_fixture = CleanupFixture(self.workspace_dir)
         scripts_dir = self.repo_root / "scripts"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         for name in ("cleanup_buddyswitch.sh", "env_cleanup.py"):
             shutil.copy2(ROOT / "scripts" / name, scripts_dir / name)
+        launcher_dir = self.repo_root / "tools" / "launcher"
+        launcher_dir.mkdir(parents=True, exist_ok=True)
+        for name in ("env.sh", "workspace.sh"):
+            shutil.copy2(ROOT / "tools" / "launcher" / name, launcher_dir / name)
 
-    def run_cleanup(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def run_cleanup(self, *args: str, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["BUDDYSWITCH_SHARED_ROOT"] = str(self.shared_root)
+        if extra_env:
+            env.update(extra_env)
         return subprocess.run(
             ["bash", "scripts/cleanup_buddyswitch.sh", *args],
             cwd=self.repo_root,
             check=False,
             capture_output=True,
+            env=env,
             text=True,
         )
 
@@ -427,6 +440,7 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         payload = json.loads(completed.stdout)
         self.assertIn("buddyswitch/content/runs/run-market.json", payload["delete_paths"])
         self.assertNotIn("buddyswitch/content/runs/run-pm.json", payload["delete_paths"])
+        self.assertEqual(payload["repo_root"], str(self.workspace_dir))
 
     def test_shell_project_cleanup_only_touches_runtime(self) -> None:
         completed = self.run_cleanup("--project", "app", "--execute", "--force", "--json")
@@ -434,20 +448,65 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         payload = json.loads(completed.stdout)
         self.assertEqual(payload["result"]["scope"], "project")
         self.assertIn("projects/app/.runtime/session.json", payload["result"]["deleted_paths"])
+        self.assertTrue(self.workspace_fixture.exists("buddyswitch/content/runs/run-market.json"))
+        self.assertFalse(self.workspace_fixture.exists("projects/app/.runtime/session.json"))
+        self.assertTrue((self.workspace_dir / "projects" / "app" / ".runtime").is_dir())
         self.assertTrue(self.fixture.exists("buddyswitch/content/runs/run-market.json"))
-        self.assertFalse(self.fixture.exists("projects/app/.runtime/session.json"))
-        self.assertTrue(self.fixture.exists("projects/app/.runtime/.gitkeep"))
 
     def test_shell_all_agents_cleanup_clears_buddy_state(self) -> None:
         completed = self.run_cleanup("--all-agents", "--execute", "--force", "--json")
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         payload = json.loads(completed.stdout)
         self.assertEqual(payload["result"]["scope"], "all-agents")
+        self.assertFalse(self.workspace_fixture.exists("buddyswitch/content/runs/run-market.json"))
+        self.assertFalse(self.workspace_fixture.exists("buddyswitch/content/runs/run-pm.json"))
+        self.assertFalse(self.workspace_fixture.exists("buddyswitch/content/runs/bad-run.json"))
+        self.assertFalse(self.workspace_fixture.exists("buddyswitch/objects/tracks/track-demo.json"))
+        self.assertTrue((self.workspace_dir / "buddyswitch" / "content" / "runs").is_dir())
+        self.assertTrue(self.fixture.exists("buddyswitch/content/runs/run-market.json"))
+
+    def test_shell_agent_cleanup_targets_launcher_workspace_not_source_checkout(self) -> None:
+        completed = self.run_cleanup(
+            "--agent",
+            "market",
+            "--execute",
+            "--force",
+            "--json",
+        )
+
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["plan"]["repo_root"], str(self.workspace_dir))
+        self.assertFalse(self.workspace_fixture.exists("buddyswitch/content/runs/run-market.json"))
+        self.assertTrue(self.workspace_fixture.exists("buddyswitch/content/runs/run-pm.json"))
+        self.assertTrue(self.fixture.exists("buddyswitch/content/runs/run-market.json"))
+
+    def test_shell_all_storage_cleanup_migrates_source_checkout_legacy_state_and_excludes(self) -> None:
+        exclude_path = self.repo_root / ".git" / "info" / "exclude"
+        exclude_path.parent.mkdir(parents=True, exist_ok=True)
+        exclude_path.write_text(
+            "# BuddySwitch runtime-only excludes\n"
+            "buddyswitch/content/runs/**\n"
+            "buddyswitch/objects/tracks/**\n"
+            "buddyswitch/objects/tasks/**\n"
+            "buddyswitch/objects/artifacts/**\n"
+            "runs/raw/**\n"
+            "projects/app/.runtime/**\n",
+            encoding="utf-8",
+        )
+
+        completed = self.run_cleanup(
+            "--all-storage",
+            "--execute",
+            "--force",
+            "--json",
+        )
+
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertFalse(self.workspace_fixture.exists("buddyswitch/content/runs/run-market.json"))
         self.assertFalse(self.fixture.exists("buddyswitch/content/runs/run-market.json"))
-        self.assertFalse(self.fixture.exists("buddyswitch/content/runs/run-pm.json"))
-        self.assertFalse(self.fixture.exists("buddyswitch/content/runs/bad-run.json"))
         self.assertFalse(self.fixture.exists("buddyswitch/objects/tracks/track-demo.json"))
-        self.assertFalse(self.fixture.exists("buddyswitch/content/runs/.gitkeep"))
+        self.assertNotIn("BuddySwitch runtime-only excludes", exclude_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

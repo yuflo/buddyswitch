@@ -8,7 +8,6 @@ artifacts/**
 
 # Project runtime noise (keep only skeleton marker)
 projects/app/.runtime/**
-!projects/app/.runtime/.gitkeep
 
 # Test runner output
 test-results/

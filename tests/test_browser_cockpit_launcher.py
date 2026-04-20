@@ -157,6 +157,18 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             )
             workspace_dir = source_home_path / ".codex-buddyswitch" / "workspace"
             self.assertTrue(workspace_dir.exists(), "browser ensure should create runtime workspace skeleton")
+            for relative_dir in (
+                "runs/raw",
+                "projects/app/.runtime",
+                "buddyswitch/objects/tracks",
+                "buddyswitch/objects/tasks",
+                "buddyswitch/objects/artifacts",
+                "buddyswitch/content/runs",
+            ):
+                self.assertTrue(
+                    (workspace_dir / relative_dir).is_dir(),
+                    f"browser ensure should materialize runtime state dir {relative_dir}",
+                )
             payloads = [
                 json.loads(line)
                 for line in capture_path.read_text(encoding="utf-8").splitlines()

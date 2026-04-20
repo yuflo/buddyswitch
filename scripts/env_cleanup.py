@@ -19,7 +19,6 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in shell integration
     _load_manifest_full = None
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 CONFIRM_PHRASE = "DELETE_BUDDYSWITCH_DATA"
 CATEGORY_ORDER = (
     "artifact_objects",
@@ -412,13 +411,18 @@ def ensure_required_skeleton(root: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
+def default_manifest_path(repo_root: Path) -> Path:
+    return repo_root / "buddyswitch" / "manifest.toml"
+
+
 def build_cleanup_plan(
     *,
     scope: str,
     buddy: str | None,
     repo_root: Path = ROOT,
-    manifest_path: Path = DEFAULT_MANIFEST,
+    manifest_path: Path | None = None,
 ) -> dict[str, Any]:
+    manifest_path = manifest_path or default_manifest_path(repo_root)
     valid_buddies = load_valid_buddies(manifest_path)
     if scope == "agent" and (buddy is None or buddy not in valid_buddies):
         raise ValueError(f"Invalid buddy '{buddy}'. Check buddyswitch/manifest.toml")
@@ -616,7 +620,8 @@ def confirm_execute(force: bool) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="BuddySwitch cleanup utility (manual use only)")
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument("--repo-root", type=Path, help="Cleanup root. Defaults to the current script checkout root.")
+    parser.add_argument("--manifest", type=Path, help="Manifest path. Defaults to <repo-root>/buddyswitch/manifest.toml.")
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--agent")
     target.add_argument("--all-agents", action="store_true")
@@ -650,8 +655,10 @@ def main() -> int:
         return 1
 
     try:
+        repo_root = args.repo_root.resolve() if args.repo_root else ROOT
+        manifest_path = args.manifest.resolve() if args.manifest else default_manifest_path(repo_root)
         scope, buddy = resolve_scope(args)
-        plan = build_cleanup_plan(scope=scope, buddy=buddy, repo_root=ROOT, manifest_path=args.manifest)
+        plan = build_cleanup_plan(scope=scope, buddy=buddy, repo_root=repo_root, manifest_path=manifest_path)
         if not args.json:
             print_text_plan(plan)
 
