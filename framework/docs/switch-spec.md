@@ -6,6 +6,8 @@
 switch <buddy>(<task-id>) -> <track-id>: <demand>
 ```
 
+Canonical machine-readable contract source: `framework/contracts/switch-grammar.json`.
+
 Supported forms:
 
 1. `switch <buddy>: <demand>`
@@ -116,6 +118,7 @@ Market runtime note:
 
 `prepare-execution` is the canonical step between `resolve` and `persist`.
 It converts the chosen skill into `selected_skill_packet`.
+Canonical machine-readable contract source: `framework/contracts/selected-skill-packet.json`.
 The packet fields are stable:
 
 - `skill_id`

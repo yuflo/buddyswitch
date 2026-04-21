@@ -103,6 +103,11 @@ ACTIVE_MARKET_CONTRACT_DOCS = (
     ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "SKILL.md",
 )
+PARALLEL_CONTRACT_FILES = (
+    ROOT / "framework" / "contracts" / "switch-grammar.json",
+    ROOT / "framework" / "contracts" / "selected-skill-packet.json",
+    ROOT / "framework" / "contracts" / "workspace-projection.json",
+)
 
 
 def _markdown_section(text: str, heading: str) -> str:
@@ -752,6 +757,27 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("channel-discovery", text)
         self.assertIn("launch-prep", text)
         self.assertNotIn('eligible_skills = ["research-scan", "pmf-recon"]', text)
+
+    def test_parallel_contract_files_exist_and_define_expected_ids(self) -> None:
+        expected_contract_ids = {
+            "switch-grammar": PARALLEL_CONTRACT_FILES[0],
+            "selected-skill-packet": PARALLEL_CONTRACT_FILES[1],
+            "workspace-projection": PARALLEL_CONTRACT_FILES[2],
+        }
+        for contract_id, path in expected_contract_ids.items():
+            with self.subTest(contract=contract_id):
+                self.assertTrue(path.exists(), msg=f"missing contract file {path.relative_to(ROOT)}")
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(payload.get("contract_id"), contract_id)
+                self.assertIn("contract_version", payload)
+
+    def test_switch_and_interface_specs_reference_parallel_contract_files(self) -> None:
+        switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")
+        interface_spec = (ROOT / "framework" / "docs" / "interface-spec.md").read_text(encoding="utf-8")
+
+        self.assertIn("framework/contracts/switch-grammar.json", switch_spec)
+        self.assertIn("framework/contracts/selected-skill-packet.json", switch_spec)
+        self.assertIn("framework/contracts/workspace-projection.json", interface_spec)
 
 
 if __name__ == "__main__":

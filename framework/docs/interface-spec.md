@@ -26,6 +26,8 @@ The interface must not:
 
 The local server serves live data at `/api/workspace` using:
 
+Canonical machine-readable contract source: `framework/contracts/workspace-projection.json`.
+
 - `buddyswitch/manifest.toml`
 - `buddyswitch/objects/tracks/*.json`
 - `buddyswitch/objects/tasks/*.json`

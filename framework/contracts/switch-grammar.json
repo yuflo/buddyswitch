@@ -1,0 +1,28 @@
+{
+  "contract_id": "switch-grammar",
+  "contract_version": "2026-04-21",
+  "canonical_syntax": "switch <buddy>(<task-id>) -> <track-id>: <demand>",
+  "supported_forms": [
+    "switch <buddy>: <demand>",
+    "switch <buddy> -> <track-id>: <demand>",
+    "switch <buddy>(<task-id>): <demand>",
+    "switch <buddy>(<task-id>) -> <track-id>: <demand>"
+  ],
+  "rules": [
+    "message must start with 'switch'",
+    "<buddy> is one token",
+    "optional <task-id> appears in parentheses immediately after buddy",
+    "optional <track-id> appears after '->'",
+    "':' is required",
+    "<demand> must be non-empty",
+    "text after ':' is demand text, not a task object",
+    "minor CLI whitespace variation around ':', '->', and task parentheses may be normalized"
+  ],
+  "parse_error_codes": [
+    "E_EMPTY_INPUT",
+    "E_INVALID_SYNTAX",
+    "E_UNKNOWN_AGENT",
+    "E_EMPTY_DEMAND",
+    "E_ENV_MANIFEST"
+  ]
+}
