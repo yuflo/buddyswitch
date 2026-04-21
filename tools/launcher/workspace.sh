@@ -35,12 +35,36 @@ buddyswitch_workspace_canonical_path() {
 }
 
 buddyswitch_workspace_validate_workspace_dir() {
-  local workspace_dir shared_root normalized_workspace normalized_shared_root
+  local workspace_dir shared_root normalized_workspace normalized_shared_root reserved_root
 
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR:-}"
   shared_root="${BUDDYSWITCH_SHARED_ROOT:-}"
   normalized_workspace="$(buddyswitch_workspace_canonical_path "${workspace_dir%/}")"
   normalized_shared_root="$(buddyswitch_workspace_canonical_path "${shared_root%/}")"
+
+  if [[ "${normalized_workspace}" == "${normalized_shared_root}" ]]; then
+    echo "workspace dir must be under BUDDYSWITCH_SHARED_ROOT" >&2
+    echo "workspace: ${normalized_workspace}" >&2
+    echo "shared root: ${normalized_shared_root}" >&2
+    echo "reserved root: ${normalized_shared_root}" >&2
+    return 1
+  fi
+
+  for reserved_root in \
+    "${normalized_shared_root}/home" \
+    "${normalized_shared_root}/codex-home" \
+    "${normalized_shared_root}/run" \
+    "${normalized_shared_root}/chrome"; do
+    case "${normalized_workspace}" in
+      "${reserved_root}" | "${reserved_root}/"*)
+        echo "workspace dir must be under BUDDYSWITCH_SHARED_ROOT" >&2
+        echo "workspace: ${normalized_workspace}" >&2
+        echo "shared root: ${normalized_shared_root}" >&2
+        echo "reserved root: ${reserved_root}" >&2
+        return 1
+        ;;
+    esac
+  done
 
   case "${normalized_workspace}" in
     "${normalized_shared_root}/"*)

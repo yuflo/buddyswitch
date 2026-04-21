@@ -33,6 +33,8 @@ buddyswitch_env_init() {
 }
 
 buddyswitch_ensure_shared_env() {
+  buddyswitch_workspace_validate_workspace_dir
+
   mkdir -p \
     "${BUDDYSWITCH_HOME}" \
     "${BUDDYSWITCH_XDG_CONFIG_HOME}" \

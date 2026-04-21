@@ -628,6 +628,74 @@ exit 0
             self.assertIn("workspace dir must be under BUDDYSWITCH_SHARED_ROOT", completed.stderr)
             self.assertFalse((shared_root / "workspace").exists(), "shared root itself must not become the workspace")
 
+    def test_start_rejects_workspace_dir_inside_reserved_launcher_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            shared_root = source_home_path / ".codex-buddyswitch"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(temp_root_path / "browser-ready.flag")
+
+            for relative in (
+                "home/workspace",
+                "codex-home/session",
+                "run/workspace",
+                "chrome/workspace",
+            ):
+                with self.subTest(relative=relative):
+                    reserved_workspace = shared_root / relative
+                    reserved_workspace.mkdir(parents=True, exist_ok=True)
+                    sentinel = reserved_workspace / "sentinel.txt"
+                    sentinel.write_text("do-not-delete\n", encoding="utf-8")
+
+                    run_env = env.copy()
+                    run_env["BUDDYSWITCH_TEST_CAPTURE"] = str(
+                        temp_root_path / f"capture-{relative.replace('/', '-')}.json"
+                    )
+                    run_env["BUDDYSWITCH_WORKSPACE_DIR"] = str(reserved_workspace)
+
+                    completed = subprocess.run(
+                        [str(LAUNCHER), "start", "debug", "prompt-input", "switch pm: draft prd"],
+                        cwd=ROOT,
+                        env=run_env,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+
+                    self.assertNotEqual(completed.returncode, 0)
+                    self.assertIn("workspace dir must be under BUDDYSWITCH_SHARED_ROOT", completed.stderr)
+                    self.assertTrue(sentinel.exists(), f"reserved workspace sentinel must be preserved for {relative}")
+                    self.assertFalse((reserved_workspace / ".git").exists(), f"reserved workspace must not become a worktree for {relative}")
+
 
 if __name__ == "__main__":
     unittest.main()
