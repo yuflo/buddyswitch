@@ -72,6 +72,72 @@ def _market_skill_with_host_execution(host_execution: dict[str, str]) -> dict[st
 
 
 class RuntimeKernelFacadeTests(unittest.TestCase):
+    def test_runtime_kernel_package_exports_entrypoints(self) -> None:
+        import runtime_kernel
+
+        self.assertTrue(callable(runtime_kernel.resolve_switch_request))
+        self.assertTrue(callable(runtime_kernel.prepare_execution_request))
+        self.assertTrue(callable(runtime_kernel.persist_switch_request))
+
+    def test_runtime_kernel_resolve_entrypoint_defaults_manifest(self) -> None:
+        import runtime_kernel
+
+        sentinel = {"ok": True, "delegate": "resolve-kernel"}
+        with patch.object(switch_runtime, "_legacy_resolve_switch", return_value=sentinel) as mock_delegate:
+            payload = runtime_kernel.resolve_switch_request("switch dev: keep cli stable")
+
+        self.assertIs(payload, sentinel)
+        mock_delegate.assert_called_once_with(
+            "switch dev: keep cli stable",
+            manifest_path=switch_runtime.DEFAULT_MANIFEST,
+        )
+
+    def test_runtime_kernel_prepare_execution_entrypoint_defaults_manifest(self) -> None:
+        import runtime_kernel
+
+        resolved = {"ok": True, "switch": {"buddy": "dev"}}
+        sentinel = {"ok": True, "delegate": "prepare-kernel"}
+        with patch.object(
+            switch_runtime,
+            "_legacy_prepare_execution_payload",
+            return_value=sentinel,
+        ) as mock_delegate:
+            payload = runtime_kernel.prepare_execution_request(
+                resolved,
+                skill_id="implement-task",
+            )
+
+        self.assertIs(payload, sentinel)
+        mock_delegate.assert_called_once_with(
+            resolved,
+            skill_id="implement-task",
+            manifest_path=switch_runtime.DEFAULT_MANIFEST,
+        )
+
+    def test_runtime_kernel_persist_entrypoint_delegates(self) -> None:
+        import runtime_kernel
+
+        resolved = {"ok": True}
+        result = {"execution_summary": "ok", "artifact_content": {"done": True}}
+        sentinel = {"ok": True, "delegate": "persist-kernel"}
+        with patch.object(
+            switch_runtime,
+            "_legacy_persist_switch",
+            return_value=sentinel,
+        ) as mock_delegate:
+            payload = runtime_kernel.persist_switch_request(
+                resolved,
+                skill_id="implement-task",
+                result=result,
+            )
+
+        self.assertIs(payload, sentinel)
+        mock_delegate.assert_called_once_with(
+            resolved,
+            skill_id="implement-task",
+            result=result,
+        )
+
     def test_runtime_kernel_resolve_facade_delegates(self) -> None:
         sentinel = {"ok": True, "delegate": "resolve"}
         with patch("runtime_kernel.resolve.resolve_switch_request", return_value=sentinel) as mock_delegate:
