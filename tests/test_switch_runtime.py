@@ -71,6 +71,56 @@ def _market_skill_with_host_execution(host_execution: dict[str, str]) -> dict[st
     return selected_skill
 
 
+class RuntimeKernelFacadeTests(unittest.TestCase):
+    def test_runtime_kernel_resolve_facade_delegates(self) -> None:
+        sentinel = {"ok": True, "delegate": "resolve"}
+        with patch("runtime_kernel.resolve.resolve_switch_request", return_value=sentinel) as mock_delegate:
+            payload = switch_runtime.resolve_switch("switch dev: keep cli stable")
+
+        self.assertIs(payload, sentinel)
+        mock_delegate.assert_called_once_with(
+            "switch dev: keep cli stable",
+            manifest_path=switch_runtime.DEFAULT_MANIFEST,
+        )
+
+    def test_runtime_kernel_prepare_execution_facade_delegates(self) -> None:
+        resolved = {"ok": True, "switch": {"buddy": "dev"}}
+        sentinel = {"ok": True, "delegate": "prepare-execution"}
+        with patch(
+            "runtime_kernel.prepare_execution.prepare_execution_request",
+            return_value=sentinel,
+        ) as mock_delegate:
+            payload = switch_runtime.prepare_execution_payload(
+                resolved,
+                skill_id="implement-task",
+            )
+
+        self.assertIs(payload, sentinel)
+        mock_delegate.assert_called_once_with(
+            resolved,
+            skill_id="implement-task",
+            manifest_path=switch_runtime.DEFAULT_MANIFEST,
+        )
+
+    def test_runtime_kernel_persist_facade_delegates(self) -> None:
+        resolved = {"ok": True}
+        result = {"execution_summary": "ok", "artifact_content": {"done": True}}
+        sentinel = {"ok": True, "delegate": "persist"}
+        with patch("runtime_kernel.persist.persist_switch_request", return_value=sentinel) as mock_delegate:
+            payload = switch_runtime.persist_switch(
+                resolved,
+                skill_id="implement-task",
+                result=result,
+            )
+
+        self.assertIs(payload, sentinel)
+        mock_delegate.assert_called_once_with(
+            resolved,
+            skill_id="implement-task",
+            result=result,
+        )
+
+
 class EnvStoreRetiredFieldTests(unittest.TestCase):
     def test_validate_track_rejects_legacy_artifact_ids_field(self) -> None:
         payload = {

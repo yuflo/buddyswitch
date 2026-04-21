@@ -430,7 +430,7 @@ def _rebuild_selected_inputs_for_execution(
     return [item for item in raw_inputs if isinstance(item, dict)]
 
 
-def prepare_execution_payload(
+def _legacy_prepare_execution_payload(
     resolved: dict[str, Any],
     *,
     skill_id: str,
@@ -498,6 +498,21 @@ def prepare_execution_payload(
             "Do not reconstruct the skill manually from disk after packet generation.",
         ],
     }
+
+
+def prepare_execution_payload(
+    resolved: dict[str, Any],
+    *,
+    skill_id: str,
+    manifest_path: Path = DEFAULT_MANIFEST,
+) -> dict[str, Any]:
+    from runtime_kernel.prepare_execution import prepare_execution_request
+
+    return prepare_execution_request(
+        resolved,
+        skill_id=skill_id,
+        manifest_path=manifest_path,
+    )
 
 
 def _track_object_path(track_id: str) -> str:
@@ -692,7 +707,7 @@ def _build_selection_contexts_by_skill(
     return artifact_selection_by_skill, run_instructions_by_skill
 
 
-def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
+def _legacy_resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
     parsed = parse_switch(text, manifest_path=manifest_path)
     if not parsed.get("ok"):
@@ -823,6 +838,12 @@ def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[st
         ),
         "run_instructions_by_skill": run_instructions_by_skill,
     }
+
+
+def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
+    from runtime_kernel.resolve import resolve_switch_request
+
+    return resolve_switch_request(text, manifest_path=manifest_path)
 
 
 def _read_json_input(source: str, *, stdin_text: str | None = None) -> dict[str, Any]:
@@ -1252,7 +1273,7 @@ def _persist_artifact_skill(
     }
 
 
-def persist_switch(
+def _legacy_persist_switch(
     resolved: dict[str, Any],
     *,
     skill_id: str | None,
@@ -1308,6 +1329,21 @@ def persist_switch(
                 f"{exc} (created task_id: {created_task_id_for_recovery}; recover with {recovery_switch})"
             ) from exc
         raise
+
+
+def persist_switch(
+    resolved: dict[str, Any],
+    *,
+    skill_id: str | None,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    from runtime_kernel.persist import persist_switch_request
+
+    return persist_switch_request(
+        resolved,
+        skill_id=skill_id,
+        result=result,
+    )
 
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
