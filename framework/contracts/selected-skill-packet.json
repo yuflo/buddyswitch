@@ -6,6 +6,11 @@
     "selected_skill_packet",
     "host_next_actions"
   ],
+  "response_field_types": {
+    "ok": "boolean",
+    "selected_skill_packet": "object",
+    "host_next_actions": "string-array"
+  },
   "packet_key_order": [
     "skill_id",
     "buddy",
@@ -43,6 +48,10 @@
         "name": "string",
         "path": "repo-relative-path",
         "contents": "markdown-string"
+      },
+      "path_constraints": {
+        "prefix": "buddyswitch/skills/",
+        "suffix": "/SKILL.md"
       }
     },
     "selected_input_item": {

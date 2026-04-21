@@ -97,7 +97,7 @@
         "status": "string",
         "track_id": "string-or-null",
         "artifact_ids": "string-array",
-        "artifact_slots": "object",
+        "artifact_slots": "artifact-slot-map",
         "run_ids": "string-array",
         "latest_run_id": "string",
         "summary": "string",
@@ -107,6 +107,16 @@
         "file_name": "basename",
         "current_artifacts": "artifact-map",
         "missing": "boolean"
+      },
+      "artifact_slot_entry": {
+        "key_order": [
+          "current_artifact_id",
+          "revision_count"
+        ],
+        "field_types": {
+          "current_artifact_id": "string",
+          "revision_count": "integer"
+        }
       }
     },
     "artifact": {
@@ -182,7 +192,7 @@
         "track_title": "string-or-null",
         "track_action": "string-or-null",
         "execution_summary": "string-or-null",
-        "reference_switches": "object",
+        "reference_switches": "string-map",
         "related_run_ids": "string-array",
         "recommended_switch": "string-or-null",
         "updated_at": "string",
