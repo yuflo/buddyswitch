@@ -290,6 +290,7 @@ exit 0
             self.assertIn("reset --yes", help_result.stdout)
             self.assertIn("browser status", help_result.stdout)
             self.assertIn("browser ensure", help_result.stdout)
+            self.assertIn("workspace ensure", help_result.stdout)
             self.assertNotIn("install-mcp", help_result.stdout)
 
             launch_result = subprocess.run(
@@ -375,6 +376,72 @@ exit 0
             )
             self.assertEqual(blocked_reset.returncode, 3)
             self.assertTrue(shared_root.exists(), "active browser marker should block reset")
+
+    def test_workspace_ensure_is_blocked_when_active_launcher_marker_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            run_dir = shared_root / "run"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "launcher-current.pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            blocked_ensure = subprocess.run(
+                [str(LAUNCHER), "workspace", "ensure"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(blocked_ensure.returncode, 3)
+            self.assertIn("active buddyswitch-codex instance", blocked_ensure.stderr)
+            self.assertFalse((shared_root / "workspace").exists(), "blocked ensure must not create the workspace")
+
+    def test_workspace_ensure_restores_runtime_agents_and_preserves_runtime_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            workspace_dir = shared_root / "workspace"
+            runtime_artifact = workspace_dir / "buddyswitch" / "objects" / "artifacts" / "artifact-demo.json"
+            runtime_run = workspace_dir / "buddyswitch" / "content" / "runs" / "run-demo.json"
+            raw_dump = workspace_dir / "runs" / "raw" / "dump.json"
+
+            (workspace_dir / ".git").mkdir(parents=True, exist_ok=True)
+            runtime_artifact.parent.mkdir(parents=True, exist_ok=True)
+            runtime_run.parent.mkdir(parents=True, exist_ok=True)
+            raw_dump.parent.mkdir(parents=True, exist_ok=True)
+            runtime_artifact.write_text('{"artifact_id":"artifact-demo"}\n', encoding="utf-8")
+            runtime_run.write_text('{"run_id":"run-demo"}\n', encoding="utf-8")
+            raw_dump.write_text('{"raw":true}\n', encoding="utf-8")
+            (workspace_dir / "AGENTS.md").write_text("# Wrong Header\n", encoding="utf-8")
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            ensure_result = subprocess.run(
+                [str(LAUNCHER), "workspace", "ensure"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(
+                ensure_result.returncode,
+                0,
+                msg=f"workspace ensure failed\nstdout:\n{ensure_result.stdout}\nstderr:\n{ensure_result.stderr}",
+            )
+            self.assertTrue((workspace_dir / ".git").exists(), "workspace ensure should leave a git worktree behind")
+            first_line = (workspace_dir / "AGENTS.md").read_text(encoding="utf-8").splitlines()[0]
+            self.assertEqual(first_line, "# BuddySwitch Runtime Workspace")
+            self.assertEqual(runtime_artifact.read_text(encoding="utf-8"), '{"artifact_id":"artifact-demo"}\n')
+            self.assertEqual(runtime_run.read_text(encoding="utf-8"), '{"run_id":"run-demo"}\n')
+            self.assertEqual(raw_dump.read_text(encoding="utf-8"), '{"raw":true}\n')
 
     def test_reset_rejects_unsafe_shared_root(self) -> None:
         with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as unsafe_root:

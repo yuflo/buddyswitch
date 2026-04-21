@@ -119,7 +119,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 self.assertEqual(payload["codex_home"], str(expected_codex_home))
                 self.assertEqual(payload["xdg_config_home"], str(expected_home / ".config"))
 
-    def test_browser_ensure_state_skeleton_creates_runtime_workspace(self) -> None:
+    def test_browser_ensure_does_not_create_runtime_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -156,19 +156,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 msg=f"browser ensure failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
             )
             workspace_dir = source_home_path / ".codex-buddyswitch" / "workspace"
-            self.assertTrue(workspace_dir.exists(), "browser ensure should create runtime workspace skeleton")
-            for relative_dir in (
-                "runs/raw",
-                "projects/app/.runtime",
-                "buddyswitch/objects/tracks",
-                "buddyswitch/objects/tasks",
-                "buddyswitch/objects/artifacts",
-                "buddyswitch/content/runs",
-            ):
-                self.assertTrue(
-                    (workspace_dir / relative_dir).is_dir(),
-                    f"browser ensure should materialize runtime state dir {relative_dir}",
-                )
+            self.assertFalse(workspace_dir.exists(), "browser ensure should not create the runtime workspace")
             payloads = [
                 json.loads(line)
                 for line in capture_path.read_text(encoding="utf-8").splitlines()

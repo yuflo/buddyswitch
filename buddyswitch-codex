@@ -27,12 +27,14 @@ Usage:
   buddyswitch-codex reset --yes
   buddyswitch-codex browser status [--port <port>] [--profile-dir <dir>]
   buddyswitch-codex browser ensure [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex workspace ensure
   buddyswitch-codex help
 
 Commands:
   start   Launch codex in the shared BuddySwitch environment (default behavior)
   reset   Remove the shared BuddySwitch environment (requires --yes)
   browser Manage browser cockpit setup (status/ensure)
+  workspace Repair the execution workspace shell (ensure)
   help    Show this help message
 
 Environment:
@@ -53,8 +55,8 @@ EOF
 }
 
 start_codex() {
-  buddyswitch_browser_bootstrap
   buddyswitch_workspace_prepare_execution_worktree
+  buddyswitch_browser_bootstrap
 
   local marker_path
   marker_path="$(buddyswitch_write_launcher_marker)"
@@ -62,6 +64,54 @@ start_codex() {
 
   cd "${BUDDYSWITCH_WORKSPACE_DIR}"
   buddyswitch_run_codex "$@"
+}
+
+workspace_usage() {
+  cat <<EOF
+Usage:
+  buddyswitch-codex workspace ensure
+  buddyswitch-codex workspace help
+
+Commands:
+  ensure  Repair the launcher execution workspace shell.
+  help    Show this help message.
+EOF
+}
+
+workspace_ensure() {
+  local active_count
+  active_count="$(buddyswitch_count_active_launchers)"
+  if [[ "${active_count}" -gt 0 ]]; then
+    echo "Workspace ensure blocked: ${active_count} active buddyswitch-codex instance(s) detected." >&2
+    echo "Close active launcher sessions and retry." >&2
+    return 3
+  fi
+
+  buddyswitch_workspace_prepare_execution_worktree
+  echo "Workspace ready: ${BUDDYSWITCH_WORKSPACE_DIR}"
+}
+
+workspace_main() {
+  local command="${1:-ensure}"
+  case "${command}" in
+    help|-h|--help)
+      workspace_usage
+      ;;
+    ensure)
+      shift || true
+      if [[ $# -gt 0 ]]; then
+        echo "Unknown workspace option: $1" >&2
+        workspace_usage >&2
+        return 2
+      fi
+      workspace_ensure
+      ;;
+    *)
+      echo "Unknown workspace command: ${command}" >&2
+      workspace_usage >&2
+      return 2
+      ;;
+  esac
 }
 
 reset_shared_env() {
@@ -126,6 +176,10 @@ main() {
     browser)
       shift || true
       buddyswitch_browser_main "$@"
+      ;;
+    workspace)
+      shift || true
+      workspace_main "$@"
       ;;
     *)
       start_codex "$@"

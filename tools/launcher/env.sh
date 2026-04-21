@@ -55,7 +55,6 @@ EOF
     cp "${BUDDYSWITCH_SOURCE_CODEX_HOME}/auth.json" "${BUDDYSWITCH_CODEX_HOME}/auth.json"
   fi
 
-  buddyswitch_workspace_prepare_execution_worktree
 }
 
 buddyswitch_codex_config_path() {

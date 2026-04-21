@@ -426,18 +426,22 @@ Use the default browser MCP for general public browsing:
 codex mcp add chrome-devtools -- npx chrome-devtools-mcp@latest
 ```
 
-BuddySwitch launcher sessions now bootstrap both browser capabilities automatically when you run:
+BuddySwitch launcher sessions now bootstrap the execution workspace shell and browser capabilities automatically when you run:
 
 ```bash
 ./buddyswitch-codex start
 ```
 
-Use the browser subcommands only for diagnostics or manual repair:
+Repair commands are split by responsibility:
 
 ```bash
 ./buddyswitch-codex browser status
 ./buddyswitch-codex browser ensure
+./buddyswitch-codex workspace ensure
 ```
+
+- `browser ensure` only repairs the shared browser cockpit and browser MCP setup.
+- `workspace ensure` only repairs the launcher execution workspace shell. It refuses to run while active launcher sessions exist and it preserves runtime outputs under `buddyswitch/objects/**`, `buddyswitch/content/runs/**`, and `runs/raw/**`.
 
 Default shared browser profile path:
 

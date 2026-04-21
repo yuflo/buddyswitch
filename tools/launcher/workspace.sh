@@ -89,8 +89,52 @@ buddyswitch_workspace_is_valid_execution_worktree() {
   [[ "${workspace_common}" == "${repo_common}" ]]
 }
 
+buddyswitch_workspace_runtime_output_paths() {
+  cat <<'EOF'
+buddyswitch/objects/tracks
+buddyswitch/objects/tasks
+buddyswitch/objects/artifacts
+buddyswitch/content/runs
+runs/raw
+EOF
+}
+
+buddyswitch_workspace_stage_runtime_outputs() {
+  local staging_root="$1"
+  local workspace_dir relative_path source_path staged_path
+
+  workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
+  while IFS= read -r relative_path; do
+    source_path="${workspace_dir}/${relative_path}"
+    staged_path="${staging_root}/${relative_path}"
+    if [[ ! -e "${source_path}" ]]; then
+      continue
+    fi
+    mkdir -p "$(dirname "${staged_path}")"
+    mv "${source_path}" "${staged_path}"
+  done < <(buddyswitch_workspace_runtime_output_paths)
+}
+
+buddyswitch_workspace_restore_runtime_outputs() {
+  local staging_root="$1"
+  local workspace_dir relative_path staged_path target_path
+
+  workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
+  while IFS= read -r relative_path; do
+    staged_path="${staging_root}/${relative_path}"
+    target_path="${workspace_dir}/${relative_path}"
+    if [[ ! -e "${staged_path}" ]]; then
+      continue
+    fi
+    rm -rf "${target_path}"
+    mkdir -p "$(dirname "${target_path}")"
+    mv "${staged_path}" "${target_path}"
+  done < <(buddyswitch_workspace_runtime_output_paths)
+}
+
 buddyswitch_workspace_ensure_execution_worktree() {
-  local workspace_dir repo_root
+  local workspace_dir repo_root staging_root
+  local cleanup_staging=0
 
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
   repo_root="$(buddyswitch_workspace_repo_root)"
@@ -101,10 +145,21 @@ buddyswitch_workspace_ensure_execution_worktree() {
   fi
 
   mkdir -p "${BUDDYSWITCH_SHARED_ROOT}"
+  if [[ -d "${workspace_dir}" ]]; then
+    staging_root="$(mktemp -d "${BUDDYSWITCH_SHARED_ROOT}/workspace-outputs.XXXXXX")"
+    cleanup_staging=1
+    buddyswitch_workspace_stage_runtime_outputs "${staging_root}"
+  fi
+
   git -C "${repo_root}" worktree remove --force "${workspace_dir}" >/dev/null 2>&1 || true
   rm -rf "${workspace_dir}"
   git -C "${repo_root}" worktree prune >/dev/null 2>&1 || true
   git -C "${repo_root}" worktree add --detach "${workspace_dir}" HEAD >/dev/null
+
+  if [[ "${cleanup_staging}" -eq 1 ]]; then
+    buddyswitch_workspace_restore_runtime_outputs "${staging_root}"
+    rm -rf "${staging_root}"
+  fi
 }
 
 buddyswitch_workspace_install_runtime_agents() {
