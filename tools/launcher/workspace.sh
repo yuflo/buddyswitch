@@ -30,6 +30,26 @@ buddyswitch_workspace_init_defaults() {
   export BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE="${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE:-${default_template}}"
 }
 
+buddyswitch_workspace_validate_workspace_dir() {
+  local workspace_dir shared_root normalized_workspace normalized_shared_root
+
+  workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR:-}"
+  shared_root="${BUDDYSWITCH_SHARED_ROOT:-}"
+  normalized_workspace="${workspace_dir%/}"
+  normalized_shared_root="${shared_root%/}"
+
+  case "${normalized_workspace}" in
+    "${normalized_shared_root}" | "${normalized_shared_root}/"*)
+      return 0
+      ;;
+  esac
+
+  echo "workspace dir must be under BUDDYSWITCH_SHARED_ROOT" >&2
+  echo "workspace: ${normalized_workspace}" >&2
+  echo "shared root: ${normalized_shared_root}" >&2
+  return 1
+}
+
 buddyswitch_workspace_is_valid_execution_worktree() {
   local workspace_dir repo_common workspace_common
 
@@ -46,6 +66,7 @@ buddyswitch_workspace_ensure_execution_worktree() {
 
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
   repo_root="$(buddyswitch_workspace_repo_root)"
+  buddyswitch_workspace_validate_workspace_dir
 
   if buddyswitch_workspace_is_valid_execution_worktree; then
     return 0
