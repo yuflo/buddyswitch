@@ -24,15 +24,11 @@ The interface must not:
 
 ## Data Source
 
-The local server serves live data at `/api/workspace` using:
+The local server serves live data at `/api/workspace`.
 
 Canonical machine-readable contract source: `framework/contracts/workspace-projection.json`.
 
-- `buddyswitch/manifest.toml`
-- `buddyswitch/objects/tracks/*.json`
-- `buddyswitch/objects/tasks/*.json`
-- `buddyswitch/objects/artifacts/*.json` as the artifact source of truth
-- `buddyswitch/content/runs/*.json` as canonical run history
+The exact payload shape, per-entity projection row shapes, and source mapping are frozen in that contract file.
 
 No static snapshot fallback is supported.
 

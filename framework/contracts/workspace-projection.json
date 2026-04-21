@@ -2,7 +2,7 @@
   "contract_id": "workspace-projection",
   "contract_version": "2026-04-21",
   "endpoint": "/api/workspace",
-  "top_level_fields": [
+  "top_level_key_order": [
     "generated_at",
     "manifest_path",
     "objects_root",
@@ -22,6 +22,103 @@
   ],
   "read_only": true,
   "no_snapshot_fallback": true,
-  "task_view_slot_field": "current_artifacts",
-  "track_view_missing_reference_field": "missing_task_ids"
+  "view_shapes": {
+    "buddy": {
+      "key_order": [
+        "id",
+        "label",
+        "scope"
+      ]
+    },
+    "track": {
+      "key_order": [
+        "id",
+        "title",
+        "status",
+        "current_buddy",
+        "next_buddy",
+        "task_ids",
+        "summary",
+        "updated_at",
+        "tasks",
+        "missing_task_ids"
+      ]
+    },
+    "task": {
+      "key_order": [
+        "id",
+        "buddy",
+        "title",
+        "status",
+        "track_id",
+        "artifact_ids",
+        "artifact_slots",
+        "run_ids",
+        "latest_run_id",
+        "summary",
+        "created_at",
+        "updated_at",
+        "object_path",
+        "file_name",
+        "current_artifacts",
+        "missing"
+      ]
+    },
+    "artifact": {
+      "key_order": [
+        "id",
+        "title",
+        "task_id",
+        "buddy",
+        "skill_id",
+        "slot",
+        "revision",
+        "supersedes_artifact_id",
+        "is_current",
+        "source_run_id",
+        "summary",
+        "content",
+        "created_at",
+        "updated_at",
+        "object_path",
+        "file_name",
+        "missing"
+      ]
+    },
+    "run_audit": {
+      "key_order": [
+        "run_id",
+        "path",
+        "buddy",
+        "task_id",
+        "task_title",
+        "demand",
+        "skill_id",
+        "artifact_ids",
+        "track_id",
+        "track_title",
+        "track_action",
+        "execution_summary",
+        "reference_switches",
+        "related_run_ids",
+        "recommended_switch",
+        "updated_at",
+        "status"
+      ]
+    },
+    "run_audit_invalid": {
+      "key_order": [
+        "run_id",
+        "path",
+        "status",
+        "updated_at"
+      ]
+    }
+  },
+  "derived_invariants": {
+    "task_view_slot_field": "current_artifacts",
+    "track_view_missing_reference_field": "missing_task_ids",
+    "current_artifacts_value_shape": "artifact",
+    "tracks_embed_task_views": true
+  }
 }

@@ -764,12 +764,44 @@ class RepoConsistencyTests(unittest.TestCase):
             "selected-skill-packet": PARALLEL_CONTRACT_FILES[1],
             "workspace-projection": PARALLEL_CONTRACT_FILES[2],
         }
+        loaded_contracts: dict[str, dict[str, object]] = {}
         for contract_id, path in expected_contract_ids.items():
             with self.subTest(contract=contract_id):
                 self.assertTrue(path.exists(), msg=f"missing contract file {path.relative_to(ROOT)}")
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual(payload.get("contract_id"), contract_id)
                 self.assertIn("contract_version", payload)
+                loaded_contracts[contract_id] = payload
+
+        selected_packet = loaded_contracts["selected-skill-packet"]
+        self.assertIn("packet_key_order", selected_packet)
+        self.assertIn("nested_shapes", selected_packet)
+        self.assertIn("host_next_actions", selected_packet)
+        self.assertIn("skill_instructions", selected_packet["nested_shapes"])
+        self.assertIn("selected_input_item", selected_packet["nested_shapes"])
+        self.assertIn("execution_constraints", selected_packet["nested_shapes"])
+        self.assertIn("tool_scope", selected_packet["nested_shapes"])
+        self.assertIn("execution_steps", selected_packet["nested_shapes"])
+        self.assertIn("market_required_values", selected_packet["nested_shapes"]["execution_constraints"])
+        self.assertIn("market_required_values", selected_packet["nested_shapes"]["tool_scope"])
+        self.assertIn("market_required_values", selected_packet["nested_shapes"]["execution_steps"])
+
+        workspace_projection = loaded_contracts["workspace-projection"]
+        self.assertIn("top_level_key_order", workspace_projection)
+        self.assertIn("view_shapes", workspace_projection)
+        self.assertIn("derived_invariants", workspace_projection)
+        self.assertIn("buddy", workspace_projection["view_shapes"])
+        self.assertIn("artifact", workspace_projection["view_shapes"])
+        self.assertIn("task", workspace_projection["view_shapes"])
+        self.assertIn("track", workspace_projection["view_shapes"])
+        self.assertIn("run_audit", workspace_projection["view_shapes"])
+        self.assertIn("key_order", workspace_projection["view_shapes"]["buddy"])
+        self.assertIn("key_order", workspace_projection["view_shapes"]["artifact"])
+        self.assertIn("key_order", workspace_projection["view_shapes"]["task"])
+        self.assertIn("key_order", workspace_projection["view_shapes"]["track"])
+        self.assertIn("key_order", workspace_projection["view_shapes"]["run_audit"])
+        self.assertIn("task_view_slot_field", workspace_projection["derived_invariants"])
+        self.assertIn("track_view_missing_reference_field", workspace_projection["derived_invariants"])
 
     def test_switch_and_interface_specs_reference_parallel_contract_files(self) -> None:
         switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")

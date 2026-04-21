@@ -1,7 +1,12 @@
 {
   "contract_id": "selected-skill-packet",
   "contract_version": "2026-04-21",
-  "packet_fields": [
+  "response_key_order": [
+    "ok",
+    "selected_skill_packet",
+    "host_next_actions"
+  ],
+  "packet_key_order": [
     "skill_id",
     "buddy",
     "instruction_path",
@@ -12,15 +17,85 @@
     "tool_scope",
     "execution_steps"
   ],
-  "host_execution_requirements": [
-    "host executes selected_skill_packet in-session",
-    "inject selected_skill_packet.skill_instructions verbatim",
-    "treat selected_skill_packet.execution_steps as ordered requirements",
-    "apply selected_skill_packet.tool_scope before run"
-  ],
-  "market_execution_boundary": {
-    "execution_constraints": "chrome-devtools-cockpit/browser-native/no-silent-degrade",
-    "tool_scope": "declarative host-facing tool boundary",
-    "execution_steps": "ordered browser workflow requirements"
-  }
+  "nested_shapes": {
+    "skill_instructions": {
+      "key_order": [
+        "name",
+        "path",
+        "contents"
+      ]
+    },
+    "selected_input_item": {
+      "key_order": [
+        "slot",
+        "artifact_id",
+        "revision",
+        "selection_reason",
+        "task_id",
+        "buddy"
+      ]
+    },
+    "execution_constraints": {
+      "key_order": [
+        "execution_mode",
+        "browser_mode",
+        "browser_profile",
+        "browser_executor",
+        "discovery_mode",
+        "login_policy",
+        "fallback_policy",
+        "session_continuity",
+        "evidence_capture_level"
+      ],
+      "market_required_values": {
+        "execution_mode": "browser-cockpit-native",
+        "browser_mode": "headed-only",
+        "browser_profile": "shared-browser",
+        "browser_executor": "chrome-devtools-cockpit",
+        "discovery_mode": "browser-native",
+        "login_policy": "mandatory-takeover",
+        "fallback_policy": "no-silent-degrade",
+        "session_continuity": "shared-cockpit",
+        "evidence_capture_level": "medium"
+      }
+    },
+    "tool_scope": {
+      "key_order": [
+        "profile",
+        "mode",
+        "allowed_tool_servers",
+        "downgrade_policy",
+        "temporary_allowed_tool_servers",
+        "downgrade_reason"
+      ],
+      "market_required_values": {
+        "profile": "market-browser-native",
+        "mode": "allowlist",
+        "allowed_tool_servers": [
+          "chrome-devtools-cockpit"
+        ],
+        "downgrade_policy": "user-approved-one-off",
+        "temporary_allowed_tool_servers": [
+          "web"
+        ],
+        "downgrade_reason": "browser-native-blocked"
+      }
+    },
+    "execution_steps": {
+      "market_required_values": [
+        "Use the chrome-devtools-cockpit browser before any market research.",
+        "Read selected inputs by slot before other work.",
+        "Perform discovery inside the browser: browse search results, destination pages, detail pages, and comment threads before synthesizing.",
+        "Pause for takeover if a critical source requires login.",
+        "If browser access remains blocked, ask for explicit user approval before any one-time downgrade.",
+        "Do not continue with snippet-only or text-only research.",
+        "Only after the steps above should you synthesize findings into the structured result."
+      ]
+    }
+  },
+  "host_next_actions": [
+    "Inject selected_skill_packet.skill_instructions verbatim into the current host turn.",
+    "Treat selected_skill_packet.execution_steps as ordered requirements.",
+    "Do not reconstruct the skill manually from disk after packet generation."
+  ]
 }

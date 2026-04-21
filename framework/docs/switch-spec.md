@@ -8,23 +8,7 @@ switch <buddy>(<task-id>) -> <track-id>: <demand>
 
 Canonical machine-readable contract source: `framework/contracts/switch-grammar.json`.
 
-Supported forms:
-
-1. `switch <buddy>: <demand>`
-2. `switch <buddy> -> <track-id>: <demand>`
-3. `switch <buddy>(<task-id>): <demand>`
-4. `switch <buddy>(<task-id>) -> <track-id>: <demand>`
-
-Rules:
-
-1. Message must start with `switch`.
-2. `<buddy>` must be one token.
-3. Optional `<task-id>` is written in parentheses immediately after buddy.
-4. Optional `<track-id>` is written after `->`.
-5. `:` is required.
-6. `<demand>` must be non-empty.
-7. Text after `:` is demand text, not a task object. When no task id is supplied, `resolve` stays in create mode and `persist` creates the task.
-8. Parser and router may normalize minor CLI whitespace variation around `:`, `->`, and task parentheses when intent remains unambiguous.
+The canonical supported forms, parse rules, and parse error vocabulary are frozen in that contract file.
 
 ## Buddy Validation
 
@@ -119,17 +103,8 @@ Market runtime note:
 `prepare-execution` is the canonical step between `resolve` and `persist`.
 It converts the chosen skill into `selected_skill_packet`.
 Canonical machine-readable contract source: `framework/contracts/selected-skill-packet.json`.
-The packet fields are stable:
-
-- `skill_id`
-- `buddy`
-- `instruction_path`
-- `skill_instructions`
-- `selected_inputs`
-- `output_schema_path`
-- `execution_constraints`
-- `tool_scope`
-- `execution_steps`
+The exact packet field list, nested packet shape, and market packet invariants are frozen in that contract file.
+That contract also freezes `output_schema_path` as part of the host-facing packet ABI.
 
 `execution_steps` is the ordered human-facing execution contract for the host session.
 For market runs, `execution_constraints` carries the Chrome MCP/browser-native/no-silent-degrade contract, `tool_scope` carries the declarative host-facing tool boundary, and `execution_steps` carries the ordered browsing workflow the host must follow.
