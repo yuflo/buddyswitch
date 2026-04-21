@@ -871,7 +871,7 @@ class RepoConsistencyTests(unittest.TestCase):
         console_text = (ROOT / "framework" / "console" / "app.js").read_text(encoding="utf-8")
 
         if "object_path" not in track_fields:
-            self.assertNotIn('renderKeyValue(sourceGrid, "Track", track.object_path ||', console_text)
+            self.assertNotIn("track.object_path", console_text)
 
 
 if __name__ == "__main__":
