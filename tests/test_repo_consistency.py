@@ -862,6 +862,17 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("runtime object reads", text.lower())
         self.assertIn("runtime write paths", text.lower())
 
+    def test_console_does_not_expect_track_object_path_before_contract_adds_it(self) -> None:
+        workspace_projection = json.loads(
+            (ROOT / "framework" / "contracts" / "workspace-projection.json").read_text(encoding="utf-8")
+        )
+        track_shape = workspace_projection["view_shapes"]["track"]
+        track_fields = track_shape["key_order"]
+        console_text = (ROOT / "framework" / "console" / "app.js").read_text(encoding="utf-8")
+
+        if "object_path" not in track_fields:
+            self.assertNotIn('renderKeyValue(sourceGrid, "Track", track.object_path ||', console_text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1068,7 +1068,9 @@ function renderSourceDetails(track) {
   const sourceGrid = createEl("div", "source-grid");
   renderKeyValue(sourceGrid, "Manifest", workspace.manifest_path || "none");
   renderKeyValue(sourceGrid, "Objects root", workspace.objects_root || "none");
-  renderKeyValue(sourceGrid, "Track", track.object_path || "none");
+  if (track.object_path) {
+    renderKeyValue(sourceGrid, "Track", track.object_path);
+  }
   if (selectedTask) {
     renderKeyValue(sourceGrid, "Task", selectedTask.object_path || "none");
   }
