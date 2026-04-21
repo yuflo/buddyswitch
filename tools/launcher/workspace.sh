@@ -152,9 +152,21 @@ buddyswitch_workspace_ensure_execution_worktree() {
   fi
 
   git -C "${repo_root}" worktree remove --force "${workspace_dir}" >/dev/null 2>&1 || true
-  rm -rf "${workspace_dir}"
+  if ! rm -rf "${workspace_dir}"; then
+    if [[ "${cleanup_staging}" -eq 1 ]]; then
+      buddyswitch_workspace_restore_runtime_outputs "${staging_root}"
+      rm -rf "${staging_root}"
+    fi
+    return 1
+  fi
   git -C "${repo_root}" worktree prune >/dev/null 2>&1 || true
-  git -C "${repo_root}" worktree add --detach "${workspace_dir}" HEAD >/dev/null
+  if ! git -C "${repo_root}" worktree add --detach "${workspace_dir}" HEAD >/dev/null; then
+    if [[ "${cleanup_staging}" -eq 1 ]]; then
+      buddyswitch_workspace_restore_runtime_outputs "${staging_root}"
+      rm -rf "${staging_root}"
+    fi
+    return 1
+  fi
 
   if [[ "${cleanup_staging}" -eq 1 ]]; then
     buddyswitch_workspace_restore_runtime_outputs "${staging_root}"

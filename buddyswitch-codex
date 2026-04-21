@@ -55,12 +55,13 @@ EOF
 }
 
 start_codex() {
-  buddyswitch_workspace_prepare_execution_worktree
-  buddyswitch_browser_bootstrap
-
   local marker_path
+  mkdir -p "${BUDDYSWITCH_RUN_STATE_DIR}"
   marker_path="$(buddyswitch_write_launcher_marker)"
   trap "buddyswitch_cleanup_pid_marker '${marker_path}'" EXIT INT TERM HUP
+
+  buddyswitch_workspace_prepare_execution_worktree
+  buddyswitch_browser_bootstrap
 
   cd "${BUDDYSWITCH_WORKSPACE_DIR}"
   buddyswitch_run_codex "$@"

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -83,6 +84,32 @@ if [[ -n "${BUDDYSWITCH_TEST_BROWSER_READY_FILE:-}" ]]; then
   touch "${BUDDYSWITCH_TEST_BROWSER_READY_FILE}"
 fi
 exit 0
+""",
+        )
+
+    def _write_fake_git(self, path: Path) -> None:
+        real_git = shutil.which("git")
+        self.assertIsNotNone(real_git, "git must be available for launcher tests")
+        self._write_exec(
+            path,
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+real_git={real_git!r}
+
+if [[ -n "${{BUDDYSWITCH_TEST_GIT_CAPTURE:-}}" && " $* " == *" worktree add "* ]]; then
+  marker_state="absent"
+  if ls "${{BUDDYSWITCH_RUN_STATE_DIR}}"/launcher-*.pid >/dev/null 2>&1; then
+    marker_state="present"
+  fi
+  printf '%s\\t%s\\n' "$*" "$marker_state" >> "${{BUDDYSWITCH_TEST_GIT_CAPTURE}}"
+fi
+
+if [[ "${{BUDDYSWITCH_FAIL_WORKTREE_ADD:-0}}" == "1" && " $* " == *" worktree add "* ]]; then
+  echo "simulated worktree add failure" >&2
+  exit 1
+fi
+
+exec "$real_git" "$@"
 """,
         )
 
@@ -235,6 +262,65 @@ exit 0
             self.assertTrue(agents_md.exists(), "runtime workspace should include AGENTS.md")
             first_line = agents_md.read_text(encoding="utf-8").splitlines()[0]
             self.assertEqual(first_line, "# BuddySwitch Runtime Workspace")
+
+    def test_start_writes_launcher_marker_before_workspace_bootstrap(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+            self._write_fake_git(fake_bin / "git")
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(temp_root_path / "browser-ready.flag")
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
+            env["BUDDYSWITCH_TEST_GIT_CAPTURE"] = str(temp_root_path / "git-calls.log")
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "start"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(
+                completed.returncode,
+                0,
+                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+            )
+
+            captures = (temp_root_path / "git-calls.log").read_text(encoding="utf-8").splitlines()
+            self.assertTrue(captures, "expected worktree add to be recorded")
+            self.assertTrue(
+                any(line.endswith("\tpresent") for line in captures),
+                "launcher marker should exist before workspace worktree bootstrap",
+            )
 
     def test_launcher_help_and_reset_flow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -442,6 +528,53 @@ exit 0
             self.assertEqual(runtime_artifact.read_text(encoding="utf-8"), '{"artifact_id":"artifact-demo"}\n')
             self.assertEqual(runtime_run.read_text(encoding="utf-8"), '{"run_id":"run-demo"}\n')
             self.assertEqual(raw_dump.read_text(encoding="utf-8"), '{"raw":true}\n')
+
+    def test_workspace_ensure_restores_runtime_outputs_when_worktree_rebuild_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            workspace_dir = shared_root / "workspace"
+            runtime_artifact = workspace_dir / "buddyswitch" / "objects" / "artifacts" / "artifact-demo.json"
+            runtime_run = workspace_dir / "buddyswitch" / "content" / "runs" / "run-demo.json"
+            raw_dump = workspace_dir / "runs" / "raw" / "dump.json"
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_git(fake_bin / "git")
+
+            (workspace_dir / ".git").mkdir(parents=True, exist_ok=True)
+            runtime_artifact.parent.mkdir(parents=True, exist_ok=True)
+            runtime_run.parent.mkdir(parents=True, exist_ok=True)
+            raw_dump.parent.mkdir(parents=True, exist_ok=True)
+            runtime_artifact.write_text('{"artifact_id":"artifact-demo"}\n', encoding="utf-8")
+            runtime_run.write_text('{"run_id":"run-demo"}\n', encoding="utf-8")
+            raw_dump.write_text('{"raw":true}\n', encoding="utf-8")
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_FAIL_WORKTREE_ADD"] = "1"
+
+            ensure_result = subprocess.run(
+                [str(LAUNCHER), "workspace", "ensure"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(ensure_result.returncode, 0)
+            self.assertIn("simulated worktree add failure", ensure_result.stderr)
+            self.assertEqual(runtime_artifact.read_text(encoding="utf-8"), '{"artifact_id":"artifact-demo"}\n')
+            self.assertEqual(runtime_run.read_text(encoding="utf-8"), '{"run_id":"run-demo"}\n')
+            self.assertEqual(raw_dump.read_text(encoding="utf-8"), '{"raw":true}\n')
+            self.assertEqual(
+                list(shared_root.glob("workspace-outputs.*")),
+                [],
+                "staged runtime outputs should not be left behind after a failed rebuild",
+            )
 
     def test_reset_rejects_unsafe_shared_root(self) -> None:
         with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as unsafe_root:
