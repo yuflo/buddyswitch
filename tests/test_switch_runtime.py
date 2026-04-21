@@ -187,6 +187,33 @@ class RuntimeKernelFacadeTests(unittest.TestCase):
         )
 
 
+class WorkspaceProjectionFacadeTests(unittest.TestCase):
+    def test_workspace_data_build_workspace_data_facade_delegates_to_runtime_store_projection(self) -> None:
+        sentinel = {"generated_at": "2026-04-21T00:00:00+08:00"}
+        with patch(
+            "runtime_store.projections.build_workspace_projection",
+            return_value=sentinel,
+        ) as mock_delegate:
+            payload = workspace_data.build_workspace_data()
+
+        self.assertIs(payload, sentinel)
+        mock_delegate.assert_called_once_with()
+
+    def test_workspace_data_runtime_store_projection_delegates_to_legacy_workspace_builder(self) -> None:
+        import runtime_store.projections as projections
+
+        sentinel = {"generated_at": "2026-04-21T00:00:00+08:00"}
+        with patch.object(
+            workspace_data,
+            "_legacy_build_workspace_data",
+            return_value=sentinel,
+        ) as mock_delegate:
+            payload = projections.build_workspace_projection()
+
+        self.assertIs(payload, sentinel)
+        mock_delegate.assert_called_once_with()
+
+
 class EnvStoreRetiredFieldTests(unittest.TestCase):
     def test_validate_track_rejects_legacy_artifact_ids_field(self) -> None:
         payload = {

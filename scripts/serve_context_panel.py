@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONSOLE_DIR = ROOT / "framework" / "console"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from workspace_data import build_workspace_data  # noqa: E402
+from runtime_store.projections import build_workspace_projection  # noqa: E402
 
 
 class ContextPanelHandler(SimpleHTTPRequestHandler):
@@ -45,7 +45,7 @@ class ContextPanelHandler(SimpleHTTPRequestHandler):
         super().do_HEAD()
 
     def send_workspace_json(self, include_body: bool = True) -> None:
-        data = build_workspace_data()
+        data = build_workspace_projection()
         body = json.dumps(data, ensure_ascii=True, indent=2).encode("utf-8")
 
         self.send_response(200)

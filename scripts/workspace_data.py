@@ -28,7 +28,7 @@ def task_object_path(task_id: str) -> str:
     return f"buddyswitch/objects/tasks/{task_id}.json"
 
 
-def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
+def _legacy_build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
     return {
         **artifact,
         "object_path": artifact_object_path(artifact["id"]),
@@ -37,7 +37,7 @@ def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _legacy_build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
     current_artifacts: dict[str, dict[str, Any]] = {}
     artifact_slots = task.get("artifact_slots", {})
     if isinstance(artifact_slots, dict):
@@ -59,7 +59,7 @@ def build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]
     }
 
 
-def build_track_views(
+def _legacy_build_track_views(
     tracks: list[dict[str, Any]],
     task_map: dict[str, dict[str, Any]],
     artifact_map: dict[str, dict[str, Any]],
@@ -103,7 +103,7 @@ def build_track_views(
     return rows
 
 
-def scan_run_audits() -> list[dict[str, Any]]:
+def _legacy_scan_run_audits() -> list[dict[str, Any]]:
     run_root = ROOT / "buddyswitch" / "content" / "runs"
     if not run_root.exists():
         return []
@@ -167,13 +167,13 @@ def scan_run_audits() -> list[dict[str, Any]]:
     return rows
 
 
-def build_workspace_data() -> dict[str, Any]:
+def _legacy_build_workspace_data() -> dict[str, Any]:
     manifest = load_manifest(DEFAULT_MANIFEST)
-    artifacts = [build_artifact_view(artifact) for artifact in list_artifacts()]
+    artifacts = [_legacy_build_artifact_view(artifact) for artifact in list_artifacts()]
     artifact_map = {artifact["id"]: artifact for artifact in artifacts}
-    tasks = [build_task_view(task, artifact_map) for task in list_tasks()]
+    tasks = [_legacy_build_task_view(task, artifact_map) for task in list_tasks()]
     task_map = {task["id"]: task for task in tasks}
-    tracks = build_track_views(list_tracks(), task_map, artifact_map)
+    tracks = _legacy_build_track_views(list_tracks(), task_map, artifact_map)
     tracked_task_ids = {
         task_id
         for track in tracks
@@ -199,5 +199,39 @@ def build_workspace_data() -> dict[str, Any]:
         "standalone_tasks": standalone_tasks,
         "tasks": tasks,
         "artifacts": artifacts,
-        "run_audits": scan_run_audits(),
+        "run_audits": _legacy_scan_run_audits(),
     }
+
+
+def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
+    from runtime_store.projections import build_artifact_view as _build_artifact_view
+
+    return _build_artifact_view(artifact)
+
+
+def build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    from runtime_store.projections import build_task_view as _build_task_view
+
+    return _build_task_view(task, artifact_map)
+
+
+def build_track_views(
+    tracks: list[dict[str, Any]],
+    task_map: dict[str, dict[str, Any]],
+    artifact_map: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    from runtime_store.projections import build_track_views as _build_track_views
+
+    return _build_track_views(tracks, task_map, artifact_map)
+
+
+def scan_run_audits() -> list[dict[str, Any]]:
+    from runtime_store.projections import scan_run_audits as _scan_run_audits
+
+    return _scan_run_audits()
+
+
+def build_workspace_data() -> dict[str, Any]:
+    from runtime_store.projections import build_workspace_projection
+
+    return build_workspace_projection()
