@@ -38,6 +38,26 @@ Task and track projections in the panel are slot-aware:
 - artifact lineage is represented through revision metadata
 - track summaries derive "latest material" from slot-aware current artifacts
 
+## UI Surface Boundary
+
+The UI surfaces are:
+
+- `framework/console/app.js`
+- `projects/app/main.js`
+
+These files are browser-layer entrypoints and must not reference runtime internals.
+
+Runtime internals that must not be referenced from UI surfaces include:
+
+- `env_store`
+- `runtime_store.repositories`
+- `runtime_store.projections`
+- `switch_runtime`
+- `workspace_data`
+
+The console UI reads runtime state only from `/api/workspace`.
+No direct runtime module imports, runtime object reads, or runtime write paths are allowed in browser code.
+
 ## Refresh Flow
 
 1. Start server: `python3 scripts/serve_context_panel.py`

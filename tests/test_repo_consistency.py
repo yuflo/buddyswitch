@@ -108,6 +108,17 @@ PARALLEL_CONTRACT_FILES = (
     ROOT / "framework" / "contracts" / "selected-skill-packet.json",
     ROOT / "framework" / "contracts" / "workspace-projection.json",
 )
+UI_SURFACE_FILES = (
+    ROOT / "framework" / "console" / "app.js",
+    ROOT / "projects" / "app" / "main.js",
+)
+UI_RUNTIME_INTERNAL_TOKENS = (
+    "env_store",
+    "runtime_store.repositories",
+    "runtime_store.projections",
+    "switch_runtime",
+    "workspace_data",
+)
 
 
 def _markdown_section(text: str, heading: str) -> str:
@@ -810,6 +821,30 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("framework/contracts/switch-grammar.json", switch_spec)
         self.assertIn("framework/contracts/selected-skill-packet.json", switch_spec)
         self.assertIn("framework/contracts/workspace-projection.json", interface_spec)
+
+    def test_ui_surface_scripts_do_not_reference_runtime_internal_modules(self) -> None:
+        for path in UI_SURFACE_FILES:
+            with self.subTest(surface=str(path.relative_to(ROOT))):
+                self.assertTrue(path.exists(), msg=f"missing ui surface {path.relative_to(ROOT)}")
+                text = path.read_text(encoding="utf-8")
+                for token in UI_RUNTIME_INTERNAL_TOKENS:
+                    self.assertNotIn(token, text, msg=f"{path.relative_to(ROOT)} should not reference {token}")
+
+        console_text = UI_SURFACE_FILES[0].read_text(encoding="utf-8")
+        self.assertIn("/api/workspace", console_text)
+
+    def test_interface_spec_locks_ui_surface_boundary_to_api_workspace(self) -> None:
+        text = (ROOT / "framework" / "docs" / "interface-spec.md").read_text(encoding="utf-8")
+
+        self.assertIn("framework/console/app.js", text)
+        self.assertIn("projects/app/main.js", text)
+        self.assertIn("/api/workspace", text)
+        self.assertIn("must not reference runtime internals", text.lower())
+        self.assertIn("env_store", text)
+        self.assertIn("runtime_store.repositories", text)
+        self.assertIn("runtime_store.projections", text)
+        self.assertIn("switch_runtime", text)
+        self.assertIn("workspace_data", text)
 
 
 if __name__ == "__main__":
