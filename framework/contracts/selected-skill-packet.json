@@ -17,13 +17,33 @@
     "tool_scope",
     "execution_steps"
   ],
+  "field_constraints": {
+    "instruction_path": {
+      "type": "repo-relative-path",
+      "prefix": "buddyswitch/skills/",
+      "suffix": "/SKILL.md"
+    },
+    "output_schema_path": {
+      "type": "repo-relative-path",
+      "prefix": "framework/schemas/"
+    },
+    "skill_instructions_contents": {
+      "type": "markdown-string",
+      "prefix": "# "
+    }
+  },
   "nested_shapes": {
     "skill_instructions": {
       "key_order": [
         "name",
         "path",
         "contents"
-      ]
+      ],
+      "field_types": {
+        "name": "string",
+        "path": "repo-relative-path",
+        "contents": "markdown-string"
+      }
     },
     "selected_input_item": {
       "key_order": [
@@ -33,7 +53,15 @@
         "selection_reason",
         "task_id",
         "buddy"
-      ]
+      ],
+      "field_types": {
+        "slot": "string",
+        "artifact_id": "string",
+        "revision": "integer-or-null",
+        "selection_reason": "string",
+        "task_id": "string",
+        "buddy": "string"
+      }
     },
     "execution_constraints": {
       "key_order": [
@@ -47,6 +75,17 @@
         "session_continuity",
         "evidence_capture_level"
       ],
+      "field_types": {
+        "execution_mode": "string",
+        "browser_mode": "string",
+        "browser_profile": "string",
+        "browser_executor": "string",
+        "discovery_mode": "string",
+        "login_policy": "string",
+        "fallback_policy": "string",
+        "session_continuity": "string",
+        "evidence_capture_level": "string"
+      },
       "market_required_values": {
         "execution_mode": "browser-cockpit-native",
         "browser_mode": "headed-only",
@@ -68,6 +107,14 @@
         "temporary_allowed_tool_servers",
         "downgrade_reason"
       ],
+      "field_types": {
+        "profile": "string",
+        "mode": "string",
+        "allowed_tool_servers": "string-array",
+        "downgrade_policy": "string",
+        "temporary_allowed_tool_servers": "string-array",
+        "downgrade_reason": "string"
+      },
       "market_required_values": {
         "profile": "market-browser-native",
         "mode": "allowlist",
@@ -82,6 +129,7 @@
       }
     },
     "execution_steps": {
+      "item_type": "string",
       "market_required_values": [
         "Use the chrome-devtools-cockpit browser before any market research.",
         "Read selected inputs by slot before other work.",

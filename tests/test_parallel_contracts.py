@@ -31,6 +31,49 @@ def _load_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _assert_type_case(test: unittest.TestCase, value: object, expected_type: str) -> None:
+    if expected_type == "string":
+        test.assertIsInstance(value, str)
+    elif expected_type == "string-or-null":
+        test.assertTrue(value is None or isinstance(value, str))
+    elif expected_type == "integer":
+        test.assertIsInstance(value, int)
+    elif expected_type == "integer-or-null":
+        test.assertTrue(value is None or isinstance(value, int))
+    elif expected_type == "boolean":
+        test.assertIsInstance(value, bool)
+    elif expected_type == "object":
+        test.assertIsInstance(value, dict)
+    elif expected_type == "string-array":
+        test.assertIsInstance(value, list)
+        test.assertTrue(all(isinstance(item, str) for item in value))
+    elif expected_type == "repo-relative-path":
+        test.assertIsInstance(value, str)
+        test.assertFalse(Path(value).is_absolute())
+    elif expected_type == "basename":
+        test.assertIsInstance(value, str)
+        test.assertEqual(Path(value).name, value)
+    elif expected_type == "artifact-map":
+        test.assertIsInstance(value, dict)
+    elif expected_type == "task-array":
+        test.assertIsInstance(value, list)
+    elif expected_type == "markdown-string":
+        test.assertIsInstance(value, str)
+        test.assertTrue(value.startswith("# "))
+    else:
+        raise AssertionError(f"unsupported expected type {expected_type!r}")
+
+
+def _assert_field_types(
+    test: unittest.TestCase,
+    payload: dict[str, object],
+    field_types: dict[str, str],
+) -> None:
+    for field, expected_type in field_types.items():
+        test.assertIn(field, payload)
+        _assert_type_case(test, payload[field], expected_type)
+
+
 class ParallelContractFreezeTests(unittest.TestCase):
     def test_switch_grammar_contract_surface(self) -> None:
         contract = _load_json(SWITCH_GRAMMAR_CONTRACT)
@@ -122,13 +165,46 @@ class SelectedSkillPacketContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
             list(packet["selected_inputs"][0].keys()),
             contract["nested_shapes"]["selected_input_item"]["key_order"],
         )
+        _assert_type_case(
+            self,
+            packet["instruction_path"],
+            contract["field_constraints"]["instruction_path"]["type"],
+        )
+        self.assertTrue(packet["instruction_path"].startswith(contract["field_constraints"]["instruction_path"]["prefix"]))
+        self.assertTrue(packet["instruction_path"].endswith(contract["field_constraints"]["instruction_path"]["suffix"]))
+        _assert_type_case(
+            self,
+            packet["output_schema_path"],
+            contract["field_constraints"]["output_schema_path"]["type"],
+        )
+        self.assertTrue(packet["output_schema_path"].startswith(contract["field_constraints"]["output_schema_path"]["prefix"]))
+        _assert_field_types(
+            self,
+            packet["skill_instructions"],
+            contract["nested_shapes"]["skill_instructions"]["field_types"],
+        )
+        _assert_field_types(
+            self,
+            packet["selected_inputs"][0],
+            contract["nested_shapes"]["selected_input_item"]["field_types"],
+        )
         self.assertEqual(
             list(packet["execution_constraints"].keys()),
             contract["nested_shapes"]["execution_constraints"]["key_order"],
         )
+        _assert_field_types(
+            self,
+            packet["execution_constraints"],
+            contract["nested_shapes"]["execution_constraints"]["field_types"],
+        )
         self.assertEqual(
             list(packet["tool_scope"].keys()),
             contract["nested_shapes"]["tool_scope"]["key_order"],
+        )
+        _assert_field_types(
+            self,
+            packet["tool_scope"],
+            contract["nested_shapes"]["tool_scope"]["field_types"],
         )
         self.assertEqual(
             packet["execution_constraints"],
@@ -142,6 +218,7 @@ class SelectedSkillPacketContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
             packet["execution_steps"],
             contract["nested_shapes"]["execution_steps"]["market_required_values"],
         )
+        self.assertTrue(all(isinstance(item, str) for item in packet["execution_steps"]))
         self.assertEqual(
             prepared["host_next_actions"],
             contract["host_next_actions"],
@@ -220,45 +297,95 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
 
         self.assertEqual(contract["contract_id"], "workspace-projection")
         self.assertEqual(list(payload.keys()), contract["top_level_key_order"])
+        _assert_type_case(
+            self,
+            payload["manifest_path"],
+            contract["field_constraints"]["manifest_path"]["type"],
+        )
+        self.assertEqual(payload["manifest_path"], contract["field_constraints"]["manifest_path"]["exact"])
+        _assert_type_case(
+            self,
+            payload["objects_root"],
+            contract["field_constraints"]["objects_root"]["type"],
+        )
+        self.assertEqual(payload["objects_root"], contract["field_constraints"]["objects_root"]["exact"])
         self.assertEqual(
             list(payload["buddies"][0].keys()),
             contract["view_shapes"]["buddy"]["key_order"],
+        )
+        _assert_field_types(
+            self,
+            payload["buddies"][0],
+            contract["view_shapes"]["buddy"]["field_types"],
         )
         self.assertEqual(
             list(payload["tracks"][0].keys()),
             contract["view_shapes"]["track"]["key_order"],
         )
+        _assert_field_types(
+            self,
+            payload["tracks"][0],
+            contract["view_shapes"]["track"]["field_types"],
+        )
         self.assertEqual(
             list(task_rows[tracked_task["id"]].keys()),
             contract["view_shapes"]["task"]["key_order"],
+        )
+        _assert_field_types(
+            self,
+            task_rows[tracked_task["id"]],
+            contract["view_shapes"]["task"]["field_types"],
         )
         self.assertEqual(
             list(payload["artifacts"][0].keys()),
             contract["view_shapes"]["artifact"]["key_order"],
         )
+        _assert_field_types(
+            self,
+            payload["artifacts"][0],
+            contract["view_shapes"]["artifact"]["field_types"],
+        )
         self.assertEqual(
             list(payload["run_audits"][0].keys()),
             contract["view_shapes"]["run_audit"]["key_order"],
+        )
+        _assert_field_types(
+            self,
+            payload["run_audits"][0],
+            contract["view_shapes"]["run_audit"]["field_types"],
         )
         self.assertEqual(
             list(payload["tracks"][0]["tasks"][0].keys()),
             contract["view_shapes"]["task"]["key_order"],
         )
+        _assert_field_types(
+            self,
+            payload["tracks"][0]["tasks"][0],
+            contract["view_shapes"]["task"]["field_types"],
+        )
         self.assertEqual(
             list(task_rows[tracked_task["id"]]["current_artifacts"]["implementation-report"].keys()),
             contract["view_shapes"]["artifact"]["key_order"],
         )
+        _assert_field_types(
+            self,
+            task_rows[tracked_task["id"]]["current_artifacts"]["implementation-report"],
+            contract["view_shapes"]["artifact"]["field_types"],
+        )
         self.assertEqual(
             sorted(payload["standalone_tasks"][0].keys()),
             sorted(contract["view_shapes"]["task"]["key_order"]),
+        )
+        _assert_field_types(
+            self,
+            payload["standalone_tasks"][0],
+            contract["view_shapes"]["task"]["field_types"],
         )
         self.assertEqual(contract["derived_invariants"]["task_view_slot_field"], "current_artifacts")
         self.assertEqual(contract["derived_invariants"]["track_view_missing_reference_field"], "missing_task_ids")
         self.assertEqual(contract["derived_invariants"]["current_artifacts_value_shape"], "artifact")
         self.assertTrue(contract["read_only"])
         self.assertTrue(contract["no_snapshot_fallback"])
-        self.assertEqual(payload["manifest_path"], "buddyswitch/manifest.toml")
-        self.assertEqual(payload["objects_root"], "buddyswitch/objects")
 
     def test_docs_point_to_contract_without_restating_workspace_source_lists(self) -> None:
         interface_spec = (ROOT / "framework" / "docs" / "interface-spec.md").read_text(encoding="utf-8")
