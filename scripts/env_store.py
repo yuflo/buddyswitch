@@ -892,9 +892,9 @@ def _legacy_save_run_content(run_id: str, payload: dict[str, Any]) -> str:
 
 
 def _runtime_repositories():
-    from runtime_store import repositories
+    import runtime_store
 
-    return repositories
+    return runtime_store
 
 
 def build_track_artifact_index(track_id: str | None) -> dict[str, Any] | None:

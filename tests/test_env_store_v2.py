@@ -14,9 +14,63 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 
 class RuntimeStoreFacadeTests(unittest.TestCase):
+    def test_runtime_store_package_exports_repository_entrypoints(self) -> None:
+        import runtime_store
+
+        self.assertTrue(callable(runtime_store.list_tracks))
+        self.assertTrue(callable(runtime_store.create_task))
+        self.assertTrue(callable(runtime_store.save_run_content))
+
+    def test_runtime_store_list_tracks_entrypoint_delegates_to_legacy_store(self) -> None:
+        import env_store
+        import runtime_store
+
+        sentinel = [{"id": "track-runtime-store"}]
+        with patch.object(env_store, "_legacy_list_tracks", return_value=sentinel) as mock_delegate:
+            rows = runtime_store.list_tracks()
+
+        self.assertIs(rows, sentinel)
+        mock_delegate.assert_called_once_with()
+
+    def test_runtime_store_create_task_entrypoint_delegates_to_legacy_store(self) -> None:
+        import env_store
+        import runtime_store
+
+        sentinel = {"id": "task-runtime-store"}
+        with patch.object(env_store, "_legacy_create_task", return_value=sentinel) as mock_delegate:
+            row = runtime_store.create_task(
+                "task-runtime-store",
+                "Runtime Store Delegation",
+                buddy="dev",
+                initial_run_id="run-runtime-store",
+            )
+
+        self.assertIs(row, sentinel)
+        mock_delegate.assert_called_once_with(
+            "task-runtime-store",
+            "Runtime Store Delegation",
+            buddy="dev",
+            track_id=None,
+            status="active",
+            summary="",
+            initial_run_id="run-runtime-store",
+        )
+
+    def test_runtime_store_save_run_content_entrypoint_delegates_to_legacy_store(self) -> None:
+        import env_store
+        import runtime_store
+
+        sentinel = "buddyswitch/content/runs/run-runtime-store.json"
+        payload = {"run_id": "run-runtime-store"}
+        with patch.object(env_store, "_legacy_save_run_content", return_value=sentinel) as mock_delegate:
+            path = runtime_store.save_run_content("run-runtime-store", payload)
+
+        self.assertEqual(path, sentinel)
+        mock_delegate.assert_called_once_with("run-runtime-store", payload)
+
     def test_runtime_store_list_tracks_facade_delegates(self) -> None:
         sentinel = [{"id": "track-runtime-store"}]
-        with patch("runtime_store.repositories.list_tracks", return_value=sentinel) as mock_delegate:
+        with patch("runtime_store.list_tracks", return_value=sentinel) as mock_delegate:
             import env_store
 
             rows = env_store.list_tracks()
@@ -26,7 +80,7 @@ class RuntimeStoreFacadeTests(unittest.TestCase):
 
     def test_runtime_store_create_task_facade_delegates(self) -> None:
         sentinel = {"id": "task-runtime-store"}
-        with patch("runtime_store.repositories.create_task", return_value=sentinel) as mock_delegate:
+        with patch("runtime_store.create_task", return_value=sentinel) as mock_delegate:
             import env_store
 
             row = env_store.create_task(
@@ -50,7 +104,7 @@ class RuntimeStoreFacadeTests(unittest.TestCase):
     def test_runtime_store_save_run_content_facade_delegates(self) -> None:
         sentinel = "buddyswitch/content/runs/run-runtime-store.json"
         payload = {"run_id": "run-runtime-store"}
-        with patch("runtime_store.repositories.save_run_content", return_value=sentinel) as mock_delegate:
+        with patch("runtime_store.save_run_content", return_value=sentinel) as mock_delegate:
             import env_store
 
             path = env_store.save_run_content("run-runtime-store", payload)
