@@ -1068,15 +1068,15 @@ function renderSourceDetails(track) {
   const sourceGrid = createEl("div", "source-grid");
   renderKeyValue(sourceGrid, "Manifest", workspace.manifest_path || "none");
   renderKeyValue(sourceGrid, "Objects root", workspace.objects_root || "none");
-  renderKeyValue(sourceGrid, "Track", track.object_path || `buddyswitch/objects/tracks/${track.id}.json`);
+  renderKeyValue(sourceGrid, "Track", track.object_path || "none");
   if (selectedTask) {
-    renderKeyValue(sourceGrid, "Task", selectedTask.object_path || `buddyswitch/objects/tasks/${selectedTask.id}.json`);
+    renderKeyValue(sourceGrid, "Task", selectedTask.object_path || "none");
   }
   selectedArtifacts.slice(0, 4).forEach((artifact, index) => {
-    renderKeyValue(sourceGrid, `Artifact ${index + 1}`, artifact.object_path || `buddyswitch/objects/artifacts/${artifact.id}.json`);
+    renderKeyValue(sourceGrid, `Artifact ${index + 1}`, artifact.object_path || "none");
   });
   selectedRuns.slice(0, 4).forEach((run, index) => {
-    renderKeyValue(sourceGrid, `Run ${index + 1}`, run.path || `buddyswitch/content/runs/${run.run_id}.json`);
+    renderKeyValue(sourceGrid, `Run ${index + 1}`, run.path || "none");
   });
   sourceDetails.append(sourceGrid);
 
@@ -1108,12 +1108,12 @@ function renderStandaloneSourceDetails(task) {
   const sourceGrid = createEl("div", "source-grid");
   renderKeyValue(sourceGrid, "Manifest", workspace.manifest_path || "none");
   renderKeyValue(sourceGrid, "Objects root", workspace.objects_root || "none");
-  renderKeyValue(sourceGrid, "Task", task.object_path || `buddyswitch/objects/tasks/${task.id}.json`);
+  renderKeyValue(sourceGrid, "Task", task.object_path || "none");
   selectedArtifacts.slice(0, 4).forEach((artifact, index) => {
-    renderKeyValue(sourceGrid, `Artifact ${index + 1}`, artifact.object_path || `buddyswitch/objects/artifacts/${artifact.id}.json`);
+    renderKeyValue(sourceGrid, `Artifact ${index + 1}`, artifact.object_path || "none");
   });
   selectedRuns.slice(0, 4).forEach((run, index) => {
-    renderKeyValue(sourceGrid, `Run ${index + 1}`, run.path || `buddyswitch/content/runs/${run.run_id}.json`);
+    renderKeyValue(sourceGrid, `Run ${index + 1}`, run.path || "none");
   });
   sourceDetails.append(sourceGrid);
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -108,9 +109,9 @@ PARALLEL_CONTRACT_FILES = (
     ROOT / "framework" / "contracts" / "selected-skill-packet.json",
     ROOT / "framework" / "contracts" / "workspace-projection.json",
 )
-UI_SURFACE_FILES = (
-    ROOT / "framework" / "console" / "app.js",
-    ROOT / "projects" / "app" / "main.js",
+UI_SURFACE_ROOTS = (
+    ROOT / "framework" / "console",
+    ROOT / "projects" / "app",
 )
 UI_RUNTIME_INTERNAL_TOKENS = (
     "env_store",
@@ -119,6 +120,13 @@ UI_RUNTIME_INTERNAL_TOKENS = (
     "switch_runtime",
     "workspace_data",
 )
+UI_RUNTIME_PATH_TOKENS = (
+    "buddyswitch/objects",
+    "buddyswitch/content/runs",
+    "runs/raw",
+    "projects/app/.runtime",
+)
+CONSOLE_RUNTIME_ENDPOINT = "/api/workspace"
 
 
 def _markdown_section(text: str, heading: str) -> str:
@@ -823,28 +831,36 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("framework/contracts/workspace-projection.json", interface_spec)
 
     def test_ui_surface_scripts_do_not_reference_runtime_internal_modules(self) -> None:
-        for path in UI_SURFACE_FILES:
+        js_files = sorted(path for root in UI_SURFACE_ROOTS for path in root.rglob("*.js"))
+        self.assertTrue(js_files, msg="expected at least one UI browser script")
+
+        for path in js_files:
             with self.subTest(surface=str(path.relative_to(ROOT))):
                 self.assertTrue(path.exists(), msg=f"missing ui surface {path.relative_to(ROOT)}")
                 text = path.read_text(encoding="utf-8")
                 for token in UI_RUNTIME_INTERNAL_TOKENS:
                     self.assertNotIn(token, text, msg=f"{path.relative_to(ROOT)} should not reference {token}")
+                for token in UI_RUNTIME_PATH_TOKENS:
+                    self.assertNotIn(token, text, msg=f"{path.relative_to(ROOT)} should not reference {token}")
 
-        console_text = UI_SURFACE_FILES[0].read_text(encoding="utf-8")
-        self.assertIn("/api/workspace", console_text)
+        console_text = (ROOT / "framework" / "console" / "app.js").read_text(encoding="utf-8")
+        api_tokens = sorted(set(re.findall(r"/api/[A-Za-z0-9_/-]+", console_text)))
+        self.assertEqual([CONSOLE_RUNTIME_ENDPOINT], api_tokens)
 
     def test_interface_spec_locks_ui_surface_boundary_to_api_workspace(self) -> None:
         text = (ROOT / "framework" / "docs" / "interface-spec.md").read_text(encoding="utf-8")
 
         self.assertIn("framework/console/app.js", text)
         self.assertIn("projects/app/main.js", text)
-        self.assertIn("/api/workspace", text)
+        self.assertIn(CONSOLE_RUNTIME_ENDPOINT, text)
         self.assertIn("must not reference runtime internals", text.lower())
         self.assertIn("env_store", text)
         self.assertIn("runtime_store.repositories", text)
         self.assertIn("runtime_store.projections", text)
         self.assertIn("switch_runtime", text)
         self.assertIn("workspace_data", text)
+        self.assertIn("runtime object reads", text.lower())
+        self.assertIn("runtime write paths", text.lower())
 
 
 if __name__ == "__main__":
