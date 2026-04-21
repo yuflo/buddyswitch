@@ -30,16 +30,20 @@ buddyswitch_workspace_init_defaults() {
   export BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE="${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE:-${default_template}}"
 }
 
+buddyswitch_workspace_canonical_path() {
+  python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve(strict=False))' "$1"
+}
+
 buddyswitch_workspace_validate_workspace_dir() {
   local workspace_dir shared_root normalized_workspace normalized_shared_root
 
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR:-}"
   shared_root="${BUDDYSWITCH_SHARED_ROOT:-}"
-  normalized_workspace="${workspace_dir%/}"
-  normalized_shared_root="${shared_root%/}"
+  normalized_workspace="$(buddyswitch_workspace_canonical_path "${workspace_dir%/}")"
+  normalized_shared_root="$(buddyswitch_workspace_canonical_path "${shared_root%/}")"
 
   case "${normalized_workspace}" in
-    "${normalized_shared_root}" | "${normalized_shared_root}/"*)
+    "${normalized_shared_root}/"*)
       return 0
       ;;
   esac
