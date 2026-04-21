@@ -24,6 +24,7 @@ if str(SCRIPTS) not in sys.path:
 
 import switch_runtime  # noqa: E402
 import workspace_data  # noqa: E402
+import runtime_store.projections as workspace_projections  # noqa: E402
 from env_store import create_artifact, create_task, create_track, get_track, require_id, validate_artifact, validate_track  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -199,19 +200,21 @@ class WorkspaceProjectionFacadeTests(unittest.TestCase):
         self.assertIs(payload, sentinel)
         mock_delegate.assert_called_once_with()
 
-    def test_workspace_data_runtime_store_projection_delegates_to_legacy_workspace_builder(self) -> None:
-        import runtime_store.projections as projections
-
-        sentinel = {"generated_at": "2026-04-21T00:00:00+08:00"}
+    def test_workspace_data_runtime_store_projection_assembles_without_workspace_legacy_builder(self) -> None:
         with patch.object(
             workspace_data,
             "_legacy_build_workspace_data",
-            return_value=sentinel,
-        ) as mock_delegate:
-            payload = projections.build_workspace_projection()
+            side_effect=AssertionError("legacy workspace assembly should not be called"),
+            create=True,
+        ):
+            payload = workspace_projections.build_workspace_projection()
 
-        self.assertIs(payload, sentinel)
-        mock_delegate.assert_called_once_with()
+        self.assertIsInstance(payload, dict)
+        self.assertIn("generated_at", payload)
+        self.assertIn("tracks", payload)
+        self.assertIn("tasks", payload)
+        self.assertIn("artifacts", payload)
+        self.assertIn("run_audits", payload)
 
 
 class EnvStoreRetiredFieldTests(unittest.TestCase):
@@ -1040,7 +1043,7 @@ class WorkspaceDataTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "updated_at": "2026-04-12T10:00:00+08:00",
         }
 
-        view = workspace_data.build_artifact_view(artifact)
+        view = workspace_projections.build_artifact_view(artifact)
         self.assertFalse(view["missing"])
         self.assertEqual(view["object_path"], "buddyswitch/objects/artifacts/art-task-centric.json")
 
@@ -1075,13 +1078,44 @@ class WorkspaceDataTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         }
 
-        view = workspace_data.build_task_view(task, artifact_map)
+        view = workspace_projections.build_task_view(task, artifact_map)
 
         self.assertEqual(sorted(view["current_artifacts"].keys()), ["implementation-report", "prd"])
         self.assertEqual(view["current_artifacts"]["prd"]["id"], "art-prd")
         self.assertNotIn("latest_artifact", view)
 
-    def test_build_workspace_data_exposes_standalone_tasks(self) -> None:
+    def test_projection_build_track_views_prefers_latest_task_and_artifact_updates(self) -> None:
+        tracks = [
+            {
+                "id": "track-dev-one",
+                "title": "Track One",
+                "status": "active",
+                "current_buddy": "dev",
+                "next_buddy": "test",
+                "task_ids": ["task-dev-one", "task-missing"],
+                "summary": "",
+                "updated_at": "2026-04-12T10:00:00+08:00",
+            }
+        ]
+        task_map = {
+            "task-dev-one": {
+                "id": "task-dev-one",
+                "updated_at": "2026-04-12T10:10:00+08:00",
+                "current_artifacts": {
+                    "implementation-report": {
+                        "id": "art-impl",
+                        "updated_at": "2026-04-12T10:20:00+08:00",
+                    }
+                },
+            }
+        }
+        rows = workspace_projections.build_track_views(tracks, task_map, artifact_map={})
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["updated_at"], "2026-04-12T10:20:00+08:00")
+        self.assertEqual(rows[0]["missing_task_ids"], ["task-missing"])
+
+    def test_build_workspace_projection_exposes_standalone_tasks(self) -> None:
         track = create_track("track-workspace-linked", "Linked Track")
         tracked_task = create_task(
             "task-dev-workspace-linked",
@@ -1100,7 +1134,7 @@ class WorkspaceDataTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self._remember(f"buddyswitch/objects/tasks/{tracked_task['id']}.json")
         self._remember(f"buddyswitch/objects/tasks/{standalone_task['id']}.json")
 
-        payload = workspace_data.build_workspace_data()
+        payload = workspace_projections.build_workspace_projection()
 
         self.assertIn("standalone_tasks", payload)
         standalone_ids = [task["id"] for task in payload["standalone_tasks"]]
@@ -1142,7 +1176,7 @@ class WorkspaceDataTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self._remember(f"buddyswitch/content/runs/{run_id}.json")
 
-        rows = workspace_data.scan_run_audits()
+        rows = workspace_projections.scan_run_audits()
         row = next((item for item in rows if item.get("run_id") == run_id), None)
         self.assertIsNotNone(row)
         assert row is not None
