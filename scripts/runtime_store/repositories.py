@@ -124,7 +124,7 @@ def create_task(
     track_id: str | None = None,
     status: str = "active",
     summary: str = "",
-    initial_run_id: str,
+    initial_run_id: str | None = None,
 ) -> dict[str, Any]:
     import env_store
 

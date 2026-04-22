@@ -42,6 +42,10 @@ id = "track-manager"
 path = "buddyswitch/skills/pm/track-manager"
 
 [[skills]]
+id = "shape-prototype"
+path = "buddyswitch/skills/design/shape-prototype"
+
+[[skills]]
 id = "implement-task"
 path = "buddyswitch/skills/dev/implement-task"
 
@@ -87,7 +91,7 @@ permissions = [
 id = "design"
 label = "Design"
 scope = "Shape UI/UX prototype direction and design handoff outcomes."
-skills = []
+skills = ["shape-prototype"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
 [[buddies]]

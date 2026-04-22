@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -21,7 +20,22 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 
 class SwitchFlowIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def test_tolerant_switch_flow_resolves_and_persists(self) -> None:
+    @staticmethod
+    def _valid_dev_result() -> dict[str, object]:
+        return {
+            "execution_summary": "Implemented the requested change and verified the core path.",
+            "working_notes": ["Scoped the edits to onboarding CTA behavior."],
+            "deliverables_or_changed_files": ["projects/app/src/example.ts"],
+            "artifact_content": {
+                "task_summary": "Implemented onboarding improvements.",
+                "changed_files": ["projects/app/src/example.ts"],
+                "implementation_notes": ["Updated CTA behavior.", "Kept state transitions unchanged."],
+                "verification_runs": [{"command": "npm test", "result": "passed", "notes": "Targeted unit coverage."}],
+                "known_limitations": ["No production build was executed in this test."],
+            },
+        }
+
+    def test_tolerant_switch_flow_resolves_without_prepare_execution(self) -> None:
         text = "switch dev : Implement the approved onboarding improvements in projects/app"
 
         parsed = parse_switch.parse_switch(text)
@@ -32,46 +46,28 @@ class SwitchFlowIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(routed["ok"])
         self.assertTrue(resolved["ok"])
         self.assertEqual(parsed["normalized_text"], routed["invocation"]["normalized_text"])
-        self.assertEqual(parsed["normalized_text"], resolved["invocation"]["normalized_text"])
-        self.assertEqual(resolved["implicit_skill_id"], "implement-task")
+        self.assertEqual(resolved["skills"][0]["id"], "implement-task")
         self.assertEqual(resolved["task_resolution"]["mode"], "create")
-        self.assertNotIn("default_artifact_kind", resolved["skill_cards"][0])
-        self.assertNotIn("auto_summary", resolved["skill_cards"][0])
+        self.assertEqual(resolved["run_envelope"]["status"], "reserved")
 
-        result = {
-            "execution_summary": "Implemented the requested change and verified the core path.",
-            "working_notes": ["Scoped the edits to onboarding CTA behavior."],
-            "deliverables_or_changed_files": ["projects/app/src/example.ts"],
-            "artifact_content": {
-                "task_summary": "Implemented onboarding improvements.",
-                "changed_files": ["projects/app/src/example.ts"],
-                "implementation_notes": ["Updated CTA behavior.", "Kept state transitions unchanged."],
-                "verification_runs": [
-                    {"command": "npm test", "result": "passed", "notes": "Targeted unit coverage."}
-                ],
-                "known_limitations": ["No production build was executed in this integration test."],
-            },
-        }
+    def test_resolve_then_persist_returns_refreshed_context(self) -> None:
+        resolved = switch_runtime.resolve_switch("switch dev: Implement onboarding behavior")
 
-        persisted = switch_runtime.persist_switch(resolved, skill_id=None, result=result)
+        payload = switch_runtime.persist_skill_result(
+            resolved,
+            skill_id="implement-task",
+            result=self._valid_dev_result(),
+        )
 
-        self.assertTrue(persisted["ok"])
-        self.assertEqual(persisted["skill_id"], "implement-task")
-        self.assertEqual(persisted["artifact_ids"], [persisted["artifact_id"]])
-        self.assertIn("recommended_switch", persisted)
-        self.assertEqual(persisted["related_run_ids"], [])
-
-        self.assertIn(persisted["paths"]["artifacts"][0], persisted["writes"])
-        self.assertIn(persisted["paths"]["task"], persisted["writes"])
-        self.assertIn(persisted["paths"]["run"], persisted["writes"])
-        self.assertNotIn("artifact_markdown", persisted["paths"])
-        self.assertNotIn("summary", persisted["paths"])
-        self.assertNotIn("suggested_next_switch", persisted)
-        run_json = json.loads(self._runtime_path(persisted["paths"]["run"]).read_text(encoding="utf-8"))
-        self.assertNotIn("suggested_next_switch", run_json)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["receipt"]["run_id"], resolved["run_envelope"]["run_id"])
         self.assertEqual(
-            persisted["recommended_switch"],
-            persisted["reference_switches"]["continue_current_task"],
+            payload["refreshed_context"]["run_envelope"]["previous_run_id"],
+            payload["receipt"]["run_id"],
+        )
+        self.assertEqual(
+            payload["refreshed_context"]["task_context"]["task"]["latest_run_id"],
+            payload["receipt"]["run_id"],
         )
 
 

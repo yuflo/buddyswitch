@@ -18,7 +18,7 @@
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["create", "read", "list", "update", "advance", "archive"]
+          "enum": ["create", "update", "advance", "archive"]
         },
         "track_id": { "type": ["string", "null"] },
         "title": { "type": ["string", "null"] },

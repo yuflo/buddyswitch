@@ -44,29 +44,30 @@ When user sends `switch <buddy>...: <demand>`:
 3. Resolve skill runtime metadata and guidance from `buddyswitch/skills/**/SKILL.md`.
 4. Use manifest scope, skills, and object authority as routing context. Treat `buddy -> skills` as the main runtime routing authority. Treat `permissions` as object-authority metadata for manual/debug mutation APIs. Keep runtime validation focused on successful resolution and safe persistence.
 5. Respect object authority:
-   - `pm` controls track lifecycle (`create/read/list/update/advance/archive`)
+   - `pm` controls track lifecycle (`create/update/advance/archive`)
    - other buddies can read tracks and create/update artifacts through their resolved task
    - every persisted run must belong to a task
-6. Resolve through `scripts/switch_runtime.py resolve` to get `eligible_skills`, skill cards, context, defaults, and output schema paths.
-7. Let the host Codex session choose one `skill_id` from `eligible_skills`.
-8. Immediately call `scripts/switch_runtime.py prepare-execution --resolved <file> --skill-id <skill_id>` to materialize `selected_skill_packet`.
-9. Inject `selected_skill_packet.skill_instructions` verbatim into the host turn, treat `selected_skill_packet.execution_steps` as ordered requirements, then execute the run in-session.
-10. Persist through `scripts/switch_runtime.py persist` when you need BuddySwitch state and canonical run audit persistence.
-11. BuddySwitch does not execute host tools; it remains the control layer and only supplies runtime packets plus canonical persistence.
-12. Render terminal final output in three sections, in this exact order: `Receipt`, `Commands`, `Summary`.
-13. `Receipt` section rules:
+6. Resolve through `scripts/switch_runtime.py resolve` to get `resolve_context`, including `skills`, `inputs`, `task_context`, `track_context`, and the reserved run envelope.
+7. Let the host Codex session choose one `skill_id` from `resolve_context.skills`.
+8. Read the selected skill's `instruction_path`, use `resolve_context.inputs` as the current selected artifact bundle only when that skill surface is already resolved, and for multi-skill buddies choose from `resolve_context.skills` using the skill metadata plus `task_context` / `track_context`. For market runs, apply `resolve_context.skills[*].host_execution` plus `resolve_context.skills[*].tool_scope` before starting browser work.
+9. Execute the selected skill in-session and produce a structured result matching the selected skill's output schema.
+10. Persist through `scripts/switch_runtime.py persist` as the current CLI wrapper for the `persist-skill-result` step whenever you need BuddySwitch state and canonical run audit persistence.
+11. Continue from `refreshed_context` when another buddy turn is needed after a successful persist.
+12. BuddySwitch does not execute host tools; it remains the control layer and only supplies resolve_context plus canonical persistence.
+13. Render terminal final output in three sections, in this exact order: `Receipt`, `Commands`, `Summary`.
+14. `Receipt` section rules:
     - `Persisted: ok|failed`
     - `Task: <task_title> [<task_id>]` (required)
     - `Track: <track_title> [<track_id>]` (show only when track exists)
     - `Artifact: <artifact_id|none>`
     - `Run: <run_id>` (required)
     - `Related Runs: <run_id_1>, <run_id_2>` (optional, only when present)
-14. `Commands` section rules:
+15. `Commands` section rules:
     - Show one `Template:` command from `reference_switches`:
       - use `continue_current_task_in_track` when present, otherwise `continue_current_task`
     - Show one `Recommended:` command:
       - prefer `handoff_to_next_buddy`, else `continue_current_task_in_track`, else `continue_current_task`
-15. `Summary` section rules:
+16. `Summary` section rules:
     - Keep execution summary to 1-2 lines.
     - Open questions max 4 items.
     - Do not lead with long object path lists; object paths are debug-only details.
@@ -77,8 +78,9 @@ Default runtime behavior:
 - Artifact object path: `buddyswitch/objects/artifacts/<artifact-id>.json`
 - Run audit path: `buddyswitch/content/runs/<run-id>.json`
 - Users do not need to provide output file paths.
-- `prepare-execution` is the canonical runtime step between `resolve` and `persist`.
-- `selected_skill_packet` is runtime data for host execution, not canonical object state.
+- `resolve_context` is the canonical runtime handoff between BuddySwitch and the host session.
+- `persist-skill-result` is the canonical persistence step; `scripts/switch_runtime.py persist` is its current CLI wrapper.
+- `refreshed_context` is the canonical follow-up handoff after a successful persist.
 - Default terminal summaries must follow the `Receipt -> Commands -> Summary` contract and keep full object paths as debug-only details.
 - Requests to write BuddySwitch-managed outputs into `artifacts/*.md` or `runs/summaries/**` must be rejected.
 

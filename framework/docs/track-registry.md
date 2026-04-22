@@ -44,6 +44,12 @@ Required fields:
 
 Every persisted run must belong to a task. A task may be untracked or bound to exactly one track.
 
+Run linkage rules:
+
+- `run_ids` may be empty only when `latest_run_id` is `null`.
+- When `latest_run_id` is non-null, it must be included in `run_ids`.
+- Create-mode resolve materializes the task immediately with zero runs (`run_ids: []`, `latest_run_id: null`); persist then attaches the first run id.
+
 ## Artifact Schema (v1)
 
 Required fields:
@@ -64,13 +70,14 @@ Artifacts participate in track flow through `artifact.task_id -> task.track_id`.
 ## Permission Model
 
 - `pm` `track-manager` skill controls track lifecycle core operations:
-  - `create`, `read`, `list`, `update`, `advance`, `archive`
+  - `create`, `update`, `advance`, `archive`
+- Track inspection now comes from resolve-time context (`track_context`, `task_context`, selected inputs), not online `track-manager` `read` / `list` actions.
 - Other buddies can read tracks and create/update artifacts through their resolved task.
 - Non-PM buddies must not directly mutate track `status/current_buddy/next_buddy/task_ids`.
 
 ## Auto-Register Rule
 
-When a task is bound to a track, the system registers its id in the target track's `task_ids`. Artifact creation updates the owning task's `artifact_ids` and `artifact_slots[slot]` state.
+When a task is bound to a track, the system registers its id in the target track's `task_ids`. `track-manager` create-mode persists both sides together: the task receives `track_id`, and the track records the task in `task_ids`. Artifact creation updates the owning task's `artifact_ids` and `artifact_slots[slot]` state.
 
 ## Explicitness Rule
 

@@ -9,7 +9,17 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from env_store import create_artifact, create_task, delete_artifact, get_artifact, get_task, update_artifact  # noqa: E402
+from env_store import (  # noqa: E402
+    create_artifact,
+    create_task,
+    create_track,
+    delete_artifact,
+    get_artifact,
+    get_track,
+    get_task,
+    update_artifact,
+    validate_task,
+)
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
@@ -67,6 +77,72 @@ class RuntimeStoreFacadeTests(unittest.TestCase):
 
         self.assertEqual(path, sentinel)
         mock_delegate.assert_called_once_with("run-runtime-store", payload)
+
+
+class ResolveTimeTaskMaterializationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _task_path(self, task_id: str) -> Path:
+        return self._runtime_path(f"buddyswitch/objects/tasks/{task_id}.json")
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._task_id = "task-dev-resolve-materialization"
+        task_path = self._task_path(self._task_id)
+        if task_path.exists():
+            task_path.unlink()
+
+    def tearDown(self) -> None:
+        task_path = self._task_path(self._task_id)
+        if task_path.exists():
+            task_path.unlink()
+        super().tearDown()
+
+    def test_create_task_allows_resolve_time_materialization_without_run(self) -> None:
+        task = create_task(
+            self._task_id,
+            "Resolve-Time Materialization",
+            buddy="dev",
+            initial_run_id=None,
+        )
+
+        self.assertEqual(task["run_ids"], [])
+        self.assertIsNone(task["latest_run_id"])
+
+    def test_validate_task_allows_empty_run_ids_when_latest_run_is_null(self) -> None:
+        payload = {
+            "id": "task-dev-validate-empty-runs",
+            "buddy": "dev",
+            "title": "Validate Empty Runs",
+            "status": "active",
+            "track_id": None,
+            "artifact_ids": [],
+            "artifact_slots": {},
+            "run_ids": [],
+            "latest_run_id": None,
+            "summary": "",
+            "created_at": "2026-04-22T10:00:00+08:00",
+            "updated_at": "2026-04-22T10:00:00+08:00",
+        }
+
+        normalized = validate_task(payload)
+
+        self.assertEqual(normalized["run_ids"], [])
+        self.assertIsNone(normalized["latest_run_id"])
+
+    def test_create_task_binds_task_and_track_ids_together(self) -> None:
+        track = create_track("track-pm-binding-invariant", "PM Binding Invariant")
+        task = create_task(
+            "task-pm-binding-invariant",
+            "PM Binding Invariant",
+            buddy="pm",
+            track_id=track["id"],
+            initial_run_id="run-seed-pm-binding-invariant",
+        )
+
+        stored_task = get_task(task["id"])
+        stored_track = get_track(track["id"])
+
+        self.assertEqual(stored_task["track_id"], track["id"])
+        self.assertIn(task["id"], stored_track["task_ids"])
 
     def test_runtime_store_list_tracks_facade_delegates(self) -> None:
         sentinel = [{"id": "track-runtime-store"}]

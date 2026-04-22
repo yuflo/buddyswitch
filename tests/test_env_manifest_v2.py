@@ -305,6 +305,20 @@ class SkillPackageLoaderTests(unittest.TestCase):
         buddies = {buddy["id"]: buddy for buddy in manifest["buddies"]}
         self.assertEqual(buddies["design"]["skills"], [])
 
+    def test_live_manifest_registers_shape_prototype_for_design(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+
+        buddies = {buddy["id"]: buddy for buddy in manifest["buddies"]}
+        skills = {skill["id"]: skill for skill in manifest["skills"]}
+
+        self.assertEqual(buddies["design"]["skills"], ["shape-prototype"])
+        runtime = skills["shape-prototype"]["runtime"]
+        self.assertEqual(runtime["output_slot"], "design-handoff")
+        self.assertEqual(
+            runtime["input_slots"],
+            ["market-scan", "prd", "requirements", "track", "design-handoff"],
+        )
+
     def test_load_manifest_reads_optional_host_execution_metadata(self) -> None:
         manifest = self._load_demo_market_manifest(
             """\

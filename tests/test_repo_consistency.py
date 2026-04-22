@@ -34,6 +34,7 @@ ARTIFACT_SKILL_DOCS = (
     ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "SKILL.md",
+    ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "SKILL.md",
 )
@@ -46,6 +47,7 @@ SKILL_TOMLS = (
     ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "skill.toml",
+    ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "skill.toml",
     ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "skill.toml",
 )
@@ -106,7 +108,8 @@ ACTIVE_MARKET_CONTRACT_DOCS = (
 )
 PARALLEL_CONTRACT_FILES = (
     ROOT / "framework" / "contracts" / "switch-grammar.json",
-    ROOT / "framework" / "contracts" / "selected-skill-packet.json",
+    ROOT / "framework" / "contracts" / "resolve-context.json",
+    ROOT / "framework" / "contracts" / "persist-skill-result.json",
     ROOT / "framework" / "contracts" / "workspace-projection.json",
 )
 UI_SURFACE_ROOTS = (
@@ -326,18 +329,19 @@ class RepoConsistencyTests(unittest.TestCase):
         text = (ROOT / "AGENTS.md").read_text(encoding="utf-8").lower()
 
         self.assertIn("execution worktree", text)
-        self.assertIn("repo root is for developing buddyswitch itself", text)
+        self.assertIn("repo-root work focused on buddyswitch source", text)
         self.assertNotIn("inject `selected_skill_packet.skill_instructions` verbatim", text)
 
-    def test_runtime_agents_template_holds_full_runtime_contract(self) -> None:
+    def test_runtime_agents_doc_uses_context_then_persist_flow(self) -> None:
         text = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
             encoding="utf-8"
         ).lower()
 
-        self.assertIn("selected_skill_packet", text)
-        self.assertIn("receipt", text)
-        self.assertIn("commands", text)
-        self.assertIn("summary", text)
+        self.assertIn("resolve_context", text)
+        self.assertIn("persist-skill-result", text)
+        self.assertIn("refreshed_context", text)
+        self.assertNotIn("selected_skill_packet", text)
+        self.assertNotIn("prepare-execution", text)
 
     def test_readme_quick_start_distinguishes_development_and_launcher_modes(self) -> None:
         text = (ROOT / "README.md").read_text(encoding="utf-8").lower()
@@ -347,22 +351,21 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("./buddyswitch-codex start", text)
         self.assertIn("${buddyswitch_shared_root}/workspace", text)
 
-    def test_switch_spec_directs_multi_skill_hosts_to_per_skill_selection_maps(self) -> None:
+    def test_switch_spec_keeps_multi_skill_choice_on_resolve_context_skills(self) -> None:
         text = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")
 
-        self.assertIn("artifact_selection_by_skill[chosen_skill_id]", text)
-        self.assertIn("run_instructions_by_skill[chosen_skill_id]", text)
-        self.assertNotIn("read `track_artifact_index` and `artifact_selection`", text)
-        self.assertNotIn("artifact_selection.selected_inputs", text)
+        self.assertIn("the host must choose one `skill_id` from `resolve_context.skills`", text)
+        self.assertIn("for multi-skill resolves, top-level `inputs` may be empty", text)
+        self.assertNotIn("artifact_selection_by_skill[chosen_skill_id]", text)
+        self.assertNotIn("run_instructions_by_skill[chosen_skill_id]", text)
 
-    def test_switch_spec_describes_neutral_top_level_run_instructions_for_multi_skill_resolves(self) -> None:
+    def test_switch_spec_describes_multi_skill_choice_without_selection_maps(self) -> None:
         text = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")
 
-        self.assertIn("top-level `artifact_selection` is `None` for multi-skill resolves", text)
-        self.assertIn("top-level `run_instructions` remains available as neutral host guidance", text)
-        self.assertIn("chosen-skill-specific selected inputs and read commands come from", text)
-        self.assertIn("artifact_selection_by_skill[chosen_skill_id]", text)
-        self.assertIn("run_instructions_by_skill[chosen_skill_id]", text)
+        self.assertIn("`resolve_context.inputs` is the current selected input bundle only when one skill surface is already resolved", text)
+        self.assertIn("the host should choose by combining the resolved skill metadata with `task_context`, `track_context`, and the buddy contract docs", text)
+        self.assertNotIn("top-level `artifact_selection` is `None` for multi-skill resolves", text)
+        self.assertNotIn("top-level `run_instructions` remains available as neutral host guidance", text)
 
     def test_contracts_and_skills_define_summary_selection_semantics(self) -> None:
         contracts = (
@@ -605,14 +608,18 @@ class RepoConsistencyTests(unittest.TestCase):
         ).lower()
         self.assertNotIn("suggested next switch", chat_return_section)
 
-    def test_market_cockpit_doc_defines_selected_skill_execution_boundary(self) -> None:
+    def test_market_cockpit_doc_defines_resolve_context_execution_boundary(self) -> None:
         cockpit_doc = (ROOT / "framework" / "docs" / "browser-cockpit.md").read_text(
             encoding="utf-8"
         ).lower()
-        self.assertIn("selected_skill_packet", cockpit_doc)
+        self.assertIn("resolve_context.skills[*].host_execution", cockpit_doc)
+        self.assertIn("resolve_context.skills[*].tool_scope", cockpit_doc)
+        self.assertIn("does not imply that top-level `resolve_context.inputs` is already populated", cockpit_doc)
         self.assertIn("host stays the only executor", cockpit_doc)
         self.assertIn("these six skills stay separate", cockpit_doc)
         self.assertIn("not a second source of truth", cockpit_doc)
+        self.assertNotIn("selected_skill_packet", cockpit_doc)
+        self.assertNotIn("prepare-execution", cockpit_doc)
 
     def test_dev1626_docs_include_active_browser_cockpit_plans(self) -> None:
         docs_dir = ROOT / "docs" / "dev1626"
@@ -621,18 +628,23 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("2026-04-17-optimization-a-browser-cockpit-realignment-plan.md", names)
         self.assertIn("2026-04-17-launcher-market-cockpit-migration-plan.md", names)
 
-    def test_switch_spec_documents_selected_skill_packet_fields(self) -> None:
+    def test_switch_spec_documents_resolve_context_loop(self) -> None:
         switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
-        self.assertIn("execution_steps", switch_spec)
-        self.assertIn("execution_constraints", switch_spec)
-        self.assertIn("output_schema_path", switch_spec)
+        self.assertIn("resolve_context", switch_spec)
+        self.assertIn("persist-skill-result", switch_spec)
+        self.assertIn("refreshed_context", switch_spec)
+        self.assertIn("preserves the resolved task-track binding", switch_spec)
+        self.assertNotIn("prepare-execution", switch_spec)
+        self.assertNotIn("selected_skill_packet", switch_spec)
 
-    def test_switch_spec_defers_runtime_order_to_execution_steps(self) -> None:
+    def test_switch_spec_defers_market_execution_boundary_to_skill_metadata(self) -> None:
         switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
-        self.assertIn("treat `selected_skill_packet.execution_steps` as ordered requirements", switch_spec)
-        self.assertNotIn("read `selected_skill_packet.selected_inputs` by slot before other work", switch_spec)
+        self.assertIn("resolve_context.skills[*].host_execution", switch_spec)
+        self.assertIn("resolve_context.skills[*].tool_scope", switch_spec)
+        self.assertIn("browser-native", switch_spec)
+        self.assertNotIn("selected_skill_packet.execution_steps", switch_spec)
 
-    def test_top_level_docs_define_selected_skill_packet_flow(self) -> None:
+    def test_top_level_docs_define_resolve_context_flow(self) -> None:
         combined = "\n".join(
             path.read_text(encoding="utf-8")
             for path in (
@@ -643,10 +655,64 @@ class RepoConsistencyTests(unittest.TestCase):
             )
         ).lower()
 
-        self.assertIn("prepare-execution", combined)
-        self.assertIn("selected_skill_packet", combined)
-        self.assertIn("inject `selected_skill_packet.skill_instructions` verbatim", combined)
+        self.assertIn("resolve_context", combined)
+        self.assertIn("persist-skill-result", combined)
+        self.assertIn("refreshed_context", combined)
         self.assertIn("buddyswitch does not execute host tools", combined)
+        self.assertNotIn("prepare-execution", combined)
+        self.assertNotIn("selected_skill_packet", combined)
+
+    def test_runtime_docs_state_resolve_and_persist_require_runtime_workspace(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
+        switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
+
+        self.assertIn("launcher-owned runtime workspace", readme)
+        self.assertIn("repo-root development checkout blocks it", readme)
+        self.assertIn("launcher-owned runtime workspace", switch_spec)
+        self.assertIn("repo-root source checkout", switch_spec)
+
+    def test_host_docs_treat_inputs_as_conditional_selected_bundle(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
+        runtime_agents = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
+            encoding="utf-8"
+        ).lower()
+        switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
+
+        self.assertIn("when the selected skill surface is already resolved", readme)
+        self.assertIn("for multi-skill buddies", readme)
+        self.assertIn("when that skill surface is already resolved", runtime_agents)
+        self.assertIn("for multi-skill buddies", runtime_agents)
+        self.assertIn("top-level `inputs` may be empty", switch_spec)
+
+    def test_manual_checklist_stays_on_active_runtime_contract(self) -> None:
+        checklist = (
+            ROOT / "docs" / "dev0154" / "2026-04-22-all-buddy-runtime-cutover-manual-checklist.md"
+        ).read_text(encoding="utf-8").lower()
+
+        self.assertIn("launcher-owned runtime workspace", checklist)
+        self.assertIn("context_revision", checklist)
+        self.assertIn("refreshed_context.run_envelope", checklist)
+        self.assertIn("preview path metadata may still live inside the durable artifact", checklist)
+        self.assertNotIn("prepare-execution", checklist)
+        self.assertNotIn("selected_skill_packet", checklist)
+
+    def test_docs_place_persist_follow_up_fields_inside_receipt(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
+        switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
+
+        self.assertIn("the host-facing follow-up data lives inside `receipt`", readme)
+        self.assertIn("check `refreshed_context.ok`", readme)
+        self.assertIn("e_runtime_refresh_context", readme)
+        self.assertIn("{ok, receipt, refreshed_context}", readme)
+        self.assertNotIn("- `refreshed_context`", readme)
+        self.assertIn("host-facing follow-up fields live inside `receipt`", switch_spec)
+        self.assertIn("check `refreshed_context.ok`", switch_spec)
+        self.assertIn("e_runtime_refresh_context", switch_spec)
+
+    def test_router_doc_lists_task_objects_as_canonical_state(self) -> None:
+        text = (ROOT / ".codex" / "agents" / "router.toml").read_text(encoding="utf-8").lower()
+
+        self.assertIn("buddyswitch/objects/tasks/*.json", text)
 
     def test_dev1626_active_plans_define_browser_cockpit_happy_path(self) -> None:
         optimization = (
@@ -664,9 +730,13 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("superseded by", migration)
         self.assertIn("optimization-a-browser-cockpit-realignment-plan", migration)
 
-    def test_switch_spec_lists_prepare_execution_runtime_error(self) -> None:
+    def test_switch_spec_lists_current_runtime_errors(self) -> None:
         switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")
-        self.assertIn("E_RUNTIME_PREPARE_EXECUTION", switch_spec)
+        self.assertIn(
+            "Runtime should return explicit errors:\n\n- `E_RUNTIME_RESOLVE`\n- `E_RUNTIME_PERSIST`\n- `E_RUNTIME_REFRESH_CONTEXT`",
+            switch_spec,
+        )
+        self.assertNotIn("E_RUNTIME_PREPARE_EXECUTION", switch_spec)
 
     def test_new_market_templates_expose_schema_derived_contract_fields(self) -> None:
         for path, schema_path in NEW_MARKET_TEMPLATE_SCHEMAS.items():
@@ -701,6 +771,7 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "buddyswitch" / "skills" / "market" / "launch-prep",
             ROOT / "buddyswitch" / "skills" / "pm" / "write-prd",
             ROOT / "buddyswitch" / "skills" / "pm" / "track-manager",
+            ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype",
             ROOT / "buddyswitch" / "skills" / "dev" / "implement-task",
             ROOT / "buddyswitch" / "skills" / "test" / "smoke-test",
         )
@@ -719,6 +790,7 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "buddyswitch" / "skills" / "market" / "launch-prep",
             ROOT / "buddyswitch" / "skills" / "pm" / "write-prd",
             ROOT / "buddyswitch" / "skills" / "pm" / "track-manager",
+            ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype",
             ROOT / "buddyswitch" / "skills" / "dev" / "implement-task",
             ROOT / "buddyswitch" / "skills" / "test" / "smoke-test",
         )
@@ -743,12 +815,18 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "assets" / "channel-plan-template.md",
             ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "assets" / "launch-prep-template.md",
             ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "assets" / "prd-template.md",
+            ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "assets" / "design-handoff-template.md",
             ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "assets" / "implementation-report-template.md",
             ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "assets" / "test-report-template.md",
         )
         for path in expected_assets:
             with self.subTest(asset=str(path.relative_to(ROOT))):
                 self.assertTrue(path.exists(), msg=f"missing template asset: {path.relative_to(ROOT)}")
+
+    def test_shape_prototype_package_files_exist(self) -> None:
+        self.assertTrue((ROOT / "framework" / "schemas" / "design" / "shape-prototype.json").exists())
+        self.assertTrue((ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "skill.toml").exists())
+        self.assertTrue((ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists())
 
     def test_active_docs_use_slot_revision_and_package_contract_language(self) -> None:
         targets = (
@@ -780,8 +858,9 @@ class RepoConsistencyTests(unittest.TestCase):
     def test_parallel_contract_files_exist_and_define_expected_ids(self) -> None:
         expected_contract_ids = {
             "switch-grammar": PARALLEL_CONTRACT_FILES[0],
-            "selected-skill-packet": PARALLEL_CONTRACT_FILES[1],
-            "workspace-projection": PARALLEL_CONTRACT_FILES[2],
+            "resolve-context": PARALLEL_CONTRACT_FILES[1],
+            "persist-skill-result": PARALLEL_CONTRACT_FILES[2],
+            "workspace-projection": PARALLEL_CONTRACT_FILES[3],
         }
         loaded_contracts: dict[str, dict[str, object]] = {}
         for contract_id, path in expected_contract_ids.items():
@@ -792,18 +871,17 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("contract_version", payload)
                 loaded_contracts[contract_id] = payload
 
-        selected_packet = loaded_contracts["selected-skill-packet"]
-        self.assertIn("packet_key_order", selected_packet)
-        self.assertIn("nested_shapes", selected_packet)
-        self.assertIn("host_next_actions", selected_packet)
-        self.assertIn("skill_instructions", selected_packet["nested_shapes"])
-        self.assertIn("selected_input_item", selected_packet["nested_shapes"])
-        self.assertIn("execution_constraints", selected_packet["nested_shapes"])
-        self.assertIn("tool_scope", selected_packet["nested_shapes"])
-        self.assertIn("execution_steps", selected_packet["nested_shapes"])
-        self.assertIn("market_required_values", selected_packet["nested_shapes"]["execution_constraints"])
-        self.assertIn("market_required_values", selected_packet["nested_shapes"]["tool_scope"])
-        self.assertIn("market_required_values", selected_packet["nested_shapes"]["execution_steps"])
+        resolve_context = loaded_contracts["resolve-context"]
+        self.assertIn("response_key_order", resolve_context)
+        self.assertIn("context_revision", resolve_context["response_key_order"])
+        self.assertIn("skills", resolve_context["response_key_order"])
+
+        persist_skill_result = loaded_contracts["persist-skill-result"]
+        self.assertIn("response_key_order", persist_skill_result)
+        self.assertEqual(
+            persist_skill_result["response_key_order"],
+            ["ok", "receipt", "refreshed_context"],
+        )
 
         workspace_projection = loaded_contracts["workspace-projection"]
         self.assertIn("top_level_key_order", workspace_projection)
@@ -827,7 +905,8 @@ class RepoConsistencyTests(unittest.TestCase):
         interface_spec = (ROOT / "framework" / "docs" / "interface-spec.md").read_text(encoding="utf-8")
 
         self.assertIn("framework/contracts/switch-grammar.json", switch_spec)
-        self.assertIn("framework/contracts/selected-skill-packet.json", switch_spec)
+        self.assertIn("framework/contracts/resolve-context.json", switch_spec)
+        self.assertIn("framework/contracts/persist-skill-result.json", switch_spec)
         self.assertIn("framework/contracts/workspace-projection.json", interface_spec)
 
     def test_ui_surface_scripts_do_not_reference_runtime_internal_modules(self) -> None:

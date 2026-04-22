@@ -1,0 +1,9 @@
+{
+  "contract_id": "persist-skill-result",
+  "contract_version": "2026-04-22",
+  "response_key_order": [
+    "ok",
+    "receipt",
+    "refreshed_context"
+  ]
+}

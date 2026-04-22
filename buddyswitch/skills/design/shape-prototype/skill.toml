@@ -1,0 +1,14 @@
+id = "shape-prototype"
+buddy = "design"
+description = "Use when the task is shaping a visible UI/UX prototype and producing a design handoff artifact."
+objects = ["task", "artifact"]
+produces_artifact = true
+output_slot = "design-handoff"
+input_slots = ["market-scan", "prd", "requirements", "track", "design-handoff"]
+output_schema = "framework/schemas/design/shape-prototype.json"
+produces = ["design-handoff"]
+consumes = ["market-scan", "prd", "requirements", "track", "design-handoff"]
+side_effect_level = "medium"
+required_tools = []
+required_env = []
+allowed_task_kinds = ["design"]

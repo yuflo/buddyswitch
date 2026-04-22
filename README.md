@@ -25,7 +25,9 @@ python3 scripts/parse_switch.py "switch pm: create track"
 python3 scripts/codex_router.py "switch pm: create track"
 ```
 
-3. Resolve a real directive into BuddySwitch runtime context:
+3. If you want to exercise the runtime loop manually, switch into a launcher-managed runtime workspace first. `resolve` may materialize a zero-run task and reserve the next run envelope, so it is blocked in the repo-root development checkout.
+
+Resolve a real directive into BuddySwitch `resolve_context` there:
 
 ```bash
 python3 scripts/switch_runtime.py resolve \
@@ -33,22 +35,14 @@ python3 scripts/switch_runtime.py resolve \
   > /tmp/buddyswitch-resolved.json
 ```
 
-4. Choose one `skill_id` from `eligible_skills`, then materialize the selected skill packet:
+4. Choose one `skill_id` from `resolve_context.skills`, then execute that skill in the current Codex session:
+   - read the selected skill's `instruction_path`
+   - treat `resolve_context.inputs` as the current selected input bundle only when the selected skill surface is already resolved
+   - for multi-skill buddies, choose from `resolve_context.skills` using the skill metadata plus `task_context` / `track_context`
+   - for market runs, apply `resolve_context.skills[*].host_execution` and `resolve_context.skills[*].tool_scope`
+   - execute the run in-session and produce a structured result matching the reported schema
 
-```bash
-python3 scripts/switch_runtime.py prepare-execution \
-  --resolved /tmp/buddyswitch-resolved.json \
-  --skill-id research-scan \
-  > /tmp/buddyswitch-selected-skill.json
-```
-
-5. In the current Codex session:
-   - inject `selected_skill_packet.skill_instructions` verbatim
-   - treat `selected_skill_packet.execution_steps` as ordered requirements
-   - execute the run in-session
-   - produce a structured result matching the reported schema
-
-6. Persist the result when the run should become BuddySwitch state:
+5. Persist the result when the run should become BuddySwitch state. The current CLI command is `persist`, which implements the `persist-skill-result` step:
 
 ```bash
 python3 scripts/switch_runtime.py persist \
@@ -57,7 +51,7 @@ python3 scripts/switch_runtime.py persist \
   --result /tmp/buddyswitch-result.json
 ```
 
-7. Start the read-only Context Panel:
+6. Continue from `refreshed_context` when the task needs another turn, then start the read-only Context Panel:
 
 ```bash
 python3 scripts/serve_context_panel.py
@@ -82,22 +76,16 @@ python3 scripts/codex_router.py "switch pm: create ai-scheduler-lp track"
 
 ### Resolve a run
 
+Run `resolve` only from the launcher-owned runtime workspace. In create mode it may materialize a zero-run task and reserve the next run id, so the repo-root development checkout blocks it; start the runtime workspace with `./buddyswitch-codex start` first.
+
 ```bash
 python3 scripts/switch_runtime.py resolve "switch market: quick market research for AI scheduler landing page"
 python3 scripts/switch_runtime.py resolve "switch pm: create ai-scheduler-lp track"
 ```
 
-### Prepare execution after selecting a skill
-
-```bash
-python3 scripts/switch_runtime.py prepare-execution \
-  --resolved /tmp/buddyswitch-resolved.json \
-  --skill-id write-prd
-```
-
 ### Persist a structured result
 
-Run `persist` only from the launcher-owned runtime workspace. The repo-root development checkout blocks BuddySwitch runtime writes; start it with `./buddyswitch-codex start` first.
+Run `persist` only from the launcher-owned runtime workspace. The repo-root development checkout blocks BuddySwitch runtime writes; start it with `./buddyswitch-codex start` first. This command is the current CLI wrapper for the `persist-skill-result` step.
 
 ```bash
 python3 scripts/switch_runtime.py persist \
@@ -136,7 +124,7 @@ BuddySwitch is responsible for:
 
 - parsing `switch ...` commands
 - loading buddy and skill metadata from the env manifest
-- returning allowed skill candidates and runtime packets
+- returning `resolve_context`, allowed skill metadata, and the current input bundle when one skill surface is already resolved
 - validating structured output against schemas
 - persisting canonical task, artifact, track, and run state
 
@@ -160,16 +148,16 @@ If you remember only four things, remember these:
 The default flow is:
 
 1. `parse`
-2. `resolve`
-3. `prepare-execution`
-4. host run
-5. `persist`
+2. `resolve_context`
+3. host run
+4. `persist-skill-result`
+5. continue from `refreshed_context`
 
 Important runtime rules:
 
-- `resolve` does not write BuddySwitch state.
-- `prepare-execution` is the required bridge between `resolve` and host execution.
-- `persist` is the canonical write boundary.
+- `resolve_context` reserves the next run envelope and may materialize a zero-run task in create mode before any persist happens.
+- the host chooses one `skill_id` from `resolve_context.skills` and executes it locally.
+- `persist-skill-result` is the canonical write boundary; `scripts/switch_runtime.py persist` is its current CLI wrapper.
 - BuddySwitch-managed outputs do not go into `artifacts/*.md` or `runs/summaries/**`.
 
 ## Canonical Switch Syntax
@@ -195,7 +183,7 @@ Examples:
 - `switch dev(task-dev-ai-companion) -> track-ai-companion: Implement the approved P0 scope in projects/app`
 - `switch test: Run smoke checks for the latest implementation`
 
-The text after `:` is a demand, not a task object. If no task id is supplied, `persist` creates a new task for the run. Minor spacing variation around `:` and `->` can be normalized as long as buddy, optional task id, optional track id, and demand remain clear.
+The text after `:` is a demand, not a task object. If no task id is supplied, `resolve_context` may materialize a zero-run task immediately and reserve the next run id before `persist-skill-result` records the run. Minor spacing variation around `:` and `->` can be normalized as long as buddy, optional task id, optional track id, and demand remain clear.
 
 ## Core Runtime Flow
 
@@ -210,53 +198,44 @@ The text after `:` is a demand, not a task object. If no task id is supplied, `p
 
 ### 2. Resolve
 
-`scripts/switch_runtime.py resolve` loads:
+`scripts/switch_runtime.py resolve` returns `resolve_context` by loading:
 
 - buddy definition from `buddyswitch/manifest.toml`
 - allowed skills for that buddy
 - task context
 - optional track context
-- output schema paths
-- host next actions
+- the current input bundle when one skill surface is already resolved
+- reserved run envelope
+- host execution metadata when the selected skill family needs it
 
-It returns fields such as:
+The stable handoff includes:
 
-- `eligible_skills`
-- `skill_cards`
+- `skills`
 - `task_resolution`
-- `required_output_schema_by_skill`
-- `run_instructions`
+- `run_envelope`
+- `task_context`
+- `track_context`
+- `inputs`
+- `warnings`
 
-This step writes nothing.
+This step reserves the next run envelope and may materialize a zero-run task in create mode, but it does not write the final run audit or artifact result. Run it from the launcher-owned runtime workspace rather than the repo-root development checkout.
 
-### 3. Prepare Execution
-
-`scripts/switch_runtime.py prepare-execution` takes the resolved payload plus a chosen `skill_id` and materializes `selected_skill_packet`.
-
-That packet contains:
-
-- `skill_instructions`
-- `execution_steps`
-- `selected_inputs`
-- `output_schema_path`
-- execution constraints from the skill metadata
-
-The host session should use the packet directly instead of reconstructing the skill manually.
-
-### 4. Host Run
+### 3. Host Run
 
 The host Codex session:
 
 1. chooses one `skill_id`
-2. injects the selected skill instructions
-3. executes the workflow
-4. produces a structured result matching the selected schema
+2. reads the selected skill's `instruction_path`
+3. treats `resolve_context.inputs` as the current selected input bundle only when the selected skill surface is already resolved
+4. for market runs, applies `resolve_context.skills[*].host_execution` and `resolve_context.skills[*].tool_scope`
+5. executes the workflow
+6. produces a structured result matching the selected schema
 
 BuddySwitch never performs browser, shell, editor, or MCP tool actions on behalf of the host.
 
-### 5. Persist
+### 4. Persist
 
-`scripts/switch_runtime.py persist` validates:
+`scripts/switch_runtime.py persist` is the current CLI wrapper for the `persist-skill-result` step. It validates:
 
 - selected skill identity
 - schema shape
@@ -269,13 +248,15 @@ Then it writes canonical state to the object store:
 - track objects when track mutation is part of the request
 - run audit JSON
 
-Successful persistence also returns concise host-facing follow-up data such as:
+Successful persistence returns `{ok, receipt, refreshed_context}`. The host-facing follow-up data lives inside `receipt`, including:
 
 - `task_title`
 - optional `track_title`
 - `reference_switches`
 - `related_run_ids`
 - `recommended_switch`
+
+Check `refreshed_context.ok` before using it for the next turn. On `E_RUNTIME_REFRESH_CONTEXT`, the persist already committed successfully; rerun `resolve` to reserve the next turn again.
 
 ## Project Layout
 
@@ -319,7 +300,7 @@ Canonical storage lives under the launcher runtime workspace using these relativ
 
 Authority model:
 
-- `pm` owns track lifecycle: `create`, `read`, `list`, `update`, `advance`, `archive`
+- `pm` owns track lifecycle mutations: `create`, `update`, `advance`, `archive`
 - other buddies read tracks and persist artifacts through their resolved task
 - every persisted run belongs to a task
 - `buddy -> skills` in the manifest is the main runtime routing authority
@@ -334,7 +315,7 @@ Each skill package is made of:
 - `skill.toml`
   Runtime metadata such as `id`, `buddy`, `objects`, `output_schema`, `input_slots`, `output_slot`, and artifact behavior.
 - `SKILL.md`
-  Host-facing execution guidance that gets injected through `selected_skill_packet.skill_instructions`.
+  Host-facing execution guidance the host reads from the selected skill's `instruction_path`.
 - optional `assets/`
   Templates or report scaffolds used by the skill.
 - optional `references/`
@@ -360,7 +341,7 @@ This separation matters:
 These are the main operational entry points:
 
 - `scripts/switch_runtime.py`
-  Main BuddySwitch runtime with `resolve`, `prepare-execution`, and `persist`.
+  Main BuddySwitch runtime with `resolve` and `persist` as the current CLI wrapper for `persist-skill-result`.
 - `scripts/parse_switch.py`
   Syntax parser for canonical `switch` directives.
 - `scripts/codex_router.py`

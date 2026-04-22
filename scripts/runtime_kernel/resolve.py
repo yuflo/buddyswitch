@@ -11,4 +11,4 @@ def resolve_switch_request(text: str, *, manifest_path: "Path | None" = None) ->
 
     if manifest_path is None:
         manifest_path = switch_runtime.DEFAULT_MANIFEST
-    return switch_runtime._legacy_resolve_switch(text, manifest_path=manifest_path)
+    return switch_runtime._build_resolve_context(text, manifest_path=manifest_path)

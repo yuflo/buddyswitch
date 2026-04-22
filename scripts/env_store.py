@@ -211,12 +211,15 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
         }
     if not isinstance(run_ids, list) or any(not isinstance(item, str) or not item for item in run_ids):
         raise ValueError("task.run_ids must be a list of non-empty strings")
-    if not run_ids:
-        raise ValueError("task.run_ids must include at least one run id")
-    if not isinstance(latest_run_id, str) or not latest_run_id:
-        raise ValueError("task.latest_run_id must be a non-empty string")
-    if latest_run_id not in run_ids:
-        raise ValueError("task.latest_run_id must be included in task.run_ids")
+    normalized_run_ids = list(dict.fromkeys(run_ids))
+    if latest_run_id is None:
+        if normalized_run_ids:
+            raise ValueError("task.latest_run_id must be included in task.run_ids")
+    else:
+        if not isinstance(latest_run_id, str) or not latest_run_id:
+            raise ValueError("task.latest_run_id must be a non-empty string or null")
+        if latest_run_id not in normalized_run_ids:
+            raise ValueError("task.latest_run_id must be included in task.run_ids")
     if summary is not None and not isinstance(summary, str):
         raise ValueError("task.summary must be a string or null")
     if not isinstance(created_at, str) or not created_at:
@@ -232,7 +235,7 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
         "track_id": track_id,
         "artifact_ids": list(dict.fromkeys(artifact_ids)),
         "artifact_slots": normalized_slots,
-        "run_ids": list(dict.fromkeys(run_ids)),
+        "run_ids": normalized_run_ids,
         "latest_run_id": latest_run_id,
         "summary": summary or "",
         "created_at": created_at,
@@ -567,15 +570,21 @@ def _legacy_create_task(
     track_id: str | None = None,
     status: str = "active",
     summary: str = "",
-    initial_run_id: str,
+    initial_run_id: str | None = None,
 ) -> dict[str, Any]:
     require_id(task_id, "task id")
-    require_id(initial_run_id, "task.initial_run_id")
+    if initial_run_id is not None:
+        require_id(initial_run_id, "task.initial_run_id")
     if get_task(task_id):
         raise ValueError(f"task already exists: {task_id}")
     if track_id is not None and get_track(track_id) is None:
         raise ValueError(f"track not found: {track_id}")
     timestamp = now_iso()
+    run_ids: list[str] = []
+    latest_run_id: str | None = None
+    if isinstance(initial_run_id, str):
+        run_ids = [initial_run_id]
+        latest_run_id = initial_run_id
     task = {
         "id": task_id,
         "buddy": buddy,
@@ -584,8 +593,8 @@ def _legacy_create_task(
         "track_id": track_id,
         "artifact_ids": [],
         "artifact_slots": {},
-        "run_ids": [initial_run_id],
-        "latest_run_id": initial_run_id,
+        "run_ids": run_ids,
+        "latest_run_id": latest_run_id,
         "summary": summary,
         "created_at": timestamp,
         "updated_at": timestamp,
@@ -987,7 +996,7 @@ def create_task(
     track_id: str | None = None,
     status: str = "active",
     summary: str = "",
-    initial_run_id: str,
+    initial_run_id: str | None = None,
 ) -> dict[str, Any]:
     return _runtime_repositories().create_task(
         task_id,

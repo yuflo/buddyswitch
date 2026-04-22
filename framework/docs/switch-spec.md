@@ -6,9 +6,14 @@
 switch <buddy>(<task-id>) -> <track-id>: <demand>
 ```
 
-Canonical machine-readable contract source: `framework/contracts/switch-grammar.json`.
+Canonical machine-readable grammar: `framework/contracts/switch-grammar.json`.
 
-The canonical supported forms, parse rules, and parse error vocabulary are frozen in that contract file.
+Supported canonical forms:
+
+- `switch <buddy>: <demand>`
+- `switch <buddy> -> <track-id>: <demand>`
+- `switch <buddy>(<task-id>): <demand>`
+- `switch <buddy>(<task-id>) -> <track-id>: <demand>`
 
 ## Buddy Validation
 
@@ -17,16 +22,26 @@ The canonical supported forms, parse rules, and parse error vocabulary are froze
 
 ## Runtime Model
 
-BuddySwitch uses five primitives:
+BuddySwitch uses four primitives:
 
 1. `parse`
-2. `resolve`
-3. `prepare-execution`
-4. `run`
-5. `persist`
+2. `resolve_context`
+3. `run`
+4. `persist-skill-result`
 
-`parse`, `resolve`, `prepare-execution`, and `persist` belong to BuddySwitch.
-`run` belongs to the host Codex session.
+`parse`, `resolve_context`, and `persist-skill-result` belong to BuddySwitch. `run` belongs to the host Codex session.
+
+The current CLI entrypoints are:
+
+- `python3 scripts/switch_runtime.py resolve`
+- `python3 scripts/switch_runtime.py persist`
+
+`persist` is the current CLI wrapper for the `persist-skill-result` step.
+
+Canonical runtime contract files:
+
+- `framework/contracts/resolve-context.json`
+- `framework/contracts/persist-skill-result.json`
 
 ## Failure Action Vocabulary
 
@@ -42,119 +57,125 @@ Current control-layer expectations:
 - `parse`
   - minor CLI spacing variation around `:` => `normalize`
   - unknown buddy / empty demand / non-switch input => `reject`
-- `resolve`
+- `resolve_context`
   - advisory runtime metadata such as `required_tools` / `required_env` => `warn`
   - multi-skill selection belongs to the host decision loop => `ask`
   - missing explicit task/track references or unsafe task-track conflicts => `reject`
-- `persist`
-  - invalid `skill_id`, schema mismatch, or unsafe state/reference writes => `reject`
+- `persist-skill-result`
+  - invalid `skill_id`, schema mismatch, stale context revision, or unsafe state/reference writes => `reject`
 - manual/debug APIs
   - actor permission failure or invalid object references => `reject`
 
-## Runtime Resolution
+## Resolve Context
 
-- Runtime entry: `scripts/switch_runtime.py`
-- Resolution order:
-  1. parse switch
-  2. load the selected buddy's skill catalog from skill packages under `buddyswitch/skills/**/` (`skill.toml` + `SKILL.md`)
-  3. validate explicit task id, explicit track id, and task ownership when supplied
-  4. derive task resolution (`create` or `reuse`) and effective track id
-  5. build task context and optional track context from canonical objects
-  6. build `track_artifact_index` from canonical `track -> task -> artifact` links when a track is present
-  7. reject explicit requests for retired markdown outputs under `artifacts/*.md` or `runs/summaries/**`
-  8. run deterministic artifact selection from `track_artifact_index` (when present) and return complete `artifact_selection_by_skill` / `run_instructions_by_skill` maps for all eligible skills
-  9. return top-level `artifact_selection` only when it aligns with an implicit single-skill resolve; keep top-level `run_instructions` available for neutral host guidance; also return `eligible_skills`, compact `skill_cards`, task context, track context, `track_artifact_index`, output schema paths, invocation details, and explicit next actions
+Runtime entry: `scripts/switch_runtime.py`.
+
+`resolve_context` returns the current execution handoff for the host session. The response shape is frozen in `framework/contracts/resolve-context.json`.
+
+Core fields:
+
+- `context_revision`
+- `switch`
+- `buddy`
+- `authority`
+- `task_resolution`
+- `run_envelope`
+- `task_context`
+- `track_context`
+- `inputs`
+- `skills`
+- `warnings`
+
+Resolution order:
+
+1. parse the switch
+2. load the selected buddy's skill catalog from skill packages under `buddyswitch/skills/**/` (`skill.toml` + `SKILL.md`)
+3. validate explicit task id, explicit track id, and task ownership when supplied
+4. derive task resolution (`create` or `reuse`) and effective track id
+5. materialize create-mode task context when needed and reserve the next run envelope
+6. build task context and optional track context from canonical objects
+7. reject explicit requests for retired markdown outputs under `artifacts/*.md` or `runs/summaries/**`
+8. select current artifact inputs only when one skill surface is already unambiguous
+9. return compact skill cards plus any resolved `host_execution` / `tool_scope` metadata needed by the host
 
 Create-mode contract:
 
-- When no explicit task id is supplied, `resolve` returns `task_resolution.mode = "create"` without allocating a final task id.
-- `persist` is the only step that creates the task object and assigns the final task id.
+- When no explicit task id is supplied, `resolve_context` may materialize the task immediately with zero runs.
+- Zero-run tasks use `run_ids: []` and `latest_run_id: null`.
+- `run_envelope.status = "reserved"` and `run_envelope.run_id` is the reserved run id for the next persist.
+- Because create-mode resolve may materialize a zero-run task, run `resolve` and `persist` from a launcher-owned runtime workspace rather than the repo-root source checkout.
 
 Current runtime defaults:
 
-- single-skill buddies may expose `implicit_skill_id`
-- multi-skill buddies never auto-select in runtime
-- top-level `artifact_selection` is `None` for multi-skill resolves
-- top-level `run_instructions` remains available as neutral host guidance for multi-skill resolves
-- chosen-skill-specific selected inputs and read commands come from `artifact_selection_by_skill[chosen_skill_id]` and `run_instructions_by_skill[chosen_skill_id]`
+- single-skill buddies expose one skill in `skills`
+- multi-skill buddies never auto-execute in runtime
 - `buddy -> skills` is the main routing authority in runtime
-- buddy `permissions` stay as object-authority metadata for manual/debug mutation APIs
-- `required_tools` and `required_env` are advisory skill metadata for the host session
+- buddy `permissions` remain object-authority metadata for manual/debug mutation APIs
+- `required_tools` and `required_env` are advisory host metadata
 - BuddySwitch skills are loaded from skill packages under `buddyswitch/skills/**/`
-- BuddySwitch does not rely on Codex native `.agents/skills` discovery for these skills
-- artifact slot and revision semantics are canonical (`task.artifact_slots[slot]` + artifact `revision`/`is_current`)
+- artifact slot and revision semantics are canonical (`task.artifact_slots[slot]` plus artifact `revision` / `is_current`)
 - output contracts are enforced through `framework/schemas/**`
-- output schema validation is structure-only; it does not score business quality, research quality, or workflow completeness
+- output schema validation is structure-only; it is not a business-quality review and it does not score workflow completeness
 - every persisted run belongs to a task object
-- artifact objects include canonical structured artifact content
 - run audit payloads are written to `buddyswitch/content/runs/**`
 - derived markdown artifacts and run summaries are retired
 
+Multi-skill resolution notes:
+
+- multi-skill buddies never auto-select in runtime; the host must choose one `skill_id` from `resolve_context.skills`
+- `resolve_context.inputs` is the current selected input bundle only when one skill surface is already resolved
+- for multi-skill resolves, top-level `inputs` may be empty until the host chooses the skill turn
+- the host should choose by combining the resolved skill metadata with `task_context`, `track_context`, and the buddy contract docs
+
 Market runtime note:
-- market skills declare `browser_executor = "chrome-devtools-cockpit"` and `discovery_mode = "browser-native"` in skill metadata
-- `required_tools` remains advisory even for market skills; it warns the host rather than enforcing execution order
-- market skills may declare a declarative `tool_scope_profile`; runtime normalizes it into `tool_scope`
+
+- market browser rules live in `resolve_context.skills[*].host_execution`
+- market tool boundaries live in `resolve_context.skills[*].tool_scope`
+- for `market-browser-native`, `host_execution.browser_executor` stays `chrome-devtools-cockpit`
 - host execution for market runs must stay browser-native: search in the browser and continue into real pages (details, comments, related pages when relevant)
 - no silent search API/snippet/crawler fallback is allowed; only explicit `user-approved` one-off downgrade is permitted when browser-native access is genuinely blocked
-- the host-facing execution boundary for market runs lives in `selected_skill_packet.execution_constraints`, `selected_skill_packet.tool_scope`, and `selected_skill_packet.execution_steps`, not in `required_tools`
-
-## Execution Preparation
-
-`prepare-execution` is the canonical step between `resolve` and `persist`.
-It converts the chosen skill into `selected_skill_packet`.
-Canonical machine-readable contract source: `framework/contracts/selected-skill-packet.json`.
-The exact packet field list, nested packet shape, and market packet invariants are frozen in that contract file.
-That contract also freezes `output_schema_path` as part of the host-facing packet ABI.
-
-`execution_steps` is the ordered human-facing execution contract for the host session.
-For market runs, `execution_constraints` carries the Chrome MCP/browser-native/no-silent-degrade contract, `tool_scope` carries the declarative host-facing tool boundary, and `execution_steps` carries the ordered browsing workflow the host must follow.
-The host must execute the packet in-session; BuddySwitch does not execute host tools itself.
 
 ## Host Codex Responsibilities
 
-After `resolve`:
+Recommended fixed host flow:
 
-1. choose exactly one `skill_id` from `eligible_skills`
-2. set `chosen_skill_id = skill_id`
-3. review `artifact_selection_by_skill[chosen_skill_id]` and `run_instructions_by_skill[chosen_skill_id]` only as pre-execution selection context
-4. call `scripts/switch_runtime.py prepare-execution --resolved <file> --skill-id <chosen_skill_id>` to materialize `selected_skill_packet`
-5. treat `selected_skill_packet.selected_inputs` as the canonical input bundle for the run
-6. apply `selected_skill_packet.tool_scope` before starting the run
-7. inject `selected_skill_packet.skill_instructions` verbatim and treat `selected_skill_packet.execution_steps` as ordered requirements
-8. execute the workflow in-session by following `selected_skill_packet.execution_steps` in order
-9. produce a structured result payload matching `required_output_schema_by_skill[chosen_skill_id]`
-10. call `scripts/switch_runtime.py persist`
-
-Recommended fixed host flow for track-bound work:
-1. resolve switch
-2. choose `chosen_skill_id` from `eligible_skills`
-3. review `track_artifact_index`, `artifact_selection_by_skill[chosen_skill_id]`, and `run_instructions_by_skill[chosen_skill_id]` only to choose the skill and preview likely upstream context
-4. call `prepare-execution`
-5. treat `selected_skill_packet.selected_inputs` as the canonical input bundle for the run
-6. apply `selected_skill_packet.tool_scope` before starting the run
-7. inject `selected_skill_packet.skill_instructions` verbatim and execute the run in the current host session while following `selected_skill_packet.execution_steps` in order
-8. persist result
+1. call `scripts/switch_runtime.py resolve`
+2. choose exactly one `skill_id` from `resolve_context.skills`
+3. read the selected skill package instruction markdown from `instruction_path`
+4. treat `resolve_context.inputs` as the current selected input bundle for the run when the selected skill surface is already resolved
+5. for market runs, apply `resolve_context.skills[*].host_execution` and `resolve_context.skills[*].tool_scope` before browser work
+6. execute the selected skill in-session
+7. produce a structured result payload matching the selected skill schema
+8. call `scripts/switch_runtime.py persist` to perform the `persist-skill-result` step
+9. check `refreshed_context.ok`; continue from `refreshed_context` when it is true, or rerun `resolve` when `refreshed_context.error.code = E_RUNTIME_REFRESH_CONTEXT`
 
 Boundary for execution:
-- BuddySwitch supplies routing context, selected skill packets, and persistence.
+
+- BuddySwitch supplies routing context, resolve_context, and persistence.
 - The host remains the only executor of browser, shell, and MCP tool actions.
+- BuddySwitch does not execute host tools itself.
 
-## Persist Behavior
+## Persist Skill Result
 
-`persist` is a lightweight technical gate, not a business-quality review.
+`persist-skill-result` is the canonical write boundary. The response shape is frozen in `framework/contracts/persist-skill-result.json`.
+
+The current CLI command is:
+
+```bash
+python3 scripts/switch_runtime.py persist --resolved context.json --skill-id <skill_id> --result result.json
+```
 
 It performs one boundary validation pass:
 
-- resolves the chosen skill context exactly once from the successful `resolved` payload
-- result payload matches the selected schema
-- basic state/reference safety
-
-Schema validation in this stage is structural only. It checks shape and allowed values, not whether the work itself is good enough.
+- confirms the context revision is current
+- confirms the selected skill is valid for the authoritative buddy/task context
+- validates the result payload against the selected schema
+- rejects unsafe run reuse and unsafe state/reference writes
 
 It then commits canonical state:
 
-- materializes the already-resolved task mode (`create` or `reuse`)
-- applies task-track binding when the switch explicitly targets an existing track
+- updates the resolved task mode (`create` or `reuse`)
+- preserves the resolved task-track binding for track-targeted runs and applies any remaining registration needed before write completion
 - routes into the selected skill's canonical write path (`track-manager` mutation or artifact persistence)
 - writes the final run audit after canonical object writes succeed
 
@@ -162,20 +183,18 @@ It writes:
 
 - task objects under `buddyswitch/objects/tasks/*.json`
 - artifact objects with canonical structured content under `buddyswitch/objects/artifacts/*.json`
-- run audit payloads under `buddyswitch/content/runs/**`
+- run audit payloads under `buddyswitch/content/runs/*.json`
 - track objects under `buddyswitch/objects/tracks/*.json` when task binding or PM track-manager mutations are requested
 
-Successful persist receipts and run audits also include:
+Successful persist responses include `receipt` plus `refreshed_context`. Host-facing follow-up fields live inside `receipt`, including:
 
 - `task_title`
-- `track_title` (nullable)
-- `reference_switches` with copy-ready command templates:
-  - `continue_current_task`
-  - `continue_current_task_in_track` (when track exists)
-  - `handoff_to_next_buddy` (when track has `next_buddy`)
-- `related_run_ids` (up to 2 run ids linked to the same task, excluding the current run)
-- `recommended_switch` (host-ready command chosen with precedence:
-  `handoff_to_next_buddy` > `continue_current_task_in_track` > `continue_current_task`)
+- optional `track_title`
+- `reference_switches`
+- `related_run_ids`
+- `recommended_switch`
+
+`refreshed_context` normally carries the next-turn resolve handoff. If the persist commits but the follow-up reservation cannot be written, `refreshed_context` returns `{ok: false, error.code: E_RUNTIME_REFRESH_CONTEXT}` and the host should rerun `resolve`.
 
 Host terminal rendering contract:
 
@@ -188,14 +207,12 @@ Host terminal rendering contract:
   - `Run`
   - `Related Runs` only when `related_run_ids` is non-empty
 - `Commands` order:
-  - one `Template` command from `reference_switches` (`continue_current_task_in_track` preferred over `continue_current_task`)
+  - one `Template` command from `reference_switches`
   - one `Recommended` command from `recommended_switch`
 - `Summary` constraints:
   - execution summary in 1-2 lines
   - open questions up to 4 items
 - Keep full object paths as optional debug output, not the primary summary surface.
-
-`resolve` writes nothing. Its only job is to return enough context for the host Codex session to decide what to do next.
 
 ## Error Handling
 
@@ -210,8 +227,8 @@ Parsing should return explicit errors:
 Runtime should return explicit errors:
 
 - `E_RUNTIME_RESOLVE`
-- `E_RUNTIME_PREPARE_EXECUTION`
 - `E_RUNTIME_PERSIST`
+- `E_RUNTIME_REFRESH_CONTEXT`
 
 For syntax and unknown-buddy errors include:
 
@@ -223,5 +240,5 @@ For syntax and unknown-buddy errors include:
 
 - Parser: `python3 scripts/parse_switch.py "switch pm -> track-demo: continue scope definition"`
 - Router: `python3 scripts/codex_router.py "switch pm -> track-demo: continue scope definition"`
-- Runtime resolve: `python3 scripts/switch_runtime.py resolve "switch dev: continue implementation"`
-- Runtime persist: `python3 scripts/switch_runtime.py persist --resolved resolved.json --skill-id write-prd --result result.json`
+- Runtime resolve (launcher-owned runtime workspace): `python3 scripts/switch_runtime.py resolve "switch dev: continue implementation"`
+- Runtime persist (launcher-owned runtime workspace): `python3 scripts/switch_runtime.py persist --resolved resolved.json --skill-id write-prd --result result.json`

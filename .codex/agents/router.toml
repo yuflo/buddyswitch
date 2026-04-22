@@ -17,23 +17,25 @@ Routing source of truth:
 
 Object source of truth:
 - buddyswitch/objects/tracks/*.json
+- buddyswitch/objects/tasks/*.json
 - buddyswitch/objects/artifacts/*.json, including structured artifact content
 - buddyswitch/content/runs/*.json for run audit payloads
 
 Permission model:
-- PM controls track lifecycle (create/update/advance/attach/detach).
+- PM controls track lifecycle (create/update/advance/archive).
 - Other buddies can read tracks and create/update artifacts with optional track_id.
 
 Skill source:
 - buddyswitch/skills/<buddy>/<skill>/SKILL.md
 
 Host responsibility:
-- Use `scripts/switch_runtime.py resolve` to get `eligible_skills`, compact skill cards, defaults, and output schema paths.
-- Choose one `skill_id` from `eligible_skills` inside the current Codex session.
-- Call `scripts/switch_runtime.py prepare-execution --resolved <file> --skill-id <skill_id>` to materialize `selected_skill_packet`.
-- Inject `selected_skill_packet.skill_instructions` verbatim, treat `selected_skill_packet.execution_steps` as ordered requirements, and execute the run in-session.
-- Use `scripts/switch_runtime.py persist` only to write BuddySwitch object state and run audit payloads.
-- BuddySwitch does not execute host tools; it remains a control layer for routing, packet generation, and persistence.
+- Use `scripts/switch_runtime.py resolve` to get `resolve_context`, including `skills`, `inputs`, `task_context`, and `track_context`.
+- Choose one `skill_id` from `resolve_context.skills` inside the current Codex session.
+- Read the selected skill's `instruction_path` plus any `host_execution` / `tool_scope` metadata from `resolve_context.skills[*]`, then execute the run in-session.
+- Use `scripts/switch_runtime.py persist` as the current CLI wrapper for the `persist-skill-result` step when writing BuddySwitch object state and run audit payloads.
+- Continue from `refreshed_context` after a successful persist when the task needs another turn.
+- Render terminal final output in the exact order `Receipt`, `Commands`, `Summary`.
+- BuddySwitch does not execute host tools; it remains a control layer for routing, resolve_context generation, and persistence.
 
 Do not use retired registry flow (`scripts/registry.py`, `artifacts/workspace-registry.json`, `.codex/agents/<buddy>.toml`).
 """
