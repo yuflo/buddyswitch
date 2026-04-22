@@ -96,6 +96,7 @@ buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
 buddyswitch/content/runs
 runs/raw
+projects/app/.runtime
 EOF
 }
 
@@ -132,17 +133,13 @@ buddyswitch_workspace_restore_runtime_outputs() {
   done < <(buddyswitch_workspace_runtime_output_paths)
 }
 
-buddyswitch_workspace_ensure_execution_worktree() {
+buddyswitch_workspace_force_rebuild_execution_worktree() {
   local workspace_dir repo_root staging_root
   local cleanup_staging=0
 
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
   repo_root="$(buddyswitch_workspace_repo_root)"
   buddyswitch_workspace_validate_workspace_dir
-
-  if buddyswitch_workspace_is_valid_execution_worktree; then
-    return 0
-  fi
 
   mkdir -p "${BUDDYSWITCH_SHARED_ROOT}"
   if [[ -d "${workspace_dir}" ]]; then
@@ -172,6 +169,14 @@ buddyswitch_workspace_ensure_execution_worktree() {
     buddyswitch_workspace_restore_runtime_outputs "${staging_root}"
     rm -rf "${staging_root}"
   fi
+}
+
+buddyswitch_workspace_ensure_execution_worktree() {
+  if buddyswitch_workspace_is_valid_execution_worktree; then
+    return 0
+  fi
+
+  buddyswitch_workspace_force_rebuild_execution_worktree
 }
 
 buddyswitch_workspace_install_runtime_agents() {
@@ -269,6 +274,15 @@ EOF
 buddyswitch_workspace_prepare_execution_worktree() {
   buddyswitch_workspace_init_defaults
   buddyswitch_workspace_ensure_execution_worktree
+  buddyswitch_workspace_ensure_state_skeleton
+  buddyswitch_workspace_install_runtime_agents
+  buddyswitch_workspace_install_local_excludes
+  buddyswitch_workspace_install_guardrail_hooks
+}
+
+buddyswitch_workspace_sync_execution_worktree() {
+  buddyswitch_workspace_init_defaults
+  buddyswitch_workspace_force_rebuild_execution_worktree
   buddyswitch_workspace_ensure_state_skeleton
   buddyswitch_workspace_install_runtime_agents
   buddyswitch_workspace_install_local_excludes

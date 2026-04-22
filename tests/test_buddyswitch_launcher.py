@@ -376,7 +376,8 @@ exec "$real_git" "$@"
             self.assertIn("reset --yes", help_result.stdout)
             self.assertIn("browser status", help_result.stdout)
             self.assertIn("browser ensure", help_result.stdout)
-            self.assertIn("workspace ensure", help_result.stdout)
+            self.assertIn("workspace sync", help_result.stdout)
+            self.assertNotIn("workspace ensure", help_result.stdout)
             self.assertNotIn("install-mcp", help_result.stdout)
 
             launch_result = subprocess.run(
@@ -463,7 +464,7 @@ exec "$real_git" "$@"
             self.assertEqual(blocked_reset.returncode, 3)
             self.assertTrue(shared_root.exists(), "active browser marker should block reset")
 
-    def test_workspace_ensure_is_blocked_when_active_launcher_marker_exists(self) -> None:
+    def test_workspace_sync_is_blocked_when_active_launcher_marker_exists(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -475,19 +476,243 @@ exec "$real_git" "$@"
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
 
-            blocked_ensure = subprocess.run(
-                [str(LAUNCHER), "workspace", "ensure"],
+            blocked_sync = subprocess.run(
+                [str(LAUNCHER), "workspace", "sync"],
                 cwd=ROOT,
                 env=env,
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(blocked_ensure.returncode, 3)
-            self.assertIn("active buddyswitch-codex instance", blocked_ensure.stderr)
-            self.assertFalse((shared_root / "workspace").exists(), "blocked ensure must not create the workspace")
+            self.assertEqual(blocked_sync.returncode, 3)
+            self.assertIn("active buddyswitch-codex instance", blocked_sync.stderr)
+            self.assertFalse((shared_root / "workspace").exists(), "blocked sync must not create the workspace")
 
-    def test_workspace_ensure_restores_runtime_agents_and_preserves_runtime_outputs(self) -> None:
+    def test_workspace_command_requires_explicit_subcommand(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            workspace_dir = shared_root / "workspace"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            missing_subcommand = subprocess.run(
+                [str(LAUNCHER), "workspace"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(missing_subcommand.returncode, 2)
+            self.assertIn("workspace command is required", missing_subcommand.stderr)
+            self.assertIn("workspace sync", missing_subcommand.stderr)
+            self.assertFalse(workspace_dir.exists(), "workspace command without subcommand must not run sync")
+
+    def test_workspace_sync_rebuilds_valid_stale_worktree_to_repo_head(self) -> None:
+        parent_head = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD~1"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if parent_head.returncode != 0:
+            self.skipTest("repository does not have HEAD~1 available for stale-worktree test")
+        stale_head = parent_head.stdout.strip()
+        repo_head = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(repo_head.returncode, 0, msg=repo_head.stderr)
+        current_head = repo_head.stdout.strip()
+        self.assertNotEqual(stale_head, current_head)
+
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            workspace_dir = shared_root / "workspace"
+            shared_root.mkdir(parents=True, exist_ok=True)
+
+            add_worktree = subprocess.run(
+                ["git", "-C", str(ROOT), "worktree", "add", "--detach", str(workspace_dir), stale_head],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(add_worktree.returncode, 0, msg=add_worktree.stderr)
+
+            try:
+                before_sync = subprocess.run(
+                    ["git", "-C", str(workspace_dir), "rev-parse", "HEAD"],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(before_sync.returncode, 0, msg=before_sync.stderr)
+                self.assertEqual(before_sync.stdout.strip(), stale_head)
+
+                env = os.environ.copy()
+                env["HOME"] = str(source_home_path)
+                env.pop("CODEX_HOME", None)
+
+                sync_result = subprocess.run(
+                    [str(LAUNCHER), "workspace", "sync"],
+                    cwd=ROOT,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    sync_result.returncode,
+                    0,
+                    msg=f"workspace sync failed\nstdout:\n{sync_result.stdout}\nstderr:\n{sync_result.stderr}",
+                )
+
+                after_sync = subprocess.run(
+                    ["git", "-C", str(workspace_dir), "rev-parse", "HEAD"],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(after_sync.returncode, 0, msg=after_sync.stderr)
+                self.assertEqual(after_sync.stdout.strip(), current_head)
+            finally:
+                subprocess.run(
+                    ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(workspace_dir)],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                subprocess.run(
+                    ["git", "-C", str(ROOT), "worktree", "prune"],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+    def test_start_leaves_valid_stale_worktree_untouched(self) -> None:
+        parent_head = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD~1"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if parent_head.returncode != 0:
+            self.skipTest("repository does not have HEAD~1 available for stale-worktree test")
+        stale_head = parent_head.stdout.strip()
+
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            shared_root = source_home_path / ".codex-buddyswitch"
+            workspace_dir = shared_root / "workspace"
+            shared_root.mkdir(parents=True, exist_ok=True)
+
+            add_worktree = subprocess.run(
+                ["git", "-C", str(ROOT), "worktree", "add", "--detach", str(workspace_dir), stale_head],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(add_worktree.returncode, 0, msg=add_worktree.stderr)
+
+            try:
+                before_start = subprocess.run(
+                    ["git", "-C", str(workspace_dir), "rev-parse", "HEAD"],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(before_start.returncode, 0, msg=before_start.stderr)
+                self.assertEqual(before_start.stdout.strip(), stale_head)
+
+                env = os.environ.copy()
+                env["HOME"] = str(source_home_path)
+                env.pop("CODEX_HOME", None)
+                env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+                env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+                env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(temp_root_path / "browser-ready.flag")
+                env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
+
+                launch_result = subprocess.run(
+                    [str(LAUNCHER), "start"],
+                    cwd=ROOT,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    launch_result.returncode,
+                    0,
+                    msg=f"launcher failed\nstdout:\n{launch_result.stdout}\nstderr:\n{launch_result.stderr}",
+                )
+
+                after_start = subprocess.run(
+                    ["git", "-C", str(workspace_dir), "rev-parse", "HEAD"],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(after_start.returncode, 0, msg=after_start.stderr)
+                self.assertEqual(after_start.stdout.strip(), stale_head)
+            finally:
+                subprocess.run(
+                    ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(workspace_dir)],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                subprocess.run(
+                    ["git", "-C", str(ROOT), "worktree", "prune"],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+    def test_workspace_sync_restores_runtime_agents_and_preserves_runtime_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -495,22 +720,25 @@ exec "$real_git" "$@"
             runtime_artifact = workspace_dir / "buddyswitch" / "objects" / "artifacts" / "artifact-demo.json"
             runtime_run = workspace_dir / "buddyswitch" / "content" / "runs" / "run-demo.json"
             raw_dump = workspace_dir / "runs" / "raw" / "dump.json"
+            runtime_session = workspace_dir / "projects" / "app" / ".runtime" / "session.json"
 
             (workspace_dir / ".git").mkdir(parents=True, exist_ok=True)
             runtime_artifact.parent.mkdir(parents=True, exist_ok=True)
             runtime_run.parent.mkdir(parents=True, exist_ok=True)
             raw_dump.parent.mkdir(parents=True, exist_ok=True)
+            runtime_session.parent.mkdir(parents=True, exist_ok=True)
             runtime_artifact.write_text('{"artifact_id":"artifact-demo"}\n', encoding="utf-8")
             runtime_run.write_text('{"run_id":"run-demo"}\n', encoding="utf-8")
             raw_dump.write_text('{"raw":true}\n', encoding="utf-8")
+            runtime_session.write_text('{"session":"demo"}\n', encoding="utf-8")
             (workspace_dir / "AGENTS.md").write_text("# Wrong Header\n", encoding="utf-8")
 
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
 
-            ensure_result = subprocess.run(
-                [str(LAUNCHER), "workspace", "ensure"],
+            sync_result = subprocess.run(
+                [str(LAUNCHER), "workspace", "sync"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -518,18 +746,20 @@ exec "$real_git" "$@"
                 check=False,
             )
             self.assertEqual(
-                ensure_result.returncode,
+                sync_result.returncode,
                 0,
-                msg=f"workspace ensure failed\nstdout:\n{ensure_result.stdout}\nstderr:\n{ensure_result.stderr}",
+                msg=f"workspace sync failed\nstdout:\n{sync_result.stdout}\nstderr:\n{sync_result.stderr}",
             )
-            self.assertTrue((workspace_dir / ".git").exists(), "workspace ensure should leave a git worktree behind")
+            self.assertIn("Workspace synced:", sync_result.stdout)
+            self.assertTrue((workspace_dir / ".git").exists(), "workspace sync should leave a git worktree behind")
             first_line = (workspace_dir / "AGENTS.md").read_text(encoding="utf-8").splitlines()[0]
             self.assertEqual(first_line, "# BuddySwitch Runtime Workspace")
             self.assertEqual(runtime_artifact.read_text(encoding="utf-8"), '{"artifact_id":"artifact-demo"}\n')
             self.assertEqual(runtime_run.read_text(encoding="utf-8"), '{"run_id":"run-demo"}\n')
             self.assertEqual(raw_dump.read_text(encoding="utf-8"), '{"raw":true}\n')
+            self.assertEqual(runtime_session.read_text(encoding="utf-8"), '{"session":"demo"}\n')
 
-    def test_workspace_ensure_restores_runtime_outputs_when_worktree_rebuild_fails(self) -> None:
+    def test_workspace_sync_restores_runtime_outputs_when_worktree_rebuild_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -538,6 +768,7 @@ exec "$real_git" "$@"
             runtime_artifact = workspace_dir / "buddyswitch" / "objects" / "artifacts" / "artifact-demo.json"
             runtime_run = workspace_dir / "buddyswitch" / "content" / "runs" / "run-demo.json"
             raw_dump = workspace_dir / "runs" / "raw" / "dump.json"
+            runtime_session = workspace_dir / "projects" / "app" / ".runtime" / "session.json"
 
             fake_bin = temp_root_path / "bin"
             fake_bin.mkdir(parents=True, exist_ok=True)
@@ -547,9 +778,11 @@ exec "$real_git" "$@"
             runtime_artifact.parent.mkdir(parents=True, exist_ok=True)
             runtime_run.parent.mkdir(parents=True, exist_ok=True)
             raw_dump.parent.mkdir(parents=True, exist_ok=True)
+            runtime_session.parent.mkdir(parents=True, exist_ok=True)
             runtime_artifact.write_text('{"artifact_id":"artifact-demo"}\n', encoding="utf-8")
             runtime_run.write_text('{"run_id":"run-demo"}\n', encoding="utf-8")
             raw_dump.write_text('{"raw":true}\n', encoding="utf-8")
+            runtime_session.write_text('{"session":"demo"}\n', encoding="utf-8")
 
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
@@ -557,19 +790,20 @@ exec "$real_git" "$@"
             env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
             env["BUDDYSWITCH_FAIL_WORKTREE_ADD"] = "1"
 
-            ensure_result = subprocess.run(
-                [str(LAUNCHER), "workspace", "ensure"],
+            sync_result = subprocess.run(
+                [str(LAUNCHER), "workspace", "sync"],
                 cwd=ROOT,
                 env=env,
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertNotEqual(ensure_result.returncode, 0)
-            self.assertIn("simulated worktree add failure", ensure_result.stderr)
+            self.assertNotEqual(sync_result.returncode, 0)
+            self.assertIn("simulated worktree add failure", sync_result.stderr)
             self.assertEqual(runtime_artifact.read_text(encoding="utf-8"), '{"artifact_id":"artifact-demo"}\n')
             self.assertEqual(runtime_run.read_text(encoding="utf-8"), '{"run_id":"run-demo"}\n')
             self.assertEqual(raw_dump.read_text(encoding="utf-8"), '{"raw":true}\n')
+            self.assertEqual(runtime_session.read_text(encoding="utf-8"), '{"session":"demo"}\n')
             self.assertEqual(
                 list(shared_root.glob("workspace-outputs.*")),
                 [],

@@ -27,14 +27,14 @@ Usage:
   buddyswitch-codex reset --yes
   buddyswitch-codex browser status [--port <port>] [--profile-dir <dir>]
   buddyswitch-codex browser ensure [--port <port>] [--profile-dir <dir>]
-  buddyswitch-codex workspace ensure
+  buddyswitch-codex workspace sync
   buddyswitch-codex help
 
 Commands:
   start   Launch codex in the shared BuddySwitch environment (default behavior)
   reset   Remove the shared BuddySwitch environment (requires --yes)
   browser Manage browser cockpit setup (status/ensure)
-  workspace Repair the execution workspace shell (ensure)
+  workspace Refresh the execution workspace to repo HEAD (sync)
   help    Show this help message
 
 Environment:
@@ -70,42 +70,47 @@ start_codex() {
 workspace_usage() {
   cat <<EOF
 Usage:
-  buddyswitch-codex workspace ensure
+  buddyswitch-codex workspace sync
   buddyswitch-codex workspace help
 
 Commands:
-  ensure  Repair the launcher execution workspace shell.
+  sync    Refresh the launcher execution workspace to repo HEAD.
   help    Show this help message.
 EOF
 }
 
-workspace_ensure() {
+workspace_sync() {
   local active_count
   active_count="$(buddyswitch_count_active_launchers)"
   if [[ "${active_count}" -gt 0 ]]; then
-    echo "Workspace ensure blocked: ${active_count} active buddyswitch-codex instance(s) detected." >&2
+    echo "Workspace sync blocked: ${active_count} active buddyswitch-codex instance(s) detected." >&2
     echo "Close active launcher sessions and retry." >&2
     return 3
   fi
 
-  buddyswitch_workspace_prepare_execution_worktree
-  echo "Workspace ready: ${BUDDYSWITCH_WORKSPACE_DIR}"
+  buddyswitch_workspace_sync_execution_worktree
+  echo "Workspace synced: ${BUDDYSWITCH_WORKSPACE_DIR}"
 }
 
 workspace_main() {
-  local command="${1:-ensure}"
+  local command="${1:-}"
+  if [[ -z "${command}" ]]; then
+    echo "workspace command is required" >&2
+    workspace_usage >&2
+    return 2
+  fi
   case "${command}" in
     help|-h|--help)
       workspace_usage
       ;;
-    ensure)
+    sync)
       shift || true
       if [[ $# -gt 0 ]]; then
         echo "Unknown workspace option: $1" >&2
         workspace_usage >&2
         return 2
       fi
-      workspace_ensure
+      workspace_sync
       ;;
     *)
       echo "Unknown workspace command: ${command}" >&2

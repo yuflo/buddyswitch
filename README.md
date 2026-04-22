@@ -65,6 +65,8 @@ If you need a launcher-managed product-mode session instead of repo-root develop
 ./buddyswitch-codex start
 ```
 
+Warning: `start` reuses an existing valid launcher execution workspace and does not refresh stale code to the latest repo `HEAD`. If `resolve`/`persist` should run against current repo code, run `./buddyswitch-codex workspace sync` first.
+
 ## Daily Use
 
 ### Parse or route a switch directive
@@ -76,7 +78,7 @@ python3 scripts/codex_router.py "switch pm: create ai-scheduler-lp track"
 
 ### Resolve a run
 
-Run `resolve` only from the launcher-owned runtime workspace. In create mode it may materialize a zero-run task and reserve the next run id, so the repo-root development checkout blocks it; start the runtime workspace with `./buddyswitch-codex start` first.
+Run `resolve` only from the launcher-owned runtime workspace. In create mode it may materialize a zero-run task and reserve the next run id, so the repo-root development checkout blocks it; start the runtime workspace with `./buddyswitch-codex start` first. `start` does not refresh stale but valid execution workspace code, so run `./buddyswitch-codex workspace sync` first when you need the latest repo `HEAD`.
 
 ```bash
 python3 scripts/switch_runtime.py resolve "switch market: quick market research for AI scheduler landing page"
@@ -85,7 +87,7 @@ python3 scripts/switch_runtime.py resolve "switch pm: create ai-scheduler-lp tra
 
 ### Persist a structured result
 
-Run `persist` only from the launcher-owned runtime workspace. The repo-root development checkout blocks BuddySwitch runtime writes; start it with `./buddyswitch-codex start` first. This command is the current CLI wrapper for the `persist-skill-result` step.
+Run `persist` only from the launcher-owned runtime workspace. The repo-root development checkout blocks BuddySwitch runtime writes; start it with `./buddyswitch-codex start` first. `start` does not refresh stale but valid execution workspace code, so run `./buddyswitch-codex workspace sync` first when you need the latest repo `HEAD`. This command is the current CLI wrapper for the `persist-skill-result` step.
 
 ```bash
 python3 scripts/switch_runtime.py persist \
@@ -413,16 +415,18 @@ BuddySwitch launcher sessions now bootstrap the execution workspace shell and br
 ./buddyswitch-codex start
 ```
 
-Repair commands are split by responsibility:
+`start` does not auto-sync execution workspace code to the latest repo `HEAD`. Use `workspace sync` when you want a manual code refresh.
+
+Repair and refresh commands are split by responsibility:
 
 ```bash
 ./buddyswitch-codex browser status
 ./buddyswitch-codex browser ensure
-./buddyswitch-codex workspace ensure
+./buddyswitch-codex workspace sync
 ```
 
 - `browser ensure` only repairs the shared browser cockpit and browser MCP setup.
-- `workspace ensure` only repairs the launcher execution workspace shell. It refuses to run while active launcher sessions exist and it preserves runtime outputs under `buddyswitch/objects/**`, `buddyswitch/content/runs/**`, and `runs/raw/**`.
+- `workspace sync` manually refreshes the launcher execution workspace to repo `HEAD`. It force-rebuilds the execution worktree and drops local changes outside preserved runtime paths. It refuses to run while active launcher sessions exist and preserves runtime outputs under `buddyswitch/objects/tracks/**`, `buddyswitch/objects/tasks/**`, `buddyswitch/objects/artifacts/**`, `buddyswitch/content/runs/**`, `runs/raw/**`, and `projects/app/.runtime/**`.
 
 Default shared browser profile path:
 
