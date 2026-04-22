@@ -52,7 +52,7 @@ When user sends `switch <buddy>...: <demand>`:
 8. Read the selected skill's `instruction_path`, use `resolve_context.inputs` as the current selected artifact bundle only when that skill surface is already resolved, and for multi-skill buddies choose from `resolve_context.skills` using the skill metadata plus `task_context` / `track_context`. For market runs, apply `resolve_context.skills[*].host_execution` plus `resolve_context.skills[*].tool_scope` before starting browser work.
 9. Execute the selected skill in-session and produce a structured result matching the selected skill's output schema.
 10. Persist through `scripts/switch_runtime.py persist` as the current CLI wrapper for the `persist-skill-result` step whenever you need BuddySwitch state and canonical run audit persistence.
-11. Continue from `refreshed_context` when another buddy turn is needed after a successful persist.
+11. Check `refreshed_context.ok`; continue from `refreshed_context` when it is true, or rerun `resolve` when `refreshed_context.error.code = E_RUNTIME_REFRESH_CONTEXT`.
 12. BuddySwitch does not execute host tools; it remains the control layer and only supplies resolve_context plus canonical persistence.
 13. Render terminal final output in three sections, in this exact order: `Receipt`, `Commands`, `Summary`.
 14. `Receipt` section rules:
@@ -65,8 +65,7 @@ When user sends `switch <buddy>...: <demand>`:
 15. `Commands` section rules:
     - Show one `Template:` command from `reference_switches`:
       - use `continue_current_task_in_track` when present, otherwise `continue_current_task`
-    - Show one `Recommended:` command:
-      - prefer `handoff_to_next_buddy`, else `continue_current_task_in_track`, else `continue_current_task`
+    - Show one `Recommended` command from `recommended_switch`.
 16. `Summary` section rules:
     - Keep execution summary to 1-2 lines.
     - Open questions max 4 items.

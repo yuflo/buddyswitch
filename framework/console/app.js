@@ -383,13 +383,13 @@ function deriveSwitchCommandsForTrack(track) {
   const testCommand = trackNeedsTest(track)
     ? `switch test -> ${track.id}: Run smoke checks for latest implementation`
     : "";
-  const recommended = testCommand || deriveRecommendedSwitch(latestRun, references, template, track);
+  const recommended = deriveRecommendedSwitch(latestRun, references, template, track);
   return {
     recommended,
     template,
     continueTask: references.continue_current_task || "",
     continueTaskInTrack: references.continue_current_task_in_track || template,
-    handoff: testCommand || references.handoff_to_next_buddy || (track?.next_buddy ? `switch ${track.next_buddy} -> ${track.id}: <demand>` : ""),
+    handoff: references.handoff_to_next_buddy || testCommand || (track?.next_buddy ? `switch ${track.next_buddy} -> ${track.id}: <demand>` : ""),
   };
 }
 

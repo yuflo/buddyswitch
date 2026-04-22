@@ -1043,7 +1043,8 @@ class WorkspaceDataTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "run_id": run_id,
                     "timestamp": "2026-04-12T20:10:00+08:00",
                     "switch": {
-                        "buddy": "dev",
+                        "buddy_id": "dev",
+                        "buddy": "pm",
                         "task_id": "task-dev-audit-123abc",
                         "track_id": "track-audit",
                         "demand": "implement scope",
@@ -1072,6 +1073,7 @@ class WorkspaceDataTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         row = next((item for item in rows if item.get("run_id") == run_id), None)
         self.assertIsNotNone(row)
         assert row is not None
+        self.assertEqual(row["buddy"], "dev")
         self.assertEqual(row["task_title"], "Audit Task Title")
         self.assertEqual(row["track_title"], "Audit Track Title")
         self.assertEqual(
@@ -1081,6 +1083,86 @@ class WorkspaceDataTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(row["related_run_ids"], ["run-prior-a", "run-prior-b"])
         self.assertEqual(row["recommended_switch"], "switch dev(task-dev-audit-123abc): <demand>")
         self.assertNotIn("suggested_next_switch", row)
+
+    def test_scan_run_audits_falls_back_to_legacy_buddy_when_buddy_id_invalid(self) -> None:
+        run_id = f"run-workspace-audit-invalid-buddy-{uuid.uuid4().hex[:8]}"
+        run_path = self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")
+        run_path.parent.mkdir(parents=True, exist_ok=True)
+        run_path.write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "timestamp": "2026-04-12T20:11:00+08:00",
+                    "switch": {
+                        "buddy_id": "unknown-buddy",
+                        "buddy": "pm",
+                    },
+                },
+                ensure_ascii=True,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        self._remember(f"buddyswitch/content/runs/{run_id}.json")
+
+        rows = workspace_projections.scan_run_audits()
+        row = next((item for item in rows if item.get("run_id") == run_id), None)
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row["buddy"], "pm")
+
+    def test_scan_run_audits_sets_buddy_none_when_buddy_id_and_legacy_buddy_invalid(self) -> None:
+        run_id = f"run-workspace-audit-invalid-buddy-both-{uuid.uuid4().hex[:8]}"
+        run_path = self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")
+        run_path.parent.mkdir(parents=True, exist_ok=True)
+        run_path.write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "timestamp": "2026-04-12T20:11:30+08:00",
+                    "switch": {
+                        "buddy_id": "unknown-buddy",
+                        "buddy": "also-unknown",
+                    },
+                },
+                ensure_ascii=True,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        self._remember(f"buddyswitch/content/runs/{run_id}.json")
+
+        rows = workspace_projections.scan_run_audits()
+        row = next((item for item in rows if item.get("run_id") == run_id), None)
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertIsNone(row["buddy"])
+
+    def test_scan_run_audits_falls_back_to_legacy_buddy_when_buddy_id_absent(self) -> None:
+        run_id = f"run-workspace-audit-legacy-buddy-{uuid.uuid4().hex[:8]}"
+        run_path = self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")
+        run_path.parent.mkdir(parents=True, exist_ok=True)
+        run_path.write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "timestamp": "2026-04-12T20:12:00+08:00",
+                    "switch": {
+                        "buddy": "market",
+                    },
+                },
+                ensure_ascii=True,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        self._remember(f"buddyswitch/content/runs/{run_id}.json")
+
+        rows = workspace_projections.scan_run_audits()
+        row = next((item for item in rows if item.get("run_id") == run_id), None)
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row["buddy"], "market")
 
 
 class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):

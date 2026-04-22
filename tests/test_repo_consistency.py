@@ -709,6 +709,51 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("check `refreshed_context.ok`", switch_spec)
         self.assertIn("e_runtime_refresh_context", switch_spec)
 
+    def test_active_host_prompts_require_refresh_context_check_and_retry(self) -> None:
+        targets = (
+            ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md",
+            ROOT / ".codex" / "agents" / "router.toml",
+        )
+        legacy_unconditional_runtime = (
+            "continue from `refreshed_context` when another buddy turn is needed after a successful persist."
+        )
+        legacy_unconditional_router = (
+            "continue from `refreshed_context` after a successful persist when the task needs another turn."
+        )
+
+        for path in targets:
+            text = path.read_text(encoding="utf-8").lower()
+            self.assertIn("check `refreshed_context.ok`", text, msg=f"missing refreshed_context.ok guard in {path.relative_to(ROOT)}")
+            self.assertIn("e_runtime_refresh_context", text, msg=f"missing refresh error code in {path.relative_to(ROOT)}")
+            self.assertIn("rerun `resolve`", text, msg=f"missing resolve retry guidance in {path.relative_to(ROOT)}")
+            self.assertNotIn(
+                legacy_unconditional_runtime,
+                text,
+                msg=f"legacy unconditional refreshed_context instruction must be removed in {path.relative_to(ROOT)}",
+            )
+            self.assertNotIn(
+                legacy_unconditional_router,
+                text,
+                msg=f"legacy unconditional refreshed_context instruction must be removed in {path.relative_to(ROOT)}",
+            )
+
+    def test_active_host_prompts_treat_recommended_command_as_canonical_receipt_field(self) -> None:
+        runtime_agents = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
+            encoding="utf-8"
+        ).lower()
+        router = (ROOT / ".codex" / "agents" / "router.toml").read_text(encoding="utf-8").lower()
+
+        self.assertIn("recommended_switch", runtime_agents)
+        self.assertIn("one `recommended` command from `recommended_switch`", runtime_agents)
+        self.assertNotIn("prefer `handoff_to_next_buddy`", runtime_agents)
+        self.assertNotIn("handoff_to_next_buddy", runtime_agents)
+        self.assertIn("recommended_switch", router)
+        self.assertIn("one `recommended` command from `recommended_switch`", router)
+        self.assertNotIn("prefer `handoff_to_next_buddy`", router)
+        self.assertNotIn("handoff_to_next_buddy", router)
+        self.assertNotIn("sub_task", runtime_agents)
+        self.assertNotIn("sub_task", router)
+
     def test_router_doc_lists_task_objects_as_canonical_state(self) -> None:
         text = (ROOT / ".codex" / "agents" / "router.toml").read_text(encoding="utf-8").lower()
 

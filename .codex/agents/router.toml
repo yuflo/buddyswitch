@@ -33,8 +33,9 @@ Host responsibility:
 - Choose one `skill_id` from `resolve_context.skills` inside the current Codex session.
 - Read the selected skill's `instruction_path` plus any `host_execution` / `tool_scope` metadata from `resolve_context.skills[*]`, then execute the run in-session.
 - Use `scripts/switch_runtime.py persist` as the current CLI wrapper for the `persist-skill-result` step when writing BuddySwitch object state and run audit payloads.
-- Continue from `refreshed_context` after a successful persist when the task needs another turn.
+- Check `refreshed_context.ok`; continue from `refreshed_context` when it is true, or rerun `resolve` when `refreshed_context.error.code = E_RUNTIME_REFRESH_CONTEXT`.
 - Render terminal final output in the exact order `Receipt`, `Commands`, `Summary`.
+- In `Commands`, show one `Template` command from `reference_switches` and one `Recommended` command from `recommended_switch`.
 - BuddySwitch does not execute host tools; it remains a control layer for routing, resolve_context generation, and persistence.
 
 Do not use retired registry flow (`scripts/registry.py`, `artifacts/workspace-registry.json`, `.codex/agents/<buddy>.toml`).

@@ -119,6 +119,15 @@ def scan_run_audits() -> list[dict[str, Any]]:
     if not run_root.exists():
         return []
 
+    manifest = load_manifest(DEFAULT_MANIFEST)
+    valid_buddy_ids = {
+        buddy_id
+        for buddy in manifest.get("buddies", [])
+        if isinstance(buddy, dict)
+        for buddy_id in [buddy.get("id")]
+        if isinstance(buddy_id, str) and buddy_id
+    }
+
     rows = []
     for path in sorted(run_root.glob("*.json")):
         if path.name == ".gitkeep":
@@ -149,11 +158,19 @@ def scan_run_audits() -> list[dict[str, Any]]:
 
         switch = payload.get("switch")
         switch_payload = switch if isinstance(switch, dict) else {}
+        raw_buddy_id = switch_payload.get("buddy_id")
+        buddy_id = raw_buddy_id.strip() if isinstance(raw_buddy_id, str) else None
+        if not buddy_id or buddy_id not in valid_buddy_ids:
+            buddy_id = None
+        raw_legacy_buddy = switch_payload.get("buddy")
+        legacy_buddy = raw_legacy_buddy.strip() if isinstance(raw_legacy_buddy, str) else None
+        if not legacy_buddy or legacy_buddy not in valid_buddy_ids:
+            legacy_buddy = None
         rows.append(
             {
                 "run_id": payload.get("run_id", path.stem),
                 "path": rel(path),
-                "buddy": switch_payload.get("buddy"),
+                "buddy": buddy_id or legacy_buddy,
                 "task_id": payload.get("resolved_task_id") or switch_payload.get("task_id"),
                 "task_title": payload.get("task_title"),
                 "demand": switch_payload.get("demand"),
