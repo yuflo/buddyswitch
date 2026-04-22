@@ -1,0 +1,15 @@
+version = 1
+wiki_root = "docs/llm-wiki"
+recent_change_window_days = 45
+recent_change_max_entries = 8
+canonical_sources = [
+  "AGENTS.md",
+  "README.md",
+]
+maintained_files = [
+  "docs/llm-wiki/README.md",
+  "docs/llm-wiki/recent-important-changes.md",
+  "docs/llm-wiki/verification-map.md",
+]
+owner = ""
+notes = ""

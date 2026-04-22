@@ -1,0 +1,3 @@
+display_name: Repo Wiki Maintainer
+short_description: initialize, refresh, and lint a thin repo-tracked wiki for fresh coding-agent orientation
+default_prompt: initialize, refresh, or lint the repo wiki without touching canonical docs
