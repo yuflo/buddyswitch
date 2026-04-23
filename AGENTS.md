@@ -393,6 +393,5 @@ The SHARP guidance above is the default workflow for this repository. The notes 
 ## Development Notes
 
 - Keep repo-root work focused on BuddySwitch source, tests, docs, launcher behavior, and framework contracts.
-- After reading AGENTS.md, read docs/llm-wiki/README.md for fast current-project orientation before diving into raw plans, reviews, or whiteboards.
 - Use `codex` in this checkout for development mode.
 - Use `./buddyswitch-codex start` when you need a launcher-managed product-mode runtime session.
