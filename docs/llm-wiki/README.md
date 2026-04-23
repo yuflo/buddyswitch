@@ -2,7 +2,7 @@
 
 Status: derived
 Last verified: 2026-04-23
-Covers through commit: 28fb29a340e7bdb1ebc71e273ff5041acc65e60f
+Covers through commit: 3961f01b55d2fc1d3dc1c4441be4650fd3d2af3c
 Canonical sources:
 - AGENTS.md
 - README.md

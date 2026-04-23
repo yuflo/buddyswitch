@@ -2,7 +2,7 @@
 
 Status: derived
 Last verified: 2026-04-23
-Covers through commit: 28fb29a340e7bdb1ebc71e273ff5041acc65e60f
+Covers through commit: 3961f01b55d2fc1d3dc1c4441be4650fd3d2af3c
 Canonical sources:
 - AGENTS.md
 - README.md
@@ -125,3 +125,39 @@ Do not infer:
   - framework/docs/architecture-overview.md
 - Verification evidence:
   - git show --stat --oneline 28fb29a340e7bdb1ebc71e273ff5041acc65e60f
+
+## 2026-04-22 | 753c314 | feat: replace workspace ensure with explicit sync
+- Why a fresh session should care:
+  - This change touched canonical orientation paths or runtime-routing paths.
+- New truth:
+  - Re-read the cited canonical files before trusting older summaries.
+- Invalidated old assumption:
+  - Previous fresh-session context may be stale past this commit.
+- Canonical files to read:
+  - README.md
+- Verification evidence:
+  - git show --stat --oneline 753c314099d8b5c757c4d2211ca77fb36c765350
+
+## 2026-04-23 | 61bb4f1 | fix: align repo-head host loop prompts and projection
+- Why a fresh session should care:
+  - This change touched canonical orientation paths or runtime-routing paths.
+- New truth:
+  - Re-read the cited canonical files before trusting older summaries.
+- Invalidated old assumption:
+  - Previous fresh-session context may be stale past this commit.
+- Canonical files to read:
+  - tools/launcher/assets/runtime-AGENTS.md
+- Verification evidence:
+  - git show --stat --oneline 61bb4f158845a288eaf866c38c280781da142c6e
+
+## 2026-04-23 | 3961f01 | docs: stabilize repo wiki refresh guidance
+- Why a fresh session should care:
+  - This change touched canonical orientation paths or runtime-routing paths.
+- New truth:
+  - Re-read the cited canonical files before trusting older summaries.
+- Invalidated old assumption:
+  - Previous fresh-session context may be stale past this commit.
+- Canonical files to read:
+  - AGENTS.md
+- Verification evidence:
+  - git show --stat --oneline 3961f01b55d2fc1d3dc1c4441be4650fd3d2af3c

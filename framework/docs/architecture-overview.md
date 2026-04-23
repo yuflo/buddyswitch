@@ -92,7 +92,9 @@ becomes:
 
 Prepare execution context without writing state.
 
-For create-mode switches, `resolve` does not create a task and does not assign the final task id.
+For create-mode switches, `resolve_context` may materialize a zero-run task immediately in create mode.
+`resolve_context` assigns the concrete `task_id`.
+`resolve_context` reserves the next run envelope.
 
 This step loads:
 
