@@ -260,8 +260,10 @@ exec "$real_git" "$@"
             self.assertEqual(payload["cwd"], str(workspace_dir.resolve()))
             agents_md = workspace_dir / "AGENTS.md"
             self.assertTrue(agents_md.exists(), "runtime workspace should include AGENTS.md")
-            first_line = agents_md.read_text(encoding="utf-8").splitlines()[0]
-            self.assertEqual(first_line, "# BuddySwitch Runtime Workspace")
+            expected_agents = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertEqual(agents_md.read_text(encoding="utf-8"), expected_agents)
 
     def test_start_writes_launcher_marker_before_workspace_bootstrap(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -752,8 +754,10 @@ exec "$real_git" "$@"
             )
             self.assertIn("Workspace synced:", sync_result.stdout)
             self.assertTrue((workspace_dir / ".git").exists(), "workspace sync should leave a git worktree behind")
-            first_line = (workspace_dir / "AGENTS.md").read_text(encoding="utf-8").splitlines()[0]
-            self.assertEqual(first_line, "# BuddySwitch Runtime Workspace")
+            expected_agents = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertEqual((workspace_dir / "AGENTS.md").read_text(encoding="utf-8"), expected_agents)
             self.assertEqual(runtime_artifact.read_text(encoding="utf-8"), '{"artifact_id":"artifact-demo"}\n')
             self.assertEqual(runtime_run.read_text(encoding="utf-8"), '{"run_id":"run-demo"}\n')
             self.assertEqual(raw_dump.read_text(encoding="utf-8"), '{"raw":true}\n')

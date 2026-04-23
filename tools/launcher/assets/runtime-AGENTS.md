@@ -48,8 +48,15 @@ When user sends `switch <buddy>...: <demand>`:
    - other buddies can read tracks and create/update artifacts through their resolved task
    - every persisted run must belong to a task
 6. Resolve through `scripts/switch_runtime.py resolve` to get `resolve_context`, including `skills`, `inputs`, `task_context`, `track_context`, and the reserved run envelope.
-7. Let the host Codex session choose one `skill_id` from `resolve_context.skills`.
-8. Read the selected skill's `instruction_path`, use `resolve_context.inputs` as the current selected artifact bundle only when that skill surface is already resolved, and for multi-skill buddies choose from `resolve_context.skills` using the skill metadata plus `task_context` / `track_context`. For market runs, apply `resolve_context.skills[*].host_execution` plus `resolve_context.skills[*].tool_scope` before starting browser work.
+7. Let the host Codex session choose one `skill_id` from `resolve_context.skills`. For multi-skill buddies, choose from `resolve_context.skills` using the skill metadata plus `task_context` / `track_context`, then read the selected skill's `instruction_path` and use `resolve_context.inputs` as the current selected artifact bundle only when that skill surface is already resolved.
+8. Selected-skill preflight:
+   - Treat the selected skill's `host_execution` and `tool_scope` as preflight instructions before selected-skill external tool invocation or evidence capture.
+   - `required_tools` and `required_env` remain advisory readiness metadata for the host session.
+   - If the selected skill declares `discovery_mode = browser-native`, begin discovery and evidence capture in the declared `browser_executor`.
+   - If `login_policy = mandatory-takeover` and a required login gate is encountered, pause for takeover before continuing.
+   - If the selected skill's `tool_scope` allows temporary downgrade tools, temporary downgrade tools remain unavailable until explicit user approval.
+   - Treat `fallback_policy` as selected-skill guidance for genuine browser-native blocking decisions.
+   - Do not reinterpret missing executor availability, login takeover, and genuine browser-native blocking as the same path.
 9. Execute the selected skill in-session and produce a structured result matching the selected skill's output schema.
 10. Persist through `scripts/switch_runtime.py persist` as the current CLI wrapper for the `persist-skill-result` step whenever you need BuddySwitch state and canonical run audit persistence.
 11. Check `refreshed_context.ok`; continue from `refreshed_context` when it is true, or rerun `resolve` when `refreshed_context.error.code = E_RUNTIME_REFRESH_CONTEXT`.

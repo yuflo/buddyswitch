@@ -754,6 +754,113 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("sub_task", runtime_agents)
         self.assertNotIn("sub_task", router)
 
+    def test_runtime_host_prompt_defines_selected_skill_preflight_mitigation(self) -> None:
+        text = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
+            encoding="utf-8"
+        ).lower()
+
+        required_semantics = (
+            "selected skill",
+            "preflight",
+            "host_execution",
+            "tool_scope",
+            "login_policy",
+            "fallback_policy",
+            "required_tools",
+            "required_env",
+            "browser_executor",
+            "browser-native",
+            "explicit user approval",
+            "advisory",
+        )
+        positions: dict[str, int] = {}
+        for token in required_semantics:
+            position = text.find(token)
+            self.assertNotEqual(position, -1, msg=f"missing selected-skill preflight runtime semantic: {token}")
+            positions[token] = position
+
+        grouped_tokens = (
+            "selected skill",
+            "preflight",
+            "host_execution",
+            "tool_scope",
+            "login_policy",
+            "fallback_policy",
+            "required_tools",
+            "required_env",
+            "browser_executor",
+            "browser-native",
+            "explicit user approval",
+            "advisory",
+        )
+        grouped_positions = [positions[token] for token in grouped_tokens]
+        self.assertLess(
+            max(grouped_positions) - min(grouped_positions),
+            1800,
+            msg="selected-skill preflight runtime semantics should stay grouped in the host preflight area",
+        )
+        self.assertRegex(
+            text,
+            r"temporary downgrade tools[\s\S]{0,200}explicit user approval",
+            msg="runtime prompt must bind temporary downgrade tools to explicit user approval",
+        )
+        self.assertRegex(
+            text,
+            r"login_policy[\s\S]{0,120}mandatory-takeover[\s\S]{0,200}pause for takeover",
+            msg="runtime prompt must tie mandatory-takeover to a pause-for-takeover instruction",
+        )
+        self.assertIn(
+            "do not reinterpret missing executor availability, login takeover, and genuine browser-native blocking as the same path",
+            text,
+            msg="runtime prompt must keep missing executor, takeover, and genuine browser-native blocking as separate paths",
+        )
+        self.assertNotIn("for market runs", text)
+        self.assertNotIn("hard gate", text)
+        self.assertNotIn("enforced", text)
+        self.assertNotIn("prevented", text)
+        self.assertNotIn("before any external action", text)
+        self.assertNotIn("required tools must be present before continuing", text)
+
+    def test_router_prompt_keeps_selected_skill_preflight_reduced_parity(self) -> None:
+        text = (ROOT / ".codex" / "agents" / "router.toml").read_text(encoding="utf-8").lower()
+
+        required_semantics = (
+            "selected skill",
+            "preflight",
+            "host_execution",
+            "tool_scope",
+            "required_tools",
+            "required_env",
+            "browser_executor",
+            "browser-native",
+            "explicit user approval",
+            "mandatory-takeover",
+            "advisory",
+        )
+        positions: dict[str, int] = {}
+        for token in required_semantics:
+            position = text.find(token)
+            self.assertNotEqual(position, -1, msg=f"missing selected-skill preflight router reduced semantic: {token}")
+            positions[token] = position
+
+        grouped_positions = [positions[token] for token in required_semantics]
+        self.assertLess(
+            max(grouped_positions) - min(grouped_positions),
+            1800,
+            msg="router selected-skill preflight reduced semantics should stay grouped in host responsibility guidance",
+        )
+        self.assertRegex(
+            text,
+            r"mandatory-takeover[\s\S]{0,160}separate[\s\S]{0,160}downgrade",
+            msg="router reduced parity must keep mandatory-takeover separate from downgrade handling",
+        )
+        self.assertNotIn("for market runs", text)
+        self.assertNotIn(
+            "do not reinterpret missing executor availability, login takeover, and genuine browser-native blocking as the same path",
+            text,
+        )
+        self.assertNotIn("external tool invocation or evidence capture", text)
+
     def test_router_doc_lists_task_objects_as_canonical_state(self) -> None:
         text = (ROOT / ".codex" / "agents" / "router.toml").read_text(encoding="utf-8").lower()
 
