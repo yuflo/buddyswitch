@@ -180,7 +180,31 @@ Escalate only when the change affects:
 - external APIs or commitments
 - security, privacy, payment, or permission risk
 
-### 4.4 Communication Contract
+### 4.4 Preflight gate before analysis, planning, or implementation
+For any non-trivial task, do not move from exploration into planning or implementation until the following are explicit:
+
+- target outcome and current bottleneck
+- confirmed facts with file, code, log, or command evidence
+- open assumptions or invalidators that could change the approach
+- tools, permissions, and boundary checks needed for the next action
+- verification plan and stop condition
+
+If a required tool, permission, or contract boundary is missing, stop and resolve that gap before execution.
+Use `docs/templates/ai-task-preflight.md` for medium or large tasks.
+
+### 4.5 Reviewer rubric for substantial changes
+Before declaring completion on substantial work, review the result against a fixed rubric:
+
+- is this fixing root cause or only symptoms
+- does the change respect system boundaries and metadata contracts
+- is a generic boundary fix being replaced by a local special case
+- did the change replace baggage instead of adding wrappers or compatibility layers
+- does verification prove the claimed outcome
+- did scope stay aligned with the original bottleneck
+
+Use `docs/templates/ai-reviewer-rubric.md` for self-review or reviewer-agent review.
+
+### 4.6 Communication Contract
 Use communication to move execution forward, not to perform process.
 
 - Use short, factual, execution-oriented language.
@@ -194,14 +218,26 @@ Use communication to move execution forward, not to perform process.
 - Be concise, but do not omit material facts such as changed scope, commands, file paths, assumptions, dates, or blockers when they matter.
 - Use only enough summary to support the next action. Avoid generic recaps, methodology essays, and performative status narration.
 
-### 4.5 Verify after each meaningful change block
+### 4.6A Execution Focus Loop
+After preflight, enter a single-task execution loop.
+
+- Keep one active goal, one active action, and one active proof of success. If you are carrying multiple, reduce scope until only one remains.
+- Maintain challenge-skill balance. If the task feels vague or too large, shrink the step size or gather one missing fact before continuing.
+- Prefer immediate feedback. After each meaningful step, inspect the diff, command output, log, test, screenshot, or state change before planning further moves.
+- Protect task-relevant attention. Do not open adjacent cleanup, redesign, or extra options unless current evidence shows they block the main path.
+- Start with a clean, high-confidence move that creates traction on the bottleneck.
+- When drift or confusion appears, stop and reset: restate the bottleneck, discard side paths, reduce scope, and resume with the next smallest verifiable step.
+- Progress updates are execution cues, not narration. State only: current bottleneck, current action, next proof.
+- Once the path is clear, reduce meta-process. Execute instead of repeatedly reframing the task.
+
+### 4.7 Verify after each meaningful change block
 Do not accumulate many risky changes and only test at the end when intermediate validation is feasible.
 
-### 4.6 Fix root causes, not symptoms
+### 4.8 Fix root causes, not symptoms
 Do not suppress, ignore, or hide errors just to make them disappear.
 Do not add fallback branches that mask bad states without understanding them.
 
-### 4.7 Long tasks must be resumable
+### 4.9 Long tasks must be resumable
 For work likely to span multiple sessions, maintain a resumable execution document with:
 
 - target outcome

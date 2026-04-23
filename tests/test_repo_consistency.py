@@ -332,6 +332,32 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("repo-root work focused on buddyswitch source", text)
         self.assertNotIn("inject `selected_skill_packet.skill_instructions` verbatim", text)
 
+    def test_root_agents_define_preflight_and_reviewer_rubric(self) -> None:
+        text = (ROOT / "AGENTS.md").read_text(encoding="utf-8").lower()
+
+        self.assertIn("preflight gate before analysis, planning, or implementation", text)
+        self.assertIn("confirmed facts with file, code, log, or command evidence", text)
+        self.assertIn("verification plan and stop condition", text)
+        self.assertIn("reviewer rubric for substantial changes", text)
+        self.assertIn("root cause or only symptoms", text)
+        self.assertIn("docs/templates/ai-task-preflight.md", text)
+        self.assertIn("docs/templates/ai-reviewer-rubric.md", text)
+
+    def test_docs_templates_define_ai_preflight_and_reviewer_rubric(self) -> None:
+        preflight = (ROOT / "docs" / "templates" / "ai-task-preflight.md").read_text(encoding="utf-8").lower()
+        reviewer = (ROOT / "docs" / "templates" / "ai-reviewer-rubric.md").read_text(encoding="utf-8").lower()
+
+        self.assertIn("outcome and bottleneck", preflight)
+        self.assertIn("confirmed facts", preflight)
+        self.assertIn("tools and permissions", preflight)
+        self.assertIn("verification plan", preflight)
+        self.assertIn("stop and resolve before execution", preflight)
+        self.assertIn("problem framing", reviewer)
+        self.assertIn("root cause", reviewer)
+        self.assertIn("boundary integrity", reviewer)
+        self.assertIn("verification quality", reviewer)
+        self.assertIn("fail signals", reviewer)
+
     def test_runtime_agents_doc_uses_context_then_persist_flow(self) -> None:
         text = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
             encoding="utf-8"
