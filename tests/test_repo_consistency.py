@@ -62,12 +62,12 @@ MARKET_SCHEMA_PATHS = (
 BROWSER_COCKPIT_METADATA = {
     "execution_mode": "browser-cockpit-native",
     "browser_mode": "headed-only",
-    "browser_profile": "shared-browser",
+    "browser_profile": "instance-browser",
     "browser_executor": "chrome-devtools-cockpit",
     "discovery_mode": "browser-native",
     "login_policy": "mandatory-takeover",
     "fallback_policy": "no-silent-degrade",
-    "session_continuity": "shared-cockpit",
+    "session_continuity": "instance-cockpit",
     "evidence_capture_level": "medium",
 }
 BROWSER_COCKPIT_REQUIRED_TOOLS = ["chrome-devtools-cockpit"]
@@ -511,16 +511,34 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("claim", traceability_required)
 
     def test_market_skills_share_market_cockpit_execution_metadata(self) -> None:
+        manifest = env_manifest.load_manifest()
+        market_skills = {
+            skill["id"]: skill["runtime"]
+            for skill in manifest.get("skills", [])
+            if isinstance(skill, dict)
+            and isinstance(skill.get("runtime"), dict)
+            and skill["runtime"].get("buddy") == "market"
+        }
         for path in SKILL_TOMLS[:6]:
             with self.subTest(skill_toml=str(path.relative_to(ROOT))):
-                parsed = env_manifest._load_toml(path)  # type: ignore[attr-defined]
+                parsed = market_skills.get(path.parent.name, {})
+                host_execution = parsed.get("host_execution", {}) if isinstance(parsed, dict) else {}
                 for key, value in BROWSER_COCKPIT_METADATA.items():
-                    self.assertEqual(parsed[key], value, msg=f"{path.relative_to(ROOT)} missing {key}={value}")
+                    self.assertEqual(host_execution.get(key), value, msg=f"{path.relative_to(ROOT)} missing {key}={value}")
                 self.assertEqual(
-                    parsed["required_tools"],
+                    parsed.get("required_tools"),
                     BROWSER_COCKPIT_REQUIRED_TOOLS,
                     msg=f"{path.relative_to(ROOT)} missing required_tools={BROWSER_COCKPIT_REQUIRED_TOOLS}",
                 )
+
+    def test_market_skill_metadata_uses_instance_cockpit_tokens(self) -> None:
+        for path in SKILL_TOMLS[:6]:
+            with self.subTest(skill_toml=str(path.relative_to(ROOT))):
+                parsed = env_manifest._load_toml(path)  # type: ignore[attr-defined]
+                self.assertEqual(parsed["browser_profile"], "instance-browser")
+                self.assertEqual(parsed["session_continuity"], "instance-cockpit")
+                self.assertNotEqual(parsed["browser_profile"], "shared-browser")
+                self.assertNotEqual(parsed["session_continuity"], "shared-cockpit")
 
     def test_market_skills_share_market_tool_scope_profile(self) -> None:
         for path in SKILL_TOMLS[:6]:
@@ -539,7 +557,7 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("framework/docs/browser-cockpit.md", text)
                 self.assertIn("headed", text)
                 self.assertIn("mandatory takeover", text)
-                self.assertIn("shared-browser", text)
+                self.assertIn("instance-browser", text)
 
     def test_market_skill_docs_start_with_execution_order(self) -> None:
         for path in ARTIFACT_SKILL_DOCS[:6]:
@@ -552,7 +570,7 @@ class RepoConsistencyTests(unittest.TestCase):
 
     def test_market_active_contract_docs_require_browser_native_wording(self) -> None:
         required_tokens = ("chrome-devtools-cockpit", "browser-native", "user-approved")
-        forbidden_tokens = ("search-assist",)
+        forbidden_tokens = ("search-assist", "shared-browser", "shared-cockpit")
 
         for path in ACTIVE_MARKET_CONTRACT_DOCS:
             with self.subTest(active_doc=str(path.relative_to(ROOT))):
@@ -561,6 +579,16 @@ class RepoConsistencyTests(unittest.TestCase):
                     self.assertIn(token, text, msg=f"{path.relative_to(ROOT)} missing required token '{token}'")
                 for token in forbidden_tokens:
                     self.assertNotIn(token, text, msg=f"{path.relative_to(ROOT)} must not include '{token}'")
+
+    def test_market_browser_contract_docs_require_instance_cockpit_tokens(self) -> None:
+        for path in (
+            ROOT / "framework" / "contracts" / "market.md",
+            ROOT / "framework" / "docs" / "browser-cockpit.md",
+        ):
+            with self.subTest(active_browser_doc=str(path.relative_to(ROOT))):
+                text = path.read_text(encoding="utf-8").lower()
+                self.assertIn("instance-browser", text)
+                self.assertIn("instance-cockpit", text)
 
     def test_market_schemas_share_market_cockpit_evidence_fields(self) -> None:
         for path in MARKET_SCHEMA_PATHS:
@@ -762,6 +790,23 @@ class RepoConsistencyTests(unittest.TestCase):
                 text,
                 msg=f"legacy unconditional refreshed_context instruction must be removed in {path.relative_to(ROOT)}",
             )
+
+    def test_buddy_prompt_assets_exist_for_every_manifest_buddy(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        buddies = manifest.get("buddies", [])
+        self.assertTrue(buddies)
+        for buddy in buddies:
+            buddy_id = buddy["id"]
+            path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy_id / "AGENTS.md"
+            with self.subTest(buddy=buddy_id):
+                self.assertTrue(path.exists(), msg=f"missing buddy prompt asset: {path.relative_to(ROOT)}")
+                text = path.read_text(encoding="utf-8")
+                lower = text.lower()
+                self.assertTrue(text.startswith("# BuddySwitch Runtime Workspace\n"))
+                self.assertIn(f"locked to the `{buddy_id}` buddy", lower)
+                self.assertIn("scripts/switch_runtime.py resolve", text)
+                self.assertIn("scripts/switch_runtime.py persist", text)
+                self.assertIn("cross-buddy canonical switches", lower)
 
     def test_active_host_prompts_treat_recommended_command_as_canonical_receipt_field(self) -> None:
         runtime_agents = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(

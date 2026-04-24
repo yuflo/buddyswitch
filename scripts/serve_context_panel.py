@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONSOLE_DIR = ROOT / "framework" / "console"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from runtime_store.projections import build_workspace_projection  # noqa: E402
+from runtime_store.projections import RuntimeSnapshotLockError, build_workspace_projection_snapshot  # noqa: E402
 
 
 class ContextPanelHandler(SimpleHTTPRequestHandler):
@@ -45,10 +45,23 @@ class ContextPanelHandler(SimpleHTTPRequestHandler):
         super().do_HEAD()
 
     def send_workspace_json(self, include_body: bool = True) -> None:
-        data = build_workspace_projection()
+        status_code = 200
+        retry_after = None
+        try:
+            data = build_workspace_projection_snapshot()
+        except RuntimeSnapshotLockError:
+            status_code = 503
+            retry_after = "1"
+            data = {
+                "ok": False,
+                "error": "runtime_snapshot_busy",
+                "message": "Workspace is updating. Retry shortly.",
+            }
         body = json.dumps(data, ensure_ascii=True, indent=2).encode("utf-8")
 
-        self.send_response(200)
+        self.send_response(status_code)
+        if retry_after is not None:
+            self.send_header("Retry-After", retry_after)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

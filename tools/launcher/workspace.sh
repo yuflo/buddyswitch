@@ -100,6 +100,26 @@ projects/app/.runtime
 EOF
 }
 
+buddyswitch_workspace_projected_state_paths() {
+  cat <<'EOF'
+buddyswitch/objects/tracks
+buddyswitch/objects/tasks
+buddyswitch/objects/artifacts
+buddyswitch/content/runs
+EOF
+}
+
+buddyswitch_workspace_local_runtime_paths() {
+  cat <<'EOF'
+runs/raw
+projects/app/.runtime
+EOF
+}
+
+buddyswitch_workspace_is_instance_mode() {
+  [[ -n "${BUDDYSWITCH_INSTANCE_ID:-}" ]]
+}
+
 buddyswitch_workspace_stage_runtime_outputs() {
   local staging_root="$1"
   local workspace_dir relative_path source_path staged_path
@@ -148,6 +168,7 @@ buddyswitch_workspace_force_rebuild_execution_worktree() {
     buddyswitch_workspace_stage_runtime_outputs "${staging_root}"
   fi
 
+  mkdir -p "$(dirname "${workspace_dir}")"
   git -C "${repo_root}" worktree remove --force "${workspace_dir}" >/dev/null 2>&1 || true
   if ! rm -rf "${workspace_dir}"; then
     if [[ "${cleanup_staging}" -eq 1 ]]; then
@@ -225,6 +246,14 @@ buddyswitch_workspace_ensure_state_skeleton() {
   local workspace_dir relative_dir
 
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
+  if buddyswitch_workspace_is_instance_mode; then
+    while IFS= read -r relative_dir; do
+      mkdir -p "${workspace_dir}/${relative_dir}"
+    done < <(buddyswitch_workspace_local_runtime_paths)
+    buddyswitch_workspace_install_state_projections
+    return
+  fi
+
   while IFS= read -r relative_dir; do
     mkdir -p "${workspace_dir}/${relative_dir}"
   done <<'EOF'
@@ -235,6 +264,103 @@ buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
 buddyswitch/content/runs
 EOF
+}
+
+buddyswitch_workspace_install_state_projections() {
+  local workspace_dir state_root relative_dir state_dir projected_dir
+
+  workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
+  state_root="${BUDDYSWITCH_SHARED_ROOT}/state"
+  while IFS= read -r relative_dir; do
+    state_dir="${state_root}/${relative_dir}"
+    projected_dir="${workspace_dir}/${relative_dir}"
+    mkdir -p "${state_dir}" "$(dirname "${projected_dir}")"
+    rm -rf "${projected_dir}"
+    ln -s "${state_dir}" "${projected_dir}"
+  done < <(buddyswitch_workspace_projected_state_paths)
+}
+
+buddyswitch_workspace_migrate_legacy_state_if_needed() {
+  python3 - "${BUDDYSWITCH_SHARED_ROOT}" <<'PY'
+import json
+import shutil
+import sys
+from pathlib import Path
+
+shared_root = Path(sys.argv[1])
+legacy_root = shared_root / "workspace"
+state_root = shared_root / "state"
+durable_dirs = (
+    Path("buddyswitch/objects/tracks"),
+    Path("buddyswitch/objects/tasks"),
+    Path("buddyswitch/objects/artifacts"),
+    Path("buddyswitch/content/runs"),
+)
+ignored_names = {".DS_Store", ".gitkeep"}
+
+
+def remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+        return
+    path.unlink(missing_ok=True)
+
+
+def prune_reservations(root: Path) -> None:
+    shutil.rmtree(root / "buddyswitch" / "content" / "runs" / "reserved", ignore_errors=True)
+
+
+def durable_files(root: Path) -> list[Path]:
+    rows: list[Path] = []
+    for relative_dir in durable_dirs:
+        directory = root / relative_dir
+        if not directory.exists():
+            continue
+        for path in sorted(directory.rglob("*")):
+            if path.is_dir() or path.name in ignored_names:
+                continue
+            rows.append(path)
+    return rows
+
+
+def validate_json(files: list[Path], label: str) -> None:
+    for path in files:
+        try:
+            json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"Migration blocked: invalid JSON in {label} durable state: {path}: {exc}", file=sys.stderr)
+            raise SystemExit(3)
+
+
+prune_reservations(legacy_root)
+prune_reservations(state_root)
+legacy_files = durable_files(legacy_root)
+state_files = durable_files(state_root)
+validate_json(legacy_files, "legacy workspace")
+validate_json(state_files, "shared")
+
+if legacy_files and state_files:
+    print(
+        "Migration blocked: legacy workspace durable state and shared state both contain data. "
+        "Run buddyswitch-codex reset --yes or clean up one state root before starting product mode.",
+        file=sys.stderr,
+    )
+    raise SystemExit(3)
+
+if legacy_files:
+    for relative_dir in durable_dirs:
+        source = legacy_root / relative_dir
+        target = state_root / relative_dir
+        if not source.exists() and not source.is_symlink():
+            continue
+        if target.exists() or target.is_symlink():
+            remove_path(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(target))
+
+for relative_dir in durable_dirs:
+    (state_root / relative_dir).mkdir(parents=True, exist_ok=True)
+PY
 }
 
 buddyswitch_workspace_install_guardrail_hooks() {

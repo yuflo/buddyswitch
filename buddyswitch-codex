@@ -23,7 +23,7 @@ print_help() {
   cat <<EOF
 Usage:
   buddyswitch-codex [codex args...]
-  buddyswitch-codex start [codex args...]
+  buddyswitch-codex start [--buddy <buddy>] [codex args...]
   buddyswitch-codex reset --yes
   buddyswitch-codex browser status [--port <port>] [--profile-dir <dir>]
   buddyswitch-codex browser ensure [--port <port>] [--profile-dir <dir>]
@@ -55,16 +55,130 @@ EOF
 }
 
 start_codex() {
-  local marker_path
-  mkdir -p "${BUDDYSWITCH_RUN_STATE_DIR}"
-  marker_path="$(buddyswitch_write_launcher_marker)"
+  local marker_pid marker_path buddy instance_id instance_json codex_status
+
+  buddy=""
+  instance_id=""
+  instance_json=""
+  codex_status=0
+
+  if [[ $# -gt 0 ]]; then
+    case "${1}" in
+      --buddy)
+        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+          echo "Missing value for --buddy" >&2
+          print_help >&2
+          return 2
+        fi
+        buddy="${2}"
+        shift 2
+        ;;
+      --buddy=*)
+        buddy="${1#--buddy=}"
+        if [[ -z "${buddy}" ]]; then
+          echo "Missing value for --buddy" >&2
+          print_help >&2
+          return 2
+        fi
+        shift
+        ;;
+    esac
+  fi
+
+  if [[ -n "${buddy}" ]]; then
+    buddyswitch_validate_buddy_id "${buddy}" || return $?
+    instance_id="$(buddyswitch_generate_instance_id "${buddy}")"
+    buddyswitch_env_bind_instance "${instance_id}" || return $?
+    instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+  fi
+
+  marker_pid="$$"
+  marker_path="${BUDDYSWITCH_RUN_STATE_DIR}/launcher-${marker_pid}.pid"
   trap "buddyswitch_cleanup_pid_marker '${marker_path}'" EXIT INT TERM HUP
 
-  buddyswitch_workspace_prepare_execution_worktree
-  buddyswitch_browser_bootstrap
+  (
+    unset BUDDYSWITCH_ACTIVE_BUDDY
+    unset BUDDYSWITCH_INSTANCE_ID
+    unset BUDDYSWITCH_INSTANCE_JSON
+    BUDDYSWITCH_LAUNCHER_MARKER_PID="${marker_pid}" \
+    BUDDYSWITCH_START_BUDDY="${buddy}" \
+    BUDDYSWITCH_START_INSTANCE_ID="${instance_id}" \
+      buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-start-bootstrap"
+  )
 
   cd "${BUDDYSWITCH_WORKSPACE_DIR}"
-  buddyswitch_run_codex "$@"
+  if [[ -n "${buddy}" ]]; then
+    BUDDYSWITCH_ACTIVE_BUDDY="${buddy}" \
+    BUDDYSWITCH_INSTANCE_ID="${instance_id}" \
+    BUDDYSWITCH_INSTANCE_JSON="${instance_json}" \
+      buddyswitch_run_codex "$@" || codex_status=$?
+
+    if ! buddyswitch_with_runtime_lock \
+      "${REPO_ROOT}/buddyswitch-codex" \
+      "__locked-instance-set-inactive" \
+      "${instance_id}"; then
+      if [[ "${codex_status}" -eq 0 ]]; then
+        codex_status=1
+      fi
+    fi
+  else
+    (
+      unset BUDDYSWITCH_ACTIVE_BUDDY
+      unset BUDDYSWITCH_INSTANCE_ID
+      unset BUDDYSWITCH_INSTANCE_JSON
+      buddyswitch_run_codex "$@"
+    ) || codex_status=$?
+  fi
+
+  return "${codex_status}"
+}
+
+start_locked_bootstrap() {
+  local marker_path requested_buddy requested_instance_id
+  buddyswitch_require_runtime_lock
+  requested_buddy="${BUDDYSWITCH_START_BUDDY:-}"
+  requested_instance_id="${BUDDYSWITCH_START_INSTANCE_ID:-}"
+
+  if [[ -n "${requested_buddy}" && -z "${requested_instance_id}" ]]; then
+    echo "Missing instance id for buddy startup." >&2
+    return 2
+  fi
+  if [[ -z "${requested_buddy}" && -n "${requested_instance_id}" ]]; then
+    echo "Missing buddy for instance startup." >&2
+    return 2
+  fi
+  if [[ -n "${requested_buddy}" ]]; then
+    buddyswitch_validate_buddy_id "${requested_buddy}" || return $?
+    buddyswitch_validate_instance_id "${requested_instance_id}" || return $?
+    buddyswitch_require_buddy_agents_template "${requested_buddy}" || return $?
+    buddyswitch_env_bind_instance "${requested_instance_id}" || return $?
+    buddyswitch_workspace_migrate_legacy_state_if_needed
+    buddyswitch_browser_allocate_instance_port
+  fi
+
+  mkdir -p "${BUDDYSWITCH_RUN_STATE_DIR}"
+  marker_path="$(buddyswitch_write_launcher_marker)"
+
+  buddyswitch_workspace_prepare_execution_worktree
+
+  if [[ -n "${requested_buddy}" ]]; then
+    buddyswitch_instance_activate "${requested_instance_id}" "${requested_buddy}" >/dev/null
+  fi
+  buddyswitch_browser_bootstrap
+  if [[ -n "${requested_buddy}" ]]; then
+    buddyswitch_instance_set_browser_port "${requested_instance_id}" "${BUDDYSWITCH_BROWSER_PORT}"
+  fi
+}
+
+instance_set_inactive_locked() {
+  local instance_id="${1:-}"
+  buddyswitch_require_runtime_lock
+  if [[ -z "${instance_id}" ]]; then
+    echo "instance id is required" >&2
+    return 2
+  fi
+  buddyswitch_validate_instance_id "${instance_id}" || return $?
+  buddyswitch_instance_set_status "${instance_id}" "inactive"
 }
 
 workspace_usage() {
@@ -80,11 +194,21 @@ EOF
 }
 
 workspace_sync() {
+  buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-workspace-sync"
+}
+
+workspace_sync_locked() {
   local active_count
+  buddyswitch_require_runtime_lock
   active_count="$(buddyswitch_count_active_launchers)"
   if [[ "${active_count}" -gt 0 ]]; then
     echo "Workspace sync blocked: ${active_count} active buddyswitch-codex instance(s) detected." >&2
     echo "Close active launcher sessions and retry." >&2
+    return 3
+  fi
+  if [[ -d "${BUDDYSWITCH_SHARED_ROOT}/instances" ]]; then
+    echo "Workspace sync blocked: no product-mode sync target once instances exist." >&2
+    echo "Start creates fresh instance workspaces; use reset --yes to remove product-mode runtime state." >&2
     return 3
   fi
 
@@ -120,7 +244,23 @@ workspace_main() {
   esac
 }
 
-reset_shared_env() {
+browser_dispatch() {
+  local command="${1:-status}"
+  if [[ "${command}" == "ensure" ]]; then
+    shift || true
+    buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-browser-ensure" "$@"
+    return
+  fi
+
+  buddyswitch_browser_main "$@"
+}
+
+browser_ensure_locked() {
+  buddyswitch_require_runtime_lock
+  buddyswitch_browser_main ensure "$@"
+}
+
+validate_reset_request() {
   local confirmed=0
   local arg=""
   for arg in "$@"; do
@@ -142,8 +282,17 @@ reset_shared_env() {
   if ! buddyswitch_validate_reset_root; then
     return 2
   fi
+}
 
+reset_shared_env() {
+  validate_reset_request "$@" || return $?
+  buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-reset" "$@"
+}
+
+reset_shared_env_locked() {
   local active_count
+  buddyswitch_require_runtime_lock
+  validate_reset_request "$@" || return $?
   active_count="$(buddyswitch_count_active_launchers)"
   if [[ "${active_count}" -gt 0 ]]; then
     echo "Reset blocked: ${active_count} active buddyswitch-codex instance(s) detected." >&2
@@ -168,6 +317,26 @@ reset_shared_env() {
 main() {
   local command="${1:-start}"
   case "${command}" in
+    __locked-start-bootstrap)
+      shift || true
+      start_locked_bootstrap "$@"
+      ;;
+    __locked-workspace-sync)
+      shift || true
+      workspace_sync_locked "$@"
+      ;;
+    __locked-reset)
+      shift || true
+      reset_shared_env_locked "$@"
+      ;;
+    __locked-browser-ensure)
+      shift || true
+      browser_ensure_locked "$@"
+      ;;
+    __locked-instance-set-inactive)
+      shift || true
+      instance_set_inactive_locked "$@"
+      ;;
     help|-h|--help)
       print_help
       ;;
@@ -181,7 +350,7 @@ main() {
       ;;
     browser)
       shift || true
-      buddyswitch_browser_main "$@"
+      browser_dispatch "$@"
       ;;
     workspace)
       shift || true

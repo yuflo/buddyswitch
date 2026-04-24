@@ -52,12 +52,12 @@ HOST_EXECUTION_FIELDS = (
 BROWSER_COCKPIT_HOST_EXECUTION = {
     "execution_mode": "browser-cockpit-native",
     "browser_mode": "headed-only",
-    "browser_profile": "shared-browser",
+    "browser_profile": "instance-browser",
     "browser_executor": "chrome-devtools-cockpit",
     "discovery_mode": "browser-native",
     "login_policy": "mandatory-takeover",
     "fallback_policy": "no-silent-degrade",
-    "session_continuity": "shared-cockpit",
+    "session_continuity": "instance-cockpit",
     "evidence_capture_level": "medium",
 }
 TOOL_SCOPE_PROFILES = {

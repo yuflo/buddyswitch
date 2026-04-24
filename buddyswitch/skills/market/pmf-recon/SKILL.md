@@ -50,7 +50,7 @@
 
 ## Access And Blocking Rules
 
-- If a critical source requires login, require mandatory takeover in the shared headed cockpit before continuing.
+- If a critical source requires login, require mandatory takeover in the instance headed cockpit before continuing.
 - If blocked by paywall, rate-limit, region lock, or anti-bot controls, record blockage and impact, do not silently downgrade to low-density public alternatives, do not use silent search API/snippet/crawler fallback, and request takeover or explicit user-approved one-off downgrade.
 - Any approved downgrade path must be labeled as an evidence quality downgrade.
 
@@ -58,7 +58,7 @@
 
 - This skill follows `framework/docs/browser-cockpit.md`.
 - It uses `chrome-devtools-cockpit` as the browser executor.
-- It runs in a shared headed cockpit (`browser_mode=headed-only`) with profile `shared-browser`.
+- It runs in an instance headed cockpit (`browser_mode=headed-only`) with profile `instance-browser`.
 - Discovery mode is `browser-native`: search in the browser and continue into real result pages, details, comments, and related pages where relevant.
 - Critical-source login is mandatory takeover, and fallback policy is no silent degrade.
 - Do not use silent search API/snippet/crawler fallback.

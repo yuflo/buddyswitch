@@ -1,11 +1,69 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+buddyswitch_browser_instance_root() {
+  local instance_id="${BUDDYSWITCH_INSTANCE_ID:-}"
+  if [[ -z "${instance_id}" ]]; then
+    return 1
+  fi
+  printf '%s\n' "${BUDDYSWITCH_INSTANCE_ROOT:-${BUDDYSWITCH_SHARED_ROOT}/instances/${instance_id}}"
+}
+
+buddyswitch_browser_default_profile_dir() {
+  local instance_root
+  if instance_root="$(buddyswitch_browser_instance_root)"; then
+    printf '%s/browser/profile\n' "${instance_root}"
+    return 0
+  fi
+  printf '%s/chrome/shared-browser\n' "${BUDDYSWITCH_SHARED_ROOT}"
+}
+
+buddyswitch_browser_default_log_file() {
+  local instance_root
+  if instance_root="$(buddyswitch_browser_instance_root)"; then
+    printf '%s/browser/chrome.log\n' "${instance_root}"
+    return 0
+  fi
+  printf '%s/log/chrome-cockpit.log\n' "${BUDDYSWITCH_SHARED_ROOT}"
+}
+
+buddyswitch_browser_is_instance_mode() {
+  [[ -n "${BUDDYSWITCH_INSTANCE_ID:-}" ]]
+}
+
 buddyswitch_browser_init_defaults() {
+  local default_profile_dir default_log_file
+
+  if [[ -z "${BUDDYSWITCH_BROWSER_DEFAULTS_INITIALIZED:-}" ]]; then
+    if [[ -n "${BUDDYSWITCH_BROWSER_PORT:-}" ]]; then
+      export BUDDYSWITCH_BROWSER_PORT_EXPLICIT=1
+    fi
+    if [[ -n "${BUDDYSWITCH_BROWSER_PROFILE_DIR:-}" ]]; then
+      export BUDDYSWITCH_BROWSER_PROFILE_DIR_EXPLICIT=1
+    fi
+    if [[ -n "${BUDDYSWITCH_BROWSER_LOG_FILE:-}" ]]; then
+      export BUDDYSWITCH_BROWSER_LOG_FILE_EXPLICIT=1
+    fi
+    export BUDDYSWITCH_BROWSER_DEFAULTS_INITIALIZED=1
+  fi
+
+  default_profile_dir="$(buddyswitch_browser_default_profile_dir)"
+  default_log_file="$(buddyswitch_browser_default_log_file)"
+
   export BUDDYSWITCH_BROWSER_PORT="${BUDDYSWITCH_BROWSER_PORT:-9222}"
   export BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME="${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME:-chrome-devtools-cockpit}"
-  export BUDDYSWITCH_BROWSER_PROFILE_DIR="${BUDDYSWITCH_BROWSER_PROFILE_DIR:-${BUDDYSWITCH_SHARED_ROOT}/chrome/shared-browser}"
-  export BUDDYSWITCH_BROWSER_LOG_FILE="${BUDDYSWITCH_BROWSER_LOG_FILE:-${BUDDYSWITCH_SHARED_ROOT}/log/chrome-cockpit.log}"
+
+  if [[ "${BUDDYSWITCH_BROWSER_PROFILE_DIR_EXPLICIT:-0}" == "1" ]]; then
+    export BUDDYSWITCH_BROWSER_PROFILE_DIR
+  else
+    export BUDDYSWITCH_BROWSER_PROFILE_DIR="${default_profile_dir}"
+  fi
+
+  if [[ "${BUDDYSWITCH_BROWSER_LOG_FILE_EXPLICIT:-0}" == "1" ]]; then
+    export BUDDYSWITCH_BROWSER_LOG_FILE
+  else
+    export BUDDYSWITCH_BROWSER_LOG_FILE="${default_log_file}"
+  fi
 }
 
 buddyswitch_browser_usage() {
@@ -34,7 +92,48 @@ buddyswitch_browser_url() {
 }
 
 buddyswitch_browser_pid_marker() {
+  local instance_root
+  if instance_root="$(buddyswitch_browser_instance_root)"; then
+    printf '%s/browser/chrome.pid' "${instance_root}"
+    return 0
+  fi
   printf '%s/browser-cockpit.pid' "${BUDDYSWITCH_RUN_STATE_DIR}"
+}
+
+buddyswitch_browser_port_is_available() {
+  local port="$1"
+  python3 - "${port}" <<'PY'
+import socket
+import sys
+
+port = int(sys.argv[1])
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    sock.bind(("127.0.0.1", port))
+except OSError:
+    raise SystemExit(1)
+finally:
+    sock.close()
+PY
+}
+
+buddyswitch_browser_allocate_instance_port() {
+  local port
+
+  buddyswitch_browser_init_defaults
+  if [[ "${BUDDYSWITCH_BROWSER_PORT_EXPLICIT:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  for port in {9222..9321}; do
+    if buddyswitch_browser_port_is_available "${port}"; then
+      export BUDDYSWITCH_BROWSER_PORT="${port}"
+      return 0
+    fi
+  done
+
+  echo "No free browser cockpit port found in range 9222..9321." >&2
+  return 1
 }
 
 buddyswitch_browser_check_endpoint() {
@@ -103,16 +202,50 @@ buddyswitch_browser_ensure_cockpit_mcp() {
     --browser-url="$(buddyswitch_browser_url)"
 }
 
-buddyswitch_browser_is_active() {
-  local marker_file marker_pid
+buddyswitch_browser_pid_marker_is_active() {
+  local marker_file="$1"
+  local marker_pid
 
-  marker_file="$(buddyswitch_browser_pid_marker)"
-  if [[ -f "${marker_file}" ]]; then
-    marker_pid="$(cat "${marker_file}" 2>/dev/null || true)"
-    if [[ -n "${marker_pid}" ]] && kill -0 "${marker_pid}" 2>/dev/null; then
+  if [[ ! -f "${marker_file}" ]]; then
+    return 1
+  fi
+
+  marker_pid="$(cat "${marker_file}" 2>/dev/null || true)"
+  if [[ -n "${marker_pid}" ]] && kill -0 "${marker_pid}" 2>/dev/null; then
+    return 0
+  fi
+
+  rm -f "${marker_file}"
+  return 1
+}
+
+buddyswitch_browser_any_instance_pid_marker_is_active() {
+  local marker_file
+
+  for marker_file in "${BUDDYSWITCH_SHARED_ROOT}"/instances/*/browser/chrome.pid; do
+    if [[ ! -e "${marker_file}" ]]; then
+      continue
+    fi
+    if buddyswitch_browser_pid_marker_is_active "${marker_file}"; then
       return 0
     fi
-    rm -f "${marker_file}"
+  done
+
+  return 1
+}
+
+buddyswitch_browser_is_active() {
+  local marker_file
+
+  marker_file="$(buddyswitch_browser_pid_marker)"
+  if buddyswitch_browser_pid_marker_is_active "${marker_file}"; then
+    return 0
+  fi
+
+  if ! buddyswitch_browser_is_instance_mode; then
+    if buddyswitch_browser_any_instance_pid_marker_is_active; then
+      return 0
+    fi
   fi
 
   if buddyswitch_browser_check_endpoint 2>/dev/null; then
@@ -175,8 +308,11 @@ buddyswitch_browser_ensure_cockpit_endpoint() {
 }
 
 buddyswitch_browser_bootstrap() {
+  buddyswitch_browser_init_defaults
   buddyswitch_ensure_shared_env
-  buddyswitch_browser_ensure_general_mcp
+  if ! buddyswitch_browser_is_instance_mode; then
+    buddyswitch_browser_ensure_general_mcp
+  fi
   buddyswitch_browser_ensure_cockpit_endpoint
   buddyswitch_browser_ensure_cockpit_mcp
 }

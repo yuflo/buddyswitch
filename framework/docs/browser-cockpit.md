@@ -32,18 +32,18 @@ All six market skills must carry identical host execution metadata in `skill.tom
 
 - `execution_mode = "browser-cockpit-native"`
 - `browser_mode = "headed-only"`
-- `browser_profile = "shared-browser"`
+- `browser_profile = "instance-browser"`
 - `browser_executor = "chrome-devtools-cockpit"`
 - `discovery_mode = "browser-native"`
 - `login_policy = "mandatory-takeover"`
 - `fallback_policy = "no-silent-degrade"`
-- `session_continuity = "shared-cockpit"`
+- `session_continuity = "instance-cockpit"`
 - `evidence_capture_level = "medium"`
 
 ## Runtime Rules
 
 1. Shared headed cockpit
-- All six skills run in one shared headed cockpit profile (`shared-browser`) with session continuity (`shared-cockpit`) through `chrome-devtools-cockpit`.
+- All six skills use one instance-bound headed cockpit profile (`instance-browser`) with session continuity (`instance-cockpit`) through `chrome-devtools-cockpit` for the active Buddy instance.
 - Discovery is `browser-native`: search happens in the browser and continues into real result pages, details, comments, and related pages when relevant.
 - The cockpit is execution-time infrastructure for browsing and evidence capture only.
 

@@ -11,7 +11,7 @@ Market is an outside-in buddy. It produces browser-driven, evidence-based demand
 - Run the selected market skill in the shared headed cockpit defined in `framework/docs/browser-cockpit.md`; the same cockpit contract applies across all six market skills.
 - Honor `resolve_context.skills[*].tool_scope` before any research begins.
 - Use `chrome-devtools-cockpit` as the browser executor and keep discovery `browser-native`.
-- Use browser profile `shared-browser` with session continuity across market runs.
+- Use browser profile `instance-browser` with `instance-cockpit` session continuity inside the active Buddy instance.
 - Enforce mandatory login takeover for critical sources before continuing evidence capture.
 - Perform discovery in-browser: search in the browser, then continue into real result pages, details, comments, and related pages when relevant.
 - Choose channels based on the question type and constraints.
@@ -67,7 +67,7 @@ Skill-specific synthesis fields stay with the relevant executable skill schema. 
 
 - The six market skills above share one execution-time browser cockpit, not six isolated browser stacks.
 - The default resolved tool-scope profile is `market-browser-native`.
-- The cockpit must run headed (`browser_mode=headed-only`) and use profile `shared-browser`.
+- The cockpit must run headed (`browser_mode=headed-only`) and use profile `instance-browser` with `session_continuity=instance-cockpit`.
 - The cockpit browser executor is `chrome-devtools-cockpit`.
 - `resolve_context.skills[*].tool_scope` is the host-facing tool boundary for the selected run.
 - Discovery mode is `browser-native` and requires real page traversal after in-browser search.

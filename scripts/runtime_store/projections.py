@@ -3,10 +3,19 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 import json
+import math
+import os
+import time
+
+try:
+    import fcntl
+except ModuleNotFoundError:  # pragma: no cover - Windows fallback
+    fcntl = None  # type: ignore[assignment]
 
 import env_store
 from env_manifest import DEFAULT_MANIFEST, load_manifest
@@ -15,6 +24,14 @@ from .repositories import list_artifacts, list_tasks, list_tracks
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+LOCK_WAIT_POLL_SECONDS = 0.05
+DEFAULT_RUNTIME_LOCK_TIMEOUT_SECONDS = 1.0
+RUNTIME_LOCK_TIMEOUT_ENV = "BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"
+SHARED_ROOT_ENV = "BUDDYSWITCH_SHARED_ROOT"
+
+
+class RuntimeSnapshotLockError(RuntimeError):
+    """Raised when a configured runtime snapshot lock cannot protect a read."""
 
 
 def iso_time(path: Path) -> str:
@@ -22,13 +39,78 @@ def iso_time(path: Path) -> str:
 
 
 def rel(path: Path) -> str:
-    candidate = path.resolve()
-    for base in (env_store.ROOT, PROJECT_ROOT):
+    candidate = path.absolute()
+    for base in (env_store.ROOT.absolute(), PROJECT_ROOT.absolute()):
         try:
-            return candidate.relative_to(base.resolve()).as_posix()
+            return candidate.relative_to(base).as_posix()
         except ValueError:
             continue
     return candidate.as_posix()
+
+
+def _runtime_lock_timeout_seconds() -> float:
+    raw_timeout = os.environ.get(RUNTIME_LOCK_TIMEOUT_ENV, "")
+    if not raw_timeout.strip():
+        return DEFAULT_RUNTIME_LOCK_TIMEOUT_SECONDS
+    try:
+        timeout = float(raw_timeout)
+    except ValueError:
+        return DEFAULT_RUNTIME_LOCK_TIMEOUT_SECONDS
+    if not math.isfinite(timeout):
+        return DEFAULT_RUNTIME_LOCK_TIMEOUT_SECONDS
+    if timeout < 0:
+        return 0.0
+    return timeout
+
+
+def _runtime_lock_path() -> Path | None:
+    raw_shared_root = os.environ.get(SHARED_ROOT_ENV, "").strip()
+    if not raw_shared_root:
+        return None
+    shared_root = raw_shared_root.rstrip("/")
+    if not shared_root:
+        return None
+    return Path(f"{shared_root}.lock")
+
+
+@contextmanager
+def runtime_snapshot_lock() -> Any:
+    lock_path = _runtime_lock_path()
+    if lock_path is None:
+        yield
+        return
+    if fcntl is None:
+        raise RuntimeSnapshotLockError("runtime snapshot lock requires fcntl support")
+
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError as exc:
+        raise RuntimeSnapshotLockError(f"could not open runtime snapshot lock: {lock_path}") from exc
+
+    locked = False
+    timeout_seconds = _runtime_lock_timeout_seconds()
+    deadline = time.monotonic() + timeout_seconds
+    try:
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                locked = True
+                break
+            except BlockingIOError as exc:
+                if time.monotonic() >= deadline:
+                    raise RuntimeSnapshotLockError(f"could not acquire runtime snapshot lock: {lock_path}") from exc
+                time.sleep(LOCK_WAIT_POLL_SECONDS)
+            except OSError as exc:
+                raise RuntimeSnapshotLockError(f"could not acquire runtime snapshot lock: {lock_path}") from exc
+        yield
+    finally:
+        if locked:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        os.close(lock_fd)
 
 
 def artifact_object_path(artifact_id: str) -> str:
@@ -229,3 +311,8 @@ def build_workspace_projection() -> dict[str, Any]:
         "artifacts": artifacts,
         "run_audits": scan_run_audits(),
     }
+
+
+def build_workspace_projection_snapshot() -> dict[str, Any]:
+    with runtime_snapshot_lock():
+        return build_workspace_projection()
