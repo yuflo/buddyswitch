@@ -1197,6 +1197,14 @@ function render() {
   renderSelectedTrack();
 }
 
+async function workspaceApiError(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 async function refreshWorkspaceData({ silent = false } = {}) {
   if (!canFetchLiveWorkspace()) {
     setDataStatus("Start local server: python3 scripts/serve_context_panel.py", "warning");
@@ -1215,6 +1223,11 @@ async function refreshWorkspaceData({ silent = false } = {}) {
       headers: { Accept: "application/json" },
     });
     if (!response.ok) {
+      const payload = await workspaceApiError(response);
+      if (response.status === 503 && payload?.error === "runtime_snapshot_busy") {
+        setDataStatus(payload.message || "Workspace is updating. Retry shortly.", "warning");
+        return false;
+      }
       throw new Error(`Workspace API returned ${response.status}`);
     }
     applyWorkspaceData(await response.json());

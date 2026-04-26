@@ -337,12 +337,12 @@ class SkillPackageLoaderTests(unittest.TestCase):
             required_env = []
             execution_mode = "browser-cockpit-native"
             browser_mode = "headed-only"
-            browser_profile = "shared-browser"
+            browser_profile = "instance-browser"
             browser_executor = "chrome-devtools-cockpit"
             discovery_mode = "browser-native"
             login_policy = "mandatory-takeover"
             fallback_policy = "no-silent-degrade"
-            session_continuity = "shared-cockpit"
+            session_continuity = "instance-cockpit"
             evidence_capture_level = "medium"
             allowed_task_kinds = ["research"]
             """
@@ -355,12 +355,12 @@ class SkillPackageLoaderTests(unittest.TestCase):
             {
                 "execution_mode": "browser-cockpit-native",
                 "browser_mode": "headed-only",
-                "browser_profile": "shared-browser",
+                "browser_profile": "instance-browser",
                 "browser_executor": "chrome-devtools-cockpit",
                 "discovery_mode": "browser-native",
                 "login_policy": "mandatory-takeover",
                 "fallback_policy": "no-silent-degrade",
-                "session_continuity": "shared-cockpit",
+                "session_continuity": "instance-cockpit",
                 "evidence_capture_level": "medium",
             },
         )
@@ -384,11 +384,11 @@ class SkillPackageLoaderTests(unittest.TestCase):
                 required_env = []
                 execution_mode = "browser-cockpit-native"
                 browser_mode = "headed-only"
-                browser_profile = "shared-browser"
+                browser_profile = "instance-browser"
                 discovery_mode = "browser-native"
                 login_policy = "mandatory-takeover"
                 fallback_policy = "no-silent-degrade"
-                session_continuity = "shared-cockpit"
+                session_continuity = "instance-cockpit"
                 evidence_capture_level = "medium"
                 allowed_task_kinds = ["research"]
                 """
@@ -412,11 +412,11 @@ class SkillPackageLoaderTests(unittest.TestCase):
                 required_env = []
                 execution_mode = "browser-cockpit-native"
                 browser_mode = "headed-only"
-                browser_profile = "shared-browser"
+                browser_profile = "instance-browser"
                 browser_executor = "chrome-devtools-cockpit"
                 login_policy = "mandatory-takeover"
                 fallback_policy = "no-silent-degrade"
-                session_continuity = "shared-cockpit"
+                session_continuity = "instance-cockpit"
                 evidence_capture_level = "medium"
                 allowed_task_kinds = ["research"]
                 """
@@ -441,12 +441,12 @@ class SkillPackageLoaderTests(unittest.TestCase):
                 required_env = []
                 execution_mode = "browser-cockpit-native"
                 browser_mode = "headed-only"
-                browser_profile = "shared-browser"
+                browser_profile = "instance-browser"
                 browser_executor = "chrome-devtools-cockpit"
                 discovery_mode = "browser-native"
                 login_policy = "optional"
                 fallback_policy = "no-silent-degrade"
-                session_continuity = "shared-cockpit"
+                session_continuity = "instance-cockpit"
                 evidence_capture_level = "medium"
                 allowed_task_kinds = ["research"]
                 """
@@ -471,12 +471,12 @@ class SkillPackageLoaderTests(unittest.TestCase):
                 required_env = []
                 execution_mode = "browser-cockpit-native"
                 browser_mode = "headed-only"
-                browser_profile = "shared-browser"
+                browser_profile = "instance-browser"
                 browser_executor = "chrome-devtools-cockpit"
                 discovery_mode = "manual"
                 login_policy = "mandatory-takeover"
                 fallback_policy = "no-silent-degrade"
-                session_continuity = "shared-cockpit"
+                session_continuity = "instance-cockpit"
                 evidence_capture_level = "medium"
                 allowed_task_kinds = ["research"]
                 """
@@ -500,12 +500,12 @@ class SkillPackageLoaderTests(unittest.TestCase):
             required_env = []
             execution_mode = "browser-cockpit-native"
             browser_mode = "headed-only"
-            browser_profile = "shared-browser"
+            browser_profile = "instance-browser"
             browser_executor = "chrome-devtools-cockpit"
             discovery_mode = "browser-native"
             login_policy = "mandatory-takeover"
             fallback_policy = "no-silent-degrade"
-            session_continuity = "shared-cockpit"
+            session_continuity = "instance-cockpit"
             evidence_capture_level = "medium"
             tool_scope_profile = "market-browser-native"
             allowed_task_kinds = ["research"]

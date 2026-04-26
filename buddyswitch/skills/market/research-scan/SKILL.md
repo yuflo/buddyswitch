@@ -65,7 +65,7 @@ For each round, run this fixed loop:
 ## Access And Blocking Rules
 
 - Mandatory takeover:
-  - if a critical source needs login, require mandatory takeover in the shared headed cockpit
+  - if a critical source needs login, require mandatory takeover in the instance headed cockpit
   - continue only after takeover is completed in-session
 - No silent degrade:
   - if blocked by paywall/rate-limit/region/anti-bot, record the blockage and impact
@@ -77,7 +77,7 @@ For each round, run this fixed loop:
 
 - This skill follows `framework/docs/browser-cockpit.md`.
 - It uses `chrome-devtools-cockpit` as the browser executor.
-- It runs in a shared headed cockpit (`browser_mode=headed-only`) with profile `shared-browser`.
+- It runs in an instance headed cockpit (`browser_mode=headed-only`) with profile `instance-browser`.
 - Discovery mode is `browser-native`: search in the browser and continue into real result pages, details, comments, and related pages where relevant.
 - Critical-source login is mandatory takeover, and fallback policy is no silent degrade.
 - Do not use silent search API/snippet/crawler fallback.

@@ -90,7 +90,11 @@ becomes:
 
 ### `resolve`
 
-Prepare execution context without writing state.
+Prepare execution context for the host session without writing final artifact output or run audit state.
+
+Product mode selects the buddy at launcher startup.
+The canonical wire form remains `switch ...`.
+Plain product-mode text is adapted to the canonical wire form only inside a valid buddy-locked session.
 
 For create-mode switches, `resolve_context` may materialize a zero-run task immediately in create mode.
 `resolve_context` assigns the concrete `task_id`.
@@ -106,15 +110,16 @@ This step loads:
 
 It returns fields such as:
 
-- `eligible_skills`
-- `skill_cards`
-- `task_resolution`
-- `required_output_schema_by_skill`
-- `run_instructions`
+- `skills`
+- `task_context`
+- `track_context`
+- `inputs`
+- `run_envelope`
+- `warnings`
 
 Important rule:
 
-- `resolve` writes nothing
+- `resolve` does not write final artifact output or run audit content. In create mode it may materialize a zero-run task and reserve the next run envelope so the host has a concrete task/run identity before execution.
 
 ### `run`
 
@@ -152,7 +157,7 @@ Skill selection does not happen automatically inside BuddySwitch `resolve`.
 
 Instead:
 
-1. BuddySwitch returns the allowed skill candidates.
+1. BuddySwitch returns the allowed skill candidates in `resolve_context.skills`.
 2. The host Codex session chooses one of them.
 
 This means:
@@ -174,10 +179,11 @@ Current `market` buddy behavior:
 
 1. `parse` identifies `buddy = market`
 2. `resolve` loads the `market` buddy and returns:
-   - `eligible_skills = ["research-scan", "pmf-recon", "customer-discovery", "positioning-copy", "channel-discovery", "launch-prep"]`
-   - `implicit_skill_id = null`
-   - top-level `artifact_selection = null`
-   - per-skill selection maps in `artifact_selection_by_skill` and `run_instructions_by_skill`
+   - `skills = ["research-scan", "pmf-recon", "customer-discovery", "positioning-copy", "channel-discovery", "launch-prep"]`
+   - `task_context`
+   - optional `track_context`
+   - `run_envelope`
+   - host-facing execution metadata in each resolved skill card
 3. The host chooses the skill:
    - choose `research-scan` for broad market/category/competitor/demand analysis
    - choose `pmf-recon` for PMF-oriented validation such as ICP, pain intensity, alternatives, and next validation action
@@ -218,6 +224,10 @@ These are useful during implementation, but they are not the main public archite
 ## Mental Model
 
 Use this shortcut:
+
+- Product mode selects the buddy when the launcher starts.
+- The canonical wire form remains `switch ...`.
+- Plain product-mode text is adapted only inside a valid buddy-locked session.
 
 - `switch` tells BuddySwitch which buddy owns the request
 - BuddySwitch tells the host which skills are allowed

@@ -459,8 +459,8 @@ def _legacy_get_artifact(artifact_id: str) -> dict[str, Any] | None:
 
 
 def _legacy_save_track(track: dict[str, Any]) -> dict[str, Any]:
-    ensure_runtime_dirs()
     normalized = validate_track(track)
+    ensure_runtime_dirs()
     _write_json(track_file(normalized["id"]), normalized)
     return normalized
 

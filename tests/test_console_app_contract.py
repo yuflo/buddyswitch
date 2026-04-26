@@ -205,6 +205,128 @@ class ConsoleAppContractTests(unittest.TestCase):
         self.assertEqual(commands["handoff"], persisted_handoff)
         self.assertNotEqual(commands["handoff"], synthetic_test_guidance)
 
+    def test_refresh_workspace_busy_keeps_existing_data_and_status(self) -> None:
+        script = textwrap.dedent(
+            """
+            const fs = require("fs");
+            const vm = require("vm");
+
+            function makeElement(tagName = "div") {
+              return {
+                tagName,
+                children: [],
+                className: "",
+                textContent: "",
+                type: "",
+                disabled: false,
+                dataset: {},
+                append(...nodes) { this.children.push(...nodes); },
+                appendChild(node) { this.children.push(node); return node; },
+                replaceChildren(...nodes) { this.children = [...nodes]; },
+                addEventListener() {},
+                removeEventListener() {},
+                setAttribute() {},
+                classList: {
+                  add() {},
+                  remove() {},
+                  toggle() {},
+                  contains() { return false; },
+                },
+              };
+            }
+
+            const elements = new Map();
+            const document = {
+              getElementById(id) {
+                if (!elements.has(id)) {
+                  elements.set(id, makeElement("div"));
+                }
+                return elements.get(id);
+              },
+              createElement(tag) {
+                return makeElement(tag);
+              },
+            };
+
+            const context = {
+              console,
+              window: {
+                location: { protocol: "file:" },
+                prompt() {},
+              },
+              document,
+              navigator: {
+                clipboard: {
+                  writeText: async () => {},
+                },
+              },
+              setTimeout() {},
+              clearTimeout() {},
+            };
+            context.globalThis = context;
+            vm.createContext(context);
+
+            const source = fs.readFileSync(process.env.CONSOLE_APP_PATH, "utf8");
+            vm.runInContext(
+              source + "\\nglobalThis.__consoleContract = { applyWorkspaceData, refreshWorkspaceData, workspace: () => workspace, status: () => ({ text: dataStatus.textContent, state: dataStatus.dataset.state }) };\\n",
+              context,
+            );
+
+            context.__consoleContract.applyWorkspaceData({
+              generated_at: "existing-snapshot",
+              tracks: [{ id: "track-existing", title: "Existing Track", task_ids: [] }],
+              tasks: [],
+              artifacts: [],
+              run_audits: [],
+            });
+            context.window.location.protocol = "http:";
+            context.fetch = async () => ({
+              ok: false,
+              status: 503,
+              json: async () => ({
+                ok: false,
+                error: "runtime_snapshot_busy",
+                message: "Workspace is updating. Retry shortly.",
+              }),
+            });
+
+            (async () => {
+              const refreshed = await context.__consoleContract.refreshWorkspaceData({ silent: true });
+              process.stdout.write(JSON.stringify({
+                refreshed,
+                workspace: context.__consoleContract.workspace(),
+                status: context.__consoleContract.status(),
+              }));
+            })().catch((error) => {
+              console.error(error);
+              process.exit(1);
+            });
+            """
+        )
+
+        env = os.environ.copy()
+        env.update({"CONSOLE_APP_PATH": str(CONSOLE_APP)})
+        completed = subprocess.run(
+            ["node", "-e", script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=f"node harness failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+        )
+        result = json.loads(completed.stdout)
+
+        self.assertFalse(result["refreshed"])
+        self.assertEqual(result["workspace"]["generated_at"], "existing-snapshot")
+        self.assertEqual(result["workspace"]["tracks"][0]["id"], "track-existing")
+        self.assertEqual(result["status"]["text"], "Workspace is updating. Retry shortly.")
+        self.assertEqual(result["status"]["state"], "warning")
+
 
 if __name__ == "__main__":
     unittest.main()

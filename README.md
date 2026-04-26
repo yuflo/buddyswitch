@@ -7,13 +7,14 @@ BuddySwitch is an env-centric control layer that runs inside the host Codex sess
 Two modes exist:
 
 1. **Develop BuddySwitch:** run `codex` from the repo root.
-2. **Run BuddySwitch product mode:** run `./buddyswitch-codex start`.
+2. **Run BuddySwitch product mode:** run `./buddyswitch-codex start --buddy <buddy>`.
 
-The launcher-managed product mode uses:
+The launcher-managed product mode layout is:
 
-- `${BUDDYSWITCH_SHARED_ROOT}` for runtime environment isolation
-- `${BUDDYSWITCH_SHARED_ROOT}/workspace` for the execution worktree
-- `tools/launcher/assets/runtime-AGENTS.md` for the runtime workspace contract
+- `${BUDDYSWITCH_SHARED_ROOT}` as the shared launcher root
+- `${BUDDYSWITCH_SHARED_ROOT}/state` for canonical BuddySwitch task, track, artifact, and run state
+- `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace` for each buddy-locked execution worktree
+- `tools/launcher/assets/buddies/<buddy>/AGENTS.md` for the instance root prompt contract
 
 If you are developing BuddySwitch itself, start here:
 
@@ -62,10 +63,10 @@ Then open `http://127.0.0.1:8765/`.
 If you need a launcher-managed product-mode session instead of repo-root development mode, run:
 
 ```bash
-./buddyswitch-codex start
+./buddyswitch-codex start --buddy pm
 ```
 
-Warning: `start` reuses an existing valid launcher execution workspace and does not refresh stale code to the latest repo `HEAD`. If `resolve`/`persist` should run against current repo code, run `./buddyswitch-codex workspace sync` first.
+Warning: `start --buddy <buddy>` reuses an existing valid buddy instance worktree and does not refresh stale code to the latest repo `HEAD`. `workspace sync` is retained only for the legacy singleton workspace path and is not the product-mode refresh path once `instances/` exists.
 
 ## Daily Use
 
@@ -78,7 +79,7 @@ python3 scripts/codex_router.py "switch pm: create ai-scheduler-lp track"
 
 ### Resolve a run
 
-Run `resolve` only from the launcher-owned runtime workspace. In create mode it may materialize a zero-run task and reserve the next run id, so the repo-root development checkout blocks it; start the runtime workspace with `./buddyswitch-codex start` first. `start` does not refresh stale but valid execution workspace code, so run `./buddyswitch-codex workspace sync` first when you need the latest repo `HEAD`.
+Run `resolve` only from the launcher-owned runtime workspace. In create mode it may materialize a zero-run task and reserve the next run id, so the repo-root development checkout blocks it; start the runtime workspace with `./buddyswitch-codex start --buddy <buddy>` first. Product mode runs from `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace` and projects canonical state from `${BUDDYSWITCH_SHARED_ROOT}/state`.
 
 ```bash
 python3 scripts/switch_runtime.py resolve "switch market: quick market research for AI scheduler landing page"
@@ -87,7 +88,7 @@ python3 scripts/switch_runtime.py resolve "switch pm: create ai-scheduler-lp tra
 
 ### Persist a structured result
 
-Run `persist` only from the launcher-owned runtime workspace. The repo-root development checkout blocks BuddySwitch runtime writes; start it with `./buddyswitch-codex start` first. `start` does not refresh stale but valid execution workspace code, so run `./buddyswitch-codex workspace sync` first when you need the latest repo `HEAD`. This command is the current CLI wrapper for the `persist-skill-result` step.
+Run `persist` only from the launcher-owned runtime workspace. The repo-root development checkout blocks BuddySwitch runtime writes; start it with `./buddyswitch-codex start --buddy <buddy>` first. Product mode writes canonical state under `${BUDDYSWITCH_SHARED_ROOT}/state` and keeps instance-local scratch under `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`. This command is the current CLI wrapper for the `persist-skill-result` step.
 
 ```bash
 python3 scripts/switch_runtime.py persist \
@@ -116,7 +117,7 @@ scripts/cleanup_buddyswitch.sh --project app
 scripts/cleanup_buddyswitch.sh --all-storage
 ```
 
-Defaults are dry-run. Add `--execute` to apply deletion. Cleanup targets the launcher runtime workspace under `~/.codex-buddyswitch/workspace`; it does not clean the repo-root development checkout.
+Defaults are dry-run. Add `--execute` to apply deletion. Cleanup targets shared state under `${BUDDYSWITCH_SHARED_ROOT}/state` and instance-local scratch under `${BUDDYSWITCH_SHARED_ROOT}/instances/*`; it does not clean the repo-root development checkout.
 
 ## What BuddySwitch Is
 
@@ -412,10 +413,10 @@ codex mcp add chrome-devtools -- npx chrome-devtools-mcp@latest
 BuddySwitch launcher sessions now bootstrap the execution workspace shell and browser capabilities automatically when you run:
 
 ```bash
-./buddyswitch-codex start
+./buddyswitch-codex start --buddy pm
 ```
 
-`start` does not auto-sync execution workspace code to the latest repo `HEAD`. Use `workspace sync` when you want a manual code refresh.
+`start --buddy <buddy>` does not auto-sync instance worktree code to the latest repo `HEAD`. `workspace sync` is a legacy/debug compatibility command for the singleton workspace path and is not the normal product-mode refresh path once `instances/` exists.
 
 Repair and refresh commands are split by responsibility:
 
@@ -426,7 +427,7 @@ Repair and refresh commands are split by responsibility:
 ```
 
 - `browser ensure` only repairs the shared browser cockpit and browser MCP setup.
-- `workspace sync` manually refreshes the launcher execution workspace to repo `HEAD`. It force-rebuilds the execution worktree and drops local changes outside preserved runtime paths. It refuses to run while active launcher sessions exist and preserves runtime outputs under `buddyswitch/objects/tracks/**`, `buddyswitch/objects/tasks/**`, `buddyswitch/objects/artifacts/**`, `buddyswitch/content/runs/**`, `runs/raw/**`, and `projects/app/.runtime/**`.
+- `workspace sync` manually refreshes the legacy singleton execution workspace to repo `HEAD`. It is a debug/compatibility command rather than the normal buddy-locked product-mode path.
 
 Default shared browser profile path:
 

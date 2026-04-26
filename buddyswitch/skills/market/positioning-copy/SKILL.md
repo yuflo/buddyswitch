@@ -36,7 +36,7 @@
 
 - This skill follows `framework/docs/browser-cockpit.md`.
 - It uses `chrome-devtools-cockpit` as the browser executor.
-- It runs in a shared headed cockpit (`browser_mode=headed-only`) with profile `shared-browser`.
+- It runs in an instance headed cockpit (`browser_mode=headed-only`) with profile `instance-browser`.
 - Discovery mode is `browser-native`: search in the browser and continue into real result pages, details, comments, and related pages where relevant.
 - Critical-source login is mandatory takeover, and fallback policy is no silent degrade.
 - Do not silently downgrade to low-density public alternatives when critical evidence refresh is blocked.

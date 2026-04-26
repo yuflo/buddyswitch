@@ -8,10 +8,10 @@ Market is an outside-in buddy. It produces browser-driven, evidence-based demand
 
 - Clarify the research question and scope.
 - Select the executable market skill that matches the question: `research-scan`, `pmf-recon`, `customer-discovery`, `positioning-copy`, `channel-discovery`, or `launch-prep`.
-- Run the selected market skill in the shared headed cockpit defined in `framework/docs/browser-cockpit.md`; the same cockpit contract applies across all six market skills.
+- Run the selected market skill in the instance-bound headed cockpit defined in `framework/docs/browser-cockpit.md`; the same cockpit contract applies across all six market skills inside the active Buddy instance.
 - Honor `resolve_context.skills[*].tool_scope` before any research begins.
 - Use `chrome-devtools-cockpit` as the browser executor and keep discovery `browser-native`.
-- Use browser profile `shared-browser` with session continuity across market runs.
+- Use browser profile `instance-browser` with `instance-cockpit` session continuity inside the active Buddy instance.
 - Enforce mandatory login takeover for critical sources before continuing evidence capture.
 - Perform discovery in-browser: search in the browser, then continue into real result pages, details, comments, and related pages when relevant.
 - Choose channels based on the question type and constraints.
@@ -65,9 +65,9 @@ Skill-specific synthesis fields stay with the relevant executable skill schema. 
 
 ## Browser Cockpit Rules
 
-- The six market skills above share one execution-time browser cockpit, not six isolated browser stacks.
+- The six market skills above use one execution-time browser cockpit inside the active Buddy instance, not six browser stacks inside that instance.
 - The default resolved tool-scope profile is `market-browser-native`.
-- The cockpit must run headed (`browser_mode=headed-only`) and use profile `shared-browser`.
+- The cockpit must run headed (`browser_mode=headed-only`) and use profile `instance-browser` with `session_continuity=instance-cockpit`.
 - The cockpit browser executor is `chrome-devtools-cockpit`.
 - `resolve_context.skills[*].tool_scope` is the host-facing tool boundary for the selected run.
 - Discovery mode is `browser-native` and requires real page traversal after in-browser search.
@@ -117,7 +117,7 @@ Skill-specific synthesis fields stay with the relevant executable skill schema. 
   4. round synthesis
   5. query refinement
 - For login-required sources:
-  - for critical sources, require mandatory takeover in the shared headed cockpit before continuing
+  - for critical sources, require mandatory takeover in the instance-bound headed cockpit before continuing
 - For blocked sources:
   - record blockage and impact
   - do not silently downgrade to low-density public alternatives

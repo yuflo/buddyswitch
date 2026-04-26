@@ -4,12 +4,16 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -59,6 +63,20 @@ _LEGACY_OUTPUT_PATTERNS = (
     re.compile(r"(artifacts/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\.md)"),
     re.compile(r"(runs/summaries/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\.md)"),
 )
+_PRODUCT_MODE_ENV_KEYS = (
+    "BUDDYSWITCH_ACTIVE_BUDDY",
+    "BUDDYSWITCH_INSTANCE_ID",
+    "BUDDYSWITCH_INSTANCE_JSON",
+)
+_RUNTIME_LOCK_TIMEOUT_ENV = "BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"
+_RUNTIME_LOCK_DEFAULT_TIMEOUT_SECONDS = 30.0
+_RUNTIME_LOCK_POLL_SECONDS = 0.05
+_STRUCTURAL_SWITCH_PATTERN = re.compile(
+    r"^switch\s+([a-z][a-z0-9-]*)"
+    r"(?:\s*\(\s*([a-z0-9][a-z0-9-]*)\s*\))?"
+    r"(?:\s*->\s*([a-z0-9][a-z0-9-]*))?"
+    r"\s*:(.*)$"
+)
 
 
 def runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -74,6 +92,292 @@ def runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) 
     if extra:
         payload["error"].update(extra)
     return payload
+
+
+def _load_product_mode_session(manifest_path: Path) -> dict[str, Any] | None:
+    raw_env = {key: os.environ.get(key) for key in _PRODUCT_MODE_ENV_KEYS}
+    if all(value is None for value in raw_env.values()):
+        return None
+
+    invalid_keys = [
+        key
+        for key, value in raw_env.items()
+        if value is None or not isinstance(value, str) or not value.strip()
+    ]
+    if invalid_keys:
+        raise ValueError(
+            "Partial product-mode env is invalid: "
+            + ", ".join(_PRODUCT_MODE_ENV_KEYS)
+            + " must all be set to non-empty values."
+        )
+
+    assert all(isinstance(raw_env[key], str) for key in _PRODUCT_MODE_ENV_KEYS)
+    active_buddy = raw_env["BUDDYSWITCH_ACTIVE_BUDDY"].strip()
+    instance_id = raw_env["BUDDYSWITCH_INSTANCE_ID"].strip()
+    instance_json = Path(raw_env["BUDDYSWITCH_INSTANCE_JSON"].strip())
+
+    manifest = load_manifest(manifest_path)
+    require_buddy(manifest, active_buddy)
+
+    if not instance_json.exists():
+        raise ValueError(f"BUDDYSWITCH_INSTANCE_JSON does not exist: {instance_json}")
+
+    try:
+        payload = json.loads(instance_json.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise ValueError(f"BUDDYSWITCH_INSTANCE_JSON is not valid JSON: {instance_json}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"BUDDYSWITCH_INSTANCE_JSON must be a JSON object: {instance_json}")
+
+    json_instance_id = payload.get("instance_id")
+    if not isinstance(json_instance_id, str) or json_instance_id.strip() != instance_id:
+        raise ValueError(
+            "BUDDYSWITCH_INSTANCE_JSON instance_id mismatch: "
+            f"expected '{instance_id}', found '{json_instance_id}'"
+        )
+
+    json_buddy = payload.get("buddy")
+    if isinstance(json_buddy, str) and json_buddy.strip() and json_buddy.strip() != active_buddy:
+        raise ValueError(
+            "BUDDYSWITCH_INSTANCE_JSON buddy mismatch: "
+            f"expected '{active_buddy}', found '{json_buddy.strip()}'"
+        )
+
+    return {
+        "active_buddy": active_buddy,
+        "instance_id": instance_id,
+        "instance_json": instance_json,
+        "payload": payload,
+    }
+
+
+def _product_runtime_shared_root(product_session: dict[str, Any]) -> Path:
+    raw_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
+    if isinstance(raw_shared_root, str) and raw_shared_root.strip():
+        return Path(raw_shared_root.strip())
+
+    instance_json = product_session.get("instance_json")
+    if not isinstance(instance_json, Path):
+        raise ValueError("BUDDYSWITCH_SHARED_ROOT is required for product-mode runtime locking")
+
+    instance_dir = instance_json.parent
+    if instance_dir.parent.name == "instances":
+        return instance_dir.parent.parent
+    return instance_dir
+
+
+def _runtime_lock_timeout_seconds() -> float:
+    raw_timeout = os.environ.get(_RUNTIME_LOCK_TIMEOUT_ENV)
+    if raw_timeout is None or raw_timeout.strip() == "":
+        return _RUNTIME_LOCK_DEFAULT_TIMEOUT_SECONDS
+    try:
+        timeout = float(raw_timeout)
+    except ValueError as exc:
+        raise ValueError(f"invalid {_RUNTIME_LOCK_TIMEOUT_ENV} value: {raw_timeout!r}") from exc
+    if not math.isfinite(timeout):
+        raise ValueError(f"runtime lock timeout must be finite, got {timeout}")
+    if timeout < 0:
+        raise ValueError(f"runtime lock timeout must be >= 0, got {timeout}")
+    return timeout
+
+
+@contextmanager
+def _hold_product_runtime_lock(product_session: dict[str, Any]):
+    shared_root = str(_product_runtime_shared_root(product_session)).rstrip("/")
+    if not shared_root:
+        raise ValueError("BUDDYSWITCH_SHARED_ROOT must not be empty")
+    timeout_seconds = _runtime_lock_timeout_seconds()
+    lock_path = Path(f"{shared_root}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    deadline = time.monotonic() + timeout_seconds
+    try:
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"runtime state busy: could not acquire lock at {lock_path} within {timeout_seconds:.2f}s"
+                    )
+                time.sleep(_RUNTIME_LOCK_POLL_SECONDS)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    finally:
+        os.close(lock_fd)
+
+
+def _match_structural_switch(text: str) -> re.Match[str] | None:
+    match = _STRUCTURAL_SWITCH_PATTERN.match(text)
+    if match is None:
+        return None
+    if not match.group(4).strip():
+        return None
+    return match
+
+
+def _build_plain_text_switch(active_buddy: str, binding: dict[str, Any], demand: str) -> str:
+    current_task_id = binding.get("current_task_id")
+    current_track_id = binding.get("current_track_id")
+
+    if isinstance(current_task_id, str) and current_task_id.strip():
+        command = f"switch {active_buddy}({current_task_id.strip()})"
+        if isinstance(current_track_id, str) and current_track_id.strip():
+            command = f"{command} -> {current_track_id.strip()}"
+    else:
+        command = f"switch {active_buddy}"
+
+    return f"{command}: {demand}"
+
+
+def _write_product_session_binding(
+    product_session: dict[str, Any],
+    *,
+    task_id: str,
+    track_id: str | None,
+) -> None:
+    instance_json = product_session.get("instance_json")
+    payload = product_session.get("payload")
+    if not isinstance(instance_json, Path):
+        raise ValueError("product session instance_json is required")
+    if not isinstance(payload, dict):
+        raise ValueError("product session payload is required")
+    if not isinstance(task_id, str) or not task_id.strip():
+        raise ValueError("resolved task_id is required for product session binding")
+    if track_id is not None and (not isinstance(track_id, str) or not track_id.strip()):
+        track_id = None
+
+    updated = dict(payload)
+    updated["current_task_id"] = task_id.strip()
+    updated["current_track_id"] = track_id.strip() if isinstance(track_id, str) and track_id.strip() else None
+    updated["updated_at"] = now_iso()
+    _write_runtime_json(instance_json, updated)
+    product_session["payload"] = updated
+
+
+def _resolve_binding_from_payload(payload: dict[str, Any]) -> tuple[str, str | None]:
+    switch_payload = payload.get("switch")
+    if not isinstance(switch_payload, dict):
+        raise ValueError("resolve payload switch is required for product session binding")
+    task_id = switch_payload.get("task_id")
+    track_id = switch_payload.get("track_id")
+    if not isinstance(task_id, str) or not task_id.strip():
+        raise ValueError("resolve payload switch.task_id is required for product session binding")
+    if not isinstance(track_id, str) or not track_id.strip():
+        track_id = None
+    return task_id.strip(), track_id.strip() if isinstance(track_id, str) else None
+
+
+def _raise_reservation_clear_failure(warning: dict[str, Any]) -> None:
+    message = warning.get("message")
+    run_id = warning.get("run_id")
+    reservation_path = warning.get("reservation_path")
+    raise ValueError(
+        "run reservation rollback failed: "
+        f"{message} (run_id={run_id}, reservation_path={reservation_path})"
+    )
+
+
+def _clear_reservation_from_payload(payload: dict[str, Any], *, fail_on_warning: bool = False) -> None:
+    run_envelope = payload.get("run_envelope")
+    if isinstance(run_envelope, dict):
+        run_id = run_envelope.get("run_id")
+        if isinstance(run_id, str) and run_id.strip():
+            warning = _clear_run_reservation(run_id.strip())
+            if warning is not None and fail_on_warning:
+                _raise_reservation_clear_failure(warning)
+    refreshed_context = payload.get("refreshed_context")
+    if isinstance(refreshed_context, dict):
+        _clear_reservation_from_payload(refreshed_context, fail_on_warning=fail_on_warning)
+
+
+def _receipt_has_binding_update_warning(receipt: dict[str, Any]) -> bool:
+    warnings = receipt.get("warnings")
+    if not isinstance(warnings, list):
+        return False
+    return any(
+        isinstance(item, dict) and item.get("code") == "W_INSTANCE_BINDING_UPDATE_FAILED"
+        for item in warnings
+    )
+
+
+def _persist_binding_from_payload(payload: dict[str, Any]) -> tuple[str, str | None] | None:
+    refreshed_context = payload.get("refreshed_context")
+    if isinstance(refreshed_context, dict) and refreshed_context.get("ok") is True:
+        return _resolve_binding_from_payload(refreshed_context)
+
+    receipt = payload.get("receipt")
+    if not isinstance(receipt, dict):
+        return None
+    refreshed_error = refreshed_context.get("error") if isinstance(refreshed_context, dict) else None
+    if (
+        isinstance(refreshed_error, dict)
+        and refreshed_error.get("code") == "E_RUNTIME_REFRESH_CONTEXT"
+        and not _receipt_has_binding_update_warning(receipt)
+    ):
+        task_id = receipt.get("task_id")
+        track_id = receipt.get("track_id")
+        if not isinstance(task_id, str) or not task_id.strip():
+            return None
+        if not isinstance(track_id, str) or not track_id.strip():
+            track_id = None
+        return task_id.strip(), track_id.strip() if isinstance(track_id, str) else None
+    return None
+
+
+def _mark_committed_binding_update_failed(payload: dict[str, Any], product_session: dict[str, Any], exc: Exception) -> None:
+    _clear_reservation_from_payload(payload)
+    receipt = payload.setdefault("receipt", {})
+    if not isinstance(receipt, dict):
+        return
+    warning = {
+        "code": "W_INSTANCE_BINDING_UPDATE_FAILED",
+        "message": f"instance binding update failed after persist commit: {exc}",
+        "instance_id": product_session.get("instance_id"),
+        "instance_json": str(product_session.get("instance_json")),
+    }
+    warnings = receipt.setdefault("warnings", [])
+    if isinstance(warnings, list):
+        warnings.append(warning)
+    payload["refreshed_context"] = {
+        "ok": False,
+        "error": {
+            "code": "E_RUNTIME_REFRESH_CONTEXT",
+            "message": "instance binding update failed after persist commit; rerun resolve for next turn",
+            "instance_id": product_session.get("instance_id"),
+            "instance_json": str(product_session.get("instance_json")),
+        },
+    }
+
+
+def _adapt_resolve_text_for_product_session(text: str, *, product_session: dict[str, Any]) -> str:
+    trimmed = text.strip()
+    if not trimmed:
+        return text
+
+    active_buddy = product_session["active_buddy"]
+    structural_switch = _match_structural_switch(trimmed)
+    if structural_switch:
+        requested_buddy = structural_switch.group(1).strip().lower()
+        if requested_buddy != active_buddy:
+            raise ValueError(
+                "Session is locked to buddy "
+                f"'{active_buddy}'. Received canonical switch for '{requested_buddy}'."
+            )
+        return trimmed
+
+    binding = product_session["payload"]
+    return _build_plain_text_switch(active_buddy, binding, trimmed)
+
+
+def _adapt_resolve_text_for_session(text: str, *, manifest_path: Path) -> str:
+    product_session = _load_product_mode_session(manifest_path)
+    if product_session is None:
+        return text
+    return _adapt_resolve_text_for_product_session(text, product_session=product_session)
 
 
 def _ensure_no_legacy_outputs(demand: str) -> None:
@@ -729,6 +1033,31 @@ def _derive_switch_fingerprint(switch_payload: dict[str, Any]) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 
+def _current_product_instance_id() -> str | None:
+    raw_instance_id = os.environ.get("BUDDYSWITCH_INSTANCE_ID")
+    if isinstance(raw_instance_id, str) and raw_instance_id.strip():
+        return raw_instance_id.strip()
+    return None
+
+
+def _find_active_task_reservation(task_id: str) -> dict[str, Any] | None:
+    reserved_dir = _reserved_run_path("placeholder").parent
+    if not reserved_dir.exists():
+        return None
+    for path in sorted(reserved_dir.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            raise ValueError(f"run reservation is invalid: {path.name}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"run reservation is invalid: {path.name}")
+        if payload.get("status") != "reserved":
+            continue
+        if payload.get("task_id") == task_id:
+            return payload
+    return None
+
+
 def _save_run_reservation(
     *,
     run_id: str,
@@ -738,17 +1067,30 @@ def _save_run_reservation(
     switch_payload: dict[str, Any],
 ) -> None:
     require_runtime_workspace_write_root()
+    instance_id = _current_product_instance_id()
+    if instance_id is not None:
+        existing = _find_active_task_reservation(task_id)
+        if existing is not None:
+            existing_run_id = existing.get("run_id")
+            existing_instance_id = existing.get("instance_id")
+            raise ValueError(
+                f"Task '{task_id}' already has an active run reservation"
+                f" '{existing_run_id}' for instance '{existing_instance_id or 'unknown'}'."
+            )
+    reservation = {
+        "run_id": run_id,
+        "status": "reserved",
+        "context_revision": context_revision,
+        "sequence": sequence,
+        "task_id": task_id,
+        "switch": _normalized_switch_identity(switch_payload),
+        "reserved_at": now_iso(),
+    }
+    if instance_id is not None:
+        reservation["instance_id"] = instance_id
     _write_runtime_json(
         _reserved_run_path(run_id),
-        {
-            "run_id": run_id,
-            "status": "reserved",
-            "context_revision": context_revision,
-            "sequence": sequence,
-            "task_id": task_id,
-            "switch": _normalized_switch_identity(switch_payload),
-            "reserved_at": now_iso(),
-        },
+        reservation,
     )
 
 
@@ -767,13 +1109,19 @@ def _load_run_reservation(run_id: str) -> dict[str, Any]:
     return payload
 
 
-def _clear_run_reservation(run_id: str) -> None:
+def _clear_run_reservation(run_id: str) -> dict[str, Any] | None:
     path = _reserved_run_path(run_id)
     try:
         if path.exists():
             path.unlink()
-    except OSError:
-        return
+    except OSError as exc:
+        return {
+            "code": "W_RUN_RESERVATION_CLEAR_FAILED",
+            "message": f"run reservation could not be cleared: {exc}",
+            "run_id": run_id,
+            "reservation_path": str(path),
+        }
+    return None
 
 
 def _refresh_context_error(exc: Exception) -> dict[str, Any]:
@@ -1545,6 +1893,11 @@ def _persist_skill_result(
     refreshed_track_id = receipt.get("track_id") if isinstance(receipt, dict) else None
     if not isinstance(refreshed_track_id, str) or not refreshed_track_id:
         refreshed_track_id = effective_track_id
+    reservation_clear_warning = _clear_run_reservation(run_id)
+    if reservation_clear_warning is not None:
+        receipt_warnings = receipt.setdefault("warnings", []) if isinstance(receipt, dict) else []
+        if isinstance(receipt_warnings, list):
+            receipt_warnings.append(reservation_clear_warning)
     try:
         refreshed_context = _build_resolve_context(
             _build_refresh_switch_text(
@@ -1558,14 +1911,11 @@ def _persist_skill_result(
         if not refreshed_context.get("ok"):
             raise ValueError("failed to refresh context after persist_skill_result")
     except (ManifestError, ValueError, OutputSchemaError, OSError) as exc:
-        _clear_run_reservation(run_id)
         return {
             "ok": True,
             "receipt": receipt,
             "refreshed_context": _refresh_context_error(exc),
         }
-
-    _clear_run_reservation(run_id)
 
     return {
         "ok": True,
@@ -1593,7 +1943,24 @@ def persist_skill_result(
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
     try:
-        payload = resolve_switch(args.text, manifest_path=args.manifest)
+        product_session = _load_product_mode_session(args.manifest)
+        if product_session is None:
+            adapted_text = args.text
+            payload = resolve_switch(adapted_text, manifest_path=args.manifest)
+        else:
+            with _hold_product_runtime_lock(product_session):
+                product_session = _load_product_mode_session(args.manifest)
+                if product_session is None:
+                    raise ValueError("product-mode env disappeared while acquiring runtime lock")
+                adapted_text = _adapt_resolve_text_for_product_session(args.text, product_session=product_session)
+                payload = resolve_switch(adapted_text, manifest_path=args.manifest)
+                if payload.get("ok"):
+                    task_id, track_id = _resolve_binding_from_payload(payload)
+                    try:
+                        _write_product_session_binding(product_session, task_id=task_id, track_id=track_id)
+                    except (OSError, ValueError) as exc:
+                        _clear_reservation_from_payload(payload, fail_on_warning=True)
+                        raise ValueError(f"instance binding update failed after resolve: {exc}") from exc
     except (ManifestError, ValueError, OutputSchemaError, OSError) as exc:
         payload = runtime_error("E_RUNTIME_RESOLVE", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))
@@ -1627,12 +1994,33 @@ def _cmd_persist(args: argparse.Namespace) -> int:
         stdin_text = sys.stdin.read() if args.resolved == "-" or args.result == "-" else None
         resolved = _read_json_input(args.resolved, stdin_text=stdin_text if args.resolved == "-" else None)
         result = _read_json_input(args.result, stdin_text=stdin_text if args.result == "-" else None)
-        payload = persist_skill_result(
-            resolved,
-            skill_id=_derive_cli_persist_skill_id(resolved, args.skill_id),
-            result=result,
-            manifest_path=args.manifest,
-        )
+        product_session = _load_product_mode_session(args.manifest)
+        if product_session is None:
+            payload = persist_skill_result(
+                resolved,
+                skill_id=_derive_cli_persist_skill_id(resolved, args.skill_id),
+                result=result,
+                manifest_path=args.manifest,
+            )
+        else:
+            with _hold_product_runtime_lock(product_session):
+                product_session = _load_product_mode_session(args.manifest)
+                if product_session is None:
+                    raise ValueError("product-mode env disappeared while acquiring runtime lock")
+                payload = persist_skill_result(
+                    resolved,
+                    skill_id=_derive_cli_persist_skill_id(resolved, args.skill_id),
+                    result=result,
+                    manifest_path=args.manifest,
+                )
+                if payload.get("ok"):
+                    binding = _persist_binding_from_payload(payload)
+                    if binding is not None:
+                        task_id, track_id = binding
+                        try:
+                            _write_product_session_binding(product_session, task_id=task_id, track_id=track_id)
+                        except (OSError, ValueError) as exc:
+                            _mark_committed_binding_update_failed(payload, product_session, exc)
     except (ManifestError, ValueError, OSError, OutputSchemaError, json.JSONDecodeError) as exc:
         payload = runtime_error("E_RUNTIME_PERSIST", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))

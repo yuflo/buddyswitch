@@ -20,6 +20,30 @@ if str(SCRIPTS) not in sys.path:
 
 import env_cleanup  # noqa: E402
 
+RUNTIME_LOCK_BUSY_EXIT_CODE = 4
+LOCK_TIMEOUT_SECONDS = "0.2"
+LOCK_HOLDER_SCRIPT = """\
+import fcntl
+import os
+import signal
+import sys
+import time
+
+lock_path = sys.argv[1]
+fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+fcntl.flock(fd, fcntl.LOCK_EX)
+print("locked", flush=True)
+
+def _exit(*_args):
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, _exit)
+signal.signal(signal.SIGINT, _exit)
+
+while True:
+    time.sleep(1)
+"""
+
 
 class CleanupFixture:
     def __init__(self, root: Path) -> None:
@@ -172,7 +196,7 @@ permissions = ["track.read", "track.create", "track.update", "task.read", "task.
                 "run_id": "run-market",
                 "timestamp": "2026-04-11T10:00:00+08:00",
                 "switch": {
-                    "buddy": "market",
+                    "buddy_id": "market",
                     "demand": "research",
                     "task_id": "task-market",
                     "track_id": "track-demo",
@@ -417,7 +441,7 @@ class CleanupShellIntegrationTests(unittest.TestCase):
             shutil.copy2(ROOT / "scripts" / name, scripts_dir / name)
         launcher_dir = self.repo_root / "tools" / "launcher"
         launcher_dir.mkdir(parents=True, exist_ok=True)
-        for name in ("env.sh", "workspace.sh"):
+        for name in ("env.sh", "workspace.sh", "runtime_lock.py", "browser_cockpit.sh"):
             shutil.copy2(ROOT / "tools" / "launcher" / name, launcher_dir / name)
 
     def run_cleanup(self, *args: str, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -433,6 +457,31 @@ class CleanupShellIntegrationTests(unittest.TestCase):
             env=env,
             text=True,
         )
+
+    def _spawn_lock_holder(self, lock_path: Path) -> subprocess.Popen[str]:
+        holder = subprocess.Popen(
+            [sys.executable, "-c", LOCK_HOLDER_SCRIPT, str(lock_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        self.assertIsNotNone(holder.stdout, "expected lock holder stdout pipe")
+        ready = holder.stdout.readline().strip()
+        if ready != "locked":
+            stderr = holder.stderr.read() if holder.stderr is not None else ""
+            holder.kill()
+            holder.wait(timeout=5)
+            self.fail(f"failed to acquire test runtime lock\nstdout:\n{ready}\nstderr:\n{stderr}")
+        return holder
+
+    def _stop_lock_holder(self, holder: subprocess.Popen[str]) -> None:
+        if holder.poll() is None:
+            holder.terminate()
+            try:
+                holder.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                holder.kill()
+                holder.wait(timeout=5)
 
     def test_shell_agent_dry_run_reports_run_content(self) -> None:
         completed = self.run_cleanup("--agent", "market", "--json")
@@ -507,6 +556,256 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         self.assertFalse(self.fixture.exists("buddyswitch/content/runs/run-market.json"))
         self.assertFalse(self.fixture.exists("buddyswitch/objects/tracks/track-demo.json"))
         self.assertNotIn("BuddySwitch runtime-only excludes", exclude_path.read_text(encoding="utf-8"))
+
+    def test_shell_all_storage_dry_run_does_not_mutate_source_checkout_or_excludes(self) -> None:
+        exclude_path = self.repo_root / ".git" / "info" / "exclude"
+        exclude_path.parent.mkdir(parents=True, exist_ok=True)
+        exclude_path.write_text(
+            "keep-this-line\n"
+            "# BuddySwitch runtime-only excludes\n"
+            "buddyswitch/content/runs/**\n"
+            "buddyswitch/objects/tracks/**\n"
+            "buddyswitch/objects/tasks/**\n"
+            "buddyswitch/objects/artifacts/**\n"
+            "runs/raw/**\n"
+            "projects/app/.runtime/**\n",
+            encoding="utf-8",
+        )
+        before_exclude_bytes = exclude_path.read_bytes()
+
+        source_run_path = self.repo_root / "buddyswitch" / "content" / "runs" / "source-dry-run.json"
+        source_run_path.parent.mkdir(parents=True, exist_ok=True)
+        source_run_path.write_text(
+            json.dumps(
+                {
+                    "run_id": "source-dry-run",
+                    "switch": {"buddy_id": "market", "task_id": "task-market"},
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        source_runtime_path = self.repo_root / "projects" / "app" / ".runtime" / "source-dry-run-session.json"
+        source_runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        source_runtime_path.write_text("{\"ok\":true}\n", encoding="utf-8")
+        self.assertTrue(source_run_path.exists(), "precondition: source run fixture exists")
+        self.assertTrue(source_runtime_path.exists(), "precondition: source runtime fixture exists")
+
+        completed = self.run_cleanup(
+            "--all-storage",
+            "--json",
+        )
+
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertTrue(source_run_path.exists())
+        self.assertTrue(source_runtime_path.exists())
+        self.assertEqual(before_exclude_bytes, exclude_path.read_bytes())
+
+    def test_shell_cleanup_is_blocked_when_runtime_lock_is_held(self) -> None:
+        lock_path = Path(f"{self.shared_root}.lock")
+        workspace_run_path = "buddyswitch/content/runs/run-market.json"
+        self.assertTrue(self.workspace_fixture.exists(workspace_run_path), "precondition: workspace run fixture exists")
+
+        holder = self._spawn_lock_holder(lock_path)
+        try:
+            completed = self.run_cleanup(
+                "--all-agents",
+                "--execute",
+                "--force",
+                "--json",
+                extra_env={"BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS": LOCK_TIMEOUT_SECONDS},
+            )
+        finally:
+            self._stop_lock_holder(holder)
+
+        self.assertEqual(completed.returncode, RUNTIME_LOCK_BUSY_EXIT_CODE)
+        self.assertIn("runtime state busy", completed.stderr)
+        self.assertTrue(
+            self.workspace_fixture.exists(workspace_run_path),
+            "cleanup must not mutate runtime state while lock is held",
+        )
+
+    def test_shell_cleanup_is_blocked_when_active_launcher_marker_exists(self) -> None:
+        run_dir = self.shared_root / "run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "launcher-current.pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+        workspace_run_path = "buddyswitch/content/runs/run-market.json"
+        self.assertTrue(self.workspace_fixture.exists(workspace_run_path), "precondition: workspace run fixture exists")
+
+        completed = self.run_cleanup(
+            "--all-agents",
+            "--execute",
+            "--force",
+            "--json",
+        )
+
+        self.assertEqual(completed.returncode, 3)
+        self.assertIn("active buddyswitch-codex instance", completed.stderr)
+        self.assertTrue(
+            self.workspace_fixture.exists(workspace_run_path),
+            "cleanup must not mutate runtime state while a launcher is active",
+        )
+
+    def test_shell_cleanup_is_blocked_when_active_browser_marker_exists(self) -> None:
+        browser_marker = self.shared_root / "instances" / "inst-market-active" / "browser" / "chrome.pid"
+        browser_marker.parent.mkdir(parents=True, exist_ok=True)
+        browser_marker.write_text(f"{os.getpid()}\n", encoding="utf-8")
+        workspace_run_path = "buddyswitch/content/runs/run-market.json"
+        self.assertTrue(self.workspace_fixture.exists(workspace_run_path), "precondition: workspace run fixture exists")
+
+        completed = self.run_cleanup(
+            "--all-agents",
+            "--execute",
+            "--force",
+            "--json",
+        )
+
+        self.assertEqual(completed.returncode, 3)
+        self.assertIn("active browser", completed.stderr)
+        self.assertTrue(
+            self.workspace_fixture.exists(workspace_run_path),
+            "cleanup must not mutate runtime state while a browser is active",
+        )
+
+    def test_shell_cleanup_ignores_stale_instance_browser_pid_without_endpoint(self) -> None:
+        instance_id = "inst-market-stale"
+        browser_marker = self.shared_root / "instances" / instance_id / "browser" / "chrome.pid"
+        browser_marker.parent.mkdir(parents=True, exist_ok=True)
+        browser_marker.write_text("999999\n", encoding="utf-8")
+        (self.shared_root / "instances" / instance_id / "instance.json").write_text(
+            json.dumps(
+                {
+                    "instance_id": instance_id,
+                    "buddy": "market",
+                    "status": "inactive",
+                    "workspace_dir": str(self.shared_root / "instances" / instance_id / "workspace"),
+                    "browser_port": 9333,
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        completed = self.run_cleanup(
+            "--all-agents",
+            "--execute",
+            "--force",
+            "--json",
+        )
+
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertFalse(browser_marker.exists(), "stale pid marker should be ignored and removed")
+
+    def test_shell_all_storage_cleanup_handles_state_and_instances_without_legacy_workspace(self) -> None:
+        shutil.rmtree(self.workspace_dir)
+
+        state_root = self.shared_root / "state"
+        state_fixture = CleanupFixture(state_root)
+        instance_root = self.shared_root / "instances" / "inst-market-a"
+        instance_workspace = instance_root / "workspace"
+        instance_root.mkdir(parents=True, exist_ok=True)
+        (instance_root / "instance.json").write_text(
+            json.dumps(
+                {
+                    "instance_id": "inst-market-a",
+                    "buddy": "market",
+                    "status": "inactive",
+                    "current_task_id": None,
+                    "current_track_id": None,
+                    "workspace_dir": str(instance_workspace),
+                    "browser_port": None,
+                    "created_at": "2026-04-24T00:00:00Z",
+                    "updated_at": "2026-04-24T00:00:00Z",
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        worktree_registered = False
+        try:
+            subprocess.run(
+                ["git", "-C", str(ROOT), "worktree", "add", "--detach", str(instance_workspace), "HEAD"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            worktree_registered = True
+        except subprocess.CalledProcessError:
+            pass
+        (instance_workspace / "runs" / "raw" / "market").mkdir(parents=True, exist_ok=True)
+        (instance_workspace / "runs" / "raw" / "market" / "market.log").write_text(
+            "instance raw\n",
+            encoding="utf-8",
+        )
+        (instance_workspace / "projects" / "app" / ".runtime").mkdir(parents=True, exist_ok=True)
+        (instance_workspace / "projects" / "app" / ".runtime" / "session.json").write_text(
+            "{\"ok\":true}\n",
+            encoding="utf-8",
+        )
+
+        try:
+            completed = self.run_cleanup(
+                "--all-storage",
+                "--execute",
+                "--force",
+                "--json",
+                extra_env={"REPO_ROOT": str(ROOT), "BUDDYSWITCH_REPO_ROOT": str(ROOT)},
+            )
+        finally:
+            subprocess.run(
+                ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(instance_workspace)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            subprocess.run(
+                ["git", "-C", str(ROOT), "worktree", "prune"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["plan"]["repo_root"], str(state_root))
+        self.assertFalse(state_fixture.exists("buddyswitch/content/runs/run-market.json"))
+        self.assertFalse(state_fixture.exists("buddyswitch/content/runs/run-pm.json"))
+        self.assertFalse((instance_workspace / "runs" / "raw" / "market" / "market.log").exists())
+        self.assertFalse((instance_workspace / "projects" / "app" / ".runtime" / "session.json").exists())
+        if worktree_registered:
+            worktrees = subprocess.run(
+                ["git", "-C", str(ROOT), "worktree", "list", "--porcelain"],
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout
+            self.assertNotIn(str(instance_workspace), worktrees)
+
+    def test_shell_locked_cleanup_entrypoint_rejects_direct_invocation_without_lock(self) -> None:
+        workspace_run_path = "buddyswitch/content/runs/run-market.json"
+        self.assertTrue(self.workspace_fixture.exists(workspace_run_path), "precondition: workspace run fixture exists")
+
+        completed = self.run_cleanup(
+            "__locked-cleanup",
+            "--all-agents",
+            "--execute",
+            "--force",
+            "--json",
+        )
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("runtime lock required", completed.stderr)
+        self.assertTrue(
+            self.workspace_fixture.exists(workspace_run_path),
+            "direct locked cleanup entrypoint must not mutate runtime state",
+        )
 
 
 if __name__ == "__main__":

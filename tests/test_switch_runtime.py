@@ -4,12 +4,17 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import io
 import json
+import os
 import sys
 import tempfile
+import threading
 import textwrap
 import unittest
+import urllib.error
+import urllib.request
 import uuid
 from contextlib import redirect_stderr, redirect_stdout
 from copy import deepcopy
@@ -25,18 +30,19 @@ if str(SCRIPTS) not in sys.path:
 import switch_runtime  # noqa: E402
 import workspace_data  # noqa: E402
 import runtime_store.projections as workspace_projections  # noqa: E402
+import serve_context_panel  # noqa: E402
 from env_store import create_artifact, create_task, create_track, get_task, get_track, require_id, validate_artifact, validate_track  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 EXPECTED_MARKET_HOST_EXECUTION = {
     "execution_mode": "browser-cockpit-native",
     "browser_mode": "headed-only",
-    "browser_profile": "shared-browser",
+    "browser_profile": "instance-browser",
     "browser_executor": "chrome-devtools-cockpit",
     "discovery_mode": "browser-native",
     "login_policy": "mandatory-takeover",
     "fallback_policy": "no-silent-degrade",
-    "session_continuity": "shared-cockpit",
+    "session_continuity": "instance-cockpit",
     "evidence_capture_level": "medium",
 }
 
@@ -203,6 +209,545 @@ class RuntimeKernelFacadeTests(unittest.TestCase):
         self.assertIn("disk full", payload["error"]["message"])
 
 
+class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _write_instance_json(
+        self,
+        *,
+        instance_id: str = "inst-pm-adapter",
+        buddy: str = "pm",
+        current_task_id: str | None = None,
+        current_track_id: str | None = None,
+    ) -> Path:
+        temp_dir_handle = tempfile.TemporaryDirectory(dir=ROOT)
+        self.addCleanup(temp_dir_handle.cleanup)
+        temp_dir = Path(temp_dir_handle.name)
+        path = temp_dir / "instance.json"
+        payload = {
+            "instance_id": instance_id,
+            "buddy": buddy,
+            "status": "active",
+            "current_task_id": current_task_id,
+            "current_track_id": current_track_id,
+            "workspace_dir": str(temp_dir / "workspace"),
+            "browser_port": None,
+            "created_at": "2026-04-24T00:00:00Z",
+            "updated_at": "2026-04-24T00:00:00Z",
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        return path
+
+    def _run_cmd_resolve(self, text: str, *, manifest: Path | None = None) -> tuple[int, dict[str, object]]:
+        args = argparse.Namespace(
+            text=text,
+            manifest=manifest or switch_runtime.DEFAULT_MANIFEST,
+        )
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            exit_code = switch_runtime._cmd_resolve(args)
+        return exit_code, json.loads(stdout.getvalue())
+
+    def _write_json_input(self, payload: dict[str, object]) -> Path:
+        temp_dir_handle = tempfile.TemporaryDirectory(dir=ROOT)
+        self.addCleanup(temp_dir_handle.cleanup)
+        path = Path(temp_dir_handle.name) / "input.json"
+        path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        return path
+
+    def _run_cmd_persist(
+        self,
+        resolved_payload: dict[str, object],
+        result_payload: dict[str, object],
+        *,
+        skill_id: str = "pm.write-prd",
+        manifest: Path | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        resolved_path = self._write_json_input(resolved_payload)
+        result_path = self._write_json_input(result_payload)
+        args = argparse.Namespace(
+            resolved=str(resolved_path),
+            result=str(result_path),
+            skill_id=skill_id,
+            manifest=manifest or switch_runtime.DEFAULT_MANIFEST,
+        )
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            exit_code = switch_runtime._cmd_persist(args)
+        return exit_code, json.loads(stdout.getvalue())
+
+    @staticmethod
+    def _product_env(active_buddy: str, instance_id: str, instance_json: Path) -> dict[str, str]:
+        return {
+            "BUDDYSWITCH_ACTIVE_BUDDY": active_buddy,
+            "BUDDYSWITCH_INSTANCE_ID": instance_id,
+            "BUDDYSWITCH_INSTANCE_JSON": str(instance_json),
+            "BUDDYSWITCH_SHARED_ROOT": str(instance_json.parent),
+        }
+
+    def _hold_runtime_lock(self, shared_root: Path) -> int:
+        lock_path = Path(f"{shared_root}.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.addCleanup(os.close, lock_fd)
+        return lock_fd
+
+    @staticmethod
+    def _resolve_ok(
+        *,
+        task_id: str = "task-pm-resolved",
+        track_id: str | None = None,
+    ) -> dict[str, object]:
+        return {
+            "ok": True,
+            "switch": {
+                "buddy_id": "pm",
+                "task_id": task_id,
+                "track_id": track_id,
+                "demand": "Resolved demand",
+            },
+            "run_envelope": {"run_id": "run-reserved"},
+        }
+
+    def test_cmd_resolve_without_product_mode_env_preserves_strict_text(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value={"ok": True}) as mock_resolve:
+                exit_code, payload = self._run_cmd_resolve("switch dev: continue implementation")
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        mock_resolve.assert_called_once_with(
+            "switch dev: continue implementation",
+            manifest_path=switch_runtime.DEFAULT_MANIFEST,
+        )
+
+    def test_cmd_resolve_rejects_partial_product_mode_env_before_resolve(self) -> None:
+        with patch.dict(os.environ, {"BUDDYSWITCH_ACTIVE_BUDDY": "pm"}, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value={"ok": True}) as mock_resolve:
+                exit_code, payload = self._run_cmd_resolve("draft the PRD")
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_RUNTIME_RESOLVE")
+        self.assertIn("Partial product-mode env", payload["error"]["message"])
+        mock_resolve.assert_not_called()
+
+    def test_cmd_resolve_rejects_unknown_active_buddy_before_resolve(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-unknown", buddy="unknown")
+        env = self._product_env("unknown", "inst-unknown", instance_json)
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value={"ok": True}) as mock_resolve:
+                exit_code, payload = self._run_cmd_resolve("Draft validation plan")
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_RUNTIME_RESOLVE")
+        self.assertIn("Unknown buddy 'unknown'", payload["error"]["message"])
+        mock_resolve.assert_not_called()
+
+    def test_cmd_resolve_rejects_invalid_instance_json_before_resolve(self) -> None:
+        missing_path = ROOT / f"tmp-missing-instance-{uuid.uuid4().hex[:8]}.json"
+        env = self._product_env("pm", "inst-missing", missing_path)
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value={"ok": True}) as mock_resolve:
+                exit_code, payload = self._run_cmd_resolve("Draft validation plan")
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_RUNTIME_RESOLVE")
+        self.assertIn("BUDDYSWITCH_INSTANCE_JSON", payload["error"]["message"])
+        mock_resolve.assert_not_called()
+
+    def test_cmd_resolve_product_mode_plain_text_without_binding_adapts_to_active_buddy(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-plain")
+        env = self._product_env("pm", "inst-pm-plain", instance_json)
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value=self._resolve_ok()) as mock_resolve:
+                exit_code, payload = self._run_cmd_resolve("Draft the PRD for onboarding improvements")
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        mock_resolve.assert_called_once_with(
+            "switch pm: Draft the PRD for onboarding improvements",
+            manifest_path=switch_runtime.DEFAULT_MANIFEST,
+        )
+
+    def test_cmd_resolve_product_mode_plain_text_with_task_binding_adapts_to_task_switch(self) -> None:
+        instance_json = self._write_instance_json(
+            instance_id="inst-pm-task",
+            current_task_id="task-pm-onboarding",
+        )
+        env = self._product_env("pm", "inst-pm-task", instance_json)
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value=self._resolve_ok()) as mock_resolve:
+                exit_code, payload = self._run_cmd_resolve("Refine acceptance criteria")
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        mock_resolve.assert_called_once_with(
+            "switch pm(task-pm-onboarding): Refine acceptance criteria",
+            manifest_path=switch_runtime.DEFAULT_MANIFEST,
+        )
+
+    def test_cmd_resolve_product_mode_plain_text_with_task_and_track_binding_adapts_to_task_track_switch(self) -> None:
+        instance_json = self._write_instance_json(
+            instance_id="inst-pm-track",
+            current_task_id="task-pm-onboarding",
+            current_track_id="track-onboarding",
+        )
+        env = self._product_env("pm", "inst-pm-track", instance_json)
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value=self._resolve_ok()) as mock_resolve:
+                exit_code, payload = self._run_cmd_resolve("Finalize the revised requirements")
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        mock_resolve.assert_called_once_with(
+            "switch pm(task-pm-onboarding) -> track-onboarding: Finalize the revised requirements",
+            manifest_path=switch_runtime.DEFAULT_MANIFEST,
+        )
+
+    def test_cmd_resolve_product_mode_malformed_switch_prefix_is_plain_demand(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-switch-prefix")
+        env = self._product_env("pm", "inst-pm-switch-prefix", instance_json)
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value=self._resolve_ok()) as mock_resolve:
+                exit_code, payload = self._run_cmd_resolve("switch now continue with product validation")
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        mock_resolve.assert_called_once_with(
+            "switch pm: switch now continue with product validation",
+            manifest_path=switch_runtime.DEFAULT_MANIFEST,
+        )
+
+    def test_cmd_resolve_product_mode_allows_canonical_switch_for_active_buddy(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-canonical")
+        env = self._product_env("pm", "inst-pm-canonical", instance_json)
+        canonical = "switch pm(task-pm-existing) -> track-product: Continue execution"
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value=self._resolve_ok()) as mock_resolve:
+                exit_code, payload = self._run_cmd_resolve(canonical)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        mock_resolve.assert_called_once_with(
+            canonical,
+            manifest_path=switch_runtime.DEFAULT_MANIFEST,
+        )
+
+    def test_cmd_resolve_product_mode_rejects_canonical_switch_for_other_buddy(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-locked")
+        env = self._product_env("pm", "inst-pm-locked", instance_json)
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value={"ok": True}) as mock_resolve:
+                exit_code, payload = self._run_cmd_resolve("switch dev: Continue implementation")
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_RUNTIME_RESOLVE")
+        self.assertIn("session is locked", payload["error"]["message"].lower())
+        self.assertIn("'pm'", payload["error"]["message"])
+        self.assertIn("'dev'", payload["error"]["message"])
+        mock_resolve.assert_not_called()
+
+    def test_cmd_resolve_product_mode_success_updates_instance_binding(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-bind")
+        env = self._product_env("pm", "inst-pm-bind", instance_json)
+        resolve_payload = {
+            "ok": True,
+            "switch": {
+                "buddy_id": "pm",
+                "task_id": "task-pm-updated",
+                "track_id": "track-updated",
+                "demand": "Draft updated PRD",
+            },
+            "run_envelope": {"run_id": "run-reserved"},
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value=resolve_payload):
+                exit_code, payload = self._run_cmd_resolve("Draft updated PRD")
+
+        stored = json.loads(instance_json.read_text(encoding="utf-8"))
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(stored["current_task_id"], "task-pm-updated")
+        self.assertEqual(stored["current_track_id"], "track-updated")
+        self.assertNotEqual(stored["updated_at"], "2026-04-24T00:00:00Z")
+
+    def test_cmd_resolve_product_mode_records_instance_and_blocks_second_active_task_reservation(self) -> None:
+        shared_root = self.runtime_root / "shared-root"
+        first_instance_json = self._write_instance_json(instance_id="inst-pm-first")
+        first_env = self._product_env("pm", "inst-pm-first", first_instance_json)
+        first_env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+
+        with patch.dict(os.environ, first_env, clear=True):
+            first_exit_code, first_payload = self._run_cmd_resolve("Draft launch requirements")
+
+        self.assertEqual(first_exit_code, 0)
+        self.assertTrue(first_payload["ok"])
+        first_run_id = first_payload["run_envelope"]["run_id"]
+        first_reservation = json.loads(
+            switch_runtime._reserved_run_path(first_run_id).read_text(encoding="utf-8")  # type: ignore[attr-defined]
+        )
+        self.assertEqual(first_reservation["instance_id"], "inst-pm-first")
+
+        task_id = first_payload["switch"]["task_id"]
+        second_instance_json = self._write_instance_json(
+            instance_id="inst-pm-second",
+            current_task_id=task_id,
+        )
+        second_env = self._product_env("pm", "inst-pm-second", second_instance_json)
+        second_env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+
+        with patch.dict(os.environ, second_env, clear=True):
+            second_exit_code, second_payload = self._run_cmd_resolve("Continue launch requirements")
+
+        self.assertEqual(second_exit_code, 1)
+        self.assertFalse(second_payload["ok"])
+        self.assertEqual(second_payload["error"]["code"], "E_RUNTIME_RESOLVE")
+        self.assertIn("active run reservation", second_payload["error"]["message"])
+        self.assertIn("inst-pm-first", second_payload["error"]["message"])
+
+    def test_cmd_resolve_product_mode_is_blocked_by_runtime_lock(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-resolve-lock")
+        env = self._product_env("pm", "inst-pm-resolve-lock", instance_json)
+        env["BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"] = "0"
+        self._hold_runtime_lock(Path(env["BUDDYSWITCH_SHARED_ROOT"]))
+
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value=self._resolve_ok()) as mock_resolve:
+                exit_code, payload = self._run_cmd_resolve("Draft updated PRD")
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_RUNTIME_RESOLVE")
+        self.assertIn("runtime state busy", payload["error"]["message"])
+        mock_resolve.assert_not_called()
+
+    def test_cmd_resolve_product_mode_failed_resolve_leaves_instance_binding_unchanged(self) -> None:
+        instance_json = self._write_instance_json(
+            instance_id="inst-pm-bind-fail",
+            current_task_id="task-existing",
+            current_track_id="track-existing",
+        )
+        env = self._product_env("pm", "inst-pm-bind-fail", instance_json)
+        resolve_payload = {
+            "ok": False,
+            "error": {"code": "E_INVALID_SYNTAX", "message": "invalid"},
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value=resolve_payload):
+                exit_code, payload = self._run_cmd_resolve("Draft updated PRD")
+
+        stored = json.loads(instance_json.read_text(encoding="utf-8"))
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(stored["current_task_id"], "task-existing")
+        self.assertEqual(stored["current_track_id"], "track-existing")
+
+    def test_cmd_persist_product_mode_refreshed_context_updates_instance_binding(self) -> None:
+        instance_json = self._write_instance_json(
+            instance_id="inst-pm-persist",
+            current_task_id="task-before",
+            current_track_id="track-before",
+        )
+        env = self._product_env("pm", "inst-pm-persist", instance_json)
+        persist_payload = {
+            "ok": True,
+            "receipt": {
+                "task_id": "task-just-persisted",
+                "track_id": "track-just-persisted",
+            },
+            "refreshed_context": {
+                "ok": True,
+                "switch": {
+                    "task_id": "task-refreshed",
+                    "track_id": "track-refreshed",
+                },
+            },
+        }
+        resolved_payload = {"ok": True, "switch": {"task_id": "task-before", "track_id": "track-before"}}
+        result_payload = {"execution_summary": "Persisted"}
+
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "persist_skill_result", return_value=persist_payload):
+                exit_code, payload = self._run_cmd_persist(resolved_payload, result_payload)
+
+        stored = json.loads(instance_json.read_text(encoding="utf-8"))
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(stored["current_task_id"], "task-refreshed")
+        self.assertEqual(stored["current_track_id"], "track-refreshed")
+
+    def test_cmd_persist_product_mode_refresh_error_keeps_just_persisted_binding_without_warning(self) -> None:
+        instance_json = self._write_instance_json(
+            instance_id="inst-pm-persist-refresh-error",
+            current_task_id="task-before",
+            current_track_id="track-before",
+        )
+        env = self._product_env("pm", "inst-pm-persist-refresh-error", instance_json)
+        persist_payload = {
+            "ok": True,
+            "receipt": {
+                "task_id": "task-just-persisted",
+                "track_id": "track-just-persisted",
+            },
+            "refreshed_context": {
+                "ok": False,
+                "error": {"code": "E_RUNTIME_REFRESH_CONTEXT", "message": "refresh failed"},
+            },
+        }
+        resolved_payload = {"ok": True, "switch": {"task_id": "task-before", "track_id": "track-before"}}
+        result_payload = {"execution_summary": "Persisted"}
+
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "persist_skill_result", return_value=persist_payload):
+                exit_code, payload = self._run_cmd_persist(resolved_payload, result_payload)
+
+        stored = json.loads(instance_json.read_text(encoding="utf-8"))
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(stored["current_task_id"], "task-just-persisted")
+        self.assertEqual(stored["current_track_id"], "track-just-persisted")
+
+    def test_cmd_persist_product_mode_reservation_clear_failure_returns_warning(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-persist-clear-warning")
+        env = self._product_env("pm", "inst-pm-persist-clear-warning", instance_json)
+        result_payload = {
+            "execution_summary": "Captured PRD draft updates.",
+            "working_notes": ["Focused on scope and acceptance criteria."],
+            "deliverables_or_changed_files": [],
+            "artifact_content": {
+                "problem": "Users need a clearer PRD path for runtime updates.",
+                "goals": ["Capture clear scope", "Preserve product-mode safety"],
+                "non_goals": ["Implement delivery code in this step"],
+                "users_and_scenarios": ["PM updates task scope after runtime resolve."],
+                "scope_p0_p1": {
+                    "p0": ["Define minimum acceptance criteria"],
+                    "p1": ["Add extended delivery notes"],
+                },
+                "acceptance_criteria": ["PRD payload validates and persists successfully."],
+                "risks": ["Reservation cleanup may fail if runtime storage is unstable."],
+                "open_questions": ["Should cleanup retries be added later?"],
+            },
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            resolve_exit_code, resolved_payload = self._run_cmd_resolve("Draft updated PRD")
+            self.assertEqual(resolve_exit_code, 0)
+            self.assertTrue(resolved_payload["ok"])
+            run_id = resolved_payload["run_envelope"]["run_id"]
+            reservation_path = switch_runtime._reserved_run_path(run_id)  # type: ignore[attr-defined]
+            original_unlink = Path.unlink
+
+            def flaky_unlink(path: Path, *args: object, **kwargs: object) -> None:
+                if path == reservation_path:
+                    raise OSError("unlink failed")
+                original_unlink(path, *args, **kwargs)
+
+            with patch.object(Path, "unlink", autospec=True, side_effect=flaky_unlink):
+                persist_exit_code, payload = self._run_cmd_persist(
+                    resolved_payload,
+                    result_payload,
+                    skill_id="write-prd",
+                )
+
+        self.assertEqual(persist_exit_code, 0)
+        self.assertTrue(payload["ok"])
+        receipt = payload["receipt"]
+        self.assertIsInstance(receipt, dict)
+        assert isinstance(receipt, dict)
+        warnings = receipt["warnings"]
+        self.assertIsInstance(warnings, list)
+        warning = next(
+            (item for item in warnings if isinstance(item, dict) and item.get("code") == "W_RUN_RESERVATION_CLEAR_FAILED"),
+            None,
+        )
+        self.assertIsNotNone(warning)
+        assert isinstance(warning, dict)
+        self.assertEqual(warning["run_id"], run_id)
+        self.assertEqual(warning["reservation_path"], str(reservation_path))
+
+    def test_cmd_persist_product_mode_is_blocked_by_runtime_lock(self) -> None:
+        instance_json = self._write_instance_json(
+            instance_id="inst-pm-persist-lock",
+            current_task_id="task-before",
+            current_track_id="track-before",
+        )
+        env = self._product_env("pm", "inst-pm-persist-lock", instance_json)
+        env["BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"] = "0"
+        self._hold_runtime_lock(Path(env["BUDDYSWITCH_SHARED_ROOT"]))
+        resolved_payload = {"ok": True, "switch": {"task_id": "task-before", "track_id": "track-before"}}
+        result_payload = {"execution_summary": "Persisted"}
+
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "persist_skill_result", return_value={"ok": True}) as mock_persist:
+                exit_code, payload = self._run_cmd_persist(resolved_payload, result_payload)
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_RUNTIME_PERSIST")
+        self.assertIn("runtime state busy", payload["error"]["message"])
+        mock_persist.assert_not_called()
+
+    def test_cmd_persist_product_mode_binding_failure_clears_refreshed_reservation(self) -> None:
+        instance_json = self._write_instance_json(
+            instance_id="inst-pm-persist-binding-fail",
+            current_task_id="task-before",
+            current_track_id="track-before",
+        )
+        env = self._product_env("pm", "inst-pm-persist-binding-fail", instance_json)
+        refreshed_run_id = "run-refresh-binding-fail"
+        refreshed_reservation = switch_runtime._reserved_run_path(refreshed_run_id)  # type: ignore[attr-defined]
+        refreshed_reservation.parent.mkdir(parents=True, exist_ok=True)
+        refreshed_reservation.write_text(
+            json.dumps(
+                {
+                    "run_id": refreshed_run_id,
+                    "status": "reserved",
+                    "context_revision": "ctx-task-refreshed-turn-2",
+                    "sequence": 2,
+                    "task_id": "task-refreshed",
+                    "switch": {"task_id": "task-refreshed"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        persist_payload = {
+            "ok": True,
+            "receipt": {
+                "task_id": "task-just-persisted",
+                "track_id": "track-just-persisted",
+            },
+            "refreshed_context": {
+                "ok": True,
+                "switch": {
+                    "task_id": "task-refreshed",
+                    "track_id": "track-refreshed",
+                },
+                "run_envelope": {"run_id": refreshed_run_id},
+            },
+        }
+        resolved_payload = {"ok": True, "switch": {"task_id": "task-before", "track_id": "track-before"}}
+        result_payload = {"execution_summary": "Persisted"}
+
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "persist_skill_result", return_value=persist_payload):
+                with patch.object(
+                    switch_runtime,
+                    "_write_product_session_binding",
+                    side_effect=OSError("disk full"),
+                ):
+                    exit_code, payload = self._run_cmd_persist(resolved_payload, result_payload)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertFalse(refreshed_reservation.exists())
+        self.assertEqual(payload["refreshed_context"]["error"]["code"], "E_RUNTIME_REFRESH_CONTEXT")
+
+
 class WorkspaceProjectionFacadeTests(unittest.TestCase):
     def test_workspace_data_build_workspace_data_facade_delegates_to_runtime_store_projection(self) -> None:
         sentinel = {"generated_at": "2026-04-21T00:00:00+08:00"}
@@ -230,6 +775,172 @@ class WorkspaceProjectionFacadeTests(unittest.TestCase):
         self.assertIn("tasks", payload)
         self.assertIn("artifacts", payload)
         self.assertIn("run_audits", payload)
+
+    def test_scan_run_audits_keeps_projected_relative_paths_for_symlinked_shared_state(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir_name:
+            temp_root = Path(temp_dir_name).resolve()
+            workspace_root = temp_root / "workspace"
+            state_root = temp_root / "state"
+            run_id = "run-projected-symlink"
+            state_run_path = state_root / "buddyswitch" / "content" / "runs" / f"{run_id}.json"
+            state_run_path.parent.mkdir(parents=True, exist_ok=True)
+            state_run_path.write_text(
+                json.dumps(
+                    {
+                        "run_id": run_id,
+                        "timestamp": "2026-04-24T00:00:00Z",
+                        "switch": {"buddy": "market"},
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            projected_content_root = workspace_root / "buddyswitch" / "content"
+            projected_content_root.mkdir(parents=True, exist_ok=True)
+            (projected_content_root / "runs").symlink_to(state_run_path.parent)
+
+            with patch.object(workspace_projections.env_store, "ROOT", workspace_root):
+                rows = workspace_projections.scan_run_audits()
+
+        row = next((item for item in rows if item.get("run_id") == run_id), None)
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row["path"], f"buddyswitch/content/runs/{run_id}.json")
+        self.assertFalse(Path(row["path"]).is_absolute())
+        self.assertNotIn(str(state_root), row["path"])
+
+    def test_workspace_projection_snapshot_uses_runtime_lock_when_shared_root_is_available(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir_name:
+            shared_root = Path(temp_dir_name).resolve() / ".codex-buddyswitch"
+            sentinel = {"generated_at": "2026-04-24T00:00:00Z"}
+            with patch.dict(os.environ, {"BUDDYSWITCH_SHARED_ROOT": str(shared_root)}, clear=False):
+                with patch("runtime_store.projections.build_workspace_projection", return_value=sentinel) as mock_build:
+                    with patch("runtime_store.projections.fcntl.flock") as mock_flock:
+                        payload = workspace_projections.build_workspace_projection_snapshot()
+
+        self.assertIs(payload, sentinel)
+        mock_build.assert_called_once_with()
+        lock_modes = [call.args[1] for call in mock_flock.call_args_list if len(call.args) > 1]
+        self.assertTrue(any(mode & workspace_projections.fcntl.LOCK_SH for mode in lock_modes))
+        self.assertIn(workspace_projections.fcntl.LOCK_UN, lock_modes)
+
+    def test_workspace_projection_snapshot_fails_closed_when_runtime_lock_is_busy(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir_name:
+            shared_root = Path(temp_dir_name).resolve() / ".codex-buddyswitch"
+            shared_root.mkdir(parents=True)
+
+            def busy_flock(_lock_fd: int, mode: int) -> None:
+                if mode & workspace_projections.fcntl.LOCK_SH:
+                    raise BlockingIOError("busy")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
+                    "BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS": "0",
+                },
+                clear=False,
+            ):
+                with patch("runtime_store.projections.build_workspace_projection") as mock_build:
+                    with patch("runtime_store.projections.fcntl.flock", side_effect=busy_flock):
+                        with self.assertRaisesRegex(
+                            workspace_projections.RuntimeSnapshotLockError,
+                            "could not acquire runtime snapshot lock",
+                        ):
+                            workspace_projections.build_workspace_projection_snapshot()
+
+        mock_build.assert_not_called()
+
+    def test_workspace_projection_snapshot_derives_lock_from_instance_workspace_without_shared_root(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir_name:
+            temp_root = Path(temp_dir_name).resolve()
+            shared_root = temp_root / ".codex-buddyswitch"
+            state_runs_root = shared_root / "state" / "buddyswitch" / "content" / "runs"
+            state_runs_root.mkdir(parents=True, exist_ok=True)
+            workspace_root = shared_root / "instances" / "inst-pm-a" / "workspace"
+            projected_runs = workspace_root / "buddyswitch" / "content" / "runs"
+            projected_runs.parent.mkdir(parents=True, exist_ok=True)
+            projected_runs.symlink_to(state_runs_root)
+
+            lock_path = Path(f"{shared_root}.lock")
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with patch.dict(
+                    os.environ,
+                    {"BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS": "0"},
+                    clear=True,
+                ):
+                    with patch.object(workspace_projections.env_store, "ROOT", workspace_root):
+                        with patch("runtime_store.projections.build_workspace_projection") as mock_build:
+                            with self.assertRaisesRegex(
+                                workspace_projections.RuntimeSnapshotLockError,
+                                "could not acquire runtime snapshot lock",
+                            ):
+                                workspace_projections.build_workspace_projection_snapshot()
+            finally:
+                os.close(lock_fd)
+
+        mock_build.assert_not_called()
+
+    def test_runtime_lock_timeout_ignores_non_finite_values(self) -> None:
+        for raw_timeout in ("nan", "inf", "-inf"):
+            with self.subTest(raw_timeout=raw_timeout):
+                with patch.dict(os.environ, {"BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS": raw_timeout}, clear=False):
+                    self.assertEqual(
+                        workspace_projections._runtime_lock_timeout_seconds(),  # type: ignore[attr-defined]
+                        workspace_projections.DEFAULT_RUNTIME_LOCK_TIMEOUT_SECONDS,
+                    )
+
+    def test_workspace_projection_snapshot_wraps_flock_os_error(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir_name:
+            shared_root = Path(temp_dir_name).resolve() / ".codex-buddyswitch"
+            shared_root.mkdir(parents=True)
+
+            def failing_flock(_lock_fd: int, mode: int) -> None:
+                if mode & workspace_projections.fcntl.LOCK_SH:
+                    raise OSError("flock failed")
+
+            with patch.dict(os.environ, {"BUDDYSWITCH_SHARED_ROOT": str(shared_root)}, clear=False):
+                with patch("runtime_store.projections.build_workspace_projection") as mock_build:
+                    with patch("runtime_store.projections.fcntl.flock", side_effect=failing_flock):
+                        with self.assertRaisesRegex(
+                            workspace_projections.RuntimeSnapshotLockError,
+                            "could not acquire runtime snapshot lock",
+                        ):
+                            workspace_projections.build_workspace_projection_snapshot()
+
+        mock_build.assert_not_called()
+
+
+class ContextPanelServerTests(unittest.TestCase):
+    def test_workspace_api_returns_busy_json_when_snapshot_lock_is_busy(self) -> None:
+        with patch(
+            "serve_context_panel.build_workspace_projection_snapshot",
+            side_effect=workspace_projections.RuntimeSnapshotLockError("busy"),
+        ):
+            server = serve_context_panel.ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                serve_context_panel.ContextPanelHandler,
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                url = f"http://127.0.0.1:{server.server_address[1]}/api/workspace"
+                with self.assertRaises(urllib.error.HTTPError) as raised:
+                    urllib.request.urlopen(url, timeout=2)
+                self.assertEqual(raised.exception.code, 503)
+                payload = json.loads(raised.exception.read().decode("utf-8"))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"], "runtime_snapshot_busy")
+        self.assertEqual(payload["message"], "Workspace is updating. Retry shortly.")
 
 
 class EnvStoreRetiredFieldTests(unittest.TestCase):
