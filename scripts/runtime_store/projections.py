@@ -63,14 +63,46 @@ def _runtime_lock_timeout_seconds() -> float:
     return timeout
 
 
+def _shared_root_from_workspace_root(workspace_root: Path) -> Path | None:
+    parts = workspace_root.resolve(strict=False).parts
+    if ".codex-buddyswitch" not in parts:
+        return None
+    index = len(parts) - 1 - list(reversed(parts)).index(".codex-buddyswitch")
+    suffix = parts[index + 1 :]
+    if len(suffix) >= 3 and suffix[0] == "instances" and suffix[1] and suffix[2] == "workspace":
+        return Path(*parts[: index + 1])
+    if len(suffix) >= 1 and suffix[0] == "workspace":
+        return Path(*parts[: index + 1])
+    return None
+
+
+def _workspace_uses_projected_state(workspace_root: Path) -> bool:
+    projected_paths = (
+        workspace_root / "buddyswitch" / "objects" / "tracks",
+        workspace_root / "buddyswitch" / "objects" / "tasks",
+        workspace_root / "buddyswitch" / "objects" / "artifacts",
+        workspace_root / "buddyswitch" / "content" / "runs",
+    )
+    return any(path.is_symlink() for path in projected_paths)
+
+
 def _runtime_lock_path() -> Path | None:
     raw_shared_root = os.environ.get(SHARED_ROOT_ENV, "").strip()
-    if not raw_shared_root:
-        return None
-    shared_root = raw_shared_root.rstrip("/")
-    if not shared_root:
-        return None
-    return Path(f"{shared_root}.lock")
+    if raw_shared_root:
+        shared_root = raw_shared_root.rstrip("/")
+        if not shared_root:
+            return None
+        return Path(f"{shared_root}.lock")
+
+    workspace_root = env_store.ROOT
+    derived_shared_root = _shared_root_from_workspace_root(workspace_root)
+    if derived_shared_root is not None:
+        return Path(f"{derived_shared_root}.lock")
+    if _workspace_uses_projected_state(workspace_root):
+        raise RuntimeSnapshotLockError(
+            f"runtime snapshot lock shared root could not be derived from workspace root: {workspace_root}"
+        )
+    return None
 
 
 @contextmanager

@@ -458,11 +458,27 @@ exec "$real_git" "$@"
             self.assertTrue(buddy_agents.exists(), "pm buddy prompt asset must be checked in")
             self.assertEqual((workspace_dir / "AGENTS.md").read_text(encoding="utf-8"), buddy_agents.read_text(encoding="utf-8"))
             self.assertTrue((workspace_dir / "AGENTS.md").read_text(encoding="utf-8").startswith("# BuddySwitch Runtime Workspace\n"))
+            copied_agents = (workspace_dir / "AGENTS.md").read_text(encoding="utf-8").lower()
+            for token in (
+                "selected-skill preflight",
+                "host_execution",
+                "tool_scope",
+                "persist-skill-result",
+                "refreshed_context",
+                "receipt -> commands -> summary",
+            ):
+                self.assertIn(token, copied_agents)
             self.assertTrue((instance_root / "browser" / "profile").exists())
             self.assertTrue((instance_root / "browser" / "chrome.pid").exists())
             self.assertTrue((instance_root / "browser" / "chrome.log").exists())
             self.assertFalse((shared_root / "chrome" / "shared-browser").exists())
             self.assertFalse((shared_root / "run" / "browser-cockpit.pid").exists())
+            instance_auth = instance_root / "codex-home" / "auth.json"
+            shared_auth = shared_root / "codex-home" / "auth.json"
+            self.assertTrue(shared_auth.exists())
+            self.assertTrue(instance_auth.exists())
+            self.assertFalse(instance_auth.is_file() and not instance_auth.is_symlink())
+            self.assertEqual(instance_auth.resolve(), shared_auth.resolve())
             self.assertEqual(instance_snapshot["status"], "active")
             self.assertEqual(instance_snapshot["instance_id"], payload["instance_id"])
             self.assertEqual(instance_snapshot["buddy"], "pm")
@@ -994,6 +1010,62 @@ exec "$real_git" "$@"
             self.assertEqual(blocked_reset.returncode, 3)
             self.assertTrue(shared_root.exists(), "active instance browser marker should block reset")
             self.assertTrue(browser_profile_dir.exists(), "blocked reset must not delete active instance profile")
+
+    def test_reset_blocks_live_instance_browser_without_pid_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_id = "inst-pm-live-endpoint"
+            instance_root = shared_root / "instances" / instance_id
+            instance_root.mkdir(parents=True, exist_ok=True)
+            (instance_root / "instance.json").write_text(
+                json.dumps(
+                    {
+                        "instance_id": instance_id,
+                        "buddy": "pm",
+                        "status": "inactive",
+                        "workspace_dir": str(instance_root / "workspace"),
+                        "browser_port": 9333,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_exec(
+                fake_bin / "curl",
+                """#!/usr/bin/env bash
+for arg in "$@"; do
+  if [[ "${arg}" == "http://127.0.0.1:9333/json/version" ]]; then
+    exit 0
+  fi
+done
+exit 1
+""",
+            )
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+
+            blocked_reset = subprocess.run(
+                [str(LAUNCHER), "reset", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(blocked_reset.returncode, 3)
+            self.assertIn("active browser cockpit", blocked_reset.stderr)
+            self.assertTrue(shared_root.exists())
 
     def test_reset_is_blocked_when_runtime_lock_is_held(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -1917,6 +1989,94 @@ exec "$real_git" "$@"
             )
             self.assertEqual(reset_result.returncode, 0)
             self.assertFalse(workspace_dir.exists(), "reset should remove the execution worktree")
+
+    def test_reset_removes_registered_instance_worktrees(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            ready_file = temp_root_path / "browser-ready.flag"
+            capture_path = temp_root_path / "capture.json"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_root = shared_root / "instances" / payload["instance_id"]
+            workspace_dir = instance_root / "workspace"
+            self.assertTrue(workspace_dir.exists())
+
+            ready_file.unlink(missing_ok=True)
+            (instance_root / "browser" / "chrome.pid").unlink(missing_ok=True)
+
+            try:
+                reset_with_yes = subprocess.run(
+                    [str(LAUNCHER), "reset", "--yes"],
+                    cwd=ROOT,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(reset_with_yes.returncode, 0, msg=reset_with_yes.stderr)
+                worktrees = subprocess.run(
+                    ["git", "-C", str(ROOT), "worktree", "list", "--porcelain"],
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout
+                self.assertNotIn(str(workspace_dir), worktrees)
+            finally:
+                subprocess.run(
+                    ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(workspace_dir)],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                subprocess.run(
+                    ["git", "-C", str(ROOT), "worktree", "prune"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
             self.assertFalse(shared_root.exists(), "reset should remove the shared launcher root")
 
     def test_start_rejects_workspace_dir_outside_shared_root(self) -> None:

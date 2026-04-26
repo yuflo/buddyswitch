@@ -234,6 +234,37 @@ buddyswitch_browser_any_instance_pid_marker_is_active() {
   return 1
 }
 
+buddyswitch_browser_any_recorded_instance_endpoint_is_active() {
+  local instance_json browser_port
+
+  for instance_json in "${BUDDYSWITCH_SHARED_ROOT}"/instances/*/instance.json; do
+    if [[ ! -f "${instance_json}" ]]; then
+      continue
+    fi
+    browser_port="$(
+      python3 - "${instance_json}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+
+port = payload.get("browser_port")
+if isinstance(port, int):
+    print(port)
+PY
+    )"
+    if [[ -n "${browser_port}" ]] && curl --silent --show-error --fail "http://127.0.0.1:${browser_port}/json/version" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 buddyswitch_browser_is_active() {
   local marker_file
 
@@ -244,6 +275,9 @@ buddyswitch_browser_is_active() {
 
   if ! buddyswitch_browser_is_instance_mode; then
     if buddyswitch_browser_any_instance_pid_marker_is_active; then
+      return 0
+    fi
+    if buddyswitch_browser_any_recorded_instance_endpoint_is_active; then
       return 0
     fi
   fi

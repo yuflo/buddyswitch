@@ -247,9 +247,11 @@ def discover_run_content(root: Path) -> tuple[list[dict[str, Any]], list[dict[st
         if not isinstance(switch, dict):
             invalid.append({"path": relative, "run_id": run_id, "reason": "run content is missing switch object"})
             continue
-        buddy = switch.get("buddy")
+        buddy = switch.get("buddy_id")
         if not isinstance(buddy, str) or not buddy:
-            invalid.append({"path": relative, "run_id": run_id, "reason": "run content is missing switch.buddy"})
+            buddy = switch.get("buddy")
+        if not isinstance(buddy, str) or not buddy:
+            invalid.append({"path": relative, "run_id": run_id, "reason": "run content is missing switch.buddy_id"})
             continue
         valid.append({"path": relative, "run_id": run_id, "buddy": buddy})
     return valid, invalid

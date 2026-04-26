@@ -409,14 +409,15 @@ A task is done only when:
 The SHARP guidance above is the default workflow for this repository. The notes below define BuddySwitch-specific working context and source-of-truth locations.
 
 - Use `codex` here when you are editing BuddySwitch source, tests, docs, or launcher code.
-- `./buddyswitch-codex start` does not run Codex from this checkout; it launches from a launcher-managed execution worktree under `${BUDDYSWITCH_SHARED_ROOT}/workspace`.
+- `./buddyswitch-codex start --buddy <buddy>` does not run Codex from this checkout; it launches from a launcher-managed instance worktree under `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`.
+- Shared BuddySwitch state lives under `${BUDDYSWITCH_SHARED_ROOT}/state` and is projected into each instance workspace through the repo-relative runtime paths.
 - The execution worktree carries the full runtime BuddySwitch contract in `tools/launcher/assets/runtime-AGENTS.md`.
 - Runtime BuddySwitch state is not maintained as tracked skeleton directories in the main checkout.
 
 ## Canonical Sources
 
 - Env manifest: `buddyswitch/manifest.toml`
-- Runtime state paths inside the execution worktree:
+- Runtime state paths projected into each instance execution worktree:
   - `buddyswitch/objects/tracks/*.json`
   - `buddyswitch/objects/tasks/*.json`
   - `buddyswitch/objects/artifacts/*.json`

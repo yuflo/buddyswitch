@@ -612,6 +612,64 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertEqual(stored["current_task_id"], "task-just-persisted")
         self.assertEqual(stored["current_track_id"], "track-just-persisted")
 
+    def test_cmd_persist_product_mode_reservation_clear_failure_returns_warning(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-persist-clear-warning")
+        env = self._product_env("pm", "inst-pm-persist-clear-warning", instance_json)
+        result_payload = {
+            "execution_summary": "Captured PRD draft updates.",
+            "working_notes": ["Focused on scope and acceptance criteria."],
+            "deliverables_or_changed_files": [],
+            "artifact_content": {
+                "problem": "Users need a clearer PRD path for runtime updates.",
+                "goals": ["Capture clear scope", "Preserve product-mode safety"],
+                "non_goals": ["Implement delivery code in this step"],
+                "users_and_scenarios": ["PM updates task scope after runtime resolve."],
+                "scope_p0_p1": {
+                    "p0": ["Define minimum acceptance criteria"],
+                    "p1": ["Add extended delivery notes"],
+                },
+                "acceptance_criteria": ["PRD payload validates and persists successfully."],
+                "risks": ["Reservation cleanup may fail if runtime storage is unstable."],
+                "open_questions": ["Should cleanup retries be added later?"],
+            },
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            resolve_exit_code, resolved_payload = self._run_cmd_resolve("Draft updated PRD")
+            self.assertEqual(resolve_exit_code, 0)
+            self.assertTrue(resolved_payload["ok"])
+            run_id = resolved_payload["run_envelope"]["run_id"]
+            reservation_path = switch_runtime._reserved_run_path(run_id)  # type: ignore[attr-defined]
+            original_unlink = Path.unlink
+
+            def flaky_unlink(path: Path, *args: object, **kwargs: object) -> None:
+                if path == reservation_path:
+                    raise OSError("unlink failed")
+                original_unlink(path, *args, **kwargs)
+
+            with patch.object(Path, "unlink", autospec=True, side_effect=flaky_unlink):
+                persist_exit_code, payload = self._run_cmd_persist(
+                    resolved_payload,
+                    result_payload,
+                    skill_id="write-prd",
+                )
+
+        self.assertEqual(persist_exit_code, 0)
+        self.assertTrue(payload["ok"])
+        receipt = payload["receipt"]
+        self.assertIsInstance(receipt, dict)
+        assert isinstance(receipt, dict)
+        warnings = receipt["warnings"]
+        self.assertIsInstance(warnings, list)
+        warning = next(
+            (item for item in warnings if isinstance(item, dict) and item.get("code") == "W_RUN_RESERVATION_CLEAR_FAILED"),
+            None,
+        )
+        self.assertIsNotNone(warning)
+        assert isinstance(warning, dict)
+        self.assertEqual(warning["run_id"], run_id)
+        self.assertEqual(warning["reservation_path"], str(reservation_path))
+
     def test_cmd_persist_product_mode_is_blocked_by_runtime_lock(self) -> None:
         instance_json = self._write_instance_json(
             instance_id="inst-pm-persist-lock",
@@ -791,6 +849,39 @@ class WorkspaceProjectionFacadeTests(unittest.TestCase):
                             "could not acquire runtime snapshot lock",
                         ):
                             workspace_projections.build_workspace_projection_snapshot()
+
+        mock_build.assert_not_called()
+
+    def test_workspace_projection_snapshot_derives_lock_from_instance_workspace_without_shared_root(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir_name:
+            temp_root = Path(temp_dir_name).resolve()
+            shared_root = temp_root / ".codex-buddyswitch"
+            state_runs_root = shared_root / "state" / "buddyswitch" / "content" / "runs"
+            state_runs_root.mkdir(parents=True, exist_ok=True)
+            workspace_root = shared_root / "instances" / "inst-pm-a" / "workspace"
+            projected_runs = workspace_root / "buddyswitch" / "content" / "runs"
+            projected_runs.parent.mkdir(parents=True, exist_ok=True)
+            projected_runs.symlink_to(state_runs_root)
+
+            lock_path = Path(f"{shared_root}.lock")
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with patch.dict(
+                    os.environ,
+                    {"BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS": "0"},
+                    clear=True,
+                ):
+                    with patch.object(workspace_projections.env_store, "ROOT", workspace_root):
+                        with patch("runtime_store.projections.build_workspace_projection") as mock_build:
+                            with self.assertRaisesRegex(
+                                workspace_projections.RuntimeSnapshotLockError,
+                                "could not acquire runtime snapshot lock",
+                            ):
+                                workspace_projections.build_workspace_projection_snapshot()
+            finally:
+                os.close(lock_fd)
 
         mock_build.assert_not_called()
 

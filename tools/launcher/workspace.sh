@@ -192,6 +192,36 @@ buddyswitch_workspace_force_rebuild_execution_worktree() {
   fi
 }
 
+buddyswitch_workspace_remove_registered_worktrees_under() {
+  local root="$1"
+  local repo_root normalized_root worktree_path normalized_worktree_path
+
+  repo_root="$(buddyswitch_workspace_repo_root)"
+  if [[ -z "${root}" || ! -d "${root}" ]]; then
+    return 0
+  fi
+  if ! git -C "${repo_root}" rev-parse --git-dir >/dev/null 2>&1; then
+    return 0
+  fi
+  normalized_root="$(buddyswitch_workspace_canonical_path "${root}")"
+
+  while IFS= read -r line; do
+    case "${line}" in
+      worktree\ *)
+        worktree_path="${line#worktree }"
+        normalized_worktree_path="$(buddyswitch_workspace_canonical_path "${worktree_path}")"
+        case "${normalized_worktree_path}" in
+          "${normalized_root}" | "${normalized_root}/"*)
+            git -C "${repo_root}" worktree remove --force "${worktree_path}" >/dev/null 2>&1 || true
+            ;;
+        esac
+        ;;
+    esac
+  done < <(git -C "${repo_root}" worktree list --porcelain 2>/dev/null || true)
+
+  git -C "${repo_root}" worktree prune >/dev/null 2>&1 || true
+}
+
 buddyswitch_workspace_ensure_execution_worktree() {
   if buddyswitch_workspace_is_valid_execution_worktree; then
     return 0

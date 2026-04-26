@@ -271,15 +271,27 @@ def _resolve_binding_from_payload(payload: dict[str, Any]) -> tuple[str, str | N
     return task_id.strip(), track_id.strip() if isinstance(track_id, str) else None
 
 
-def _clear_reservation_from_payload(payload: dict[str, Any]) -> None:
+def _raise_reservation_clear_failure(warning: dict[str, Any]) -> None:
+    message = warning.get("message")
+    run_id = warning.get("run_id")
+    reservation_path = warning.get("reservation_path")
+    raise ValueError(
+        "run reservation rollback failed: "
+        f"{message} (run_id={run_id}, reservation_path={reservation_path})"
+    )
+
+
+def _clear_reservation_from_payload(payload: dict[str, Any], *, fail_on_warning: bool = False) -> None:
     run_envelope = payload.get("run_envelope")
     if isinstance(run_envelope, dict):
         run_id = run_envelope.get("run_id")
         if isinstance(run_id, str) and run_id.strip():
-            _clear_run_reservation(run_id.strip())
+            warning = _clear_run_reservation(run_id.strip())
+            if warning is not None and fail_on_warning:
+                _raise_reservation_clear_failure(warning)
     refreshed_context = payload.get("refreshed_context")
     if isinstance(refreshed_context, dict):
-        _clear_reservation_from_payload(refreshed_context)
+        _clear_reservation_from_payload(refreshed_context, fail_on_warning=fail_on_warning)
 
 
 def _receipt_has_binding_update_warning(receipt: dict[str, Any]) -> bool:
@@ -1097,13 +1109,19 @@ def _load_run_reservation(run_id: str) -> dict[str, Any]:
     return payload
 
 
-def _clear_run_reservation(run_id: str) -> None:
+def _clear_run_reservation(run_id: str) -> dict[str, Any] | None:
     path = _reserved_run_path(run_id)
     try:
         if path.exists():
             path.unlink()
-    except OSError:
-        return
+    except OSError as exc:
+        return {
+            "code": "W_RUN_RESERVATION_CLEAR_FAILED",
+            "message": f"run reservation could not be cleared: {exc}",
+            "run_id": run_id,
+            "reservation_path": str(path),
+        }
+    return None
 
 
 def _refresh_context_error(exc: Exception) -> dict[str, Any]:
@@ -1875,7 +1893,11 @@ def _persist_skill_result(
     refreshed_track_id = receipt.get("track_id") if isinstance(receipt, dict) else None
     if not isinstance(refreshed_track_id, str) or not refreshed_track_id:
         refreshed_track_id = effective_track_id
-    _clear_run_reservation(run_id)
+    reservation_clear_warning = _clear_run_reservation(run_id)
+    if reservation_clear_warning is not None:
+        receipt_warnings = receipt.setdefault("warnings", []) if isinstance(receipt, dict) else []
+        if isinstance(receipt_warnings, list):
+            receipt_warnings.append(reservation_clear_warning)
     try:
         refreshed_context = _build_resolve_context(
             _build_refresh_switch_text(
@@ -1937,7 +1959,7 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
                     try:
                         _write_product_session_binding(product_session, task_id=task_id, track_id=track_id)
                     except (OSError, ValueError) as exc:
-                        _clear_reservation_from_payload(payload)
+                        _clear_reservation_from_payload(payload, fail_on_warning=True)
                         raise ValueError(f"instance binding update failed after resolve: {exc}") from exc
     except (ManifestError, ValueError, OutputSchemaError, OSError) as exc:
         payload = runtime_error("E_RUNTIME_RESOLVE", str(exc))

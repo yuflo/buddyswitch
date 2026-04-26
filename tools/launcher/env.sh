@@ -53,6 +53,8 @@ buddyswitch_require_runtime_lock() {
 }
 
 buddyswitch_ensure_shared_env() {
+  local shared_codex_home
+
   buddyswitch_workspace_validate_workspace_dir
 
   mkdir -p \
@@ -60,6 +62,9 @@ buddyswitch_ensure_shared_env() {
     "${BUDDYSWITCH_XDG_CONFIG_HOME}" \
     "${BUDDYSWITCH_CODEX_HOME}" \
     "${BUDDYSWITCH_RUN_STATE_DIR}"
+
+  shared_codex_home="${BUDDYSWITCH_SHARED_ROOT}/codex-home"
+  mkdir -p "${shared_codex_home}"
 
   if [[ ! -f "${BUDDYSWITCH_CODEX_HOME}/config.toml" ]]; then
     cat > "${BUDDYSWITCH_CODEX_HOME}/config.toml" <<'EOF'
@@ -71,8 +76,17 @@ plugins = false
 EOF
   fi
 
-  if [[ ! -f "${BUDDYSWITCH_CODEX_HOME}/auth.json" && -f "${BUDDYSWITCH_SOURCE_CODEX_HOME}/auth.json" ]]; then
-    cp "${BUDDYSWITCH_SOURCE_CODEX_HOME}/auth.json" "${BUDDYSWITCH_CODEX_HOME}/auth.json"
+  if [[ ! -f "${shared_codex_home}/auth.json" && -f "${BUDDYSWITCH_SOURCE_CODEX_HOME}/auth.json" ]]; then
+    cp "${BUDDYSWITCH_SOURCE_CODEX_HOME}/auth.json" "${shared_codex_home}/auth.json"
+  fi
+
+  if [[ "${BUDDYSWITCH_CODEX_HOME}" == "${shared_codex_home}" ]]; then
+    return 0
+  fi
+
+  if [[ -f "${shared_codex_home}/auth.json" ]]; then
+    rm -f "${BUDDYSWITCH_CODEX_HOME}/auth.json"
+    ln -s "${shared_codex_home}/auth.json" "${BUDDYSWITCH_CODEX_HOME}/auth.json"
   fi
 
 }

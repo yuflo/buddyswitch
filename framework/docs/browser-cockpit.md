@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the shared execution contract for market research skills without changing BuddySwitch object authority or skill boundaries.
+Define the execution contract for market research skills inside a buddy-locked instance without changing BuddySwitch object authority or skill boundaries.
 
 `resolve_context` exposes the selected skill metadata that makes `browser-native` behavior explicit to the host.
 BuddySwitch does not open browser tools itself; it remains the control layer while the host stays the only executor.
@@ -42,7 +42,7 @@ All six market skills must carry identical host execution metadata in `skill.tom
 
 ## Runtime Rules
 
-1. Shared headed cockpit
+1. Instance-bound headed cockpit
 - All six skills use one instance-bound headed cockpit profile (`instance-browser`) with session continuity (`instance-cockpit`) through `chrome-devtools-cockpit` for the active Buddy instance.
 - Discovery is `browser-native`: search happens in the browser and continues into real result pages, details, comments, and related pages when relevant.
 - The cockpit is execution-time infrastructure for browsing and evidence capture only.
@@ -65,10 +65,9 @@ All six market skills must carry identical host execution metadata in `skill.tom
 
 ## Cockpit Bootstrap
 
-- Preferred happy path: run `./buddyswitch-codex start`.
-- `start` bootstraps the BuddySwitch shared home, ensures `chrome-devtools`, ensures the shared headed cockpit endpoint, ensures `chrome-devtools-cockpit`, and then launches Codex.
-- Use `./buddyswitch-codex browser status` for a read-only readiness check.
-- Use `./buddyswitch-codex browser ensure` to repair or pre-warm the shared browser cockpit without launching a full Codex session.
+- Preferred product-mode path: run `./buddyswitch-codex start --buddy <buddy>`.
+- Buddy-locked `start` bootstraps the active instance home, ensures the instance-bound headed cockpit endpoint, ensures `chrome-devtools-cockpit`, and then launches Codex.
+- `./buddyswitch-codex browser status` and `./buddyswitch-codex browser ensure` are debug or compatibility commands outside the normal buddy-locked product-mode path.
 
 ## Source Of Truth Boundary
 

@@ -4,13 +4,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 LAUNCHER_ENV_SH="${SOURCE_REPO_ROOT}/tools/launcher/env.sh"
+LAUNCHER_BROWSER_SH="${SOURCE_REPO_ROOT}/tools/launcher/browser_cockpit.sh"
 
-if [[ ! -f "${LAUNCHER_ENV_SH}" ]]; then
-  echo "Launcher env helper is missing under tools/launcher." >&2
+if [[ ! -f "${LAUNCHER_ENV_SH}" || ! -f "${LAUNCHER_BROWSER_SH}" ]]; then
+  echo "Launcher helpers are missing under tools/launcher." >&2
   exit 1
 fi
 
 source "${LAUNCHER_ENV_SH}"
+source "${LAUNCHER_BROWSER_SH}"
 
 buddyswitch_cleanup_strip_legacy_runtime_excludes() {
   local repo_root="$1"
@@ -132,25 +134,11 @@ buddyswitch_cleanup_run_env_cleanup() {
 }
 
 buddyswitch_count_active_browsers() {
-  local active_count=0
-  local marker_file marker_pid
-
-  for marker_file in \
-    "${BUDDYSWITCH_RUN_STATE_DIR}/browser-cockpit.pid" \
-    "${BUDDYSWITCH_SHARED_ROOT}/instances"/*/browser/chrome.pid; do
-    if [[ ! -e "${marker_file}" ]]; then
-      continue
-    fi
-
-    marker_pid="$(cat "${marker_file}" 2>/dev/null || true)"
-    if [[ -n "${marker_pid}" ]] && kill -0 "${marker_pid}" 2>/dev/null; then
-      active_count=$((active_count + 1))
-    else
-      rm -f "${marker_file}"
-    fi
-  done
-
-  echo "${active_count}"
+  if buddyswitch_browser_is_active; then
+    echo "1"
+    return 0
+  fi
+  echo "0"
 }
 
 buddyswitch_cleanup_first_instance_workspace() {
@@ -238,6 +226,7 @@ buddyswitch_cleanup_apply_instance_local_cleanup() {
         mkdir -p "${instance_workspace}/projects/app/.runtime"
         ;;
       all-storage)
+        buddyswitch_workspace_remove_registered_worktrees_under "${instance_root}"
         rm -rf "${instance_root}"
         ;;
     esac
@@ -251,6 +240,7 @@ buddyswitch_cleanup_trim_state_skeleton() {
 
 export BUDDYSWITCH_REPO_ROOT="${SOURCE_REPO_ROOT}"
 buddyswitch_env_init
+buddyswitch_browser_init_defaults
 
 run_cleanup_locked() {
   local legacy_workspace_root="${BUDDYSWITCH_WORKSPACE_DIR}"
@@ -305,10 +295,11 @@ run_cleanup_locked() {
     return 1
   fi
 
-  buddyswitch_cleanup_strip_legacy_runtime_excludes "${SOURCE_REPO_ROOT}"
-
-  if buddyswitch_cleanup_requests_all_storage "$@" && [[ "${SOURCE_REPO_ROOT}" != "${legacy_workspace_root}" ]]; then
-    python3 "${SCRIPT_DIR}/env_cleanup.py" --repo-root "${SOURCE_REPO_ROOT}" --all-storage --execute --force >/dev/null
+  if buddyswitch_cleanup_requests_execute "${BUDDYSWITCH_CLEANUP_COMMON_ARGS[@]}"; then
+    buddyswitch_cleanup_strip_legacy_runtime_excludes "${SOURCE_REPO_ROOT}"
+    if buddyswitch_cleanup_requests_all_storage "$@" && [[ "${SOURCE_REPO_ROOT}" != "${legacy_workspace_root}" ]]; then
+      python3 "${SCRIPT_DIR}/env_cleanup.py" --repo-root "${SOURCE_REPO_ROOT}" --all-storage --execute --force >/dev/null
+    fi
   fi
 
   cd "${SOURCE_REPO_ROOT}"

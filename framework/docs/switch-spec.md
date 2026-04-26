@@ -15,6 +15,19 @@ Supported canonical forms:
 - `switch <buddy>(<task-id>): <demand>`
 - `switch <buddy>(<task-id>) -> <track-id>: <demand>`
 
+## Product-Mode Plain Input
+
+The canonical wire grammar remains `switch <buddy>(<task-id>) -> <track-id>: <demand>`.
+`parse_switch.py` stays strict and only parses canonical `switch ...` text.
+
+In a launcher-managed product-mode session, `./buddyswitch-codex start --buddy <buddy>` binds the process to one active buddy. Plain user text inside that session is adapted by `scripts/switch_runtime.py resolve` before parse when all product-mode env vars are valid:
+
+- `BUDDYSWITCH_ACTIVE_BUDDY`
+- `BUDDYSWITCH_INSTANCE_ID`
+- `BUDDYSWITCH_INSTANCE_JSON`
+
+Same-buddy canonical switches are allowed. Cross-buddy canonical switches reject before parse or resolve mutation. Missing product-mode env keeps strict canonical behavior. Partial product-mode env rejects before mutation.
+
 ## Buddy Validation
 
 - Buddy names are loaded from `buddyswitch/manifest.toml`.

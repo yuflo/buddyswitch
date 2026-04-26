@@ -307,6 +307,7 @@ reset_shared_env_locked() {
   fi
 
   if [[ -d "${BUDDYSWITCH_SHARED_ROOT}" ]]; then
+    buddyswitch_workspace_remove_registered_worktrees_under "${BUDDYSWITCH_SHARED_ROOT}"
     rm -rf "${BUDDYSWITCH_SHARED_ROOT}"
     echo "Reset complete: removed ${BUDDYSWITCH_SHARED_ROOT}"
   else

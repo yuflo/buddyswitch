@@ -374,8 +374,37 @@ class RepoConsistencyTests(unittest.TestCase):
 
         self.assertIn("two modes exist", text)
         self.assertIn("develop buddyswitch", text)
-        self.assertIn("./buddyswitch-codex start", text)
-        self.assertIn("${buddyswitch_shared_root}/workspace", text)
+        self.assertIn("./buddyswitch-codex start --buddy <buddy>", text)
+        self.assertIn("${buddyswitch_shared_root}/instances/<instance-id>/workspace", text)
+        self.assertIn("${buddyswitch_shared_root}/state", text)
+        self.assertNotIn("product mode uses:\n\n- `${buddyswitch_shared_root}`", text)
+        self.assertNotIn("${buddyswitch_shared_root}/workspace` for the execution worktree", text)
+
+    def test_active_product_mode_docs_do_not_teach_singleton_workspace(self) -> None:
+        active_docs = (
+            ROOT / "README.md",
+            ROOT / "AGENTS.md",
+            ROOT / "framework" / "docs" / "architecture-overview.md",
+            ROOT / "framework" / "docs" / "switch-spec.md",
+            ROOT / "framework" / "docs" / "skill-architecture-best-practices.md",
+        )
+        forbidden = (
+            "${buddyswitch_shared_root}/workspace for the execution worktree",
+            "~/.codex-buddyswitch/workspace",
+            "launcher-managed execution worktree under `${buddyswitch_shared_root}/workspace`",
+        )
+        required = (
+            "${buddyswitch_shared_root}/instances/<instance-id>/workspace",
+            "${buddyswitch_shared_root}/state",
+        )
+        for path in active_docs:
+            with self.subTest(active_doc=str(path.relative_to(ROOT))):
+                text = path.read_text(encoding="utf-8").lower()
+                for token in forbidden:
+                    self.assertNotIn(token, text)
+        readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
+        for token in required:
+            self.assertIn(token, readme)
 
     def test_switch_spec_keeps_multi_skill_choice_on_resolve_context_skills(self) -> None:
         text = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")
@@ -650,10 +679,32 @@ class RepoConsistencyTests(unittest.TestCase):
         for field_name in OPTIONAL_MARKET_EVIDENCE_FIELDS:
             self.assertIn(field_name, evidence_section)
 
-    def test_market_contract_describes_shared_cockpit_without_implying_multi_skill_runs(self) -> None:
+    def test_market_contract_describes_instance_bound_cockpit_without_implying_multi_skill_runs(self) -> None:
         contract_text = (ROOT / "framework" / "contracts" / "market.md").read_text(encoding="utf-8").lower()
-        self.assertIn("run the selected market skill in the shared headed cockpit", contract_text)
+        self.assertIn("run the selected market skill in the instance-bound headed cockpit", contract_text)
+        self.assertIn("active buddy instance", contract_text)
         self.assertNotIn("run all six market skills", contract_text)
+
+    def test_active_browser_docs_do_not_use_legacy_shared_cockpit_terms(self) -> None:
+        active_docs = (
+            ROOT / "framework" / "contracts" / "market.md",
+            ROOT / "framework" / "docs" / "browser-cockpit.md",
+        )
+        forbidden = (
+            "shared headed cockpit",
+            "shared browser cockpit",
+            "shared browser endpoint",
+            "shared browser profile",
+            "shared-browser",
+            "shared-cockpit",
+        )
+        for path in active_docs:
+            with self.subTest(active_doc=str(path.relative_to(ROOT))):
+                text = path.read_text(encoding="utf-8").lower()
+                for token in forbidden:
+                    self.assertNotIn(token, text)
+                self.assertIn("instance-browser", text)
+                self.assertIn("instance-cockpit", text)
 
     def test_market_contract_chat_return_blocks_match_schema_surface(self) -> None:
         chat_return_section = _markdown_section(
@@ -807,6 +858,19 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("scripts/switch_runtime.py resolve", text)
                 self.assertIn("scripts/switch_runtime.py persist", text)
                 self.assertIn("cross-buddy canonical switches", lower)
+                required_runtime_tokens = (
+                    "resolve_context",
+                    "selected-skill preflight",
+                    "host_execution",
+                    "tool_scope",
+                    "persist-skill-result",
+                    "refreshed_context",
+                    "receipt -> commands -> summary",
+                    "runs/raw/",
+                    "projects/app/.runtime/",
+                )
+                for token in required_runtime_tokens:
+                    self.assertIn(token, lower)
 
     def test_active_host_prompts_treat_recommended_command_as_canonical_receipt_field(self) -> None:
         runtime_agents = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
