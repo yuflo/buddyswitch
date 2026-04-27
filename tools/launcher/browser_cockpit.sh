@@ -234,6 +234,36 @@ buddyswitch_browser_any_instance_pid_marker_is_active() {
   return 1
 }
 
+buddyswitch_browser_instance_pid_marker_is_active() {
+  local instance_id="$1"
+  local marker_file="${BUDDYSWITCH_SHARED_ROOT}/instances/${instance_id}/browser/chrome.pid"
+  buddyswitch_browser_pid_marker_is_active "${marker_file}"
+}
+
+buddyswitch_browser_instance_endpoint_is_active() {
+  local instance_id="$1"
+  local instance_json="${BUDDYSWITCH_SHARED_ROOT}/instances/${instance_id}/instance.json"
+  local browser_port
+
+  browser_port="$(
+    python3 - "${instance_json}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+port = payload.get("browser_port")
+if isinstance(port, int):
+    print(port)
+PY
+  )"
+  [[ -n "${browser_port}" ]] || return 1
+  curl --silent --show-error --fail "http://127.0.0.1:${browser_port}/json/version" >/dev/null 2>&1
+}
+
 buddyswitch_browser_any_recorded_instance_endpoint_is_active() {
   local instance_json browser_port
 

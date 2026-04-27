@@ -1043,12 +1043,12 @@ function cleanupSuggestions(track) {
   orderedTrackTasks(track).forEach((task) => {
     if (task.buddy && !seen.has(task.buddy)) {
       seen.add(task.buddy);
-      commands.push(`scripts/cleanup_buddyswitch.sh --agent ${task.buddy}`);
+      commands.push(`./buddyswitch-codex cleanup --agent ${task.buddy}`);
     }
   });
-  commands.push("scripts/cleanup_buddyswitch.sh --all-agents");
-  commands.push("scripts/cleanup_buddyswitch.sh --project app");
-  commands.push("scripts/cleanup_buddyswitch.sh --all-storage");
+  commands.push("./buddyswitch-codex cleanup --all-agents");
+  commands.push("./buddyswitch-codex cleanup --project app");
+  commands.push("./buddyswitch-codex cleanup --all-storage");
   return commands;
 }
 
@@ -1120,10 +1120,10 @@ function renderStandaloneSourceDetails(task) {
   cleanup.append(createEl("h4", "", "Cleanup dry-run commands"));
   const commandList = createEl("div", "command-list");
   [
-    `scripts/cleanup_buddyswitch.sh --agent ${task.buddy}`,
-    "scripts/cleanup_buddyswitch.sh --all-agents",
-    "scripts/cleanup_buddyswitch.sh --project app",
-    "scripts/cleanup_buddyswitch.sh --all-storage",
+    `./buddyswitch-codex cleanup --agent ${task.buddy}`,
+    "./buddyswitch-codex cleanup --all-agents",
+    "./buddyswitch-codex cleanup --project app",
+    "./buddyswitch-codex cleanup --all-storage",
   ].forEach((command) => renderCommand(commandList, command));
   cleanup.append(commandList);
   sourceDetails.append(cleanup);

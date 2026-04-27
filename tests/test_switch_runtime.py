@@ -406,6 +406,24 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
             manifest_path=switch_runtime.DEFAULT_MANIFEST,
         )
 
+    def test_reopened_product_mode_env_uses_existing_instance_binding(self) -> None:
+        instance_json = self._write_instance_json(
+            instance_id="inst-pm-reopen",
+            current_task_id="task-pm-onboarding",
+            current_track_id="track-onboarding",
+        )
+        env = self._product_env("pm", "inst-pm-reopen", instance_json)
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(switch_runtime, "resolve_switch", return_value=self._resolve_ok()) as mock_resolve:
+                exit_code, payload = self._run_cmd_resolve("continue the plan")
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        mock_resolve.assert_called_once_with(
+            "switch pm(task-pm-onboarding) -> track-onboarding: continue the plan",
+            manifest_path=switch_runtime.DEFAULT_MANIFEST,
+        )
+
     def test_cmd_resolve_product_mode_malformed_switch_prefix_is_plain_demand(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-pm-switch-prefix")
         env = self._product_env("pm", "inst-pm-switch-prefix", instance_json)

@@ -132,14 +132,26 @@ real_git={real_git!r}
 
 if [[ -n "${{BUDDYSWITCH_TEST_GIT_CAPTURE:-}}" && " $* " == *" worktree add "* ]]; then
   marker_state="absent"
-  if ls "${{BUDDYSWITCH_RUN_STATE_DIR}}"/launcher-*.pid >/dev/null 2>&1; then
-    marker_state="present"
+  marker_payload=""
+  marker_json="$(ls "${{BUDDYSWITCH_RUN_STATE_DIR}}"/launcher-*.json 2>/dev/null | head -n 1 || true)"
+  marker_pid="$(ls "${{BUDDYSWITCH_RUN_STATE_DIR}}"/launcher-*.pid 2>/dev/null | head -n 1 || true)"
+  if [[ -n "${{marker_json}}" ]]; then
+    marker_state="json"
+    marker_payload="$(python3 -c 'import json, sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), sort_keys=True))' "${{marker_json}}")"
+  elif [[ -n "${{marker_pid}}" ]]; then
+    marker_state="pid"
+    marker_payload="$(cat "${{marker_pid}}")"
   fi
-  printf '%s\\t%s\\n' "$*" "$marker_state" >> "${{BUDDYSWITCH_TEST_GIT_CAPTURE}}"
+  printf '%s\\t%s\\t%s\\n' "$*" "$marker_state" "$marker_payload" >> "${{BUDDYSWITCH_TEST_GIT_CAPTURE}}"
 fi
 
 if [[ "${{BUDDYSWITCH_FAIL_WORKTREE_ADD:-0}}" == "1" && " $* " == *" worktree add "* ]]; then
   echo "simulated worktree add failure" >&2
+  exit 1
+fi
+
+if [[ "${{BUDDYSWITCH_FAIL_WORKTREE_REMOVE:-0}}" == "1" && " $* " == *" worktree remove "* ]]; then
+  echo "simulated worktree remove failure" >&2
   exit 1
 fi
 
@@ -171,6 +183,63 @@ exec "$real_git" "$@"
             except subprocess.TimeoutExpired:
                 holder.kill()
                 holder.wait(timeout=5)
+
+    def _write_instance_record(
+        self,
+        shared_root: Path,
+        instance_id: str,
+        *,
+        buddy: str = "pm",
+        payload_instance_id: str | None = None,
+        workspace_dir: Path | None = None,
+        browser_port: int | None = None,
+    ) -> tuple[Path, Path]:
+        instance_root = shared_root / "instances" / instance_id
+        instance_root.mkdir(parents=True, exist_ok=True)
+        workspace_path = workspace_dir or instance_root / "workspace"
+        (instance_root / "instance.json").write_text(
+            json.dumps(
+                {
+                    "instance_id": payload_instance_id or instance_id,
+                    "buddy": buddy,
+                    "status": "inactive",
+                    "current_task_id": "task-existing",
+                    "current_track_id": "track-existing",
+                    "workspace_dir": str(workspace_path),
+                    "browser_port": browser_port,
+                    "created_at": "2026-04-26T00:00:00Z",
+                    "updated_at": "2026-04-26T00:00:01Z",
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return instance_root, workspace_path
+
+    def _add_test_worktree(self, workspace_dir: Path) -> None:
+        add = subprocess.run(
+            ["git", "-C", str(ROOT), "worktree", "add", "--detach", str(workspace_dir), "HEAD"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(add.returncode, 0, msg=add.stderr)
+        self.addCleanup(
+            subprocess.run,
+            ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(workspace_dir)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.addCleanup(
+            subprocess.run,
+            ["git", "-C", str(ROOT), "worktree", "prune"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
 
     def test_start_bootstraps_browser_stack_and_reuses_state(self) -> None:
         self.assertTrue(LAUNCHER.exists(), "expected root launcher to exist")
@@ -363,7 +432,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_GIT_CAPTURE"] = str(temp_root_path / "git-calls.log")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "start"],
+                [str(LAUNCHER), "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -378,10 +447,14 @@ exec "$real_git" "$@"
 
             captures = (temp_root_path / "git-calls.log").read_text(encoding="utf-8").splitlines()
             self.assertTrue(captures, "expected worktree add to be recorded")
-            self.assertTrue(
-                any(line.endswith("\tpresent") for line in captures),
-                "launcher marker should exist before workspace worktree bootstrap",
-            )
+            json_marker_rows = [line.split("\t", 2) for line in captures if "\tjson\t" in line]
+            self.assertTrue(json_marker_rows, "launcher JSON marker should exist before workspace worktree bootstrap")
+            payload = json.loads((temp_root_path / "capture.json").read_text(encoding="utf-8"))
+            marker = json.loads(json_marker_rows[0][2])
+            instance_root = source_home_path / ".codex-buddyswitch" / "instances" / payload["instance_id"]
+            self.assertEqual(marker["instance_id"], payload["instance_id"])
+            self.assertEqual(marker["buddy"], "pm")
+            self.assertEqual(marker["workspace_dir"], str(instance_root / "workspace"))
 
     def test_start_with_buddy_wires_instance_env_and_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -439,6 +512,13 @@ exec "$real_git" "$@"
             shared_root = source_home_path / ".codex-buddyswitch"
             instance_snapshot = payload["instance_json_payload"]
 
+            self.assertIn("BuddySwitch instance:", completed.stdout)
+            self.assertIn(payload["instance_id"], completed.stdout)
+            self.assertIn("Open existing:", completed.stdout)
+            self.assertIn(f"./buddyswitch-codex instance open {payload['instance_id']}", completed.stdout)
+            self.assertIn("Delete instance:", completed.stdout)
+            self.assertIn(f"./buddyswitch-codex instance delete {payload['instance_id']} --yes", completed.stdout)
+
             self.assertEqual(payload["argv"], ["debug", "prompt-input", "switch pm: draft prd"])
             self.assertEqual(payload["active_buddy"], "pm")
             self.assertIsInstance(payload["instance_id"], str)
@@ -485,7 +565,8 @@ exec "$real_git" "$@"
             self.assertIsNone(instance_snapshot["current_task_id"])
             self.assertIsNone(instance_snapshot["current_track_id"])
             self.assertEqual(instance_snapshot["workspace_dir"], str(workspace_dir))
-            self.assertEqual(instance_snapshot["browser_port"], 9222)
+            browser_port = instance_snapshot["browser_port"]
+            self.assertIsInstance(browser_port, int)
             self.assertTrue(instance_snapshot["created_at"])
             self.assertTrue(instance_snapshot["updated_at"])
 
@@ -496,7 +577,7 @@ exec "$real_git" "$@"
             self.assertEqual(stored_instance["workspace_dir"], str(workspace_dir))
             self.assertIsNone(stored_instance["current_task_id"])
             self.assertIsNone(stored_instance["current_track_id"])
-            self.assertEqual(stored_instance["browser_port"], 9222)
+            self.assertEqual(stored_instance["browser_port"], browser_port)
             self.assertTrue(stored_instance["created_at"])
             self.assertTrue(stored_instance["updated_at"])
             self.assertFalse((shared_root / "workspace").exists(), "buddy-locked start must not use legacy shared workspace")
@@ -511,7 +592,7 @@ exec "$real_git" "$@"
             self.assertIn("chrome-devtools-cockpit", mcp_add_names)
             self.assertNotIn("chrome-devtools", mcp_add_names)
             cockpit_add = next(entry for entry in mcp_add_entries if entry["argv"][2] == "chrome-devtools-cockpit")
-            self.assertIn("--browser-url=http://127.0.0.1:9222", cockpit_add["argv"])
+            self.assertIn(f"--browser-url=http://127.0.0.1:{browser_port}", cockpit_add["argv"])
 
             projection_pairs = {
                 "buddyswitch/objects/tasks": shared_root / "state" / "buddyswitch" / "objects" / "tasks",
@@ -607,6 +688,57 @@ exec "$real_git" "$@"
             cockpit_add = next(entry for entry in call_entries if entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
             self.assertIn("--browser-url=http://127.0.0.1:9223", cockpit_add["argv"])
 
+    def test_start_with_buddy_bootstrap_failure_does_not_leave_active_instance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_PORT"] = "65530"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(temp_root_path / "missing-chrome")
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("Chrome binary not found", completed.stderr)
+            statuses = [
+                json.loads(path.read_text(encoding="utf-8")).get("status")
+                for path in (source_home_path / ".codex-buddyswitch" / "instances").glob("*/instance.json")
+            ]
+            self.assertNotIn("active", statuses)
+            self.assertFalse((temp_root_path / "capture.json").exists(), "Codex should not launch after bootstrap failure")
+
     def test_start_with_unknown_buddy_fails_before_shared_root_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -637,6 +769,705 @@ exec "$real_git" "$@"
             self.assertIn("Unknown buddy 'unknown'", completed.stderr)
             self.assertFalse(capture_path.exists(), "codex should not launch when buddy validation fails")
             self.assertFalse(shared_root.exists(), "invalid buddy must fail before shared root mutation")
+
+    def test_buddy_list_prints_manifest_buddies_without_runtime_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "buddy", "list"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertIn("pm", completed.stdout)
+            self.assertIn("dev", completed.stdout)
+            self.assertIn("market", completed.stdout)
+            self.assertFalse(shared_root.exists(), "buddy list must not create runtime state")
+
+    def test_instance_list_empty_points_to_start_buddy(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            env = os.environ.copy()
+            env["HOME"] = str(Path(source_home))
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "list"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0)
+            self.assertIn("No BuddySwitch instances found.", completed.stdout)
+            self.assertIn("./buddyswitch-codex start --buddy <buddy>", completed.stdout)
+
+    def test_instance_list_prints_stored_instances_and_filters_by_buddy(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            for instance_id, buddy, task_id in (
+                ("inst-pm-a", "pm", "task-pm-a"),
+                ("inst-dev-b", "dev", "task-dev-b"),
+            ):
+                instance_root = shared_root / "instances" / instance_id
+                instance_root.mkdir(parents=True, exist_ok=True)
+                (instance_root / "instance.json").write_text(
+                    json.dumps(
+                        {
+                            "instance_id": instance_id,
+                            "buddy": buddy,
+                            "status": "inactive",
+                            "current_task_id": task_id,
+                            "current_track_id": None,
+                            "workspace_dir": str(instance_root / "workspace"),
+                            "browser_port": None,
+                            "created_at": "2026-04-26T00:00:00Z",
+                            "updated_at": "2026-04-26T00:00:01Z",
+                        },
+                        ensure_ascii=True,
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "list", "--buddy", "pm"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertIn("inst-pm-a", completed.stdout)
+            self.assertIn("pm", completed.stdout)
+            self.assertIn("task-pm-a", completed.stdout)
+            self.assertNotIn("inst-dev-b", completed.stdout)
+
+    def test_instance_open_reuses_existing_instance_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            ready_file = temp_root_path / "browser-ready.flag"
+            calls_path = temp_root_path / "calls.jsonl"
+            first_capture = temp_root_path / "capture-start.json"
+            second_capture = temp_root_path / "capture-open.json"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
+
+            start_env = env.copy()
+            start_env["BUDDYSWITCH_TEST_CAPTURE"] = str(first_capture)
+            start_result = subprocess.run(
+                [str(LAUNCHER), "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                cwd=ROOT,
+                env=start_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(start_result.returncode, 0, msg=start_result.stderr)
+
+            first_payload = json.loads(first_capture.read_text(encoding="utf-8"))
+            instance_id = first_payload["instance_id"]
+            shared_root = source_home_path / ".codex-buddyswitch"
+
+            open_env = env.copy()
+            open_env["BUDDYSWITCH_TEST_CAPTURE"] = str(second_capture)
+            open_result = subprocess.run(
+                [str(LAUNCHER), "instance", "open", instance_id, "debug", "prompt-input", "continue"],
+                cwd=ROOT,
+                env=open_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(open_result.returncode, 0, msg=open_result.stderr)
+            second_payload = json.loads(second_capture.read_text(encoding="utf-8"))
+            self.assertEqual(second_payload["instance_id"], instance_id)
+            self.assertEqual(second_payload["instance_json"], first_payload["instance_json"])
+            self.assertEqual(second_payload["cwd"], first_payload["cwd"])
+            self.assertEqual(second_payload["home"], first_payload["home"])
+            self.assertEqual(second_payload["codex_home"], first_payload["codex_home"])
+            self.assertEqual(len(list((shared_root / "instances").glob("inst-*"))), 1)
+            stored = json.loads(Path(second_payload["instance_json"]).read_text(encoding="utf-8"))
+            self.assertEqual(stored["status"], "inactive")
+
+    def test_instance_open_rejects_traversal_instance_id(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            env = os.environ.copy()
+            env["HOME"] = str(Path(source_home))
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "open", "../bad"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("Invalid instance id", completed.stderr)
+
+    def test_instance_open_rejects_missing_instance_record(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            env = os.environ.copy()
+            env["HOME"] = str(Path(source_home))
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "open", "inst-pm-missing"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("Instance record missing", completed.stderr)
+
+    def test_instance_open_rejects_instance_id_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            self._write_instance_record(shared_root, "inst-pm-record", payload_instance_id="inst-pm-other")
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "open", "inst-pm-record"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("Instance id mismatch", completed.stderr)
+
+    def test_instance_open_rejects_unknown_buddy(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            self._write_instance_record(shared_root, "inst-unknown-buddy", buddy="unknown")
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "open", "inst-unknown-buddy"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("Unknown buddy 'unknown'", completed.stderr)
+
+    def test_instance_open_rejects_missing_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            self._write_instance_record(shared_root, "inst-pm-missing-workspace")
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "open", "inst-pm-missing-workspace"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 3)
+            self.assertIn("Instance open blocked", completed.stderr)
+            self.assertIn("delete this instance or start a new one", completed.stderr)
+
+    def test_instance_open_rejects_active_target_instance(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_root, workspace_dir = self._write_instance_record(shared_root, "inst-pm-active")
+            self._add_test_worktree(workspace_dir)
+            run_dir = shared_root / "run"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / f"launcher-{os.getpid()}.json").write_text(
+                json.dumps({"pid": os.getpid(), "instance_id": "inst-pm-active"}, ensure_ascii=True) + "\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "open", "inst-pm-active"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 3)
+            self.assertIn("Instance open blocked: inst-pm-active is already active.", completed.stderr)
+            self.assertTrue(instance_root.exists())
+
+    def test_instance_open_rejects_live_legacy_launcher_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            self._write_instance_record(shared_root, "inst-pm-legacy-live")
+            self._add_test_worktree(shared_root / "instances" / "inst-pm-legacy-live" / "workspace")
+            run_dir = shared_root / "run"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "launcher-current.pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "open", "inst-pm-legacy-live"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 3)
+            self.assertIn("live legacy launcher marker exists", completed.stderr)
+
+    def test_instance_open_bootstrap_failure_leaves_instance_inactive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            _, workspace_dir = self._write_instance_record(shared_root, "inst-pm-open-bootstrap-fail")
+            self._add_test_worktree(workspace_dir)
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_PORT"] = "65530"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(temp_root_path / "missing-chrome")
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "open", "inst-pm-open-bootstrap-fail", "debug", "prompt-input", "continue"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("Chrome binary not found", completed.stderr)
+            stored = json.loads((shared_root / "instances" / "inst-pm-open-bootstrap-fail" / "instance.json").read_text(encoding="utf-8"))
+            self.assertEqual(stored["status"], "inactive")
+            self.assertFalse((temp_root_path / "capture.json").exists(), "Codex should not launch after bootstrap failure")
+
+    def test_locked_instance_open_entrypoint_rejects_direct_invocation_without_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["BUDDYSWITCH_OPEN_INSTANCE_ID"] = "inst-pm-direct"
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "__locked-instance-open-bootstrap"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("runtime lock required", completed.stderr)
+
+    def test_instance_delete_removes_only_target_instance_without_shared_state(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            target_root, target_workspace = self._write_instance_record(shared_root, "inst-pm-delete")
+            other_root, _ = self._write_instance_record(shared_root, "inst-dev-keep", buddy="dev")
+            state_task = shared_root / "state" / "buddyswitch" / "objects" / "tasks" / "task-keep.json"
+            state_task.parent.mkdir(parents=True, exist_ok=True)
+            state_task.write_text('{"id":"task-keep"}\n', encoding="utf-8")
+            self._add_test_worktree(target_workspace)
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            delete_result = subprocess.run(
+                [str(LAUNCHER), "instance", "delete", "inst-pm-delete", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(delete_result.returncode, 0, msg=delete_result.stderr)
+            self.assertIn("Instance deleted: inst-pm-delete", delete_result.stdout)
+            self.assertFalse(target_root.exists())
+            self.assertTrue(other_root.exists())
+            self.assertTrue(state_task.exists())
+            worktree_list = subprocess.run(
+                ["git", "-C", str(ROOT), "worktree", "list", "--porcelain"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotIn(str(target_workspace), worktree_list.stdout)
+
+    def test_instance_delete_requires_yes(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            target_root, _ = self._write_instance_record(shared_root, "inst-pm-keep")
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            delete_result = subprocess.run(
+                [str(LAUNCHER), "instance", "delete", "inst-pm-keep"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(delete_result.returncode, 1)
+            self.assertIn("Instance delete requires explicit confirmation", delete_result.stderr)
+            self.assertTrue(target_root.exists())
+
+    def test_instance_delete_rejects_traversal_instance_id(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            outside_path = source_home_path / "bad"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            delete_result = subprocess.run(
+                [str(LAUNCHER), "instance", "delete", "../bad", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(delete_result.returncode, 2)
+            self.assertIn("Invalid instance id", delete_result.stderr)
+            self.assertFalse(outside_path.exists())
+
+    def test_instance_delete_rejects_missing_target(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            env = os.environ.copy()
+            env["HOME"] = str(Path(source_home))
+            env.pop("CODEX_HOME", None)
+
+            delete_result = subprocess.run(
+                [str(LAUNCHER), "instance", "delete", "inst-pm-missing", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(delete_result.returncode, 2)
+            self.assertIn("Instance record missing", delete_result.stderr)
+
+    def test_instance_delete_blocks_active_target_launcher(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            target_root, _ = self._write_instance_record(shared_root, "inst-pm-live-launcher")
+            run_dir = shared_root / "run"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / f"launcher-{os.getpid()}.json").write_text(
+                json.dumps({"pid": os.getpid(), "instance_id": "inst-pm-live-launcher"}, ensure_ascii=True) + "\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            delete_result = subprocess.run(
+                [str(LAUNCHER), "instance", "delete", "inst-pm-live-launcher", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(delete_result.returncode, 3)
+            self.assertIn("Instance delete blocked: inst-pm-live-launcher is active.", delete_result.stderr)
+            self.assertTrue(target_root.exists())
+
+    def test_instance_delete_blocks_active_target_browser_pid(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            target_root, _ = self._write_instance_record(shared_root, "inst-pm-live-browser-pid")
+            browser_dir = target_root / "browser"
+            browser_dir.mkdir(parents=True, exist_ok=True)
+            (browser_dir / "chrome.pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            delete_result = subprocess.run(
+                [str(LAUNCHER), "instance", "delete", "inst-pm-live-browser-pid", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(delete_result.returncode, 3)
+            self.assertIn("active browser cockpit", delete_result.stderr)
+            self.assertTrue(target_root.exists())
+
+    def test_instance_delete_blocks_live_target_browser_endpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            target_root, _ = self._write_instance_record(shared_root, "inst-pm-live-browser-endpoint", browser_port=9333)
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_exec(
+                fake_bin / "curl",
+                """#!/usr/bin/env bash
+for arg in "$@"; do
+  if [[ "${arg}" == "http://127.0.0.1:9333/json/version" ]]; then
+    exit 0
+  fi
+done
+exit 1
+""",
+            )
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+
+            delete_result = subprocess.run(
+                [str(LAUNCHER), "instance", "delete", "inst-pm-live-browser-endpoint", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(delete_result.returncode, 3)
+            self.assertIn("active browser cockpit", delete_result.stderr)
+            self.assertTrue(target_root.exists())
+
+    def test_instance_delete_blocks_live_legacy_launcher_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            target_root, _ = self._write_instance_record(shared_root, "inst-pm-legacy-delete")
+            run_dir = shared_root / "run"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "launcher-current.pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            delete_result = subprocess.run(
+                [str(LAUNCHER), "instance", "delete", "inst-pm-legacy-delete", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(delete_result.returncode, 3)
+            self.assertIn("live legacy launcher marker exists", delete_result.stderr)
+            self.assertTrue(target_root.exists())
+
+    def test_instance_delete_blocks_worktree_deregistration_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            target_root, target_workspace = self._write_instance_record(shared_root, "inst-pm-remove-fail")
+            self._add_test_worktree(target_workspace)
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_git(fake_bin / "git")
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_FAIL_WORKTREE_REMOVE"] = "1"
+
+            delete_result = subprocess.run(
+                [str(LAUNCHER), "instance", "delete", "inst-pm-remove-fail", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(delete_result.returncode, 0)
+            self.assertIn("simulated worktree remove failure", delete_result.stderr)
+            self.assertTrue(target_root.exists())
+
+    def test_instance_delete_rejects_symlinked_instance_root_without_touching_external_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as external_root:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instances_root = shared_root / "instances"
+            instances_root.mkdir(parents=True, exist_ok=True)
+            external_instance_root = Path(external_root) / "external-instance"
+            external_workspace = external_instance_root / "workspace"
+            external_instance_root.mkdir(parents=True, exist_ok=True)
+            (external_instance_root / "instance.json").write_text(
+                json.dumps(
+                    {
+                        "instance_id": "inst-pm-symlink",
+                        "buddy": "pm",
+                        "status": "inactive",
+                        "current_task_id": "task-existing",
+                        "current_track_id": "track-existing",
+                        "workspace_dir": str(external_workspace),
+                        "browser_port": None,
+                        "created_at": "2026-04-26T00:00:00Z",
+                        "updated_at": "2026-04-26T00:00:01Z",
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            sentinel = external_instance_root / "sentinel.txt"
+            sentinel.write_text("keep\n", encoding="utf-8")
+            self._add_test_worktree(external_workspace)
+            (instances_root / "inst-pm-symlink").symlink_to(external_instance_root, target_is_directory=True)
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            delete_result = subprocess.run(
+                [str(LAUNCHER), "instance", "delete", "inst-pm-symlink", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(delete_result.returncode, 3)
+            self.assertIn("unsafe instance root", delete_result.stderr)
+            self.assertTrue((instances_root / "inst-pm-symlink").is_symlink())
+            self.assertTrue(sentinel.exists())
+            worktree_list = subprocess.run(
+                ["git", "-C", str(ROOT), "worktree", "list", "--porcelain"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertIn(str(external_workspace), worktree_list.stdout)
+
+    def test_locked_instance_delete_entrypoint_rejects_direct_invocation_without_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            env = os.environ.copy()
+            env["HOME"] = str(Path(source_home))
+            env.pop("CODEX_HOME", None)
+            env["BUDDYSWITCH_DELETE_INSTANCE_ID"] = "inst-pm-direct"
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "__locked-instance-delete"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("runtime lock required", completed.stderr)
 
     def test_start_without_buddy_does_not_set_instance_env_vars(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -882,6 +1713,13 @@ exec "$real_git" "$@"
             self.assertIn("browser status", help_result.stdout)
             self.assertIn("browser ensure", help_result.stdout)
             self.assertIn("workspace sync", help_result.stdout)
+            self.assertIn("buddy list", help_result.stdout)
+            self.assertIn("instance list", help_result.stdout)
+            self.assertIn("instance open", help_result.stdout)
+            self.assertIn("instance delete", help_result.stdout)
+            self.assertIn("start --buddy", help_result.stdout)
+            self.assertIn("buddyswitch-codex cleanup", help_result.stdout)
+            self.assertIn("cleanup", help_result.stdout)
             self.assertNotIn("workspace ensure", help_result.stdout)
             self.assertNotIn("install-mcp", help_result.stdout)
 
@@ -922,6 +1760,38 @@ exec "$real_git" "$@"
             )
             self.assertEqual(reset_with_yes.returncode, 0)
             self.assertFalse(shared_root.exists(), "reset --yes should remove shared root")
+
+    def test_cleanup_command_routes_through_launcher(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = temp_root_path / "shared-root"
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            capture_path = temp_root_path / "capture.json"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            cleanup_result = subprocess.run(
+                [str(LAUNCHER), "cleanup", "--all-agents", "--json"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(cleanup_result.returncode, 1)
+            self.assertNotIn("Unknown", cleanup_result.stderr)
+            self.assertIn("Cleanup blocked", cleanup_result.stderr)
+            self.assertFalse(capture_path.exists(), "cleanup routing must not start Codex")
 
     def test_reset_is_blocked_when_active_launcher_marker_exists(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:

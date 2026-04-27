@@ -252,6 +252,34 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("legacy " + "artifact content", combined)
         self.assertNotIn("buddyswitch/content/" + "artifacts", combined)
 
+    def test_active_cleanup_surfaces_use_launcher_cleanup_command(self) -> None:
+        targets = (
+            ROOT / "README.md",
+            ROOT / "framework" / "docs" / "interface-spec.md",
+            ROOT / "framework" / "console" / "app.js",
+        )
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in targets)
+
+        self.assertIn("./buddyswitch-codex cleanup --agent", combined)
+        self.assertIn("./buddyswitch-codex cleanup --all-agents", combined)
+        self.assertIn("./buddyswitch-codex cleanup --project app", combined)
+        self.assertIn("./buddyswitch-codex cleanup --all-storage", combined)
+        self.assertNotIn("scripts/cleanup_buddyswitch.sh --agent", combined)
+        self.assertNotIn("scripts/cleanup_buddyswitch.sh --all-agents", combined)
+        self.assertNotIn("scripts/cleanup_buddyswitch.sh --project app", combined)
+        self.assertNotIn("scripts/cleanup_buddyswitch.sh --all-storage", combined)
+
+    def test_readme_documents_instance_lifecycle_cli(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("./buddyswitch-codex buddy list", readme)
+        self.assertIn("./buddyswitch-codex instance list", readme)
+        self.assertIn("./buddyswitch-codex instance open <instance-id>", readme)
+        self.assertIn("./buddyswitch-codex instance delete <instance-id> --yes", readme)
+        self.assertIn("creates a fresh buddy-locked instance", readme)
+        self.assertNotIn("start --buddy <buddy>` reuses an existing instance", readme)
+        self.assertNotIn("start --buddy <buddy>` reuses an existing valid buddy instance", readme)
+
     def test_main_checkout_does_not_track_legacy_runtime_placeholders(self) -> None:
         self.assertFalse((ROOT / "buddyswitch" / "content" / "artifacts" / ".gitkeep").exists())
         self.assertFalse((ROOT / "projects" / "app" / ".runtime" / ".gitkeep").exists())

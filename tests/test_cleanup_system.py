@@ -435,18 +435,43 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         self.shared_root = self.repo_root / ".codex-buddyswitch"
         self.workspace_dir = self.shared_root / "workspace"
         self.workspace_fixture = CleanupFixture(self.workspace_dir)
+        shutil.copy2(ROOT / "buddyswitch-codex", self.repo_root / "buddyswitch-codex")
         scripts_dir = self.repo_root / "scripts"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         for name in ("cleanup_buddyswitch.sh", "env_cleanup.py"):
             shutil.copy2(ROOT / "scripts" / name, scripts_dir / name)
         launcher_dir = self.repo_root / "tools" / "launcher"
         launcher_dir.mkdir(parents=True, exist_ok=True)
-        for name in ("env.sh", "workspace.sh", "runtime_lock.py", "browser_cockpit.sh"):
+        for name in ("env.sh", "workspace.sh", "runtime_lock.py", "browser_cockpit.sh", "instance.sh", "cleanup.sh"):
             shutil.copy2(ROOT / "tools" / "launcher" / name, launcher_dir / name)
 
     def run_cleanup(self, *args: str, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         env["BUDDYSWITCH_SHARED_ROOT"] = str(self.shared_root)
+        env["BUDDYSWITCH_REPO_ROOT"] = str(self.repo_root)
+        env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+        env["REPO_ROOT"] = str(self.repo_root)
+        if extra_env:
+            env.update(extra_env)
+        return subprocess.run(
+            ["bash", "./buddyswitch-codex", "cleanup", *args],
+            cwd=self.repo_root,
+            check=False,
+            capture_output=True,
+            env=env,
+            text=True,
+        )
+
+    def run_cleanup_shim(
+        self,
+        *args: str,
+        extra_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["BUDDYSWITCH_SHARED_ROOT"] = str(self.shared_root)
+        env["BUDDYSWITCH_REPO_ROOT"] = str(self.repo_root)
+        env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+        env["REPO_ROOT"] = str(self.repo_root)
         if extra_env:
             env.update(extra_env)
         return subprocess.run(
@@ -490,6 +515,33 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         self.assertIn("buddyswitch/content/runs/run-market.json", payload["delete_paths"])
         self.assertNotIn("buddyswitch/content/runs/run-pm.json", payload["delete_paths"])
         self.assertEqual(payload["repo_root"], str(self.workspace_dir))
+
+    def test_shell_agent_dry_run_without_common_args_prints_human_plan(self) -> None:
+        completed = self.run_cleanup("--agent", "market")
+
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertIn("BuddySwitch cleanup plan", completed.stdout)
+        self.assertIn("buddyswitch/content/runs/run-market.json", completed.stdout)
+
+    def test_shell_cleanup_legacy_script_forwards_to_launcher_cleanup(self) -> None:
+        completed = self.run_cleanup_shim("--agent", "market", "--json")
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertIn("buddyswitch/content/runs/run-market.json", payload["delete_paths"])
+        self.assertEqual(payload["repo_root"], str(self.workspace_dir))
+
+    def test_shell_cleanup_uses_source_manifest_when_targeting_shared_state(self) -> None:
+        state_root = self.shared_root / "state"
+        state_fixture = CleanupFixture(state_root)
+        (state_root / "buddyswitch" / "manifest.toml").unlink()
+
+        completed = self.run_cleanup("--agent", "market", "--json")
+
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["repo_root"], str(state_root))
+        self.assertIn("buddyswitch/content/runs/run-market.json", payload["delete_paths"])
+        self.assertTrue(state_fixture.exists("buddyswitch/content/runs/run-market.json"))
 
     def test_shell_project_cleanup_only_touches_runtime(self) -> None:
         completed = self.run_cleanup("--project", "app", "--execute", "--force", "--json")
@@ -670,6 +722,31 @@ class CleanupShellIntegrationTests(unittest.TestCase):
             "cleanup must not mutate runtime state while a browser is active",
         )
 
+    def test_shell_cleanup_is_blocked_when_shared_browser_endpoint_is_active_without_marker(self) -> None:
+        fake_bin = self.repo_root / "bin"
+        fake_bin.mkdir(parents=True, exist_ok=True)
+        fake_curl = fake_bin / "curl"
+        fake_curl.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        fake_curl.chmod(0o755)
+
+        workspace_run_path = "buddyswitch/content/runs/run-market.json"
+        self.assertTrue(self.workspace_fixture.exists(workspace_run_path), "precondition: workspace run fixture exists")
+
+        completed = self.run_cleanup(
+            "--all-agents",
+            "--execute",
+            "--force",
+            "--json",
+            extra_env={"PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"},
+        )
+
+        self.assertEqual(completed.returncode, 3)
+        self.assertIn("active browser", completed.stderr)
+        self.assertTrue(
+            self.workspace_fixture.exists(workspace_run_path),
+            "cleanup must not mutate runtime state while a browser endpoint is active",
+        )
+
     def test_shell_cleanup_ignores_stale_instance_browser_pid_without_endpoint(self) -> None:
         instance_id = "inst-market-stale"
         browser_marker = self.shared_root / "instances" / instance_id / "browser" / "chrome.pid"
@@ -792,12 +869,18 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         workspace_run_path = "buddyswitch/content/runs/run-market.json"
         self.assertTrue(self.workspace_fixture.exists(workspace_run_path), "precondition: workspace run fixture exists")
 
-        completed = self.run_cleanup(
-            "__locked-cleanup",
-            "--all-agents",
-            "--execute",
-            "--force",
-            "--json",
+        env = os.environ.copy()
+        env["BUDDYSWITCH_SHARED_ROOT"] = str(self.shared_root)
+        env["BUDDYSWITCH_REPO_ROOT"] = str(self.repo_root)
+        env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+        env["REPO_ROOT"] = str(self.repo_root)
+        completed = subprocess.run(
+            ["bash", "./buddyswitch-codex", "__locked-cleanup", "--all-agents", "--execute", "--force", "--json"],
+            cwd=self.repo_root,
+            check=False,
+            capture_output=True,
+            env=env,
+            text=True,
         )
 
         self.assertEqual(completed.returncode, 2)

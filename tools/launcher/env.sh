@@ -181,13 +181,14 @@ buddyswitch_generate_instance_id() {
 buddyswitch_instance_activate() {
   local instance_id="$1"
   local buddy="$2"
+  local status="${3:-active}"
   local instance_json instance_dir
 
   instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
   instance_dir="$(dirname "${instance_json}")"
   mkdir -p "${instance_dir}"
 
-  python3 - "${instance_json}" "${instance_id}" "${buddy}" "${BUDDYSWITCH_WORKSPACE_DIR}" <<'PY'
+  python3 - "${instance_json}" "${instance_id}" "${buddy}" "${status}" "${BUDDYSWITCH_WORKSPACE_DIR}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -196,12 +197,13 @@ from pathlib import Path
 instance_json = Path(sys.argv[1])
 instance_id = sys.argv[2]
 buddy = sys.argv[3]
-workspace_dir = sys.argv[4]
+status = sys.argv[4]
+workspace_dir = sys.argv[5]
 now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 payload = {
     "instance_id": instance_id,
     "buddy": buddy,
-    "status": "active",
+    "status": status,
     "current_task_id": None,
     "current_track_id": None,
     "workspace_dir": workspace_dir,
@@ -289,8 +291,29 @@ buddyswitch_run_codex() {
 
 buddyswitch_write_launcher_marker() {
   local marker_pid="${1:-${BUDDYSWITCH_LAUNCHER_MARKER_PID:-$$}}"
-  local marker_path="${BUDDYSWITCH_RUN_STATE_DIR}/launcher-${marker_pid}.pid"
-  printf '%s\n' "${marker_pid}" > "${marker_path}"
+  local marker_path="${BUDDYSWITCH_RUN_STATE_DIR}/launcher-${marker_pid}.json"
+  mkdir -p "${BUDDYSWITCH_RUN_STATE_DIR}"
+  python3 - \
+    "${marker_path}" \
+    "${marker_pid}" \
+    "${BUDDYSWITCH_START_INSTANCE_ID:-${BUDDYSWITCH_INSTANCE_ID:-}}" \
+    "${BUDDYSWITCH_START_BUDDY:-${BUDDYSWITCH_ACTIVE_BUDDY:-}}" \
+    "${BUDDYSWITCH_WORKSPACE_DIR:-}" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+path = Path(sys.argv[1])
+payload = {
+    "pid": int(sys.argv[2]),
+    "instance_id": sys.argv[3] or None,
+    "buddy": sys.argv[4] or None,
+    "workspace_dir": sys.argv[5] or None,
+    "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+}
+path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+PY
   printf '%s\n' "${marker_path}"
 }
 
@@ -300,28 +323,53 @@ buddyswitch_cleanup_pid_marker() {
 }
 
 buddyswitch_count_active_launchers() {
-  local active_count=0
-  local marker_file marker_pid
-
   if [[ ! -d "${BUDDYSWITCH_RUN_STATE_DIR}" ]]; then
     echo "0"
     return
   fi
 
-  for marker_file in "${BUDDYSWITCH_RUN_STATE_DIR}"/launcher-*.pid; do
-    if [[ ! -e "${marker_file}" ]]; then
-      continue
-    fi
+  python3 - "${BUDDYSWITCH_RUN_STATE_DIR}" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
 
-    marker_pid="$(cat "${marker_file}" 2>/dev/null || true)"
-    if [[ -n "${marker_pid}" ]] && kill -0 "${marker_pid}" 2>/dev/null; then
-      active_count=$((active_count + 1))
-    else
-      rm -f "${marker_file}"
-    fi
-  done
+run_dir = Path(sys.argv[1])
+live_pids = set()
 
-  echo "${active_count}"
+
+def pid_is_live(pid):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def mark_pid(path, pid):
+    if pid is not None and pid > 0 and pid_is_live(pid):
+        live_pids.add(pid)
+        return
+    path.unlink(missing_ok=True)
+
+
+for marker in run_dir.glob("launcher-*.json"):
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        pid = payload.get("pid")
+    except Exception:
+        pid = None
+    mark_pid(marker, pid if isinstance(pid, int) else None)
+
+for marker in run_dir.glob("launcher-*.pid"):
+    try:
+        pid = int(marker.read_text(encoding="utf-8").strip())
+    except Exception:
+        pid = None
+    mark_pid(marker, pid)
+
+print(len(live_pids))
+PY
 }
 
 buddyswitch_validate_reset_root() {

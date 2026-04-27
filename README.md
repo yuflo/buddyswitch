@@ -63,10 +63,25 @@ Then open `http://127.0.0.1:8765/`.
 If you need a launcher-managed product-mode session instead of repo-root development mode, run:
 
 ```bash
+./buddyswitch-codex buddy list
 ./buddyswitch-codex start --buddy pm
 ```
 
-Warning: `start --buddy <buddy>` reuses an existing valid buddy instance worktree and does not refresh stale code to the latest repo `HEAD`. `workspace sync` is retained only for the legacy singleton workspace path and is not the product-mode refresh path once `instances/` exists.
+`start --buddy <buddy>` creates a fresh buddy-locked instance. To re-enter a stored instance, use:
+
+```bash
+./buddyswitch-codex instance list
+./buddyswitch-codex instance open <instance-id>
+```
+
+To remove one stored instance without deleting shared BuddySwitch state:
+
+```bash
+./buddyswitch-codex instance delete <instance-id> --yes
+```
+
+`instance open <instance-id>` re-enters the existing instance workspace and runtime profile; it does not restore the previous Codex transcript.
+`instance delete <instance-id> --yes` removes only that instance's launcher-owned local tree and does not delete shared BuddySwitch state.
 
 ## Daily Use
 
@@ -108,13 +123,26 @@ python3 scripts/switch_runtime.py persist \
 python3 scripts/serve_context_panel.py
 ```
 
+### Manage product-mode instances
+
+```bash
+./buddyswitch-codex buddy list
+./buddyswitch-codex instance list
+./buddyswitch-codex instance open <instance-id>
+./buddyswitch-codex instance delete <instance-id> --yes
+```
+
+`start --buddy <buddy>` creates a fresh buddy-locked instance.
+`instance open <instance-id>` re-enters the existing instance workspace and runtime profile; it does not restore the previous Codex transcript.
+`instance delete <instance-id> --yes` removes only that instance's launcher-owned local tree and does not delete shared BuddySwitch state.
+
 ### Clean local state
 
 ```bash
-scripts/cleanup_buddyswitch.sh --agent market
-scripts/cleanup_buddyswitch.sh --all-agents
-scripts/cleanup_buddyswitch.sh --project app
-scripts/cleanup_buddyswitch.sh --all-storage
+./buddyswitch-codex cleanup --agent market
+./buddyswitch-codex cleanup --all-agents
+./buddyswitch-codex cleanup --project app
+./buddyswitch-codex cleanup --all-storage
 ```
 
 Defaults are dry-run. Add `--execute` to apply deletion. Cleanup targets shared state under `${BUDDYSWITCH_SHARED_ROOT}/state` and instance-local scratch under `${BUDDYSWITCH_SHARED_ROOT}/instances/*`; it does not clean the repo-root development checkout.
@@ -364,7 +392,7 @@ These are the main operational entry points:
 - `scripts/serve_context_panel.py`
   Serves the read-only Context Panel.
 - `scripts/cleanup_buddyswitch.sh`
-  Storage-aware cleanup helper.
+  Compatibility shim to `./buddyswitch-codex cleanup`.
 
 ## Context Panel
 
@@ -439,10 +467,10 @@ Override the profile path with `BUDDYSWITCH_BROWSER_PROFILE_DIR=/your/path` when
 
 ## Cleanup
 
-Manual cleanup helper:
+Manual cleanup entrypoint:
 
 ```bash
-scripts/cleanup_buddyswitch.sh
+./buddyswitch-codex cleanup
 ```
 
 Defaults to dry-run. Add `--execute` to apply deletion.

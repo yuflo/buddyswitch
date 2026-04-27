@@ -293,7 +293,7 @@ Inside that session:
 - there is no in-session buddy switching
 - there is no implicit instance reuse
 
-If explicit resume/reopen behavior is needed later, that is a separate cut. It is not part of this architecture decision.
+> Superseded for lifecycle CLI: explicit `instance open <instance-id>` and `instance delete <instance-id> --yes` are now planned as a narrow product-facing lifecycle cut. Smart reuse, broad per-instance maintenance APIs, and workspace rebuild/sync remain out of scope.
 
 Stored instance rule:
 
@@ -658,7 +658,7 @@ Maintenance command meanings are explicit:
 - `buddyswitch-codex reset --yes`
   acquires `${BUDDYSWITCH_SHARED_ROOT}.lock`, then deletes the entire launcher root, including shared state, all instance trees, and launcher-managed profile/bootstrap state
 
-Maintenance is intentionally global in the first cut. There is no per-instance maintenance API until real usage proves that stored inactive instances need finer-grained management.
+> Superseded for lifecycle CLI: explicit `instance open <instance-id>` and `instance delete <instance-id> --yes` are now planned as a narrow product-facing lifecycle cut. Smart reuse, broad per-instance maintenance APIs, and workspace rebuild/sync remain out of scope.
 
 ## Launcher Responsibilities
 
