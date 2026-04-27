@@ -69,10 +69,9 @@ No direct runtime module imports, runtime object reads, or runtime write paths a
 
 Panel can show copyable commands only:
 
-- `./buddyswitch-codex cleanup --agent <buddy>`
-- `./buddyswitch-codex cleanup --all-agents`
-- `./buddyswitch-codex cleanup --project app`
-- `./buddyswitch-codex cleanup --all-storage`
+- `./buddyswitch-codex data cleanup --buddy <buddy>`
+- `./buddyswitch-codex data cleanup --app-runtime`
+- `./buddyswitch-codex data cleanup --all-data`
 
-Commands must not include `--execute` or `--force` by default.
-The cleanup command covers task objects, artifact objects, runtime files, and run audit content under `buddyswitch/content/runs/**`.
+Commands must not include `--yes` by default.
+The cleanup command covers task objects, artifact objects, runtime files, and run audit content under `buddyswitch/content/runs/**` without deleting instance roots.

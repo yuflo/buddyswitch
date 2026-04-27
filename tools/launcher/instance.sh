@@ -4,17 +4,38 @@ set -euo pipefail
 buddyswitch_instance_usage() {
   cat <<EOF
 Usage:
+  buddyswitch-codex instance buddies
+  buddyswitch-codex instance start --buddy <buddy> [-- codex args...]
   buddyswitch-codex instance list [--buddy <buddy>]
-  buddyswitch-codex instance open <instance-id> [codex args...]
-  buddyswitch-codex instance delete <instance-id> --yes
+  buddyswitch-codex instance open <instance-id> [-- codex args...]
+  buddyswitch-codex instance delete <instance-id> [--yes]
   buddyswitch-codex instance help
 
 Commands:
+  buddies Print valid buddies from buddyswitch/manifest.toml.
+  start   Launch Codex in a fresh product-mode instance.
   list    List stored product-mode instances.
   open    Launch Codex in an existing inactive instance.
   delete  Delete one stored inactive instance without deleting shared state.
   help    Show this help message.
 EOF
+}
+
+buddyswitch_instance_buddies() {
+  python3 "${REPO_ROOT}/scripts/env_manifest.py" list-buddies
+}
+
+buddyswitch_instance_start() {
+  case "${1:-}" in
+    --buddy|--buddy=*)
+      start_codex "$@"
+      ;;
+    *)
+      echo "instance start requires --buddy <buddy>" >&2
+      buddyswitch_instance_usage >&2
+      return 2
+      ;;
+  esac
 }
 
 buddyswitch_instance_json_files() {
@@ -79,7 +100,7 @@ for instance_json in sorted((shared_root / "instances").glob("*/instance.json"))
 
 if not rows:
     print("No BuddySwitch instances found.")
-    print("Start one with: ./buddyswitch-codex start --buddy <buddy>")
+    print("Start one with: ./buddyswitch-codex instance start --buddy <buddy>")
     raise SystemExit(0)
 
 print("instance_id\tbuddy\tstatus\tcurrent_task_id\tcurrent_track_id\tbrowser_port\tupdated_at\tworkspace_dir")
@@ -209,6 +230,11 @@ buddyswitch_instance_require_safe_delete_root() {
   local instance_root
   local normalized_instances_root normalized_instance_root
 
+  if [[ -L "${BUDDYSWITCH_SHARED_ROOT}" ]]; then
+    echo "Instance delete blocked: unsafe shared root for ${instance_id}." >&2
+    return 3
+  fi
+
   instance_root="$(buddyswitch_instance_root "${instance_id}")"
   if [[ -L "${instances_root}" || -L "${instance_root}" ]]; then
     echo "Instance delete blocked: unsafe instance root for ${instance_id}." >&2
@@ -233,6 +259,19 @@ buddyswitch_instance_require_safe_delete_root() {
 buddyswitch_instance_main() {
   local command="${1:-}"
   case "${command}" in
+    buddies)
+      shift || true
+      if [[ $# -gt 0 ]]; then
+        echo "Unknown instance buddies option: $1" >&2
+        buddyswitch_instance_usage >&2
+        return 2
+      fi
+      buddyswitch_instance_buddies
+      ;;
+    start)
+      shift || true
+      buddyswitch_instance_start "$@"
+      ;;
     list)
       shift || true
       buddyswitch_instance_list "$@"

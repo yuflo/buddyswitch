@@ -1043,12 +1043,11 @@ function cleanupSuggestions(track) {
   orderedTrackTasks(track).forEach((task) => {
     if (task.buddy && !seen.has(task.buddy)) {
       seen.add(task.buddy);
-      commands.push(`./buddyswitch-codex cleanup --agent ${task.buddy}`);
+      commands.push(`./buddyswitch-codex data cleanup --buddy ${task.buddy}`);
     }
   });
-  commands.push("./buddyswitch-codex cleanup --all-agents");
-  commands.push("./buddyswitch-codex cleanup --project app");
-  commands.push("./buddyswitch-codex cleanup --all-storage");
+  commands.push("./buddyswitch-codex data cleanup --all-data");
+  commands.push("./buddyswitch-codex data cleanup --app-runtime");
   return commands;
 }
 
@@ -1080,7 +1079,7 @@ function renderSourceDetails(track) {
   sourceDetails.append(sourceGrid);
 
   const cleanup = createEl("section", "material-section");
-  cleanup.append(createEl("h4", "", "Cleanup dry-run commands"));
+  cleanup.append(createEl("h4", "", "Cleanup preview commands"));
   const commandList = createEl("div", "command-list");
   cleanupSuggestions(track).forEach((command) => renderCommand(commandList, command));
   cleanup.append(commandList);
@@ -1117,13 +1116,12 @@ function renderStandaloneSourceDetails(task) {
   sourceDetails.append(sourceGrid);
 
   const cleanup = createEl("section", "material-section");
-  cleanup.append(createEl("h4", "", "Cleanup dry-run commands"));
+  cleanup.append(createEl("h4", "", "Cleanup preview commands"));
   const commandList = createEl("div", "command-list");
   [
-    `./buddyswitch-codex cleanup --agent ${task.buddy}`,
-    "./buddyswitch-codex cleanup --all-agents",
-    "./buddyswitch-codex cleanup --project app",
-    "./buddyswitch-codex cleanup --all-storage",
+    `./buddyswitch-codex data cleanup --buddy ${task.buddy}`,
+    "./buddyswitch-codex data cleanup --all-data",
+    "./buddyswitch-codex data cleanup --app-runtime",
   ].forEach((command) => renderCommand(commandList, command));
   cleanup.append(commandList);
   sourceDetails.append(cleanup);

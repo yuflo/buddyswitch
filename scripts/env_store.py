@@ -53,7 +53,7 @@ def require_runtime_workspace_write_root(root: Path | None = None) -> None:
         return
     raise ValueError(
         "BuddySwitch runtime writes are blocked in the source checkout. "
-        "Start the launcher workspace with ./buddyswitch-codex start and rerun there."
+        "Start the launcher workspace with ./buddyswitch-codex instance start --buddy <buddy> and rerun there."
     )
 
 

@@ -69,13 +69,13 @@ buddyswitch_browser_init_defaults() {
 buddyswitch_browser_usage() {
   cat <<EOF
 Usage:
-  buddyswitch-codex browser status [--port <port>] [--profile-dir <dir>]
-  buddyswitch-codex browser ensure [--port <port>] [--profile-dir <dir>]
-  buddyswitch-codex browser help
+  buddyswitch-codex env browser status [--instance <instance-id>] [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex env browser ensure --instance <instance-id> [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex env browser help
 
 Commands:
-  status  Check whether the shared browser cockpit endpoint is reachable.
-  ensure  Ensure the shared browser cockpit and BuddySwitch browser MCPs are ready.
+  status  Check whether the browser cockpit endpoint is reachable.
+  ensure  Ensure the instance browser cockpit and BuddySwitch browser MCPs are ready.
   help    Show this help message.
 
 Environment:
@@ -85,6 +85,30 @@ Environment:
   BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME  MCP server name (default: ${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME})
   BUDDYSWITCH_BROWSER_CHROME_BIN        Override Chrome binary path.
 EOF
+}
+
+buddyswitch_browser_validate_port_option() {
+  local port="$1"
+
+  if [[ ! "${port}" =~ ^[0-9]+$ ]]; then
+    echo "Invalid value for --port: ${port} (expected 1..65535)" >&2
+    return 2
+  fi
+  if (( 10#${port} < 1 || 10#${port} > 65535 )); then
+    echo "Invalid value for --port: ${port} (expected 1..65535)" >&2
+    return 2
+  fi
+}
+
+buddyswitch_browser_validate_env_or_default_port() {
+  local port="${BUDDYSWITCH_BROWSER_PORT:-9222}"
+
+  if buddyswitch_browser_validate_port_option "${port}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Invalid value for BUDDYSWITCH_BROWSER_PORT: ${port} (expected 1..65535)" >&2
+  return 2
 }
 
 buddyswitch_browser_url() {
@@ -182,6 +206,35 @@ buddyswitch_browser_add_mcp_server() {
   buddyswitch_run_codex mcp add "${server_name}" -- "$@"
 }
 
+buddyswitch_browser_remove_mcp_server() {
+  local server_name="$1"
+  buddyswitch_run_codex mcp remove "${server_name}"
+}
+
+buddyswitch_browser_mcp_browser_url() {
+  local server_name="$1"
+  local config_path section
+
+  config_path="$(buddyswitch_codex_config_path)"
+  if [[ ! -f "${config_path}" ]]; then
+    return 1
+  fi
+
+  section="[mcp_servers.${server_name}]"
+  awk -v section="${section}" '
+    $0 == section { in_section = 1; next }
+    /^\[/ && in_section { exit }
+    in_section {
+      if (match($0, /--browser-url=[^" ,\]]+/)) {
+        value = substr($0, RSTART, RLENGTH)
+        sub(/^--browser-url=/, "", value)
+        print value
+        exit
+      }
+    }
+  ' "${config_path}"
+}
+
 buddyswitch_browser_ensure_general_mcp() {
   if buddyswitch_browser_has_mcp_server "chrome-devtools"; then
     return 0
@@ -191,15 +244,24 @@ buddyswitch_browser_ensure_general_mcp() {
 }
 
 buddyswitch_browser_ensure_cockpit_mcp() {
-  if buddyswitch_browser_has_mcp_server "${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME}"; then
-    return 0
+  local server_name expected_browser_url recorded_browser_url
+
+  server_name="${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME}"
+  expected_browser_url="$(buddyswitch_browser_url)"
+
+  if buddyswitch_browser_has_mcp_server "${server_name}"; then
+    recorded_browser_url="$(buddyswitch_browser_mcp_browser_url "${server_name}" || true)"
+    if [[ "${recorded_browser_url}" == "${expected_browser_url}" ]]; then
+      return 0
+    fi
+    buddyswitch_browser_remove_mcp_server "${server_name}"
   fi
 
   buddyswitch_browser_add_mcp_server \
-    "${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME}" \
+    "${server_name}" \
     npx \
     chrome-devtools-mcp@latest \
-    --browser-url="$(buddyswitch_browser_url)"
+    --browser-url="${expected_browser_url}"
 }
 
 buddyswitch_browser_pid_marker_is_active() {
@@ -399,7 +461,9 @@ buddyswitch_browser_main() {
           buddyswitch_browser_usage >&2
           return 2
         fi
-        BUDDYSWITCH_BROWSER_PORT="$2"
+        buddyswitch_browser_validate_port_option "$2" || return $?
+        export BUDDYSWITCH_BROWSER_PORT="$2"
+        export BUDDYSWITCH_BROWSER_PORT_EXPLICIT=1
         shift 2
         ;;
       --profile-dir)
@@ -408,7 +472,8 @@ buddyswitch_browser_main() {
           buddyswitch_browser_usage >&2
           return 2
         fi
-        BUDDYSWITCH_BROWSER_PROFILE_DIR="$2"
+        export BUDDYSWITCH_BROWSER_PROFILE_DIR="$2"
+        export BUDDYSWITCH_BROWSER_PROFILE_DIR_EXPLICIT=1
         shift 2
         ;;
       --help|-h)

@@ -20,7 +20,7 @@ Supported canonical forms:
 The canonical wire grammar remains `switch <buddy>(<task-id>) -> <track-id>: <demand>`.
 `parse_switch.py` stays strict and only parses canonical `switch ...` text.
 
-In a launcher-managed product-mode session, `./buddyswitch-codex start --buddy <buddy>` binds the process to one active buddy. Plain user text inside that session is adapted by `scripts/switch_runtime.py resolve` before parse when all product-mode env vars are valid:
+In a launcher-managed product-mode session, `./buddyswitch-codex instance start --buddy <buddy>` binds the process to one active buddy. Plain user text inside that session is adapted by `scripts/switch_runtime.py resolve` before parse when all product-mode env vars are valid:
 
 - `BUDDYSWITCH_ACTIVE_BUDDY`
 - `BUDDYSWITCH_INSTANCE_ID`

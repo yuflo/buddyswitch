@@ -65,9 +65,9 @@ All six market skills must carry identical host execution metadata in `skill.tom
 
 ## Cockpit Bootstrap
 
-- Preferred product-mode path: run `./buddyswitch-codex start --buddy <buddy>`.
-- Buddy-locked `start` bootstraps the active instance home, ensures the instance-bound headed cockpit endpoint, ensures `chrome-devtools-cockpit`, and then launches Codex.
-- `./buddyswitch-codex browser status` and `./buddyswitch-codex browser ensure` are debug or compatibility commands outside the normal buddy-locked product-mode path.
+- Preferred product-mode path: run `./buddyswitch-codex instance start --buddy <buddy>`.
+- Buddy-locked `instance start` bootstraps the active instance home, ensures the instance-bound headed cockpit endpoint, ensures `chrome-devtools-cockpit`, and then launches Codex.
+- `./buddyswitch-codex env browser status` and `./buddyswitch-codex env browser ensure --instance <instance-id>` are debug or compatibility commands outside the normal buddy-locked product-mode path.
 
 ## Source Of Truth Boundary
 

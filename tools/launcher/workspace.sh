@@ -407,7 +407,7 @@ validate_json(state_files, "shared")
 if legacy_files and state_files:
     print(
         "Migration blocked: legacy workspace durable state and shared state both contain data. "
-        "Run buddyswitch-codex reset --yes or clean up one state root before starting product mode.",
+        "Run buddyswitch-codex env reset --yes or clean up one state root before starting product mode.",
         file=sys.stderr,
     )
     raise SystemExit(3)

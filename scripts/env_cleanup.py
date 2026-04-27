@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -19,7 +20,6 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in shell integration
     _load_manifest_full = None
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIRM_PHRASE = "DELETE_BUDDYSWITCH_DATA"
 CATEGORY_ORDER = (
     "artifact_objects",
     "task_objects",
@@ -98,6 +98,14 @@ def rel(root: Path, path: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
+def is_path_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
 def repo_path(root: Path, raw_path: str) -> Path | None:
     path = Path(raw_path)
     if path.is_absolute() or ".." in path.parts:
@@ -105,11 +113,93 @@ def repo_path(root: Path, raw_path: str) -> Path | None:
     return root / path
 
 
-def iter_files(root: Path, relative_dir: str) -> list[Path]:
-    directory = root / relative_dir
+def iter_directory_files(directory: Path) -> list[Path]:
     if not directory.is_dir():
         return []
-    return sorted(path for path in directory.rglob("*") if (path.is_file() or path.is_symlink()) and path.name != ".gitkeep")
+    paths: list[Path] = []
+    for current_root, dir_names, file_names in os.walk(directory, followlinks=False):
+        current = Path(current_root)
+        kept_dirs: list[str] = []
+        for dir_name in dir_names:
+            candidate = current / dir_name
+            if candidate.is_symlink():
+                if candidate.name != ".gitkeep":
+                    paths.append(candidate)
+                continue
+            kept_dirs.append(dir_name)
+        dir_names[:] = kept_dirs
+
+        for file_name in file_names:
+            candidate = current / file_name
+            if candidate.name == ".gitkeep":
+                continue
+            if candidate.is_file() or candidate.is_symlink():
+                paths.append(candidate)
+    return sorted(paths)
+
+
+def resolve_guarded_relative_dir(
+    root: Path,
+    relative_dir: str,
+    *,
+    allow_missing: bool = False,
+) -> tuple[Path | None, str | None]:
+    relative_target = Path(relative_dir)
+    if relative_target.is_absolute() or ".." in relative_target.parts:
+        return None, f"invalid cleanup path '{relative_dir}'."
+
+    current = root
+    for part in relative_target.parts:
+        current = current / part
+        if current.is_symlink():
+            return None, f"cleanup path traverses symlink '{rel(root, current)}'."
+
+    target_dir = root / relative_target
+    if target_dir.exists():
+        if not target_dir.is_dir():
+            if allow_missing:
+                return None, f"cleanup path '{relative_dir}' is not a directory."
+            return None, None
+    elif not allow_missing:
+        return None, None
+
+    resolved_root = root.resolve(strict=False)
+    resolved_target_dir = target_dir.resolve(strict=False)
+    if not is_path_within(resolved_target_dir, resolved_root):
+        return None, "cleanup path resolves outside repo root."
+    return target_dir, None
+
+
+def resolve_guarded_object_json_path(
+    root: Path,
+    *,
+    relative_dir: str,
+    object_id: str,
+) -> tuple[Path | None, str | None]:
+    object_name = Path(f"{object_id}.json")
+    if object_name.is_absolute() or ".." in object_name.parts or len(object_name.parts) != 1:
+        return None, f"invalid cleanup object id '{object_id}'."
+
+    target_dir, blocked_reason = resolve_guarded_relative_dir(root, relative_dir)
+    if target_dir is None:
+        return None, blocked_reason
+
+    target_path = target_dir / object_name.name
+    if target_path.is_symlink():
+        return None, f"cleanup target '{rel(root, target_path)}' is a symlink."
+
+    resolved_root = root.resolve(strict=False)
+    resolved_target_path = target_path.resolve(strict=False)
+    if not is_path_within(resolved_target_path, resolved_root):
+        return None, "cleanup path resolves outside repo root."
+    return target_path, None
+
+
+def iter_files(root: Path, relative_dir: str) -> list[Path]:
+    target_dir, _ = resolve_guarded_relative_dir(root, relative_dir)
+    if target_dir is None:
+        return []
+    return iter_directory_files(target_dir)
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -121,6 +211,13 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+
+def append_warning(warnings: list[str] | None, message: str) -> None:
+    if warnings is None:
+        return
+    if message not in warnings:
+        warnings.append(message)
 
 
 def load_valid_buddies(manifest_path: Path) -> set[str]:
@@ -154,6 +251,7 @@ def new_plan(scope: str, *, buddy: str | None = None) -> dict[str, Any]:
         "task_records": [],
         "run_records": [],
         "direct_delete_paths": [],
+        "external_delete_paths": {},
     }
 
 
@@ -168,6 +266,16 @@ def add_path(plan: dict[str, Any], path: Path, category: str) -> None:
         plan["_path_categories"][relative] = category
         plan["delete_paths"].append(relative)
         plan["counts_by_category"][category] += 1
+
+
+def add_external_path(plan: dict[str, Any], *, display_path: str, absolute_path: Path, category: str) -> None:
+    if display_path not in plan["_path_categories"]:
+        plan["_path_categories"][display_path] = category
+        plan["delete_paths"].append(display_path)
+        plan["counts_by_category"][category] += 1
+    if display_path not in plan["external_delete_paths"]:
+        plan["external_delete_paths"][display_path] = str(absolute_path)
+        plan["direct_delete_paths"].append(display_path)
 
 
 def discover_artifact_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -259,9 +367,157 @@ def discover_run_content(root: Path) -> tuple[list[dict[str, Any]], list[dict[st
 
 def add_dir_files(plan: dict[str, Any], relative_dir: str, category: str) -> None:
     root = Path(plan["repo_root"])
-    for path in iter_files(root, relative_dir):
+    target_dir, blocked_reason = resolve_guarded_relative_dir(root, relative_dir)
+    if target_dir is None:
+        if blocked_reason is None:
+            return
+        if blocked_reason.startswith("invalid cleanup path"):
+            add_warning(plan, f"Skipping shared-state cleanup: {blocked_reason}")
+        else:
+            add_warning(plan, f"Skipping shared-state cleanup for '{relative_dir}': {blocked_reason}")
+        return
+
+    for path in iter_directory_files(target_dir):
         add_path(plan, path, category)
         plan["direct_delete_paths"].append(rel(root, path))
+
+
+def discover_instance_workspaces(
+    plan: dict[str, Any],
+    *,
+    shared_root: Path,
+    buddy_filter: str | None,
+) -> list[Path]:
+    instances_root = shared_root / "instances"
+    if shared_root.is_symlink():
+        add_warning(plan, f"Skipping instance-local cleanup: shared root is a symlink ({shared_root}).")
+        return []
+    if not instances_root.exists() or not instances_root.is_dir():
+        return []
+    if instances_root.is_symlink():
+        add_warning(plan, f"Skipping instance-local cleanup: instances root is a symlink ({instances_root}).")
+        return []
+
+    resolved_instances_root = instances_root.resolve(strict=False)
+    workspaces: list[Path] = []
+    for instance_root in sorted(instances_root.iterdir()):
+        if not instance_root.is_dir():
+            continue
+        if instance_root.is_symlink():
+            add_warning(
+                plan,
+                f"Skipping instance-local cleanup for '{instance_root.name}': instance root is a symlink.",
+            )
+            continue
+
+        resolved_instance_root = instance_root.resolve(strict=False)
+        if not is_path_within(resolved_instance_root, resolved_instances_root):
+            add_warning(
+                plan,
+                f"Skipping instance-local cleanup for '{instance_root.name}': instance root resolves outside shared instances root.",
+            )
+            continue
+
+        workspace_dir = instance_root / "workspace"
+        if not workspace_dir.exists():
+            continue
+        if workspace_dir.is_symlink():
+            add_warning(
+                plan,
+                f"Skipping instance-local cleanup for '{instance_root.name}': workspace path is a symlink.",
+            )
+            continue
+        if not workspace_dir.is_dir():
+            add_warning(
+                plan,
+                f"Skipping instance-local cleanup for '{instance_root.name}': workspace path is not a directory.",
+            )
+            continue
+
+        resolved_workspace = workspace_dir.resolve(strict=False)
+        if not is_path_within(resolved_workspace, resolved_instance_root):
+            add_warning(
+                plan,
+                f"Skipping instance-local cleanup for '{instance_root.name}': workspace resolves outside its instance root.",
+            )
+            continue
+
+        instance_buddy: str | None = None
+        instance_json = instance_root / "instance.json"
+        if instance_json.exists():
+            try:
+                payload = read_json(instance_json)
+            except (OSError, ValueError, json.JSONDecodeError):
+                payload = {}
+                if buddy_filter is not None:
+                    add_warning(
+                        plan,
+                        f"Skipping buddy-filtered cleanup for '{instance_root.name}': invalid instance.json.",
+                    )
+            buddy_value = payload.get("buddy")
+            if isinstance(buddy_value, str) and buddy_value:
+                instance_buddy = buddy_value
+
+        if buddy_filter is not None:
+            if instance_buddy is None:
+                add_warning(
+                    plan,
+                    f"Skipping buddy-filtered cleanup for '{instance_root.name}': missing buddy in instance.json.",
+                )
+                continue
+            if instance_buddy != buddy_filter:
+                continue
+
+        workspaces.append(workspace_dir)
+    return workspaces
+
+
+def add_instance_workspace_dir_files(
+    plan: dict[str, Any],
+    *,
+    shared_root: Path,
+    workspace_dir: Path,
+    relative_dir: str,
+    category: str,
+) -> None:
+    instance_name = workspace_dir.parent.name
+    relative_target = Path(relative_dir)
+    if relative_target.is_absolute() or ".." in relative_target.parts:
+        add_warning(
+            plan,
+            f"Skipping instance-local cleanup for '{instance_name}': invalid cleanup path '{relative_dir}'.",
+        )
+        return
+
+    current = workspace_dir
+    for part in relative_target.parts:
+        current = current / part
+        if current.is_symlink():
+            add_warning(
+                plan,
+                (
+                    f"Skipping instance-local cleanup for '{instance_name}': cleanup path "
+                    f"'{relative_dir}' traverses symlink '{rel(workspace_dir, current)}'."
+                ),
+            )
+            return
+
+    target_dir = workspace_dir / relative_target
+    if not target_dir.is_dir():
+        return
+
+    resolved_workspace = workspace_dir.resolve(strict=False)
+    resolved_target_dir = target_dir.resolve(strict=False)
+    if not is_path_within(resolved_target_dir, resolved_workspace):
+        add_warning(
+            plan,
+            f"Skipping instance-local cleanup for '{instance_name}': cleanup path '{relative_dir}' resolves outside workspace.",
+        )
+        return
+
+    for path in iter_directory_files(target_dir):
+        display_path = rel(shared_root, path)
+        add_external_path(plan, display_path=display_path, absolute_path=path, category=category)
 
 
 def add_indexed_artifact(plan: dict[str, Any], record: dict[str, Any]) -> None:
@@ -297,7 +553,7 @@ def add_run_content(plan: dict[str, Any], record: dict[str, Any]) -> None:
 
 def delete_relative_path(root: Path, relative_path: str) -> None:
     resolved = repo_path(root, relative_path)
-    if resolved is None or not resolved.exists():
+    if resolved is None or (not resolved.exists() and not resolved.is_symlink()):
         return
     if resolved.is_dir() and not resolved.is_symlink():
         shutil.rmtree(resolved)
@@ -305,10 +561,36 @@ def delete_relative_path(root: Path, relative_path: str) -> None:
     resolved.unlink()
 
 
-def detach_task_from_track(root: Path, track_id: str | None, task_id: str) -> None:
+def delete_absolute_path(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+        return
+    path.unlink()
+
+
+def detach_task_from_track(
+    root: Path,
+    track_id: str | None,
+    task_id: str,
+    *,
+    warnings: list[str] | None = None,
+) -> None:
     if not isinstance(track_id, str) or not track_id:
         return
-    track_path = root / "buddyswitch" / "objects" / "tracks" / f"{track_id}.json"
+    track_path, blocked_reason = resolve_guarded_object_json_path(
+        root,
+        relative_dir="buddyswitch/objects/tracks",
+        object_id=track_id,
+    )
+    if track_path is None:
+        if blocked_reason is not None:
+            append_warning(
+                warnings,
+                f"Skipping unsafe track detach target '{track_id}': {blocked_reason}",
+            )
+        return
     if not track_path.exists():
         return
     try:
@@ -325,10 +607,27 @@ def detach_task_from_track(root: Path, track_id: str | None, task_id: str) -> No
     write_json(track_path, payload)
 
 
-def detach_artifact_from_task(root: Path, task_id: str | None, artifact_id: str) -> None:
+def detach_artifact_from_task(
+    root: Path,
+    task_id: str | None,
+    artifact_id: str,
+    *,
+    warnings: list[str] | None = None,
+) -> None:
     if not isinstance(task_id, str) or not task_id:
         return
-    task_path = root / "buddyswitch" / "objects" / "tasks" / f"{task_id}.json"
+    task_path, blocked_reason = resolve_guarded_object_json_path(
+        root,
+        relative_dir="buddyswitch/objects/tasks",
+        object_id=task_id,
+    )
+    if task_path is None:
+        if blocked_reason is not None:
+            append_warning(
+                warnings,
+                f"Skipping unsafe task detach target '{task_id}': {blocked_reason}",
+            )
+        return
     if not task_path.exists():
         return
     try:
@@ -344,9 +643,19 @@ def detach_artifact_from_task(root: Path, task_id: str | None, artifact_id: str)
     payload["artifact_ids"] = filtered
 
     artifact_slots = payload.get("artifact_slots")
-    artifact_path = root / "buddyswitch" / "objects" / "artifacts" / f"{artifact_id}.json"
+    artifact_path, artifact_path_reason = resolve_guarded_object_json_path(
+        root,
+        relative_dir="buddyswitch/objects/artifacts",
+        object_id=artifact_id,
+    )
     slot: str | None = None
-    if isinstance(artifact_slots, dict) and artifact_path.exists():
+    if artifact_path is None:
+        if artifact_path_reason is not None:
+            append_warning(
+                warnings,
+                f"Skipping unsafe artifact detach source '{artifact_id}': {artifact_path_reason}",
+            )
+    elif isinstance(artifact_slots, dict) and artifact_path.exists():
         try:
             artifact_payload = read_json(artifact_path)
         except (OSError, ValueError, json.JSONDecodeError):
@@ -360,9 +669,20 @@ def detach_artifact_from_task(root: Path, task_id: str | None, artifact_id: str)
         slot_state = artifact_slots.get(slot)
         deleting_current = isinstance(slot_state, dict) and slot_state.get("current_artifact_id") == artifact_id
         if deleting_current:
-            candidates: list[dict[str, Any]] = []
+            candidates: list[tuple[dict[str, Any], Path]] = []
             for candidate_id in filtered:
-                candidate_path = root / "buddyswitch" / "objects" / "artifacts" / f"{candidate_id}.json"
+                candidate_path, candidate_reason = resolve_guarded_object_json_path(
+                    root,
+                    relative_dir="buddyswitch/objects/artifacts",
+                    object_id=candidate_id,
+                )
+                if candidate_path is None:
+                    if candidate_reason is not None:
+                        append_warning(
+                            warnings,
+                            f"Skipping unsafe artifact detach candidate '{candidate_id}': {candidate_reason}",
+                        )
+                    continue
                 if not candidate_path.exists():
                     continue
                 try:
@@ -374,23 +694,23 @@ def detach_artifact_from_task(root: Path, task_id: str | None, artifact_id: str)
                 candidate_slot = candidate.get("slot")
                 if not isinstance(candidate_slot, str) or candidate_slot != slot:
                     continue
-                candidates.append(candidate)
+                candidates.append((candidate, candidate_path))
             if candidates:
                 candidates.sort(
                     key=lambda row: (
-                        row.get("revision", 0) if isinstance(row.get("revision"), int) else 0,
-                        row.get("updated_at", "") if isinstance(row.get("updated_at"), str) else "",
-                        row.get("id", "") if isinstance(row.get("id"), str) else "",
+                        row[0].get("revision", 0) if isinstance(row[0].get("revision"), int) else 0,
+                        row[0].get("updated_at", "") if isinstance(row[0].get("updated_at"), str) else "",
+                        row[0].get("id", "") if isinstance(row[0].get("id"), str) else "",
                     ),
                     reverse=True,
                 )
-                promoted = candidates[0]
+                promoted, _ = candidates[0]
                 revision_count = slot_state.get("revision_count", promoted.get("revision")) if isinstance(slot_state, dict) else promoted.get("revision")
                 if not isinstance(revision_count, int) or revision_count < promoted.get("revision", 0):
                     revision_count = promoted.get("revision", 0)
-                for candidate in candidates:
+                for candidate, candidate_path in candidates:
                     candidate["is_current"] = candidate.get("id") == promoted.get("id")
-                    write_json(root / "buddyswitch" / "objects" / "artifacts" / f"{candidate['id']}.json", candidate)
+                    write_json(candidate_path, candidate)
                 artifact_slots[slot] = {
                     "current_artifact_id": promoted["id"],
                     "revision_count": revision_count,
@@ -400,7 +720,7 @@ def detach_artifact_from_task(root: Path, task_id: str | None, artifact_id: str)
     write_json(task_path, payload)
 
 
-def ensure_required_skeleton(root: Path) -> None:
+def ensure_required_skeleton(root: Path, *, warnings: list[str] | None = None) -> None:
     for relative_dir in (
         "runs/raw",
         "projects/app/.runtime",
@@ -409,8 +729,29 @@ def ensure_required_skeleton(root: Path) -> None:
         "buddyswitch/objects/artifacts",
         "buddyswitch/content/runs",
     ):
-        directory = root / relative_dir
-        directory.mkdir(parents=True, exist_ok=True)
+        directory, blocked_reason = resolve_guarded_relative_dir(root, relative_dir, allow_missing=True)
+        if directory is None:
+            if blocked_reason is not None:
+                append_warning(
+                    warnings,
+                    f"Skipping skeleton recreation for '{relative_dir}': {blocked_reason}",
+                )
+            continue
+        if directory.exists():
+            if directory.is_dir():
+                continue
+            append_warning(
+                warnings,
+                f"Skipping skeleton recreation for '{relative_dir}': target exists and is not a directory.",
+            )
+            continue
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            append_warning(
+                warnings,
+                f"Skipping skeleton recreation for '{relative_dir}': {exc}",
+            )
 
 
 def default_manifest_path(repo_root: Path) -> Path:
@@ -423,23 +764,32 @@ def build_cleanup_plan(
     buddy: str | None,
     repo_root: Path = ROOT,
     manifest_path: Path | None = None,
+    shared_root: Path | None = None,
 ) -> dict[str, Any]:
     manifest_path = manifest_path or default_manifest_path(repo_root)
     valid_buddies = load_valid_buddies(manifest_path)
-    if scope == "agent" and (buddy is None or buddy not in valid_buddies):
+    internal_scope = scope
+    if scope == "buddy":
+        internal_scope = "agent"
+    elif scope == "app-runtime":
+        internal_scope = "project"
+    elif scope == "all-data":
+        internal_scope = "all-storage"
+    if internal_scope == "agent" and (buddy is None or buddy not in valid_buddies):
         raise ValueError(f"Invalid buddy '{buddy}'. Check buddyswitch/manifest.toml")
-    if scope == "project" and buddy is not None:
+    if internal_scope == "project" and buddy is not None:
         raise ValueError("project cleanup does not accept buddy")
 
     plan = new_plan(scope, buddy=buddy)
     plan["repo_root"] = str(repo_root)
+    plan["shared_root"] = str(shared_root) if shared_root is not None else None
     plan["_path_categories"] = {}
 
     artifact_objects, invalid_artifact_objects = discover_artifact_objects(repo_root)
     task_objects, invalid_task_objects = discover_task_objects(repo_root)
     run_content, invalid_run_content = discover_run_content(repo_root)
 
-    if scope == "agent":
+    if internal_scope == "agent":
         add_dir_files(plan, f"runs/raw/{buddy}", "run_raw")
         for record in artifact_objects:
             if record["producer_buddy"] == buddy:
@@ -466,7 +816,7 @@ def build_cleanup_plan(
                 f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
             )
 
-    elif scope == "all-agents":
+    elif internal_scope == "all-agents":
         add_dir_files(plan, "runs/raw", "run_raw")
         add_dir_files(plan, "buddyswitch/objects/tracks", "track_objects")
         for record in artifact_objects:
@@ -487,10 +837,10 @@ def build_cleanup_plan(
             add_path(plan, repo_root / item["path"], "task_objects")
             plan["direct_delete_paths"].append(item["path"])
 
-    elif scope == "project":
+    elif internal_scope == "project":
         add_dir_files(plan, "projects/app/.runtime", "project_runtime")
 
-    elif scope == "all-storage":
+    elif internal_scope == "all-storage":
         add_dir_files(plan, "runs/raw", "run_raw")
         add_dir_files(plan, "projects/app/.runtime", "project_runtime")
         add_dir_files(plan, "buddyswitch/objects/tracks", "track_objects")
@@ -521,11 +871,50 @@ def build_cleanup_plan(
     else:
         raise ValueError(f"Unsupported cleanup scope: {scope}")
 
+    if shared_root is not None:
+        if internal_scope == "agent":
+            for workspace in discover_instance_workspaces(plan, shared_root=shared_root, buddy_filter=buddy):
+                add_instance_workspace_dir_files(
+                    plan,
+                    shared_root=shared_root,
+                    workspace_dir=workspace,
+                    relative_dir=f"runs/raw/{buddy}",
+                    category="run_raw",
+                )
+        elif internal_scope == "project":
+            for workspace in discover_instance_workspaces(plan, shared_root=shared_root, buddy_filter=None):
+                add_instance_workspace_dir_files(
+                    plan,
+                    shared_root=shared_root,
+                    workspace_dir=workspace,
+                    relative_dir="projects/app/.runtime",
+                    category="project_runtime",
+                )
+        elif internal_scope == "all-storage":
+            for workspace in discover_instance_workspaces(plan, shared_root=shared_root, buddy_filter=None):
+                add_instance_workspace_dir_files(
+                    plan,
+                    shared_root=shared_root,
+                    workspace_dir=workspace,
+                    relative_dir="runs/raw",
+                    category="run_raw",
+                )
+                add_instance_workspace_dir_files(
+                    plan,
+                    shared_root=shared_root,
+                    workspace_dir=workspace,
+                    relative_dir="projects/app/.runtime",
+                    category="project_runtime",
+                )
+
     plan["delete_paths"].sort()
     plan["artifact_object_ids"].sort()
     plan["task_object_ids"].sort()
     plan["run_ids"].sort()
     plan["direct_delete_paths"] = sorted(set(plan["direct_delete_paths"]))
+    plan["external_delete_paths"] = {
+        key: plan["external_delete_paths"][key] for key in sorted(plan["external_delete_paths"])
+    }
     plan["warnings"].sort()
     plan.pop("_path_categories", None)
     return plan
@@ -534,12 +923,15 @@ def build_cleanup_plan(
 def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
     root = Path(plan["repo_root"])
     deleted_paths: list[str] = []
+    warnings = plan.get("warnings")
+    if not isinstance(warnings, list):
+        warnings = None
 
-    if plan["scope"] == "agent":
+    if plan["scope"] in {"agent", "buddy"}:
         for record in plan["artifact_records"]:
-            detach_artifact_from_task(root, record.get("task_id"), record["id"])
+            detach_artifact_from_task(root, record.get("task_id"), record["id"], warnings=warnings)
         for record in plan["task_records"]:
-            detach_task_from_track(root, record.get("track_id"), record["id"])
+            detach_task_from_track(root, record.get("track_id"), record["id"], warnings=warnings)
 
     indexed_artifact_paths = set()
     for record in plan["artifact_records"]:
@@ -560,10 +952,16 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
     for relative_path in plan["direct_delete_paths"]:
         if relative_path in indexed_artifact_paths or relative_path in indexed_task_paths:
             continue
-        delete_relative_path(root, relative_path)
+        external_path = plan.get("external_delete_paths", {}).get(relative_path)
+        if external_path is not None:
+            delete_absolute_path(Path(external_path))
+        else:
+            delete_relative_path(root, relative_path)
         deleted_paths.append(relative_path)
 
-    ensure_required_skeleton(root)
+    ensure_required_skeleton(root, warnings=warnings)
+    if isinstance(warnings, list):
+        warnings.sort()
     return {
         "ok": True,
         "scope": plan["scope"],
@@ -578,14 +976,16 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
 
 
 def print_text_plan(plan: dict[str, Any]) -> None:
-    if plan["scope"] == "agent":
-        target = f"--agent {plan['buddy']}"
+    if plan["scope"] in {"agent", "buddy"}:
+        target = f"--buddy {plan['buddy']}"
     elif plan["scope"] == "all-agents":
-        target = "--all-agents"
-    elif plan["scope"] == "project":
-        target = "--project app"
+        target = "--all-data"
+    elif plan["scope"] in {"project", "app-runtime"}:
+        target = "--app-runtime"
+    elif plan["scope"] == "all-data":
+        target = "--all-data"
     else:
-        target = "--all-storage"
+        target = "--all-data"
 
     print("BuddySwitch cleanup plan")
     print(f"Repo root: {plan['repo_root']}")
@@ -609,70 +1009,87 @@ def print_text_plan(plan: dict[str, Any]) -> None:
             print(f"  - {warning}")
 
 
-def confirm_execute(force: bool) -> None:
-    if force:
-        return
-    if not sys.stdin.isatty():
-        raise ValueError("--execute requires interactive confirmation, or use --force")
-    print(f"Type '{CONFIRM_PHRASE}' to confirm deletion:")
-    answer = input().strip()
-    if answer != CONFIRM_PHRASE:
-        raise ValueError("Confirmation phrase mismatch. Aborted.")
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="BuddySwitch cleanup utility (manual use only)")
     parser.add_argument("--repo-root", type=Path, help="Cleanup root. Defaults to the current script checkout root.")
+    parser.add_argument(
+        "--shared-root",
+        type=Path,
+        help="Shared BuddySwitch root used to discover instance workspaces for instance-local cleanup.",
+    )
     parser.add_argument("--manifest", type=Path, help="Manifest path. Defaults to <repo-root>/buddyswitch/manifest.toml.")
     target = parser.add_mutually_exclusive_group(required=True)
-    target.add_argument("--agent")
-    target.add_argument("--all-agents", action="store_true")
-    target.add_argument("--project")
-    target.add_argument("--all-storage", action="store_true")
-    parser.add_argument("--execute", action="store_true")
-    parser.add_argument("--force", action="store_true")
+    target.add_argument("--buddy")
+    target.add_argument("--app-runtime", action="store_true")
+    target.add_argument("--all-data", action="store_true")
+    parser.add_argument("--yes", action="store_true")
     parser.add_argument("--json", action="store_true", help="Print cleanup plan/result as JSON.")
     return parser
 
 
 def resolve_scope(args: argparse.Namespace) -> tuple[str, str | None]:
-    if args.agent:
-        return "agent", args.agent
-    if args.all_agents:
-        return "all-agents", None
-    if args.project:
-        if args.project != "app":
-            raise ValueError(f"Invalid project '{args.project}'. Only 'app' is supported for --project")
-        return "project", None
-    if args.all_storage:
-        return "all-storage", None
+    if args.buddy:
+        return "buddy", args.buddy
+    if args.app_runtime:
+        return "app-runtime", None
+    if args.all_data:
+        return "all-data", None
     raise ValueError("No cleanup target provided")
+
+
+def resolve_repo_root_arg(*, repo_root_arg: Path | None, shared_root: Path | None) -> Path:
+    if repo_root_arg is None:
+        return ROOT
+    if repo_root_arg.is_symlink():
+        raise ValueError(f"Refusing cleanup: repo root argument is a symlink ({repo_root_arg}).")
+
+    resolved_repo_root = repo_root_arg.resolve()
+    if shared_root is None:
+        return resolved_repo_root
+
+    resolved_shared_root = shared_root.resolve(strict=False)
+    resolved_state_root = (shared_root / "state").resolve(strict=False)
+    if not is_path_within(resolved_state_root, resolved_shared_root):
+        raise ValueError(
+            "Refusing cleanup: shared-state root resolves outside shared root "
+            f"({resolved_state_root} not within {resolved_shared_root})."
+        )
+    if not is_path_within(resolved_repo_root, resolved_state_root):
+        raise ValueError(
+            f"Refusing cleanup: repo root resolves outside shared-state root ({resolved_repo_root})."
+        )
+    return resolved_repo_root
 
 
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    if args.force and not args.execute:
-        print("ERROR: --force can only be used with --execute", file=sys.stderr)
-        return 1
 
     try:
-        repo_root = args.repo_root.resolve() if args.repo_root else ROOT
+        shared_root = args.shared_root if args.shared_root else None
+        if shared_root is not None and shared_root.is_symlink():
+            raise ValueError(f"Refusing cleanup: shared root argument is a symlink ({shared_root}).")
+        repo_root = resolve_repo_root_arg(repo_root_arg=args.repo_root, shared_root=shared_root)
         manifest_path = args.manifest.resolve() if args.manifest else default_manifest_path(repo_root)
         scope, buddy = resolve_scope(args)
-        plan = build_cleanup_plan(scope=scope, buddy=buddy, repo_root=repo_root, manifest_path=manifest_path)
+        plan = build_cleanup_plan(
+            scope=scope,
+            buddy=buddy,
+            repo_root=repo_root,
+            manifest_path=manifest_path,
+            shared_root=shared_root,
+        )
         if not args.json:
             print_text_plan(plan)
 
-        if not args.execute:
+        if not args.yes:
             if args.json:
                 print(json.dumps(plan, ensure_ascii=True, indent=2))
             else:
                 print()
-                print("Dry-run mode: no files were deleted.")
+                print("Preview mode: no files were deleted.")
             return 0
 
-        confirm_execute(args.force)
         result = execute_cleanup_plan(plan)
         if args.json:
             print(json.dumps({"plan": plan, "result": result}, ensure_ascii=True, indent=2))

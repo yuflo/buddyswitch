@@ -26,28 +26,28 @@ buddyswitch_browser_init_defaults
 print_help() {
   cat <<EOF
 Usage:
-  buddyswitch-codex [codex args...]
-  buddyswitch-codex start --buddy <buddy> [codex args...]
-  buddyswitch-codex buddy list
+  buddyswitch-codex instance buddies
+  buddyswitch-codex instance start --buddy <buddy> [-- codex args...]
   buddyswitch-codex instance list [--buddy <buddy>]
-  buddyswitch-codex instance open <instance-id> [codex args...]
-  buddyswitch-codex instance delete <instance-id> --yes
-  buddyswitch-codex cleanup [--agent <buddy>|--all-agents|--project app|--all-storage] [--execute --force] [--json]
-  buddyswitch-codex reset --yes
-  buddyswitch-codex browser status [--port <port>] [--profile-dir <dir>]
-  buddyswitch-codex browser ensure [--port <port>] [--profile-dir <dir>]
-  buddyswitch-codex workspace sync
+  buddyswitch-codex instance open <instance-id> [-- codex args...]
+  buddyswitch-codex instance delete <instance-id> [--yes]
+
+  buddyswitch-codex data cleanup --buddy <buddy> [--yes] [--json]
+  buddyswitch-codex data cleanup --app-runtime [--yes] [--json]
+  buddyswitch-codex data cleanup --all-data [--yes] [--json]
+
+  buddyswitch-codex env status [--json]
+  buddyswitch-codex env browser status [--instance <instance-id>] [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex env browser ensure --instance <instance-id> [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex env reset [--yes]
+
   buddyswitch-codex help
 
 Commands:
-  start   Launch codex in the shared BuddySwitch environment (default behavior)
-  buddy   Inspect static BuddySwitch buddies from the manifest.
-  instance Manage stored BuddySwitch product-mode instances.
-  cleanup Remove BuddySwitch runtime state through the launcher safety gates.
-  reset   Remove the shared BuddySwitch environment (requires --yes)
-  browser Manage browser cockpit setup (status/ensure)
-  workspace Refresh the execution workspace to repo HEAD (sync)
-  help    Show this help message
+  instance Manage BuddySwitch product-mode instances.
+  data     Manage BuddySwitch data cleanup commands.
+  env      Manage BuddySwitch environment status and reset commands.
+  help     Show this help message.
 
 Environment:
   BUDDYSWITCH_SHARED_ROOT      Shared launcher root (default: ${BUDDYSWITCH_SHARED_ROOT})
@@ -95,6 +95,10 @@ start_codex() {
         shift
         ;;
     esac
+  fi
+
+  if [[ "${1:-}" == "--" ]]; then
+    shift || true
   fi
 
   if [[ -n "${buddy}" ]]; then
@@ -209,6 +213,9 @@ instance_open() {
     return 2
   fi
   shift || true
+  if [[ "${1:-}" == "--" ]]; then
+    shift || true
+  fi
   buddyswitch_validate_instance_id "${instance_id}" || return $?
   buddy="$(buddyswitch_instance_validate_record "${instance_id}")" || return $?
   buddyswitch_validate_buddy_id "${buddy}" || return 2
@@ -306,13 +313,16 @@ instance_delete() {
     esac
   done
 
+  buddyswitch_validate_instance_id "${instance_id}" || return $?
   if [[ "${confirmed}" -ne 1 ]]; then
-    echo "Instance delete requires explicit confirmation." >&2
-    echo "Run: buddyswitch-codex instance delete ${instance_id} --yes" >&2
-    return 1
+    echo "BuddySwitch instance delete preview"
+    echo "Instance: ${instance_id}"
+    echo "Instance root: $(buddyswitch_instance_root "${instance_id}")"
+    echo "Shared state kept: ${BUDDYSWITCH_SHARED_ROOT}/state"
+    echo "Run with --yes to delete this instance root."
+    return 0
   fi
 
-  buddyswitch_validate_instance_id "${instance_id}" || return $?
   BUDDYSWITCH_DELETE_INSTANCE_ID="${instance_id}" \
     buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-instance-delete"
 }
@@ -351,62 +361,6 @@ instance_delete_locked() {
   echo "Instance deleted: ${instance_id}"
 }
 
-buddy_usage() {
-  cat <<EOF
-Usage:
-  buddyswitch-codex buddy list
-  buddyswitch-codex buddy help
-
-Commands:
-  list  Print valid buddies from buddyswitch/manifest.toml.
-  help  Show this help message.
-EOF
-}
-
-buddy_main() {
-  local command="${1:-}"
-  case "${command}" in
-    list)
-      shift || true
-      if [[ $# -gt 0 ]]; then
-        echo "Unknown buddy option: $1" >&2
-        buddy_usage >&2
-        return 2
-      fi
-      python3 "${REPO_ROOT}/scripts/env_manifest.py" list-buddies
-      ;;
-    help|-h|--help)
-      buddy_usage
-      ;;
-    "")
-      echo "buddy command is required" >&2
-      buddy_usage >&2
-      return 2
-      ;;
-    *)
-      echo "Unknown buddy command: ${command}" >&2
-      buddy_usage >&2
-      return 2
-      ;;
-  esac
-}
-
-workspace_usage() {
-  cat <<EOF
-Usage:
-  buddyswitch-codex workspace sync
-  buddyswitch-codex workspace help
-
-Commands:
-  sync    Refresh the launcher execution workspace to repo HEAD.
-  help    Show this help message.
-EOF
-}
-
-workspace_sync() {
-  buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-workspace-sync"
-}
-
 workspace_sync_locked() {
   local active_count
   buddyswitch_require_runtime_lock
@@ -418,7 +372,7 @@ workspace_sync_locked() {
   fi
   if [[ -d "${BUDDYSWITCH_SHARED_ROOT}/instances" ]]; then
     echo "Workspace sync blocked: no product-mode sync target once instances exist." >&2
-    echo "Start creates fresh instance workspaces; use reset --yes to remove product-mode runtime state." >&2
+    echo "Start creates fresh instance workspaces; use env reset --yes to remove product-mode runtime state." >&2
     return 3
   fi
 
@@ -426,48 +380,23 @@ workspace_sync_locked() {
   echo "Workspace synced: ${BUDDYSWITCH_WORKSPACE_DIR}"
 }
 
-workspace_main() {
-  local command="${1:-}"
-  if [[ -z "${command}" ]]; then
-    echo "workspace command is required" >&2
-    workspace_usage >&2
-    return 2
-  fi
-  case "${command}" in
-    help|-h|--help)
-      workspace_usage
-      ;;
-    sync)
-      shift || true
-      if [[ $# -gt 0 ]]; then
-        echo "Unknown workspace option: $1" >&2
-        workspace_usage >&2
-        return 2
-      fi
-      workspace_sync
-      ;;
-    *)
-      echo "Unknown workspace command: ${command}" >&2
-      workspace_usage >&2
-      return 2
-      ;;
-  esac
-}
-
-browser_dispatch() {
-  local command="${1:-status}"
-  if [[ "${command}" == "ensure" ]]; then
-    shift || true
-    buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-browser-ensure" "$@"
-    return
-  fi
-
-  buddyswitch_browser_main "$@"
-}
-
 browser_ensure_locked() {
+  local instance_id="${BUDDYSWITCH_BROWSER_INSTANCE_ID:-}" browser_port
   buddyswitch_require_runtime_lock
+  if [[ -n "${instance_id}" ]]; then
+    buddyswitch_validate_instance_id "${instance_id}" || return $?
+    buddyswitch_instance_validate_record "${instance_id}" >/dev/null || return $?
+    buddyswitch_env_bind_instance "${instance_id}" || return $?
+    browser_port="$(buddyswitch_instance_record_field "${instance_id}" "browser_port" || true)"
+    if [[ -n "${browser_port}" ]]; then
+      export BUDDYSWITCH_BROWSER_PORT="${browser_port}"
+    fi
+    buddyswitch_browser_init_defaults
+  fi
   buddyswitch_browser_main ensure "$@"
+  if [[ -n "${instance_id}" ]]; then
+    buddyswitch_instance_set_browser_port "${instance_id}" "${BUDDYSWITCH_BROWSER_PORT}"
+  fi
 }
 
 validate_reset_request() {
@@ -478,14 +407,14 @@ validate_reset_request() {
       confirmed=1
     else
       echo "Unknown reset option: ${arg}" >&2
-      echo "Use: buddyswitch-codex reset --yes" >&2
+      echo "Use: buddyswitch-codex env reset --yes" >&2
       return 2
     fi
   done
 
   if [[ "${confirmed}" -ne 1 ]]; then
     echo "Reset requires explicit confirmation." >&2
-    echo "Run: buddyswitch-codex reset --yes" >&2
+    echo "Run: buddyswitch-codex env reset --yes" >&2
     return 1
   fi
 
@@ -525,8 +454,301 @@ reset_shared_env_locked() {
   fi
 }
 
+data_usage() {
+  cat <<EOF
+Usage:
+  buddyswitch-codex data cleanup --buddy <buddy> [--yes] [--json]
+  buddyswitch-codex data cleanup --app-runtime [--yes] [--json]
+  buddyswitch-codex data cleanup --all-data [--yes] [--json]
+EOF
+}
+
+data_main() {
+  local command="${1:-}"
+  case "${command}" in
+    cleanup)
+      shift || true
+      buddyswitch_cleanup_main "$@"
+      ;;
+    help|-h|--help|"")
+      data_usage
+      ;;
+    *)
+      echo "Unknown data command: ${command}" >&2
+      data_usage >&2
+      return 2
+      ;;
+  esac
+}
+
+env_status() {
+  local json=0 arg instance_count=0 browser_state="inactive"
+  for arg in "$@"; do
+    case "${arg}" in
+      --json)
+        json=1
+        ;;
+      *)
+        echo "Unknown env status option: ${arg}" >&2
+        env_usage >&2
+        return 2
+        ;;
+    esac
+  done
+
+  if [[ -d "${BUDDYSWITCH_SHARED_ROOT}/instances" ]]; then
+    instance_count="$(find "${BUDDYSWITCH_SHARED_ROOT}/instances" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+  fi
+  if buddyswitch_browser_is_active; then
+    browser_state="active"
+  fi
+
+  if [[ "${json}" -eq 1 ]]; then
+    python3 - "${BUDDYSWITCH_SHARED_ROOT}" "${instance_count}" "${browser_state}" <<'PY'
+import json
+import sys
+
+print(json.dumps({
+    "shared_root": sys.argv[1],
+    "instance_count": int(sys.argv[2]),
+    "browser_state": sys.argv[3],
+}, ensure_ascii=True))
+PY
+    return 0
+  fi
+
+  echo "BuddySwitch env status"
+  echo "Shared root: ${BUDDYSWITCH_SHARED_ROOT}"
+  echo "Instances: ${instance_count}"
+  echo "Browser: ${browser_state}"
+  echo "Next: ./buddyswitch-codex instance list"
+}
+
+env_reset() {
+  local confirmed=0 arg
+  for arg in "$@"; do
+    case "${arg}" in
+      --yes)
+        confirmed=1
+        ;;
+      *)
+        echo "Unknown env reset option: ${arg}" >&2
+        env_usage >&2
+        return 2
+        ;;
+    esac
+  done
+
+  if [[ "${confirmed}" -ne 1 ]]; then
+    echo "BuddySwitch env reset preview"
+    echo "Shared root: ${BUDDYSWITCH_SHARED_ROOT}"
+    echo "Run with --yes to remove the shared BuddySwitch environment."
+    return 0
+  fi
+  reset_shared_env "$@"
+}
+
+env_browser_validate_options() {
+  local arg
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    case "${arg}" in
+      --port)
+        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+          echo "Missing value for --port" >&2
+          buddyswitch_browser_usage >&2
+          return 2
+        fi
+        buddyswitch_browser_validate_port_option "$2" || return $?
+        shift 2
+        ;;
+      --profile-dir)
+        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+          echo "Missing value for --profile-dir" >&2
+          buddyswitch_browser_usage >&2
+          return 2
+        fi
+        shift 2
+        ;;
+      --help|-h)
+        buddyswitch_browser_usage
+        return 0
+        ;;
+      *)
+        echo "Unknown browser option: ${arg}" >&2
+        buddyswitch_browser_usage >&2
+        return 2
+        ;;
+    esac
+  done
+}
+
+env_browser_main() {
+  local command="${1:-}" instance_id="" browser_port
+  local explicit_port_requested=0 arg
+  local -a browser_args=()
+  if [[ -n "${command}" ]]; then
+    shift || true
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --instance)
+        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+          echo "Missing value for --instance" >&2
+          env_usage >&2
+          return 2
+        fi
+        instance_id="${2}"
+        shift 2
+        ;;
+      *)
+        browser_args+=("${1}")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -n "${instance_id}" && "${command}" != "ensure" ]]; then
+    buddyswitch_validate_instance_id "${instance_id}" || return $?
+    buddyswitch_instance_validate_record "${instance_id}" >/dev/null || return $?
+    buddyswitch_env_bind_instance "${instance_id}" || return $?
+    browser_port="$(buddyswitch_instance_record_field "${instance_id}" "browser_port" || true)"
+    if [[ -n "${browser_port}" ]]; then
+      export BUDDYSWITCH_BROWSER_PORT="${browser_port}"
+    fi
+    buddyswitch_browser_init_defaults
+  fi
+
+  case "${command}" in
+    status)
+      if [[ "${#browser_args[@]}" -gt 0 ]]; then
+        buddyswitch_browser_main status "${browser_args[@]}"
+      else
+        buddyswitch_browser_main status
+      fi
+      ;;
+    ensure)
+      if [[ -z "${instance_id}" ]]; then
+        echo "env browser ensure requires --instance <instance-id>" >&2
+        env_usage >&2
+        return 2
+      fi
+      buddyswitch_validate_instance_id "${instance_id}" || return $?
+      if [[ "${#browser_args[@]}" -gt 0 ]]; then
+        env_browser_validate_options "${browser_args[@]}" || return $?
+      fi
+      if [[ "${#browser_args[@]}" -gt 0 ]]; then
+        for arg in "${browser_args[@]}"; do
+          if [[ "${arg}" == "--port" ]]; then
+            explicit_port_requested=1
+            break
+          fi
+        done
+      fi
+      if [[ "${explicit_port_requested}" -ne 1 ]]; then
+        buddyswitch_browser_validate_env_or_default_port || return $?
+      fi
+      if [[ "${#browser_args[@]}" -gt 0 ]]; then
+        BUDDYSWITCH_BROWSER_INSTANCE_ID="${instance_id}" \
+          buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-browser-ensure" "${browser_args[@]}"
+      else
+        BUDDYSWITCH_BROWSER_INSTANCE_ID="${instance_id}" \
+          buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-browser-ensure"
+      fi
+      ;;
+    help|-h|--help|"")
+      env_usage
+      ;;
+    *)
+      echo "Unknown env browser command: ${command}" >&2
+      env_usage >&2
+      return 2
+      ;;
+  esac
+}
+
+env_usage() {
+  cat <<EOF
+Usage:
+  buddyswitch-codex env status [--json]
+  buddyswitch-codex env browser status [--instance <instance-id>] [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex env browser ensure --instance <instance-id> [--port <port>] [--profile-dir <dir>]
+  buddyswitch-codex env reset [--yes]
+EOF
+}
+
+env_main() {
+  local command="${1:-}"
+  case "${command}" in
+    status)
+      shift || true
+      env_status "$@"
+      ;;
+    browser)
+      shift || true
+      env_browser_main "$@"
+      ;;
+    reset)
+      shift || true
+      env_reset "$@"
+      ;;
+    help|-h|--help|"")
+      env_usage
+      ;;
+    *)
+      echo "env command is not available yet in this task stage." >&2
+      env_usage >&2
+      return 2
+      ;;
+  esac
+}
+
+legacy_command_hint() {
+  local command="${1:-}"
+  case "${command}" in
+    start)
+      echo "buddyswitch-codex instance start --buddy <buddy> [-- codex args...]"
+      ;;
+    buddy)
+      echo "buddyswitch-codex instance buddies"
+      ;;
+    cleanup)
+      echo "buddyswitch-codex data cleanup ..."
+      ;;
+    reset)
+      echo "buddyswitch-codex env reset --yes"
+      ;;
+    browser)
+      echo "buddyswitch-codex env browser status|ensure ..."
+      ;;
+    workspace)
+      echo "No public replacement. Use instance lifecycle commands."
+      ;;
+    *)
+      echo "buddyswitch-codex help"
+      ;;
+  esac
+}
+
+fail_removed_public_command() {
+  local command="${1:-}"
+  local hint
+  hint="$(legacy_command_hint "${command}")"
+  echo "Top-level command removed: ${command}" >&2
+  echo "Use: ${hint}" >&2
+  return 2
+}
+
+fail_unknown_top_level_command() {
+  local command="${1:-}"
+  echo "Unknown top-level command: ${command}" >&2
+  echo "Run: buddyswitch-codex help" >&2
+  return 2
+}
+
 main() {
-  local command="${1:-start}"
+  local command="${1:-}"
   case "${command}" in
     __locked-start-bootstrap)
       shift || true
@@ -563,36 +785,28 @@ main() {
     help|-h|--help)
       print_help
       ;;
-    cleanup)
-      shift || true
-      buddyswitch_cleanup_main "$@"
-      ;;
-    reset)
-      shift || true
-      reset_shared_env "$@"
-      ;;
-    start)
-      shift || true
-      start_codex "$@"
-      ;;
-    buddy)
-      shift || true
-      buddy_main "$@"
-      ;;
     instance)
       shift || true
       buddyswitch_instance_main "$@"
       ;;
-    browser)
+    data)
       shift || true
-      browser_dispatch "$@"
+      data_main "$@"
       ;;
-    workspace)
+    env)
       shift || true
-      workspace_main "$@"
+      env_main "$@"
+      ;;
+    start|buddy|cleanup|reset|browser|workspace)
+      fail_removed_public_command "${command}"
+      ;;
+    "")
+      echo "Missing BuddySwitch command." >&2
+      echo "Run: buddyswitch-codex help" >&2
+      return 2
       ;;
     *)
-      start_codex "$@"
+      fail_unknown_top_level_command "${command}"
       ;;
   esac
 }

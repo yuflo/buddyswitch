@@ -409,7 +409,7 @@ A task is done only when:
 The SHARP guidance above is the default workflow for this repository. The notes below define BuddySwitch-specific working context and source-of-truth locations.
 
 - Use `codex` here when you are editing BuddySwitch source, tests, docs, or launcher code.
-- `./buddyswitch-codex start --buddy <buddy>` does not run Codex from this checkout; it launches from a launcher-managed instance worktree under `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`.
+- `./buddyswitch-codex instance start --buddy <buddy>` does not run Codex from this checkout; it launches from a launcher-managed instance worktree under `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`.
 - Shared BuddySwitch state lives under `${BUDDYSWITCH_SHARED_ROOT}/state` and is projected into each instance workspace through the repo-relative runtime paths.
 - The execution worktree carries the full runtime BuddySwitch contract in `tools/launcher/assets/runtime-AGENTS.md`.
 - Runtime BuddySwitch state is not maintained as tracked skeleton directories in the main checkout.
@@ -431,4 +431,4 @@ The SHARP guidance above is the default workflow for this repository. The notes 
 
 - Keep repo-root work focused on BuddySwitch source, tests, docs, launcher behavior, and framework contracts.
 - Use `codex` in this checkout for development mode.
-- Use `./buddyswitch-codex start` when you need a launcher-managed product-mode runtime session.
+- Use `./buddyswitch-codex instance start --buddy <buddy>` when you need a launcher-managed product-mode runtime session.

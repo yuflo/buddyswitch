@@ -252,7 +252,7 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("legacy " + "artifact content", combined)
         self.assertNotIn("buddyswitch/content/" + "artifacts", combined)
 
-    def test_active_cleanup_surfaces_use_launcher_cleanup_command(self) -> None:
+    def test_active_cleanup_surfaces_use_data_cleanup_command(self) -> None:
         targets = (
             ROOT / "README.md",
             ROOT / "framework" / "docs" / "interface-spec.md",
@@ -260,25 +260,112 @@ class RepoConsistencyTests(unittest.TestCase):
         )
         combined = "\n".join(path.read_text(encoding="utf-8") for path in targets)
 
-        self.assertIn("./buddyswitch-codex cleanup --agent", combined)
-        self.assertIn("./buddyswitch-codex cleanup --all-agents", combined)
-        self.assertIn("./buddyswitch-codex cleanup --project app", combined)
-        self.assertIn("./buddyswitch-codex cleanup --all-storage", combined)
+        self.assertIn("./buddyswitch-codex data cleanup --buddy", combined)
+        self.assertIn("./buddyswitch-codex data cleanup --app-runtime", combined)
+        self.assertIn("./buddyswitch-codex data cleanup --all-data", combined)
+        self.assertNotIn("./buddyswitch-codex cleanup --agent", combined)
+        self.assertNotIn("./buddyswitch-codex cleanup --all-agents", combined)
+        self.assertNotIn("./buddyswitch-codex cleanup --project app", combined)
+        self.assertNotIn("./buddyswitch-codex cleanup --all-storage", combined)
         self.assertNotIn("scripts/cleanup_buddyswitch.sh --agent", combined)
         self.assertNotIn("scripts/cleanup_buddyswitch.sh --all-agents", combined)
         self.assertNotIn("scripts/cleanup_buddyswitch.sh --project app", combined)
         self.assertNotIn("scripts/cleanup_buddyswitch.sh --all-storage", combined)
 
+    def test_active_docs_and_env_store_use_final_public_command_surface(self) -> None:
+        targets = (
+            ROOT / "AGENTS.md",
+            ROOT / "framework" / "docs" / "switch-spec.md",
+            ROOT / "framework" / "docs" / "browser-cockpit.md",
+            ROOT / "scripts" / "env_store.py",
+        )
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in targets)
+
+        forbidden_patterns = (
+            r"\./buddyswitch-codex start\b",
+            r"\./buddyswitch-codex buddy\b",
+            r"\./buddyswitch-codex cleanup\b",
+            r"\./buddyswitch-codex reset\b",
+            r"\./buddyswitch-codex browser\b",
+            r"\./buddyswitch-codex workspace\b",
+        )
+        for pattern in forbidden_patterns:
+            self.assertIsNone(re.search(pattern, combined), msg=f"legacy public command leaked: {pattern}")
+
+        self.assertIn("./buddyswitch-codex instance start --buddy <buddy>", combined)
+        self.assertIn("./buddyswitch-codex env browser ensure --instance <instance-id>", combined)
+        self.assertIn("./buddyswitch-codex env browser status", combined)
+
+    def test_active_launcher_helpers_use_final_reset_command_surface(self) -> None:
+        text = (ROOT / "tools" / "launcher" / "workspace.sh").read_text(encoding="utf-8")
+
+        self.assertIn("buddyswitch-codex env reset --yes", text)
+        self.assertNotIn("buddyswitch-codex reset --yes", text)
+
     def test_readme_documents_instance_lifecycle_cli(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-        self.assertIn("./buddyswitch-codex buddy list", readme)
+        self.assertIn("./buddyswitch-codex instance buddies", readme)
+        self.assertIn("./buddyswitch-codex instance start --buddy <buddy>", readme)
         self.assertIn("./buddyswitch-codex instance list", readme)
         self.assertIn("./buddyswitch-codex instance open <instance-id>", readme)
-        self.assertIn("./buddyswitch-codex instance delete <instance-id> --yes", readme)
+        self.assertIn("./buddyswitch-codex instance delete <instance-id>", readme)
         self.assertIn("creates a fresh buddy-locked instance", readme)
         self.assertNotIn("start --buddy <buddy>` reuses an existing instance", readme)
         self.assertNotIn("start --buddy <buddy>` reuses an existing valid buddy instance", readme)
+
+    def test_launcher_help_surfaces_only_final_public_namespaces(self) -> None:
+        launcher = (ROOT / "buddyswitch-codex").read_text(encoding="utf-8")
+        self.assertIn("print_help() {", launcher)
+        self.assertIn("start_codex()", launcher)
+        help_block = launcher.split("print_help() {", 1)[1].split("start_codex()", 1)[0]
+
+        self.assertIn("buddyswitch-codex instance buddies", help_block)
+        self.assertIn("buddyswitch-codex instance start --buddy <buddy>", help_block)
+        self.assertIn("buddyswitch-codex data cleanup --buddy <buddy>", help_block)
+        self.assertIn("buddyswitch-codex env status", help_block)
+        self.assertIn("buddyswitch-codex env reset [--yes]", help_block)
+        self.assertIn("buddyswitch-codex help", help_block)
+        self.assertIn("  instance", help_block)
+        self.assertIn("  data", help_block)
+        self.assertIn("  env", help_block)
+        self.assertIn("  help", help_block)
+        self.assertNotIn("buddyswitch-codex [codex args...]", help_block)
+        self.assertNotIn("buddyswitch-codex start ", help_block)
+        self.assertNotIn("buddyswitch-codex buddy ", help_block)
+        self.assertNotIn("buddyswitch-codex cleanup ", help_block)
+        self.assertNotIn("buddyswitch-codex reset ", help_block)
+        self.assertNotIn("buddyswitch-codex browser ", help_block)
+        self.assertNotIn("buddyswitch-codex workspace ", help_block)
+
+    def test_launcher_main_dispatch_only_exposes_final_public_namespaces(self) -> None:
+        launcher = (ROOT / "buddyswitch-codex").read_text(encoding="utf-8")
+        main_match = re.search(r"(?ms)^main\(\) \{\n(.*?)^\}\n\nmain \"\$@\"\n?$", launcher)
+        self.assertIsNotNone(main_match, msg="missing top-level main() dispatch block")
+        assert main_match is not None
+        main_block = main_match.group(1)
+
+        self.assertIn("    instance)", main_block)
+        self.assertIn("    data)", main_block)
+        self.assertIn("    env)", main_block)
+        self.assertIn("    help|-h|--help)", main_block)
+
+        self.assertIn("    __locked-start-bootstrap)", main_block)
+        self.assertIn("    __locked-workspace-sync)", main_block)
+        self.assertIn("    __locked-reset)", main_block)
+        self.assertIn("    __locked-browser-ensure)", main_block)
+        self.assertIn("    __locked-instance-set-inactive)", main_block)
+        self.assertIn("    __locked-instance-open-bootstrap)", main_block)
+        self.assertIn("    __locked-instance-delete)", main_block)
+        self.assertIn("    __locked-cleanup)", main_block)
+
+        self.assertNotIn("    start)", main_block)
+        self.assertNotIn("    buddy)", main_block)
+        self.assertNotIn("    cleanup)", main_block)
+        self.assertNotIn("    reset)", main_block)
+        self.assertNotIn("    browser)", main_block)
+        self.assertNotIn("    workspace)", main_block)
+        self.assertNotIn('      start_codex "$@"', main_block)
 
     def test_main_checkout_does_not_track_legacy_runtime_placeholders(self) -> None:
         self.assertFalse((ROOT / "buddyswitch" / "content" / "artifacts" / ".gitkeep").exists())
@@ -402,7 +489,7 @@ class RepoConsistencyTests(unittest.TestCase):
 
         self.assertIn("two modes exist", text)
         self.assertIn("develop buddyswitch", text)
-        self.assertIn("./buddyswitch-codex start --buddy <buddy>", text)
+        self.assertIn("./buddyswitch-codex instance start --buddy <buddy>", text)
         self.assertIn("${buddyswitch_shared_root}/instances/<instance-id>/workspace", text)
         self.assertIn("${buddyswitch_shared_root}/state", text)
         self.assertNotIn("product mode uses:\n\n- `${buddyswitch_shared_root}`", text)
@@ -1037,9 +1124,6 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "docs" / "dev1626" / "2026-04-17-launcher-market-cockpit-migration-plan.md"
         ).read_text(encoding="utf-8").lower()
 
-        self.assertIn("buddyswitch-codex start", optimization)
-        self.assertIn("browser status", optimization)
-        self.assertIn("browser ensure", optimization)
         self.assertIn("chrome-devtools-cockpit", optimization)
         self.assertIn("shared-browser", optimization)
         self.assertIn("superseded by", migration)

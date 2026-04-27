@@ -1002,7 +1002,7 @@ class RuntimeWriteBoundaryTests(unittest.TestCase):
         task_id = f"task-dev-write-guard-{uuid.uuid4().hex[:8]}"
         with self.assertRaisesRegex(
             ValueError,
-            r"BuddySwitch runtime writes are blocked in the source checkout.*\./buddyswitch-codex start",
+            r"BuddySwitch runtime writes are blocked in the source checkout.*\./buddyswitch-codex instance start --buddy <buddy>",
         ):
             create_task(
                 task_id,

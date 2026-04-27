@@ -7,7 +7,7 @@ BuddySwitch is an env-centric control layer that runs inside the host Codex sess
 Two modes exist:
 
 1. **Develop BuddySwitch:** run `codex` from the repo root.
-2. **Run BuddySwitch product mode:** run `./buddyswitch-codex start --buddy <buddy>`.
+2. **Run BuddySwitch product mode:** run `./buddyswitch-codex instance start --buddy <buddy>`.
 
 The launcher-managed product mode layout is:
 
@@ -63,11 +63,11 @@ Then open `http://127.0.0.1:8765/`.
 If you need a launcher-managed product-mode session instead of repo-root development mode, run:
 
 ```bash
-./buddyswitch-codex buddy list
-./buddyswitch-codex start --buddy pm
+./buddyswitch-codex instance buddies
+./buddyswitch-codex instance start --buddy pm
 ```
 
-`start --buddy <buddy>` creates a fresh buddy-locked instance. To re-enter a stored instance, use:
+`instance start --buddy <buddy>` creates a fresh buddy-locked instance. To re-enter a stored instance, use:
 
 ```bash
 ./buddyswitch-codex instance list
@@ -77,11 +77,11 @@ If you need a launcher-managed product-mode session instead of repo-root develop
 To remove one stored instance without deleting shared BuddySwitch state:
 
 ```bash
-./buddyswitch-codex instance delete <instance-id> --yes
+./buddyswitch-codex instance delete <instance-id>
 ```
 
 `instance open <instance-id>` re-enters the existing instance workspace and runtime profile; it does not restore the previous Codex transcript.
-`instance delete <instance-id> --yes` removes only that instance's launcher-owned local tree and does not delete shared BuddySwitch state.
+`instance delete <instance-id>` previews deletion. Add `--yes` to remove only that instance's launcher-owned local tree; shared BuddySwitch state is kept.
 
 ## Daily Use
 
@@ -94,7 +94,7 @@ python3 scripts/codex_router.py "switch pm: create ai-scheduler-lp track"
 
 ### Resolve a run
 
-Run `resolve` only from the launcher-owned runtime workspace. In create mode it may materialize a zero-run task and reserve the next run id, so the repo-root development checkout blocks it; start the runtime workspace with `./buddyswitch-codex start --buddy <buddy>` first. Product mode runs from `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace` and projects canonical state from `${BUDDYSWITCH_SHARED_ROOT}/state`.
+Run `resolve` only from the launcher-owned runtime workspace. In create mode it may materialize a zero-run task and reserve the next run id, so the repo-root development checkout blocks it; start the runtime workspace with `./buddyswitch-codex instance start --buddy <buddy>` first. Product mode runs from `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace` and projects canonical state from `${BUDDYSWITCH_SHARED_ROOT}/state`.
 
 ```bash
 python3 scripts/switch_runtime.py resolve "switch market: quick market research for AI scheduler landing page"
@@ -103,7 +103,7 @@ python3 scripts/switch_runtime.py resolve "switch pm: create ai-scheduler-lp tra
 
 ### Persist a structured result
 
-Run `persist` only from the launcher-owned runtime workspace. The repo-root development checkout blocks BuddySwitch runtime writes; start it with `./buddyswitch-codex start --buddy <buddy>` first. Product mode writes canonical state under `${BUDDYSWITCH_SHARED_ROOT}/state` and keeps instance-local scratch under `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`. This command is the current CLI wrapper for the `persist-skill-result` step.
+Run `persist` only from the launcher-owned runtime workspace. The repo-root development checkout blocks BuddySwitch runtime writes; start it with `./buddyswitch-codex instance start --buddy <buddy>` first. Product mode writes canonical state under `${BUDDYSWITCH_SHARED_ROOT}/state` and keeps instance-local scratch under `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`. This command is the current CLI wrapper for the `persist-skill-result` step.
 
 ```bash
 python3 scripts/switch_runtime.py persist \
@@ -126,26 +126,26 @@ python3 scripts/serve_context_panel.py
 ### Manage product-mode instances
 
 ```bash
-./buddyswitch-codex buddy list
+./buddyswitch-codex instance buddies
+./buddyswitch-codex instance start --buddy <buddy>
 ./buddyswitch-codex instance list
 ./buddyswitch-codex instance open <instance-id>
-./buddyswitch-codex instance delete <instance-id> --yes
+./buddyswitch-codex instance delete <instance-id>
 ```
 
-`start --buddy <buddy>` creates a fresh buddy-locked instance.
+`instance start --buddy <buddy>` creates a fresh buddy-locked instance.
 `instance open <instance-id>` re-enters the existing instance workspace and runtime profile; it does not restore the previous Codex transcript.
-`instance delete <instance-id> --yes` removes only that instance's launcher-owned local tree and does not delete shared BuddySwitch state.
+`instance delete <instance-id>` previews deletion. Add `--yes` to remove only that instance's launcher-owned local tree; shared BuddySwitch state is kept.
 
 ### Clean local state
 
 ```bash
-./buddyswitch-codex cleanup --agent market
-./buddyswitch-codex cleanup --all-agents
-./buddyswitch-codex cleanup --project app
-./buddyswitch-codex cleanup --all-storage
+./buddyswitch-codex data cleanup --buddy market
+./buddyswitch-codex data cleanup --app-runtime
+./buddyswitch-codex data cleanup --all-data
 ```
 
-Defaults are dry-run. Add `--execute` to apply deletion. Cleanup targets shared state under `${BUDDYSWITCH_SHARED_ROOT}/state` and instance-local scratch under `${BUDDYSWITCH_SHARED_ROOT}/instances/*`; it does not clean the repo-root development checkout.
+Defaults are preview mode. Add `--yes` to apply deletion. Data cleanup targets shared BuddySwitch data and instance-local scratch; it never deletes instance roots or the shared launcher root.
 
 ## What BuddySwitch Is
 
@@ -391,8 +391,6 @@ These are the main operational entry points:
   Aggregates canonical state into the `/api/workspace` payload.
 - `scripts/serve_context_panel.py`
   Serves the read-only Context Panel.
-- `scripts/cleanup_buddyswitch.sh`
-  Compatibility shim to `./buddyswitch-codex cleanup`.
 
 ## Context Panel
 
@@ -441,23 +439,27 @@ codex mcp add chrome-devtools -- npx chrome-devtools-mcp@latest
 BuddySwitch launcher sessions now bootstrap the execution workspace shell and browser capabilities automatically when you run:
 
 ```bash
-./buddyswitch-codex start --buddy pm
+./buddyswitch-codex instance start --buddy pm
 ```
 
-`start --buddy <buddy>` does not auto-sync instance worktree code to the latest repo `HEAD`. `workspace sync` is a legacy/debug compatibility command for the singleton workspace path and is not the normal product-mode refresh path once `instances/` exists.
+`instance start --buddy <buddy>` creates a fresh instance worktree from the current repo code.
 
 Repair and refresh commands are split by responsibility:
 
 ```bash
-./buddyswitch-codex browser status
-./buddyswitch-codex browser ensure
-./buddyswitch-codex workspace sync
+./buddyswitch-codex env browser status --instance <instance-id>
+./buddyswitch-codex env browser ensure --instance <instance-id>
+./buddyswitch-codex env reset
 ```
 
-- `browser ensure` only repairs the shared browser cockpit and browser MCP setup.
-- `workspace sync` manually refreshes the legacy singleton execution workspace to repo `HEAD`. It is a debug/compatibility command rather than the normal buddy-locked product-mode path.
+- `env browser ensure --instance <instance-id>` repairs that instance's browser cockpit and browser MCP setup.
+- `env browser ensure --instance <instance-id>` and `env browser status --instance <instance-id>` default to that instance profile path:
 
-Default shared browser profile path:
+```text
+~/.codex-buddyswitch/instances/<instance-id>/browser/profile
+```
+
+Shared browser profile fallback (used when no instance context is bound):
 
 ```text
 ~/.codex-buddyswitch/chrome/shared-browser
@@ -470,21 +472,21 @@ Override the profile path with `BUDDYSWITCH_BROWSER_PROFILE_DIR=/your/path` when
 Manual cleanup entrypoint:
 
 ```bash
-./buddyswitch-codex cleanup
+./buddyswitch-codex data cleanup --buddy <buddy>
+./buddyswitch-codex data cleanup --app-runtime
+./buddyswitch-codex data cleanup --all-data
 ```
 
-Defaults to dry-run. Add `--execute` to apply deletion.
+Defaults to preview mode. Add `--yes` to apply deletion.
 
 Useful modes:
 
-- `--agent <buddy>`
+- `--buddy <buddy>`
   Cleans that buddy's raw logs, task objects, artifact objects, and run content where `switch.buddy == <buddy>`.
-- `--all-agents`
-  Clears BuddySwitch env state for all buddies, including run audit content.
-- `--project app`
-  Only clears `projects/app/.runtime/` inside the launcher runtime workspace.
-- `--all-storage`
-  Clears the full launcher-managed BuddySwitch storage surface.
+- `--app-runtime`
+  Clears `projects/app/.runtime/` inside instance workspaces.
+- `--all-data`
+  Clears all-buddy shared data, all-buddy raw scratch, and app runtime scratch while keeping instance roots and the shared root.
 
 ## Terminal Output Contract
 
