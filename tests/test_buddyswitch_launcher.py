@@ -148,6 +148,68 @@ Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).write_text(
 """,
         )
 
+    def test_codex_config_patch_removes_prior_misnested_managed_settings_idempotently(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            config_path = temp_root_path / "config.toml"
+            config_path.write_text(
+                """[skills.bundled]
+enabled = false
+
+[features]
+plugins = false
+# BuddySwitch managed automation permissions
+sandbox_mode = "workspace-write"
+approval_policy = { granular = {
+  sandbox_approval = true,
+  rules = false,
+  mcp_elicitations = false,
+  request_permissions = false,
+  skill_approval = false,
+} }
+
+[mcp_servers.chrome-devtools-cockpit]
+command = "npx"
+args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
+
+[sandbox_workspace_write]
+network_access = false
+writable_roots = ["/old"]
+""",
+                encoding="utf-8",
+            )
+
+            command = [
+                sys.executable,
+                str(ROOT / "tools" / "launcher" / "codex_config.py"),
+                "--config",
+                str(config_path),
+                "--shared-root",
+                str(shared_root),
+                "--repo-root",
+                str(ROOT),
+                "--temp-root",
+                "/tmp",
+            ]
+            for _ in range(2):
+                completed = subprocess.run(
+                    command,
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            config_text = config_path.read_text(encoding="utf-8")
+            features_section = config_text.split("[features]", 1)[1].split("\n[", 1)[0]
+            self._assert_codex_automation_config(config_text, shared_root=shared_root)
+            self.assertEqual(config_text.count("# BuddySwitch managed automation permissions"), 1)
+            self.assertNotIn("sandbox_mode", features_section)
+            self.assertNotIn("approval_policy", features_section)
+
     def _write_fake_curl(self, path: Path) -> None:
         self._write_exec(
             path,

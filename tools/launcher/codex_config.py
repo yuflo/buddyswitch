@@ -10,6 +10,7 @@ from pathlib import Path
 
 
 SANDBOX_TABLE = "sandbox_workspace_write"
+MANAGED_COMMENT = "# BuddySwitch managed automation permissions"
 
 
 def parse_args() -> argparse.Namespace:
@@ -133,11 +134,15 @@ def strip_managed_sections(config_text: str) -> str:
             index += 1
             continue
 
-        if current_section is None and top_level_key_assignment(line, "sandbox_mode"):
+        if line.strip() == MANAGED_COMMENT:
             index += 1
             continue
 
-        if current_section is None and top_level_key_assignment(line, "approval_policy"):
+        if current_section in (None, "features") and top_level_key_assignment(line, "sandbox_mode"):
+            index += 1
+            continue
+
+        if current_section in (None, "features") and top_level_key_assignment(line, "approval_policy"):
             balance = brace_delta(line.partition("=")[2])
             index += 1
             while balance > 0 and index < len(lines):
