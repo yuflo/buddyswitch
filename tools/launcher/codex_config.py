@@ -190,13 +190,17 @@ def build_writable_roots(
     canonical_shared_root = canonical(shared_root)
     canonical_repo_root = canonical(repo_root)
     canonical_source_codex_home = canonical(source_codex_home) if source_codex_home else canonical(str(Path.home() / ".codex"))
-    validate_shared_root(canonical_shared_root, canonical_repo_root, canonical_source_codex_home)
+    git_common_dir = repo_git_common_dir(canonical_repo_root)
     roots: list[Path] = [
         canonical_shared_root,
-        repo_git_common_dir(canonical_repo_root),
+        git_common_dir,
     ]
+    for root in roots:
+        validate_writable_root(root, canonical_repo_root, canonical_source_codex_home, git_common_dir)
     for temp_root in temp_roots:
-        roots.append(canonical(temp_root))
+        canonical_temp_root = canonical(temp_root)
+        if is_safe_writable_root(canonical_temp_root, canonical_repo_root, canonical_source_codex_home, git_common_dir):
+            roots.append(canonical_temp_root)
     return dedupe_paths(roots)
 
 
@@ -210,11 +214,19 @@ def path_contains(container: Path, path: Path) -> bool:
     return True
 
 
-def validate_shared_root(shared_root: Path, repo_root: Path, source_codex_home: Path) -> None:
-    if path_contains(shared_root, repo_root):
-        raise ValueError(f"refusing writable root that grants source checkout: {shared_root}")
-    if path_contains(shared_root, source_codex_home) or path_contains(source_codex_home, shared_root):
-        raise ValueError(f"refusing writable root that grants source Codex home: {shared_root}")
+def validate_writable_root(root: Path, repo_root: Path, source_codex_home: Path, git_common_dir: Path) -> None:
+    if root != git_common_dir and (path_contains(root, repo_root) or path_contains(repo_root, root)):
+        raise ValueError(f"refusing writable root that grants source checkout: {root}")
+    if path_contains(root, source_codex_home) or path_contains(source_codex_home, root):
+        raise ValueError(f"refusing writable root that grants source Codex home: {root}")
+
+
+def is_safe_writable_root(root: Path, repo_root: Path, source_codex_home: Path, git_common_dir: Path) -> bool:
+    try:
+        validate_writable_root(root, repo_root, source_codex_home, git_common_dir)
+    except ValueError:
+        return False
+    return True
 
 
 def patched_config_text(existing_text: str, roots: list[Path]) -> str:
