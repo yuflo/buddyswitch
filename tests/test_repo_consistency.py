@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -130,6 +131,22 @@ UI_RUNTIME_PATH_TOKENS = (
     "projects/app/.runtime",
 )
 CONSOLE_RUNTIME_ENDPOINT = "/api/workspace"
+RUNTIME_LOCK_GUARD_SOURCES = (
+    ROOT / "tools" / "launcher" / "runtime_lock.py",
+    ROOT / "scripts" / "switch_runtime.py",
+    ROOT / "scripts" / "runtime_store" / "projections.py",
+    ROOT / "tests" / "test_cleanup_system.py",
+)
+HOME_PATH_GUARD_PATHS = (
+    "README.md",
+    "AGENTS.md",
+    ".codex",
+    "framework/docs",
+    "framework/templates",
+    "scripts",
+    "buddyswitch/manifest.toml",
+)
+HOME_PATH_GUARD_SUFFIXES = {".md", ".toml", ".json", ".yaml", ".yml"}
 
 
 def _markdown_section(text: str, heading: str) -> str:
@@ -174,6 +191,17 @@ def _required_template_tokens(schema: dict[str, object]) -> list[str]:
         if isinstance(items, dict):
             return _required_template_tokens(items)
     return []
+
+
+def _tracked_repo_files(paths: tuple[str, ...]) -> list[Path]:
+    result = subprocess.run(
+        ["git", "ls-files", "--", *paths],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return [ROOT / relative_path for relative_path in result.stdout.splitlines() if relative_path]
 
 
 class RepoConsistencyTests(unittest.TestCase):
@@ -501,6 +529,35 @@ class RepoConsistencyTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
         for token in required:
             self.assertIn(token, readme)
+
+    def test_runtime_sources_do_not_construct_legacy_shared_root_lock_paths(self) -> None:
+        combined_runtime_sources = "\n".join(path.read_text(encoding="utf-8") for path in RUNTIME_LOCK_GUARD_SOURCES)
+
+        self.assertNotIn('Path(f"{shared_root}.lock")', combined_runtime_sources)
+        self.assertNotIn('Path(f"{derived_shared_root}.lock")', combined_runtime_sources)
+
+    def test_tracked_docs_and_config_examples_do_not_hardcode_current_home_shared_root(self) -> None:
+        current_home_shared_root = str(Path.home() / ".codex-buddyswitch")
+        tracked_files = _tracked_repo_files(HOME_PATH_GUARD_PATHS)
+        checked_files: list[Path] = []
+
+        for path in tracked_files:
+            if path.suffix not in HOME_PATH_GUARD_SUFFIXES:
+                continue
+            checked_files.append(path)
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn(
+                current_home_shared_root,
+                text,
+                msg=f"{path.relative_to(ROOT)} should not hard-code {current_home_shared_root}",
+            )
+            self.assertNotIn(
+                'Path.home() / ".codex-buddyswitch"',
+                text,
+                msg=f"{path.relative_to(ROOT)} should not include a current-home shared root example",
+            )
+
+        self.assertTrue(checked_files, msg="expected tracked docs/config example files to be scanned")
 
     def test_switch_spec_keeps_multi_skill_choice_on_resolve_context_skills(self) -> None:
         text = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")
