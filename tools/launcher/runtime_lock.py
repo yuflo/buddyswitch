@@ -180,8 +180,8 @@ def assert_runtime_lock_held(shared_root: str) -> int:
         return 2
 
     lock_path = runtime_lock_path(shared_root)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
     try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
         probe_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
     except OSError as exc:
         print(f"runtime lock required: could not open lock file: {exc}", file=sys.stderr)
