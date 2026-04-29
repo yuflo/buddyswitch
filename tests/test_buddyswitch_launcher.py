@@ -2267,6 +2267,37 @@ exit 1
             self.assertTrue(proof_payload["proof_exists"])
             self.assertEqual(Path(proof_payload["proof_parent"]), shared_root / "run" / "locks")
 
+    def test_runtime_lock_assert_held_reports_controlled_failure_without_lock_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
+            source_home_path = Path(source_home)
+            temp_root_path = Path(temp_root)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            proof_path = temp_root_path / "stale-proof"
+            proof_path.write_text("stale-token", encoding="utf-8")
+
+            env = os.environ.copy()
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            env["BUDDYSWITCH_RUNTIME_LOCK_PROOF"] = str(proof_path)
+            env["BUDDYSWITCH_RUNTIME_LOCK_TOKEN"] = "stale-token"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
+                    "--assert-held",
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("runtime lock required", completed.stderr)
+            self.assertNotIn("Traceback", completed.stderr)
+            self.assertFalse(self._legacy_runtime_lock_path(shared_root).exists())
+
     def test_runtime_lock_is_not_inherited_by_background_children(self) -> None:
         with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
             source_home_path = Path(source_home)
