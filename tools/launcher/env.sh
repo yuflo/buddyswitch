@@ -4,6 +4,7 @@ set -euo pipefail
 BUDDYSWITCH_LAUNCHER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUDDYSWITCH_WORKSPACE_HELPER="${BUDDYSWITCH_LAUNCHER_DIR}/workspace.sh"
 BUDDYSWITCH_RUNTIME_LOCK_HELPER_DEFAULT="${BUDDYSWITCH_LAUNCHER_DIR}/runtime_lock.py"
+BUDDYSWITCH_CODEX_CONFIG_HELPER="${BUDDYSWITCH_LAUNCHER_DIR}/codex_config.py"
 
 if [[ ! -f "${BUDDYSWITCH_WORKSPACE_HELPER}" ]]; then
   echo "Workspace helper is missing under tools/launcher." >&2
@@ -52,6 +53,23 @@ buddyswitch_require_runtime_lock() {
   unset BUDDYSWITCH_RUNTIME_LOCK_TOKEN
 }
 
+buddyswitch_patch_codex_config() {
+  local config_path
+  local -a temp_root_args=()
+  config_path="${BUDDYSWITCH_CODEX_HOME}/config.toml"
+
+  if [[ -n "${TMPDIR:-}" ]]; then
+    temp_root_args+=(--temp-root "${TMPDIR}")
+  fi
+
+  python3 "${BUDDYSWITCH_CODEX_CONFIG_HELPER}" \
+    --config "${config_path}" \
+    --shared-root "${BUDDYSWITCH_SHARED_ROOT}" \
+    --repo-root "${BUDDYSWITCH_REPO_ROOT}" \
+    --temp-root "/tmp" \
+    "${temp_root_args[@]}"
+}
+
 buddyswitch_ensure_shared_env() {
   local shared_codex_home
 
@@ -75,6 +93,8 @@ enabled = false
 plugins = false
 EOF
   fi
+
+  buddyswitch_patch_codex_config
 
   if [[ ! -f "${shared_codex_home}/auth.json" && -f "${BUDDYSWITCH_SOURCE_CODEX_HOME}/auth.json" ]]; then
     cp "${BUDDYSWITCH_SOURCE_CODEX_HOME}/auth.json" "${shared_codex_home}/auth.json"

@@ -556,6 +556,9 @@ exec "$real_git" "$@"
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
             instance_snapshot = payload["instance_json_payload"]
+            repo_root = Path(
+                subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "--git-common-dir"], text=True).strip()
+            ).parent
 
             self.assertIn("BuddySwitch instance:", completed.stdout)
             self.assertIn(payload["instance_id"], completed.stdout)
@@ -598,6 +601,23 @@ exec "$real_git" "$@"
             self.assertTrue((instance_root / "browser" / "chrome.log").exists())
             self.assertFalse((shared_root / "chrome" / "shared-browser").exists())
             self.assertFalse((shared_root / "run" / "browser-cockpit.pid").exists())
+            config_text = (instance_root / "codex-home" / "config.toml").read_text(encoding="utf-8")
+            self.assertIn('sandbox_mode = "workspace-write"', config_text)
+            self.assertIn("network_access = true", config_text)
+            self.assertIn("sandbox_approval = true", config_text)
+            self.assertIn("rules = false", config_text)
+            self.assertIn("mcp_elicitations = false", config_text)
+            self.assertIn("request_permissions = false", config_text)
+            self.assertIn("skill_approval = false", config_text)
+            self.assertIn(str(shared_root), config_text)
+            self.assertIn(str(repo_root / ".git"), config_text)
+            self.assertIn('"/tmp"', config_text)
+            masked_config = config_text
+            for allowed_path in (str(shared_root), str(repo_root / ".git"), "/tmp", os.environ.get("TMPDIR", "")):
+                if allowed_path:
+                    masked_config = masked_config.replace(allowed_path, "")
+            self.assertNotIn(str(Path.home()), masked_config)
+            self.assertNotIn(str(repo_root), config_text.replace(str(repo_root / ".git"), ""))
             instance_auth = instance_root / "codex-home" / "auth.json"
             shared_auth = shared_root / "codex-home" / "auth.json"
             self.assertTrue(shared_auth.exists())
@@ -984,6 +1004,83 @@ exec "$real_git" "$@"
             self.assertEqual(len(list((shared_root / "instances").glob("inst-*"))), 1)
             stored = json.loads(Path(second_payload["instance_json"]).read_text(encoding="utf-8"))
             self.assertEqual(stored["status"], "inactive")
+
+    def test_instance_open_patches_existing_config_and_preserves_mcp_sections(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_id = "inst-pm-existing-config"
+            instance_root, workspace_dir = self._write_instance_record(shared_root, instance_id, browser_port=9222)
+            self._add_test_worktree(workspace_dir)
+
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            instance_codex_home = instance_root / "codex-home"
+            instance_codex_home.mkdir(parents=True, exist_ok=True)
+            (instance_codex_home / "config.toml").write_text(
+                """[skills.bundled]
+enabled = false
+
+[features]
+plugins = false
+
+[mcp_servers.chrome-devtools-cockpit]
+command = "npx"
+args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
+""",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            ready_file = temp_root_path / "browser-ready.flag"
+            capture_path = temp_root_path / "capture-open.json"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            open_result = subprocess.run(
+                [str(LAUNCHER), "instance", "open", instance_id, "debug", "prompt-input", "continue"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(open_result.returncode, 0, msg=open_result.stderr)
+            config_text = (instance_root / "codex-home" / "config.toml").read_text(encoding="utf-8")
+            self.assertIn('sandbox_mode = "workspace-write"', config_text)
+            self.assertIn("network_access = true", config_text)
+            self.assertIn("[mcp_servers.chrome-devtools-cockpit]", config_text)
+            self.assertIn('command = "npx"', config_text)
+            self.assertIn('args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]', config_text)
 
     def test_instance_open_rejects_traversal_instance_id(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
