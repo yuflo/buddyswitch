@@ -18,6 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Patch Codex config automation permissions for BuddySwitch runtime.")
     parser.add_argument("--config", required=True, help="Path to config.toml")
     parser.add_argument("--shared-root", required=True, help="BuddySwitch shared root")
+    parser.add_argument("--source-codex-home", help="Source Codex home that must not be writable")
     parser.add_argument("--repo-root", required=True, help="BuddySwitch repo root")
     parser.add_argument(
         "--temp-root",
@@ -179,10 +180,17 @@ def strip_managed_sections(config_text: str) -> str:
     return "".join(output)
 
 
-def build_writable_roots(shared_root: str, repo_root: str, temp_roots: list[str]) -> list[Path]:
+def build_writable_roots(
+    shared_root: str,
+    repo_root: str,
+    temp_roots: list[str],
+    *,
+    source_codex_home: str | None = None,
+) -> list[Path]:
     canonical_shared_root = canonical(shared_root)
     canonical_repo_root = canonical(repo_root)
-    validate_shared_root(canonical_shared_root, canonical_repo_root)
+    canonical_source_codex_home = canonical(source_codex_home) if source_codex_home else canonical(str(Path.home() / ".codex"))
+    validate_shared_root(canonical_shared_root, canonical_repo_root, canonical_source_codex_home)
     roots: list[Path] = [
         canonical_shared_root,
         repo_git_common_dir(canonical_repo_root),
@@ -202,8 +210,7 @@ def path_contains(container: Path, path: Path) -> bool:
     return True
 
 
-def validate_shared_root(shared_root: Path, repo_root: Path) -> None:
-    source_codex_home = canonical(str(Path.home() / ".codex"))
+def validate_shared_root(shared_root: Path, repo_root: Path, source_codex_home: Path) -> None:
     if path_contains(shared_root, repo_root):
         raise ValueError(f"refusing writable root that grants source checkout: {shared_root}")
     if path_contains(shared_root, source_codex_home) or path_contains(source_codex_home, shared_root):
@@ -225,7 +232,12 @@ def main() -> int:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     existing_text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
     try:
-        roots = build_writable_roots(args.shared_root, args.repo_root, args.temp_root)
+        roots = build_writable_roots(
+            args.shared_root,
+            args.repo_root,
+            args.temp_root,
+            source_codex_home=args.source_codex_home,
+        )
     except ValueError as exc:
         print(f"refusing writable root: {exc}", file=sys.stderr)
         return 2

@@ -65,6 +65,7 @@ buddyswitch_patch_codex_config() {
   python3 "${BUDDYSWITCH_CODEX_CONFIG_HELPER}" \
     --config "${config_path}" \
     --shared-root "${BUDDYSWITCH_SHARED_ROOT}" \
+    --source-codex-home "${BUDDYSWITCH_SOURCE_CODEX_HOME}" \
     --repo-root "${BUDDYSWITCH_REPO_ROOT}" \
     --temp-root "/tmp" \
     "${temp_root_args[@]}"

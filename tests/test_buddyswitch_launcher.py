@@ -219,8 +219,15 @@ writable_roots = ["/old"]
             source_home_path = Path(source_home)
             source_codex_home = source_home_path / ".codex"
             source_codex_home.mkdir(parents=True)
+            custom_codex_home = source_home_path / "custom-codex-home"
+            custom_codex_home.mkdir()
 
-            for shared_root in (ROOT, source_codex_home):
+            cases = (
+                (ROOT, []),
+                (source_codex_home, []),
+                (custom_codex_home, ["--source-codex-home", str(custom_codex_home)]),
+            )
+            for shared_root, extra_args in cases:
                 config_path = temp_root_path / f"{shared_root.name}-config.toml"
                 completed = subprocess.run(
                     [
@@ -234,6 +241,7 @@ writable_roots = ["/old"]
                         str(ROOT),
                         "--temp-root",
                         "/tmp",
+                        *extra_args,
                     ],
                     cwd=ROOT,
                     env={**os.environ, "HOME": str(source_home_path)},
