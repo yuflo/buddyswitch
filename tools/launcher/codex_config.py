@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -90,12 +91,34 @@ def dedupe_paths(paths: list[Path]) -> list[Path]:
 
 
 def parse_section_header(line: str) -> str | None:
-    stripped = line.strip()
+    stripped = strip_inline_comment(line).strip()
     if not stripped.startswith("[") or not stripped.endswith("]"):
         return None
     if stripped.startswith("[[") and stripped.endswith("]]"):
         return stripped[2:-2].strip()
     return stripped[1:-1].strip()
+
+
+def strip_inline_comment(line: str) -> str:
+    in_single_quote = False
+    in_double_quote = False
+    escaped = False
+    for index, char in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if in_double_quote and char == "\\":
+            escaped = True
+            continue
+        if char == '"' and not in_single_quote:
+            in_double_quote = not in_double_quote
+            continue
+        if char == "'" and not in_double_quote:
+            in_single_quote = not in_single_quote
+            continue
+        if char == "#" and not in_single_quote and not in_double_quote:
+            return line[:index]
+    return line
 
 
 def top_level_key_assignment(line: str, key: str) -> bool:
@@ -157,13 +180,34 @@ def strip_managed_sections(config_text: str) -> str:
 
 
 def build_writable_roots(shared_root: str, repo_root: str, temp_roots: list[str]) -> list[Path]:
+    canonical_shared_root = canonical(shared_root)
+    canonical_repo_root = canonical(repo_root)
+    validate_shared_root(canonical_shared_root, canonical_repo_root)
     roots: list[Path] = [
-        canonical(shared_root),
-        repo_git_common_dir(canonical(repo_root)),
+        canonical_shared_root,
+        repo_git_common_dir(canonical_repo_root),
     ]
     for temp_root in temp_roots:
         roots.append(canonical(temp_root))
     return dedupe_paths(roots)
+
+
+def path_contains(container: Path, path: Path) -> bool:
+    if container == path:
+        return True
+    try:
+        path.relative_to(container)
+    except ValueError:
+        return False
+    return True
+
+
+def validate_shared_root(shared_root: Path, repo_root: Path) -> None:
+    source_codex_home = canonical(str(Path.home() / ".codex"))
+    if path_contains(shared_root, repo_root):
+        raise ValueError(f"refusing writable root that grants source checkout: {shared_root}")
+    if path_contains(shared_root, source_codex_home) or path_contains(source_codex_home, shared_root):
+        raise ValueError(f"refusing writable root that grants source Codex home: {shared_root}")
 
 
 def patched_config_text(existing_text: str, roots: list[Path]) -> str:
@@ -180,7 +224,11 @@ def main() -> int:
     config_path = canonical(args.config)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     existing_text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
-    roots = build_writable_roots(args.shared_root, args.repo_root, args.temp_root)
+    try:
+        roots = build_writable_roots(args.shared_root, args.repo_root, args.temp_root)
+    except ValueError as exc:
+        print(f"refusing writable root: {exc}", file=sys.stderr)
+        return 2
     config_path.write_text(patched_config_text(existing_text, roots), encoding="utf-8")
     return 0
 

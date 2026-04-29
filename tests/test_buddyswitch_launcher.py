@@ -174,7 +174,7 @@ approval_policy = { granular = {
 command = "npx"
 args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
 
-[sandbox_workspace_write]
+[sandbox_workspace_write] # old managed table with an inline comment
 network_access = false
 writable_roots = ["/old"]
 """,
@@ -207,8 +207,44 @@ writable_roots = ["/old"]
             features_section = config_text.split("[features]", 1)[1].split("\n[", 1)[0]
             self._assert_codex_automation_config(config_text, shared_root=shared_root)
             self.assertEqual(config_text.count("# BuddySwitch managed automation permissions"), 1)
+            self.assertNotIn("[sandbox_workspace_write] # old", config_text)
+            self.assertNotIn("network_access = false", config_text)
+            self.assertNotIn('writable_roots = ["/old"]', config_text)
             self.assertNotIn("sandbox_mode", features_section)
             self.assertNotIn("approval_policy", features_section)
+
+    def test_codex_config_patch_rejects_shared_root_that_grants_forbidden_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True)
+
+            for shared_root in (ROOT, source_codex_home):
+                config_path = temp_root_path / f"{shared_root.name}-config.toml"
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        str(ROOT / "tools" / "launcher" / "codex_config.py"),
+                        "--config",
+                        str(config_path),
+                        "--shared-root",
+                        str(shared_root),
+                        "--repo-root",
+                        str(ROOT),
+                        "--temp-root",
+                        "/tmp",
+                    ],
+                    cwd=ROOT,
+                    env={**os.environ, "HOME": str(source_home_path)},
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.assertEqual(completed.returncode, 2)
+                self.assertIn("refusing writable root", completed.stderr)
+                self.assertFalse(config_path.exists())
 
     def _write_fake_curl(self, path: Path) -> None:
         self._write_exec(
