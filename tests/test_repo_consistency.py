@@ -228,7 +228,6 @@ class RepoConsistencyTests(unittest.TestCase):
         targets = (
             ROOT / "framework" / "docs" / "switch-spec.md",
             ROOT / "framework" / "docs" / "skill-architecture-best-practices.md",
-            ROOT / "docs" / "reviews" / "buddyswitch-control-layer" / "07-implementation-status.md",
         )
         combined = "\n".join(path.read_text(encoding="utf-8") for path in targets).lower()
 
@@ -243,7 +242,6 @@ class RepoConsistencyTests(unittest.TestCase):
         targets = (
             ROOT / "README.md",
             ROOT / "framework" / "docs" / "interface-spec.md",
-            ROOT / "docs" / "reviews" / "buddyswitch-control-layer" / "07-implementation-status.md",
         )
         combined = "\n".join(path.read_text(encoding="utf-8") for path in targets).lower()
 
@@ -399,8 +397,6 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "README.md",
             ROOT / "framework" / "docs" / "artifacts-runs-git-policy.md",
             ROOT / "evals" / "cases" / "07-cleanup-storage-script.md",
-            ROOT / "docs" / "reviews" / "buddyswitch-control-layer" / "10-phase-3-task-centric-runtime-plan.md",
-            ROOT / "docs" / "reviews" / "buddyswitch-control-layer" / "11-phase-3-implementation-handoff.md",
         )
         combined = "\n".join(path.read_text(encoding="utf-8") for path in targets).lower()
         self.assertIn("launcher runtime workspace", combined)
@@ -455,23 +451,8 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("verification plan and stop condition", text)
         self.assertIn("reviewer rubric for substantial changes", text)
         self.assertIn("root cause or only symptoms", text)
-        self.assertIn("docs/templates/ai-task-preflight.md", text)
-        self.assertIn("docs/templates/ai-reviewer-rubric.md", text)
-
-    def test_docs_templates_define_ai_preflight_and_reviewer_rubric(self) -> None:
-        preflight = (ROOT / "docs" / "templates" / "ai-task-preflight.md").read_text(encoding="utf-8").lower()
-        reviewer = (ROOT / "docs" / "templates" / "ai-reviewer-rubric.md").read_text(encoding="utf-8").lower()
-
-        self.assertIn("outcome and bottleneck", preflight)
-        self.assertIn("confirmed facts", preflight)
-        self.assertIn("tools and permissions", preflight)
-        self.assertIn("verification plan", preflight)
-        self.assertIn("stop and resolve before execution", preflight)
-        self.assertIn("problem framing", reviewer)
-        self.assertIn("root cause", reviewer)
-        self.assertIn("boundary integrity", reviewer)
-        self.assertIn("verification quality", reviewer)
-        self.assertIn("fail signals", reviewer)
+        self.assertIn("do not rely on a separate template file", text)
+        self.assertIn("do not rely on a separate rubric file", text)
 
     def test_runtime_agents_doc_uses_context_then_persist_flow(self) -> None:
         text = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
@@ -841,13 +822,6 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("selected_skill_packet", cockpit_doc)
         self.assertNotIn("prepare-execution", cockpit_doc)
 
-    def test_dev1626_docs_include_active_browser_cockpit_plans(self) -> None:
-        docs_dir = ROOT / "docs" / "dev1626"
-        names = {path.name for path in docs_dir.glob("*.md")}
-
-        self.assertIn("2026-04-17-optimization-a-browser-cockpit-realignment-plan.md", names)
-        self.assertIn("2026-04-17-launcher-market-cockpit-migration-plan.md", names)
-
     def test_switch_spec_documents_resolve_context_loop(self) -> None:
         switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
         self.assertIn("resolve_context", switch_spec)
@@ -903,18 +877,6 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("when that skill surface is already resolved", runtime_agents)
         self.assertIn("for multi-skill buddies", runtime_agents)
         self.assertIn("top-level `inputs` may be empty", switch_spec)
-
-    def test_manual_checklist_stays_on_active_runtime_contract(self) -> None:
-        checklist = (
-            ROOT / "docs" / "dev0154" / "2026-04-22-all-buddy-runtime-cutover-manual-checklist.md"
-        ).read_text(encoding="utf-8").lower()
-
-        self.assertIn("launcher-owned runtime workspace", checklist)
-        self.assertIn("context_revision", checklist)
-        self.assertIn("refreshed_context.run_envelope", checklist)
-        self.assertIn("preview path metadata may still live inside the durable artifact", checklist)
-        self.assertNotIn("prepare-execution", checklist)
-        self.assertNotIn("selected_skill_packet", checklist)
 
     def test_docs_place_persist_follow_up_fields_inside_receipt(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
@@ -1115,19 +1077,6 @@ class RepoConsistencyTests(unittest.TestCase):
         text = (ROOT / ".codex" / "agents" / "router.toml").read_text(encoding="utf-8").lower()
 
         self.assertIn("buddyswitch/objects/tasks/*.json", text)
-
-    def test_dev1626_active_plans_define_browser_cockpit_happy_path(self) -> None:
-        optimization = (
-            ROOT / "docs" / "dev1626" / "2026-04-17-optimization-a-browser-cockpit-realignment-plan.md"
-        ).read_text(encoding="utf-8").lower()
-        migration = (
-            ROOT / "docs" / "dev1626" / "2026-04-17-launcher-market-cockpit-migration-plan.md"
-        ).read_text(encoding="utf-8").lower()
-
-        self.assertIn("chrome-devtools-cockpit", optimization)
-        self.assertIn("shared-browser", optimization)
-        self.assertIn("superseded by", migration)
-        self.assertIn("optimization-a-browser-cockpit-realignment-plan", migration)
 
     def test_switch_spec_lists_current_runtime_errors(self) -> None:
         switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")

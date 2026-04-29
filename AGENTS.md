@@ -190,7 +190,7 @@ For any non-trivial task, do not move from exploration into planning or implemen
 - verification plan and stop condition
 
 If a required tool, permission, or contract boundary is missing, stop and resolve that gap before execution.
-Use `docs/templates/ai-task-preflight.md` for medium or large tasks.
+For medium or large tasks, make the required checks above explicit in the task record or working notes. Do not rely on a separate template file.
 
 ### 4.5 Reviewer rubric for substantial changes
 Before declaring completion on substantial work, review the result against a fixed rubric:
@@ -202,7 +202,7 @@ Before declaring completion on substantial work, review the result against a fix
 - does verification prove the claimed outcome
 - did scope stay aligned with the original bottleneck
 
-Use `docs/templates/ai-reviewer-rubric.md` for self-review or reviewer-agent review.
+Use the review questions above directly for self-review or reviewer-agent review. Do not rely on a separate rubric file.
 
 ### 4.6 Communication Contract
 Use communication to move execution forward, not to perform process.
