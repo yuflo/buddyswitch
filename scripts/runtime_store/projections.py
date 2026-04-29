@@ -92,12 +92,12 @@ def _runtime_lock_path() -> Path | None:
         shared_root = raw_shared_root.rstrip("/")
         if not shared_root:
             return None
-        return Path(f"{shared_root}.lock")
+        return Path(shared_root) / "run" / "locks" / "runtime.lock"
 
     workspace_root = env_store.ROOT
     derived_shared_root = _shared_root_from_workspace_root(workspace_root)
     if derived_shared_root is not None:
-        return Path(f"{derived_shared_root}.lock")
+        return derived_shared_root / "run" / "locks" / "runtime.lock"
     if _workspace_uses_projected_state(workspace_root):
         raise RuntimeSnapshotLockError(
             f"runtime snapshot lock shared root could not be derived from workspace root: {workspace_root}"

@@ -283,8 +283,16 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
             "BUDDYSWITCH_SHARED_ROOT": str(instance_json.parent),
         }
 
+    @staticmethod
+    def _legacy_runtime_lock_path(shared_root: Path) -> Path:
+        return Path(f"{shared_root}.lock")
+
+    @staticmethod
+    def _runtime_lock_path(shared_root: Path) -> Path:
+        return shared_root / "run" / "locks" / "runtime.lock"
+
     def _hold_runtime_lock(self, shared_root: Path) -> int:
-        lock_path = Path(f"{shared_root}.lock")
+        lock_path = self._runtime_lock_path(shared_root)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -360,12 +368,15 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
     def test_cmd_resolve_product_mode_plain_text_without_binding_adapts_to_active_buddy(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-pm-plain")
         env = self._product_env("pm", "inst-pm-plain", instance_json)
+        shared_root = Path(env["BUDDYSWITCH_SHARED_ROOT"])
         with patch.dict(os.environ, env, clear=True):
             with patch.object(switch_runtime, "resolve_switch", return_value=self._resolve_ok()) as mock_resolve:
                 exit_code, payload = self._run_cmd_resolve("Draft the PRD for onboarding improvements")
 
         self.assertEqual(exit_code, 0)
         self.assertTrue(payload["ok"])
+        self.assertFalse(self._legacy_runtime_lock_path(shared_root).exists())
+        self.assertTrue(self._runtime_lock_path(shared_root).exists())
         mock_resolve.assert_called_once_with(
             "switch pm: Draft the PRD for onboarding improvements",
             manifest_path=switch_runtime.DEFAULT_MANIFEST,
@@ -881,7 +892,7 @@ class WorkspaceProjectionFacadeTests(unittest.TestCase):
             projected_runs.parent.mkdir(parents=True, exist_ok=True)
             projected_runs.symlink_to(state_runs_root)
 
-            lock_path = Path(f"{shared_root}.lock")
+            lock_path = shared_root / "run" / "locks" / "runtime.lock"
             lock_path.parent.mkdir(parents=True, exist_ok=True)
             lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
             try:
@@ -900,6 +911,8 @@ class WorkspaceProjectionFacadeTests(unittest.TestCase):
                                 workspace_projections.build_workspace_projection_snapshot()
             finally:
                 os.close(lock_fd)
+            self.assertFalse(Path(f"{shared_root}.lock").exists())
+            self.assertTrue((shared_root / "run" / "locks" / "runtime.lock").exists())
 
         mock_build.assert_not_called()
 

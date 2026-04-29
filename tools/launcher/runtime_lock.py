@@ -83,6 +83,18 @@ def normalize_shared_root(raw_shared_root: str | None) -> str:
     return shared_root
 
 
+def runtime_lock_dir(shared_root: str) -> Path:
+    return Path(shared_root) / "run" / "locks"
+
+
+def runtime_lock_path(shared_root: str) -> Path:
+    return runtime_lock_dir(shared_root) / "runtime.lock"
+
+
+def runtime_proof_path(shared_root: str) -> Path:
+    return runtime_lock_dir(shared_root) / f"runtime.{os.getpid()}.proof"
+
+
 def acquire_runtime_lock(lock_fd: int, lock_path: Path, timeout_seconds: float) -> int:
     deadline = time.monotonic() + timeout_seconds
     while True:
@@ -100,10 +112,10 @@ def acquire_runtime_lock(lock_fd: int, lock_path: Path, timeout_seconds: float) 
 
 
 def run_with_lock(shared_root: str, timeout_seconds: float, command: list[str]) -> int:
-    lock_path = Path(f"{shared_root}.lock")
+    lock_path = runtime_lock_path(shared_root)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
-    proof_path = Path(f"{shared_root}.lock.{os.getpid()}.proof")
+    proof_path = runtime_proof_path(shared_root)
     child: subprocess.Popen[bytes] | None = None
     received_signal: int | None = None
     try:
@@ -167,7 +179,7 @@ def assert_runtime_lock_held(shared_root: str) -> int:
         print("runtime lock required: inherited lock proof mismatch", file=sys.stderr)
         return 2
 
-    lock_path = Path(f"{shared_root}.lock")
+    lock_path = runtime_lock_path(shared_root)
     probe_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         try:

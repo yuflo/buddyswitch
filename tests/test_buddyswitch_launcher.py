@@ -44,6 +44,14 @@ while True:
 
 
 class BuddySwitchLauncherTests(unittest.TestCase):
+    @staticmethod
+    def _legacy_runtime_lock_path(shared_root: Path) -> Path:
+        return Path(f"{shared_root}.lock")
+
+    @staticmethod
+    def _runtime_lock_path(shared_root: Path) -> Path:
+        return shared_root / "run" / "locks" / "runtime.lock"
+
     def _write_exec(self, path: Path, content: str) -> None:
         path.write_text(content, encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
@@ -160,6 +168,7 @@ exec "$real_git" "$@"
         )
 
     def _spawn_lock_holder(self, lock_path: Path) -> subprocess.Popen[str]:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
         holder = subprocess.Popen(
             [sys.executable, "-c", LOCK_HOLDER_SCRIPT, str(lock_path)],
             stdout=subprocess.PIPE,
@@ -2095,7 +2104,7 @@ exit 1
             env.pop("CODEX_HOME", None)
             env["BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"] = LOCK_TIMEOUT_SECONDS
 
-            lock_path = Path(f"{shared_root}.lock")
+            lock_path = self._runtime_lock_path(shared_root)
             holder = self._spawn_lock_holder(lock_path)
             try:
                 blocked_reset = subprocess.run(
@@ -2204,6 +2213,59 @@ exit 1
             self.assertEqual(direct_reset.returncode, 2)
             self.assertIn("Reset blocked", direct_reset.stderr)
             self.assertTrue(sentinel.exists(), "helper-wrapped locked reset must not bypass root validation")
+
+    def test_runtime_lock_helper_writes_lock_and_proof_under_shared_root_run_locks(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
+            source_home_path = Path(source_home)
+            temp_root_path = Path(temp_root)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            proof_capture_path = temp_root_path / "proof-capture.json"
+
+            env = os.environ.copy()
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            env["BUDDYSWITCH_TEST_PROOF_CAPTURE"] = str(proof_capture_path)
+
+            capture_script = (
+                "import json, os\n"
+                "from pathlib import Path\n"
+                "proof_path = Path(os.environ['BUDDYSWITCH_RUNTIME_LOCK_PROOF'])\n"
+                "payload = {\n"
+                "  'proof_path': str(proof_path),\n"
+                "  'proof_parent': str(proof_path.parent),\n"
+                "  'proof_exists': proof_path.exists(),\n"
+                "}\n"
+                "Path(os.environ['BUDDYSWITCH_TEST_PROOF_CAPTURE']).write_text(\n"
+                "  json.dumps(payload, ensure_ascii=True),\n"
+                "  encoding='utf-8',\n"
+                ")\n"
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
+                    "--",
+                    sys.executable,
+                    "-c",
+                    capture_script,
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertTrue(proof_capture_path.exists(), "locked child must capture inherited proof metadata")
+
+            lock_path = self._legacy_runtime_lock_path(shared_root)
+            new_lock_path = self._runtime_lock_path(shared_root)
+            self.assertFalse(lock_path.exists())
+            self.assertTrue(new_lock_path.exists())
+
+            proof_payload = json.loads(proof_capture_path.read_text(encoding="utf-8"))
+            self.assertTrue(proof_payload["proof_exists"])
+            self.assertEqual(Path(proof_payload["proof_parent"]), shared_root / "run" / "locks")
 
     def test_runtime_lock_is_not_inherited_by_background_children(self) -> None:
         with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
@@ -2380,7 +2442,7 @@ exit 1
             env.pop("CODEX_HOME", None)
             env["BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"] = LOCK_TIMEOUT_SECONDS
 
-            lock_path = Path(f"{shared_root}.lock")
+            lock_path = self._runtime_lock_path(shared_root)
             holder = self._spawn_lock_holder(lock_path)
             try:
                 blocked_sync = subprocess.run(
@@ -2717,7 +2779,7 @@ exit 0
             env["BUDDYSWITCH_TEST_CURL_CALLED_FILE"] = str(curl_called_path)
             env["BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"] = LOCK_TIMEOUT_SECONDS
 
-            lock_path = Path(f"{shared_root}.lock")
+            lock_path = self._runtime_lock_path(shared_root)
             holder = self._spawn_lock_holder(lock_path)
             try:
                 ensure_invalid_port = subprocess.run(
@@ -2927,7 +2989,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             env.pop("CODEX_HOME", None)
             env["BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"] = LOCK_TIMEOUT_SECONDS
 
-            lock_path = Path(f"{shared_root}.lock")
+            lock_path = self._runtime_lock_path(shared_root)
             holder = self._spawn_lock_holder(lock_path)
             try:
                 blocked_ensure = subprocess.run(
@@ -3004,7 +3066,8 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             self.assertFalse((instance_root / "home").exists())
             self.assertFalse((instance_root / "codex-home").exists())
             self.assertFalse((instance_root / "xdg-config").exists())
-            self.assertFalse(Path(f"{shared_root}.lock").exists())
+            self.assertFalse(self._legacy_runtime_lock_path(shared_root).exists())
+            self.assertFalse(self._runtime_lock_path(shared_root).exists())
 
     def test_locked_workspace_sync_entrypoint_rejects_direct_invocation_without_lock(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:

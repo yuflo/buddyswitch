@@ -187,7 +187,7 @@ def _hold_product_runtime_lock(product_session: dict[str, Any]):
     if not shared_root:
         raise ValueError("BUDDYSWITCH_SHARED_ROOT must not be empty")
     timeout_seconds = _runtime_lock_timeout_seconds()
-    lock_path = Path(f"{shared_root}.lock")
+    lock_path = Path(shared_root) / "run" / "locks" / "runtime.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
     deadline = time.monotonic() + timeout_seconds
