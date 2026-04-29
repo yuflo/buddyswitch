@@ -30,20 +30,27 @@ def toml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def render_managed_block(roots: list[Path]) -> str:
-    rendered_roots = ",\n  ".join(toml_string(str(root)) for root in roots)
+def render_managed_top_level_block() -> str:
     return (
-        f"""
+        """
 # BuddySwitch managed automation permissions
 sandbox_mode = "workspace-write"
-approval_policy = {{ granular = {{
+approval_policy = { granular = {
   sandbox_approval = true,
   rules = false,
   mcp_elicitations = false,
   request_permissions = false,
   skill_approval = false,
-}} }}
+} }
+""".strip()
+        + "\n"
+    )
 
+
+def render_sandbox_workspace_write_block(roots: list[Path]) -> str:
+    rendered_roots = ",\n  ".join(toml_string(str(root)) for root in roots)
+    return (
+        f"""
 [sandbox_workspace_write]
 network_access = true
 writable_roots = [
@@ -55,10 +62,7 @@ writable_roots = [
 
 
 def canonical(path: str) -> Path:
-    expanded = Path(path).expanduser()
-    if expanded.is_absolute():
-        return expanded
-    return (Path.cwd() / expanded).resolve(strict=False)
+    return Path(path).expanduser().resolve(strict=False)
 
 
 def repo_git_common_dir(repo_root: Path) -> Path:
@@ -159,10 +163,11 @@ def build_writable_roots(shared_root: str, repo_root: str, temp_roots: list[str]
 
 def patched_config_text(existing_text: str, roots: list[Path]) -> str:
     preserved = strip_managed_sections(existing_text).rstrip("\n")
-    managed = render_managed_block(roots)
+    managed_top_level = render_managed_top_level_block()
+    sandbox_workspace_write = render_sandbox_workspace_write_block(roots)
     if preserved:
-        return f"{preserved}\n\n{managed}"
-    return managed
+        return f"{managed_top_level}\n{preserved}\n\n{sandbox_workspace_write}"
+    return f"{managed_top_level}\n{sandbox_workspace_write}"
 
 
 def main() -> int:

@@ -52,6 +52,47 @@ class BuddySwitchLauncherTests(unittest.TestCase):
     def _runtime_lock_path(shared_root: Path) -> Path:
         return shared_root / "run" / "locks" / "runtime.lock"
 
+    @staticmethod
+    def _repo_git_common_dir(repo_root: Path = ROOT) -> Path:
+        output = subprocess.check_output(
+            ["git", "-C", str(repo_root), "rev-parse", "--git-common-dir"],
+            text=True,
+        ).strip()
+        git_dir = Path(output)
+        if not git_dir.is_absolute():
+            git_dir = repo_root / git_dir
+        return git_dir.resolve(strict=False)
+
+    def _assert_codex_automation_config(self, config_text: str, *, shared_root: Path, repo_root: Path = ROOT) -> None:
+        repo_git_common_dir = self._repo_git_common_dir(repo_root)
+        top_level_text = config_text.split("[", 1)[0]
+
+        self.assertEqual(config_text.count('sandbox_mode = "workspace-write"'), 1)
+        self.assertEqual(config_text.count("[sandbox_workspace_write]"), 1)
+        self.assertIn('sandbox_mode = "workspace-write"', top_level_text)
+        self.assertIn("approval_policy = { granular = {", top_level_text)
+        self.assertIn("network_access = true", config_text)
+        self.assertIn("sandbox_approval = true", config_text)
+        self.assertIn("rules = false", config_text)
+        self.assertIn("mcp_elicitations = false", config_text)
+        self.assertIn("request_permissions = false", config_text)
+        self.assertIn("skill_approval = false", config_text)
+        self.assertIn(str(shared_root.resolve(strict=False)), config_text)
+        self.assertIn(str(repo_git_common_dir), config_text)
+        self.assertIn(json.dumps(str(Path("/tmp").resolve(strict=False))), config_text)
+
+        masked_config = config_text
+        for allowed_path in (
+            str(shared_root.resolve(strict=False)),
+            str(repo_git_common_dir),
+            str(Path("/tmp").resolve(strict=False)),
+            str(Path(os.environ["TMPDIR"]).resolve(strict=False)) if os.environ.get("TMPDIR") else "",
+        ):
+            if allowed_path:
+                masked_config = masked_config.replace(allowed_path, "")
+        self.assertNotIn(str(Path.home()), masked_config)
+        self.assertNotIn(str(repo_root.resolve(strict=False)), config_text.replace(str(repo_git_common_dir), ""))
+
     def _write_exec(self, path: Path, content: str) -> None:
         path.write_text(content, encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
@@ -556,9 +597,6 @@ exec "$real_git" "$@"
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_root = source_home_path / ".codex-buddyswitch"
             instance_snapshot = payload["instance_json_payload"]
-            repo_root = Path(
-                subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "--git-common-dir"], text=True).strip()
-            ).parent
 
             self.assertIn("BuddySwitch instance:", completed.stdout)
             self.assertIn(payload["instance_id"], completed.stdout)
@@ -602,22 +640,7 @@ exec "$real_git" "$@"
             self.assertFalse((shared_root / "chrome" / "shared-browser").exists())
             self.assertFalse((shared_root / "run" / "browser-cockpit.pid").exists())
             config_text = (instance_root / "codex-home" / "config.toml").read_text(encoding="utf-8")
-            self.assertIn('sandbox_mode = "workspace-write"', config_text)
-            self.assertIn("network_access = true", config_text)
-            self.assertIn("sandbox_approval = true", config_text)
-            self.assertIn("rules = false", config_text)
-            self.assertIn("mcp_elicitations = false", config_text)
-            self.assertIn("request_permissions = false", config_text)
-            self.assertIn("skill_approval = false", config_text)
-            self.assertIn(str(shared_root), config_text)
-            self.assertIn(str(repo_root / ".git"), config_text)
-            self.assertIn('"/tmp"', config_text)
-            masked_config = config_text
-            for allowed_path in (str(shared_root), str(repo_root / ".git"), "/tmp", os.environ.get("TMPDIR", "")):
-                if allowed_path:
-                    masked_config = masked_config.replace(allowed_path, "")
-            self.assertNotIn(str(Path.home()), masked_config)
-            self.assertNotIn(str(repo_root), config_text.replace(str(repo_root / ".git"), ""))
+            self._assert_codex_automation_config(config_text, shared_root=shared_root)
             instance_auth = instance_root / "codex-home" / "auth.json"
             shared_auth = shared_root / "codex-home" / "auth.json"
             self.assertTrue(shared_auth.exists())
@@ -1076,11 +1099,24 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
 
             self.assertEqual(open_result.returncode, 0, msg=open_result.stderr)
             config_text = (instance_root / "codex-home" / "config.toml").read_text(encoding="utf-8")
-            self.assertIn('sandbox_mode = "workspace-write"', config_text)
-            self.assertIn("network_access = true", config_text)
+            self._assert_codex_automation_config(config_text, shared_root=shared_root)
             self.assertIn("[mcp_servers.chrome-devtools-cockpit]", config_text)
             self.assertIn('command = "npx"', config_text)
             self.assertIn('args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]', config_text)
+
+            second_open_result = subprocess.run(
+                [str(LAUNCHER), "instance", "open", instance_id, "debug", "prompt-input", "continue again"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(second_open_result.returncode, 0, msg=second_open_result.stderr)
+            repatched_config_text = (instance_root / "codex-home" / "config.toml").read_text(encoding="utf-8")
+            self._assert_codex_automation_config(repatched_config_text, shared_root=shared_root)
+            self.assertEqual(repatched_config_text.count("[mcp_servers.chrome-devtools-cockpit]"), 1)
 
     def test_instance_open_rejects_traversal_instance_id(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
