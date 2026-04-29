@@ -755,6 +755,7 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         return instance_root, workspace_dir
 
     def _spawn_lock_holder(self, lock_path: Path) -> subprocess.Popen[str]:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
         holder = subprocess.Popen(
             [sys.executable, "-c", LOCK_HOLDER_SCRIPT, str(lock_path)],
             stdout=subprocess.PIPE,
@@ -954,7 +955,7 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         self.assertEqual(before_exclude_bytes, exclude_path.read_bytes())
 
     def test_shell_cleanup_is_blocked_when_runtime_lock_is_held(self) -> None:
-        lock_path = Path(f"{self.shared_root}.lock")
+        lock_path = self.shared_root / "run" / "locks" / "runtime.lock"
         state_run_path = "buddyswitch/content/runs/run-market.json"
         self.assertTrue(self.state_fixture.exists(state_run_path), "precondition: shared-state run fixture exists")
 
