@@ -132,6 +132,7 @@ UI_RUNTIME_PATH_TOKENS = (
 )
 CONSOLE_RUNTIME_ENDPOINT = "/api/workspace"
 RUNTIME_LOCK_GUARD_SOURCES = (
+    ROOT / "tools" / "launcher" / "env.sh",
     ROOT / "tools" / "launcher" / "runtime_lock.py",
     ROOT / "scripts" / "switch_runtime.py",
     ROOT / "scripts" / "runtime_store" / "projections.py",
@@ -535,6 +536,8 @@ class RepoConsistencyTests(unittest.TestCase):
 
         self.assertNotIn('Path(f"{shared_root}.lock")', combined_runtime_sources)
         self.assertNotIn('Path(f"{derived_shared_root}.lock")', combined_runtime_sources)
+        self.assertNotIn("BUDDYSWITCH_RUNTIME_LOCK_PROOF", combined_runtime_sources)
+        self.assertNotIn("BUDDYSWITCH_RUNTIME_LOCK_TOKEN", combined_runtime_sources)
 
     def test_tracked_docs_and_config_examples_do_not_hardcode_current_home_shared_root(self) -> None:
         current_home_shared_root = str(Path.home() / ".codex-buddyswitch")
@@ -772,6 +775,19 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("instance-browser", text)
                 self.assertIn("instance-cockpit", text)
 
+    def test_browser_cockpit_docs_define_mcp_auto_approval_without_parallel_calls(self) -> None:
+        for path in (
+            ROOT / "README.md",
+            ROOT / "framework" / "docs" / "browser-cockpit.md",
+            ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md",
+        ):
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                text = path.read_text(encoding="utf-8").lower()
+                self.assertIn("all enabled mcp servers", text)
+                self.assertIn('default_tools_approval_mode = "approve"', text)
+                self.assertIn("supports_parallel_tool_calls = true", text)
+                self.assertIn("do not set", text)
+
     def test_market_schemas_share_market_cockpit_evidence_fields(self) -> None:
         for path in MARKET_SCHEMA_PATHS:
             with self.subTest(schema=str(path.relative_to(ROOT))):
@@ -974,6 +990,42 @@ class RepoConsistencyTests(unittest.TestCase):
                 legacy_unconditional_router,
                 text,
                 msg=f"legacy unconditional refreshed_context instruction must be removed in {path.relative_to(ROOT)}",
+            )
+
+    def test_docs_define_persist_as_end_of_turn_explicit_resolve_boundary(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
+        switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
+
+        self.assertIn("successful `persist` does not reserve a follow-up run", readme)
+        self.assertIn("receipt.recommended_switch", readme)
+        self.assertIn("run `resolve` with `receipt.recommended_switch`", readme)
+        self.assertIn("if another turn is needed, run `resolve` with `receipt.recommended_switch`", readme)
+        self.assertNotIn("continue from `refreshed_context`", readme)
+
+        self.assertIn("`persist` is the end-of-turn commit boundary", switch_spec)
+        self.assertIn("successful `persist` does not reserve a follow-up run", switch_spec)
+        self.assertIn("receipt.recommended_switch", switch_spec)
+        self.assertIn("run explicit `resolve` with `receipt.recommended_switch`", switch_spec)
+        self.assertNotIn("`refreshed_context` normally carries the next-turn resolve handoff", switch_spec)
+        self.assertNotIn("continue from `refreshed_context` when it is true", switch_spec)
+
+    def test_active_host_prompts_require_explicit_resolve_after_persist(self) -> None:
+        targets = (
+            ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md",
+            ROOT / ".codex" / "agents" / "router.toml",
+        )
+
+        for path in targets:
+            text = path.read_text(encoding="utf-8").lower()
+            self.assertIn("check `refreshed_context.ok`", text)
+            self.assertIn("e_runtime_refresh_context", text)
+            self.assertIn("receipt.recommended_switch", text)
+            self.assertIn("next explicit `resolve`", text)
+            self.assertIn("if another turn is needed", text)
+            self.assertNotIn("continue from `refreshed_context`", text)
+            self.assertNotIn(
+                "`refreshed_context` is the canonical follow-up handoff after a successful persist",
+                text,
             )
 
     def test_buddy_prompt_assets_exist_for_every_manifest_buddy(self) -> None:

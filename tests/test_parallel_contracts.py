@@ -224,17 +224,42 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         self.assertTrue(persisted["ok"])
         self.assertEqual(list(persisted.keys()), contract["response_key_order"])
         self.assertEqual(persisted["receipt"]["run_id"], context["run_envelope"]["run_id"])
+        self.assertFalse(persisted["refreshed_context"]["ok"])
+        self.assertEqual(persisted["refreshed_context"]["error"]["code"], "E_RUNTIME_REFRESH_CONTEXT")
         self.assertEqual(
-            persisted["refreshed_context"]["run_envelope"]["previous_run_id"],
-            persisted["receipt"]["run_id"],
+            persisted["refreshed_context"]["error"]["recommended_switch"],
+            persisted["receipt"]["recommended_switch"],
         )
-        self.assertEqual(persisted["refreshed_context"]["run_envelope"]["status"], "reserved")
+        self.assertNotIn("run_envelope", persisted["refreshed_context"])
         self.assertNotIn("skill_id", persisted)
         self.assertNotIn("task_id", persisted)
         self.assertNotIn("artifact_id", persisted)
         self.assertNotIn("run_id", persisted)
         self.assertNotIn("paths", persisted)
         self.assertNotIn("writes", persisted)
+
+    def test_persist_contract_does_not_leave_hidden_follow_up_reservation(self) -> None:
+        context = switch_runtime.resolve_switch(
+            "switch dev: Implement the approved onboarding improvements in projects/app"
+        )
+        consumed_run_id = context["run_envelope"]["run_id"]
+        consumed_path = switch_runtime._reserved_run_path(consumed_run_id)  # type: ignore[attr-defined]
+        self.assertTrue(consumed_path.exists())
+
+        persisted = switch_runtime.persist_skill_result(
+            context,
+            skill_id="implement-task",
+            result=self._artifact_result(),
+        )
+
+        self.assertTrue(persisted["ok"])
+        self.assertFalse(consumed_path.exists())
+        self.assertFalse(persisted["refreshed_context"]["ok"])
+        self.assertNotIn("run_envelope", persisted["refreshed_context"])
+
+        reserved_dir = switch_runtime._reserved_run_path("placeholder").parent  # type: ignore[attr-defined]
+        remaining = sorted(reserved_dir.glob("*.json")) if reserved_dir.exists() else []
+        self.assertEqual(remaining, [])
 
 
 class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):

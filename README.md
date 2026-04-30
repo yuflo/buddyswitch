@@ -52,7 +52,7 @@ python3 scripts/switch_runtime.py persist \
   --result /tmp/buddyswitch-result.json
 ```
 
-6. Continue from `refreshed_context` when the task needs another turn, then start the read-only Context Panel:
+6. `persist` is end-of-turn. Successful `persist` does not reserve a follow-up run. If another turn is needed, run `resolve` with `receipt.recommended_switch`, then start the read-only Context Panel:
 
 ```bash
 python3 scripts/serve_context_panel.py
@@ -182,7 +182,7 @@ The default flow is:
 2. `resolve_context`
 3. host run
 4. `persist-skill-result`
-5. continue from `refreshed_context`
+5. if another turn is needed, run `resolve` with `receipt.recommended_switch`
 
 Important runtime rules:
 
@@ -287,7 +287,9 @@ Successful persistence returns `{ok, receipt, refreshed_context}`. The host-faci
 - `related_run_ids`
 - `recommended_switch`
 
-Check `refreshed_context.ok` before using it for the next turn. On `E_RUNTIME_REFRESH_CONTEXT`, the persist already committed successfully; rerun `resolve` to reserve the next turn again.
+`persist` is the end-of-turn commit boundary. Successful `persist` does not reserve a follow-up run.
+
+Check `refreshed_context.ok` before using it for the next turn. On `E_RUNTIME_REFRESH_CONTEXT`, the persist already committed successfully; if another turn is needed, run `resolve` with `receipt.recommended_switch`.
 
 ## Project Layout
 
@@ -443,6 +445,8 @@ BuddySwitch launcher sessions now bootstrap the execution workspace shell and br
 ```
 
 `instance start --buddy <buddy>` creates a fresh instance worktree from the current repo code.
+
+Launcher-managed Codex config sets all enabled MCP servers to `default_tools_approval_mode = "approve"` so product-mode research does not stop for per-tool MCP approval prompts. Do not set `supports_parallel_tool_calls = true` for the browser cockpit path; the instance browser is stateful and should execute page navigation, clicks, and DOM reads serially.
 
 Repair and refresh commands are split by responsibility:
 

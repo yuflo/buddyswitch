@@ -1124,11 +1124,21 @@ def _clear_run_reservation(run_id: str) -> dict[str, Any] | None:
     return None
 
 
-def _refresh_context_error(exc: Exception) -> dict[str, Any]:
-    return runtime_error(
-        "E_RUNTIME_REFRESH_CONTEXT",
-        f"persist succeeded, but refreshed_context could not be reserved: {exc}",
-    )
+def _post_persist_refreshed_context_unavailable(receipt: dict[str, Any]) -> dict[str, Any]:
+    recommended_switch = receipt.get("recommended_switch")
+    reference_switches = receipt.get("reference_switches")
+    error: dict[str, Any] = {
+        "code": "E_RUNTIME_REFRESH_CONTEXT",
+        "message": (
+            "persist completed without reserving a follow-up run; "
+            "rerun resolve with receipt.recommended_switch to continue"
+        ),
+    }
+    if isinstance(recommended_switch, str) and recommended_switch.strip():
+        error["recommended_switch"] = recommended_switch
+    if isinstance(reference_switches, dict):
+        error["reference_switches"] = reference_switches
+    return {"ok": False, "error": error}
 
 
 def _derive_context_sequence(task: dict[str, Any]) -> int:
@@ -1755,21 +1765,6 @@ def _persist_artifact_skill(
     }
 
 
-def _build_refresh_switch_text(
-    *,
-    buddy_id: str,
-    task_id: str,
-    track_id: str | None,
-    demand: str,
-) -> str:
-    if not isinstance(demand, str) or not demand.strip():
-        raise ValueError("switch.demand is required")
-    command = f"switch {buddy_id}({task_id})"
-    if isinstance(track_id, str) and track_id:
-        command += f" -> {track_id}"
-    return f"{command}: {demand}"
-
-
 def _persist_skill_result(
     context: dict[str, Any],
     *,
@@ -1854,9 +1849,6 @@ def _persist_skill_result(
 
     task_resolution = context.get("task_resolution")
     task_mode = task_resolution.get("mode") if isinstance(task_resolution, dict) else None
-    demand = persist_switch.get("demand")
-    if not isinstance(demand, str) or not demand.strip():
-        raise ValueError("switch.demand is required")
     explicit_track_id = persist_switch.get("track_id")
     task, effective_track_id, _ = _ensure_task_binding(task=stored_task, explicit_track_id=explicit_track_id)
     created_task_id_for_recovery = task["id"] if task_mode == "create" else None
@@ -1890,32 +1882,12 @@ def _persist_skill_result(
             ) from exc
         raise
 
-    refreshed_track_id = receipt.get("track_id") if isinstance(receipt, dict) else None
-    if not isinstance(refreshed_track_id, str) or not refreshed_track_id:
-        refreshed_track_id = effective_track_id
     reservation_clear_warning = _clear_run_reservation(run_id)
     if reservation_clear_warning is not None:
         receipt_warnings = receipt.setdefault("warnings", []) if isinstance(receipt, dict) else []
         if isinstance(receipt_warnings, list):
             receipt_warnings.append(reservation_clear_warning)
-    try:
-        refreshed_context = _build_resolve_context(
-            _build_refresh_switch_text(
-                buddy_id=buddy_id,
-                task_id=task["id"],
-                track_id=refreshed_track_id,
-                demand=demand,
-            ),
-            manifest_path=manifest_path,
-        )
-        if not refreshed_context.get("ok"):
-            raise ValueError("failed to refresh context after persist_skill_result")
-    except (ManifestError, ValueError, OutputSchemaError, OSError) as exc:
-        return {
-            "ok": True,
-            "receipt": receipt,
-            "refreshed_context": _refresh_context_error(exc),
-        }
+    refreshed_context = _post_persist_refreshed_context_unavailable(receipt)
 
     return {
         "ok": True,

@@ -4,11 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import fcntl
 import math
 import os
 import signal
-import secrets
 import struct
 import subprocess
 import sys
@@ -21,8 +21,6 @@ LOCK_WAIT_POLL_SECONDS = 0.05
 BUSY_EXIT_CODE = 4
 TIMEOUT_ENV = "BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"
 SHARED_ROOT_ENV = "BUDDYSWITCH_SHARED_ROOT"
-LOCK_PROOF_ENV = "BUDDYSWITCH_RUNTIME_LOCK_PROOF"
-LOCK_TOKEN_ENV = "BUDDYSWITCH_RUNTIME_LOCK_TOKEN"
 
 
 def parse_args() -> argparse.Namespace:
@@ -96,10 +94,6 @@ def runtime_owner_lock_path(shared_root: str) -> Path:
     return runtime_lock_dir(shared_root) / "runtime.owner.lock"
 
 
-def runtime_proof_path(shared_root: str) -> Path:
-    return runtime_lock_dir(shared_root) / f"runtime.{os.getpid()}.proof"
-
-
 def acquire_owner_lock(lock_fd: int, lock_path: Path) -> int:
     try:
         fcntl.lockf(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -121,6 +115,68 @@ def write_lock_owner(lock_fd: int) -> int | None:
     if lock_type == fcntl.F_UNLCK:
         return None
     return int(pid)
+
+
+def darwin_parent_process_id(pid: int) -> int | None:
+    if sys.platform != "darwin":
+        return None
+    buffer = ctypes.create_string_buffer(4096)
+    try:
+        libc = ctypes.CDLL("libc.dylib", use_errno=True)
+        result = libc.proc_pidinfo(ctypes.c_int(pid), ctypes.c_int(3), ctypes.c_uint64(0), buffer, len(buffer))
+    except (AttributeError, OSError):
+        return None
+    if result < struct.calcsize("IIIII"):
+        return None
+    try:
+        _flags, _status, _xstatus, _pid, ppid = struct.unpack_from("IIIII", buffer.raw)
+    except struct.error:
+        return None
+    return int(ppid)
+
+
+def parent_process_id(pid: int) -> int | None:
+    darwin_ppid = darwin_parent_process_id(pid)
+    if darwin_ppid is not None:
+        return darwin_ppid
+
+    proc_stat = Path("/proc") / str(pid) / "stat"
+    try:
+        stat_text = proc_stat.read_text(encoding="utf-8")
+        stat_fields = stat_text.rsplit(") ", 1)[1].split()
+        return int(stat_fields[1])
+    except (OSError, IndexError, ValueError):
+        pass
+
+    try:
+        output = subprocess.check_output(
+            ["ps", "-o", "ppid=", "-p", str(pid)],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    output_lines = output.strip().splitlines()
+    if not output_lines:
+        return None
+    try:
+        return int(output_lines[0].strip())
+    except ValueError:
+        return None
+
+
+def process_is_descendant_of(pid: int, ancestor_pid: int) -> bool:
+    current_pid = pid
+    seen: set[int] = set()
+    while current_pid > 0 and current_pid not in seen:
+        if current_pid == ancestor_pid:
+            return True
+        seen.add(current_pid)
+        parent_pid = parent_process_id(current_pid)
+        if parent_pid is None:
+            return False
+        current_pid = parent_pid
+    return False
 
 
 def acquire_runtime_lock(lock_fd: int, lock_path: Path, timeout_seconds: float) -> int:
@@ -145,8 +201,6 @@ def run_with_lock(shared_root: str, timeout_seconds: float, command: list[str]) 
     lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
     owner_lock_path = runtime_owner_lock_path(shared_root)
     owner_lock_fd: int | None = None
-    proof_path = runtime_proof_path(shared_root)
-    proof_fd: int | None = None
     child: subprocess.Popen[bytes] | None = None
     received_signal: int | None = None
     try:
@@ -157,16 +211,7 @@ def run_with_lock(shared_root: str, timeout_seconds: float, command: list[str]) 
         owner_lock_result = acquire_owner_lock(owner_lock_fd, owner_lock_path)
         if owner_lock_result != 0:
             return owner_lock_result
-        proof_token = secrets.token_urlsafe(24)
-        proof_path.write_text(proof_token, encoding="utf-8")
-        os.chmod(proof_path, 0o600)
-        proof_fd = os.open(proof_path, os.O_RDWR)
-        owner_lock_result = acquire_owner_lock(proof_fd, proof_path)
-        if owner_lock_result != 0:
-            return owner_lock_result
         child_env = os.environ.copy()
-        child_env[LOCK_PROOF_ENV] = str(proof_path)
-        child_env[LOCK_TOKEN_ENV] = proof_token
 
         def forward_signal(signum: int, _frame: object) -> None:
             nonlocal received_signal
@@ -196,51 +241,32 @@ def run_with_lock(shared_root: str, timeout_seconds: float, command: list[str]) 
             return 128 + received_signal
         return return_code
     finally:
-        if proof_fd is not None:
-            os.close(proof_fd)
-        proof_path.unlink(missing_ok=True)
         if owner_lock_fd is not None:
             os.close(owner_lock_fd)
         os.close(lock_fd)
 
 
 def assert_runtime_lock_held(shared_root: str) -> int:
-    proof_path_raw = os.environ.get(LOCK_PROOF_ENV)
-    proof_token = os.environ.get(LOCK_TOKEN_ENV)
-    if not proof_path_raw or not proof_token:
-        print("runtime lock required: missing inherited lock context", file=sys.stderr)
-        return 2
-
-    proof_path = Path(proof_path_raw)
-    try:
-        stored_token = proof_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        print(f"runtime lock required: invalid inherited lock context: {exc}", file=sys.stderr)
-        return 2
-
-    if not secrets.compare_digest(stored_token, proof_token):
-        print("runtime lock required: inherited lock proof mismatch", file=sys.stderr)
-        return 2
-
     try:
         owner_lock_fd = os.open(runtime_owner_lock_path(shared_root), os.O_RDWR)
-        proof_fd = os.open(proof_path, os.O_RDWR)
     except OSError as exc:
         print(f"runtime lock required: could not open lock context: {exc}", file=sys.stderr)
         return 2
     try:
         try:
             runtime_owner = write_lock_owner(owner_lock_fd)
-            proof_owner = write_lock_owner(proof_fd)
         except OSError as exc:
-            print(f"runtime lock required: could not inspect lock owners: {exc}", file=sys.stderr)
+            print(f"runtime lock required: could not inspect lock owner: {exc}", file=sys.stderr)
             return 2
     finally:
-        os.close(proof_fd)
         os.close(owner_lock_fd)
 
-    if runtime_owner is None or proof_owner is None or runtime_owner != proof_owner:
-        print("runtime lock required: inherited lock proof is not bound to runtime lock", file=sys.stderr)
+    if runtime_owner is None:
+        print("runtime lock required: runtime lock owner is not locked", file=sys.stderr)
+        return 2
+
+    if not process_is_descendant_of(os.getpid(), runtime_owner):
+        print("runtime lock required: current process did not inherit runtime lock owner", file=sys.stderr)
         return 2
 
     lock_path = runtime_lock_path(shared_root)

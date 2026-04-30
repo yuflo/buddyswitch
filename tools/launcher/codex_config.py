@@ -12,6 +12,8 @@ from pathlib import Path
 
 SANDBOX_TABLE = "sandbox_workspace_write"
 MANAGED_COMMENT = "# BuddySwitch managed automation permissions"
+MCP_SERVER_PREFIX = "mcp_servers."
+MCP_TOOLS_APPROVAL_KEY = "default_tools_approval_mode"
 
 
 def parse_args() -> argparse.Namespace:
@@ -180,6 +182,60 @@ def strip_managed_sections(config_text: str) -> str:
     return "".join(output)
 
 
+def is_mcp_server_section(section: str | None) -> bool:
+    return isinstance(section, str) and section.startswith(MCP_SERVER_PREFIX) and len(section) > len(MCP_SERVER_PREFIX)
+
+
+def approval_line_like(line: str) -> str:
+    indent = line[: len(line) - len(line.lstrip())]
+    newline = "\n" if line.endswith("\n") else ""
+    return f'{indent}{MCP_TOOLS_APPROVAL_KEY} = "approve"{newline}'
+
+
+def append_mcp_approval(output: list[str]) -> None:
+    approval_line = f'{MCP_TOOLS_APPROVAL_KEY} = "approve"\n'
+    if output and output[-1].strip() == "":
+        trailing_blank = output.pop()
+        output.append(approval_line)
+        output.append(trailing_blank)
+        return
+    output.append(approval_line)
+
+
+def patch_mcp_server_approvals(config_text: str) -> str:
+    lines = config_text.splitlines(keepends=True)
+    output: list[str] = []
+    in_mcp_section = False
+    mcp_section_has_approval = False
+
+    def finish_section() -> None:
+        nonlocal in_mcp_section, mcp_section_has_approval
+        if in_mcp_section and not mcp_section_has_approval:
+            append_mcp_approval(output)
+        in_mcp_section = False
+        mcp_section_has_approval = False
+
+    for line in lines:
+        header = parse_section_header(line)
+        if header is not None:
+            finish_section()
+            in_mcp_section = is_mcp_server_section(header)
+            mcp_section_has_approval = False
+            output.append(line)
+            continue
+
+        if in_mcp_section and top_level_key_assignment(line, MCP_TOOLS_APPROVAL_KEY):
+            if not mcp_section_has_approval:
+                output.append(approval_line_like(line))
+                mcp_section_has_approval = True
+            continue
+
+        output.append(line)
+
+    finish_section()
+    return "".join(output)
+
+
 def build_writable_roots(
     shared_root: str,
     repo_root: str,
@@ -230,7 +286,7 @@ def is_safe_writable_root(root: Path, repo_root: Path, source_codex_home: Path, 
 
 
 def patched_config_text(existing_text: str, roots: list[Path]) -> str:
-    preserved = strip_managed_sections(existing_text).rstrip("\n")
+    preserved = patch_mcp_server_approvals(strip_managed_sections(existing_text)).rstrip("\n")
     managed_top_level = render_managed_top_level_block()
     sandbox_workspace_write = render_sandbox_workspace_write_block(roots)
     if preserved:

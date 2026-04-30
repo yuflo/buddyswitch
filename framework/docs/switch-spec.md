@@ -160,7 +160,7 @@ Recommended fixed host flow:
 6. execute the selected skill in-session
 7. produce a structured result payload matching the selected skill schema
 8. call `scripts/switch_runtime.py persist` to perform the `persist-skill-result` step
-9. check `refreshed_context.ok`; continue from `refreshed_context` when it is true, or rerun `resolve` when `refreshed_context.error.code = E_RUNTIME_REFRESH_CONTEXT`
+9. check `refreshed_context.ok`; the default successful persist path returns `E_RUNTIME_REFRESH_CONTEXT`, and if another turn is needed, run explicit `resolve` with `receipt.recommended_switch`
 
 Boundary for execution:
 
@@ -207,7 +207,9 @@ Successful persist responses include `receipt` plus `refreshed_context`. Host-fa
 - `related_run_ids`
 - `recommended_switch`
 
-`refreshed_context` normally carries the next-turn resolve handoff. If the persist commits but the follow-up reservation cannot be written, `refreshed_context` returns `{ok: false, error.code: E_RUNTIME_REFRESH_CONTEXT}` and the host should rerun `resolve`.
+`persist` is the end-of-turn commit boundary. Successful `persist` does not reserve a follow-up run.
+
+Check `refreshed_context.ok` before using it for the next turn. The default successful persist path returns `{ok: false, error.code: E_RUNTIME_REFRESH_CONTEXT}`; if another turn is needed, run explicit `resolve` with `receipt.recommended_switch`.
 
 Host terminal rendering contract:
 

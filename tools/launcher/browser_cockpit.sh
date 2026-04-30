@@ -204,6 +204,7 @@ buddyswitch_browser_add_mcp_server() {
   local server_name="$1"
   shift
   buddyswitch_run_codex mcp add "${server_name}" -- "$@"
+  buddyswitch_patch_codex_config
 }
 
 buddyswitch_browser_remove_mcp_server() {

@@ -316,6 +316,27 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
             "run_envelope": {"run_id": "run-reserved"},
         }
 
+    @staticmethod
+    def _pm_prd_result() -> dict[str, object]:
+        return {
+            "execution_summary": "Captured PRD draft updates.",
+            "working_notes": ["Focused on scope and acceptance criteria."],
+            "deliverables_or_changed_files": [],
+            "artifact_content": {
+                "problem": "Users need a clearer PRD path for runtime updates.",
+                "goals": ["Capture clear scope", "Preserve product-mode safety"],
+                "non_goals": ["Implement delivery code in this step"],
+                "users_and_scenarios": ["PM updates task scope after runtime resolve."],
+                "scope_p0_p1": {
+                    "p0": ["Define minimum acceptance criteria"],
+                    "p1": ["Add extended delivery notes"],
+                },
+                "acceptance_criteria": ["PRD payload validates and persists successfully."],
+                "risks": ["Reservation cleanup may fail if runtime storage is unstable."],
+                "open_questions": ["Should cleanup retries be added later?"],
+            },
+        }
+
     def test_cmd_resolve_without_product_mode_env_preserves_strict_text(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             with patch.object(switch_runtime, "resolve_switch", return_value={"ok": True}) as mock_resolve:
@@ -519,6 +540,9 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         first_reservation = json.loads(
             switch_runtime._reserved_run_path(first_run_id).read_text(encoding="utf-8")  # type: ignore[attr-defined]
         )
+        self.assertEqual(first_reservation["status"], "reserved")
+        self.assertEqual(first_reservation["run_id"], first_run_id)
+        self.assertEqual(first_reservation["task_id"], first_payload["switch"]["task_id"])
         self.assertEqual(first_reservation["instance_id"], "inst-pm-first")
 
         task_id = first_payload["switch"]["task_id"]
@@ -537,6 +561,9 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertEqual(second_payload["error"]["code"], "E_RUNTIME_RESOLVE")
         self.assertIn("active run reservation", second_payload["error"]["message"])
         self.assertIn("inst-pm-first", second_payload["error"]["message"])
+        reserved_dir = switch_runtime._reserved_run_path("placeholder").parent  # type: ignore[attr-defined]
+        remaining = sorted(path.name for path in reserved_dir.glob("*.json"))
+        self.assertEqual(remaining, [f"{first_run_id}.json"])
 
     def test_cmd_resolve_product_mode_is_blocked_by_runtime_lock(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-pm-resolve-lock")
@@ -644,24 +671,7 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
     def test_cmd_persist_product_mode_reservation_clear_failure_returns_warning(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-pm-persist-clear-warning")
         env = self._product_env("pm", "inst-pm-persist-clear-warning", instance_json)
-        result_payload = {
-            "execution_summary": "Captured PRD draft updates.",
-            "working_notes": ["Focused on scope and acceptance criteria."],
-            "deliverables_or_changed_files": [],
-            "artifact_content": {
-                "problem": "Users need a clearer PRD path for runtime updates.",
-                "goals": ["Capture clear scope", "Preserve product-mode safety"],
-                "non_goals": ["Implement delivery code in this step"],
-                "users_and_scenarios": ["PM updates task scope after runtime resolve."],
-                "scope_p0_p1": {
-                    "p0": ["Define minimum acceptance criteria"],
-                    "p1": ["Add extended delivery notes"],
-                },
-                "acceptance_criteria": ["PRD payload validates and persists successfully."],
-                "risks": ["Reservation cleanup may fail if runtime storage is unstable."],
-                "open_questions": ["Should cleanup retries be added later?"],
-            },
-        }
+        result_payload = self._pm_prd_result()
 
         with patch.dict(os.environ, env, clear=True):
             resolve_exit_code, resolved_payload = self._run_cmd_resolve("Draft updated PRD")
@@ -698,6 +708,123 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         assert isinstance(warning, dict)
         self.assertEqual(warning["run_id"], run_id)
         self.assertEqual(warning["reservation_path"], str(reservation_path))
+
+    def test_cmd_persist_product_mode_does_not_leave_post_persist_reservation(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-no-post-persist-reserve")
+        env = self._product_env("pm", "inst-pm-no-post-persist-reserve", instance_json)
+
+        with patch.dict(os.environ, env, clear=True):
+            resolve_exit_code, resolved_payload = self._run_cmd_resolve("Draft updated PRD")
+
+            self.assertEqual(resolve_exit_code, 0)
+            self.assertTrue(resolved_payload["ok"])
+
+            consumed_run_id = resolved_payload["run_envelope"]["run_id"]
+            consumed_path = switch_runtime._reserved_run_path(consumed_run_id)  # type: ignore[attr-defined]
+            self.assertTrue(consumed_path.exists())
+
+            persist_exit_code, persisted_payload = self._run_cmd_persist(
+                resolved_payload,
+                self._pm_prd_result(),
+                skill_id="write-prd",
+            )
+
+            self.assertEqual(persist_exit_code, 0)
+            self.assertTrue(persisted_payload["ok"])
+            self.assertFalse(consumed_path.exists())
+
+            receipt = persisted_payload["receipt"]
+            self.assertIsInstance(receipt, dict)
+            assert isinstance(receipt, dict)
+            paths = receipt["paths"]
+            self.assertIsInstance(paths, dict)
+            assert isinstance(paths, dict)
+            self.assertTrue(self._runtime_path(paths["run"]).exists())
+            self.assertTrue(self._runtime_path(paths["task"]).exists())
+            for artifact_path in paths["artifacts"]:
+                self.assertTrue(self._runtime_path(artifact_path).exists())
+
+            refreshed_context = persisted_payload["refreshed_context"]
+            self.assertFalse(refreshed_context["ok"])
+            self.assertEqual(refreshed_context["error"]["code"], "E_RUNTIME_REFRESH_CONTEXT")
+            self.assertEqual(
+                refreshed_context["error"]["recommended_switch"],
+                receipt["recommended_switch"],
+            )
+            self.assertNotIn("run_envelope", refreshed_context)
+
+            reserved_dir = switch_runtime._reserved_run_path("placeholder").parent  # type: ignore[attr-defined]
+            remaining = sorted(reserved_dir.glob("*.json")) if reserved_dir.exists() else []
+            self.assertEqual(remaining, [])
+
+            followup_switch = receipt["recommended_switch"].replace("<demand>", "Continue PRD")
+            followup_exit_code, followup_payload = self._run_cmd_resolve(followup_switch)
+
+        self.assertEqual(followup_exit_code, 0)
+        self.assertTrue(followup_payload["ok"])
+        followup_run_id = followup_payload["run_envelope"]["run_id"]
+        self.assertNotEqual(followup_run_id, consumed_run_id)
+        followup_path = switch_runtime._reserved_run_path(followup_run_id)  # type: ignore[attr-defined]
+        self.assertTrue(followup_path.exists())
+
+        followup_reservation = json.loads(followup_path.read_text(encoding="utf-8"))
+        self.assertEqual(followup_reservation["status"], "reserved")
+        self.assertEqual(followup_reservation["run_id"], followup_run_id)
+        self.assertEqual(followup_reservation["task_id"], receipt["task_id"])
+        self.assertEqual(followup_reservation["instance_id"], "inst-pm-no-post-persist-reserve")
+        self.assertEqual(followup_payload["run_envelope"]["previous_run_id"], receipt["run_id"])
+
+        stored_instance = json.loads(instance_json.read_text(encoding="utf-8"))
+        self.assertEqual(stored_instance["current_task_id"], persisted_payload["receipt"]["task_id"])
+        self.assertEqual(stored_instance["current_track_id"], persisted_payload["receipt"]["track_id"])
+
+    def test_cmd_persist_product_mode_rejects_failed_resolve_payload_without_writes(self) -> None:
+        shared_root = self.runtime_root / "shared-root"
+        first_instance_json = self._write_instance_json(instance_id="inst-pm-first-failed-persist")
+        first_env = self._product_env("pm", "inst-pm-first-failed-persist", first_instance_json)
+        first_env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+
+        with patch.dict(os.environ, first_env, clear=True):
+            first_exit_code, first_payload = self._run_cmd_resolve("Draft launch requirements")
+
+        self.assertEqual(first_exit_code, 0)
+        self.assertTrue(first_payload["ok"])
+
+        task_id = first_payload["switch"]["task_id"]
+        first_run_id = first_payload["run_envelope"]["run_id"]
+        first_reservation_path = switch_runtime._reserved_run_path(first_run_id)  # type: ignore[attr-defined]
+        self.assertTrue(first_reservation_path.exists())
+
+        second_instance_json = self._write_instance_json(
+            instance_id="inst-pm-second-failed-persist",
+            current_task_id=task_id,
+        )
+        second_env = self._product_env("pm", "inst-pm-second-failed-persist", second_instance_json)
+        second_env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+
+        with patch.dict(os.environ, second_env, clear=True):
+            failed_exit_code, failed_payload = self._run_cmd_resolve("Continue launch requirements")
+            persist_exit_code, persist_payload = self._run_cmd_persist(
+                failed_payload,
+                self._pm_prd_result(),
+                skill_id="write-prd",
+            )
+
+        self.assertEqual(failed_exit_code, 1)
+        self.assertFalse(failed_payload["ok"])
+        self.assertEqual(failed_payload["error"]["code"], "E_RUNTIME_RESOLVE")
+
+        self.assertEqual(persist_exit_code, 1)
+        self.assertFalse(persist_payload["ok"])
+        self.assertEqual(persist_payload["error"]["code"], "E_RUNTIME_PERSIST")
+        self.assertIn(
+            "context payload must be successful before persist_skill_result",
+            persist_payload["error"]["message"],
+        )
+
+        self.assertTrue(first_reservation_path.exists())
+        self.assertFalse(list(self._runtime_path("buddyswitch/content/runs").glob("run-*.json")))
+        self.assertFalse(list(self._runtime_path("buddyswitch/objects/artifacts").glob("*.json")))
 
     def test_cmd_persist_product_mode_is_blocked_by_runtime_lock(self) -> None:
         instance_json = self._write_instance_json(
@@ -2391,13 +2518,38 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(list(payload.keys()), PERSIST_SKILL_RESULT_RESPONSE_KEY_ORDER)
         self.assertEqual(payload["receipt"]["run_id"], resolved["run_envelope"]["run_id"])
+        self.assertFalse(payload["refreshed_context"]["ok"])
+        self.assertEqual(payload["refreshed_context"]["error"]["code"], "E_RUNTIME_REFRESH_CONTEXT")
         self.assertEqual(
-            payload["refreshed_context"]["run_envelope"]["previous_run_id"],
-            payload["receipt"]["run_id"],
+            payload["refreshed_context"]["error"]["recommended_switch"],
+            payload["receipt"]["recommended_switch"],
         )
-        self.assertEqual(payload["refreshed_context"]["run_envelope"]["status"], "reserved")
+        self.assertNotIn("run_envelope", payload["refreshed_context"])
         for field in PERSIST_SKILL_RESULT_PACKET_ERA_FIELDS:
             self.assertNotIn(field, payload)
+
+    def test_persist_skill_result_rejects_ok_false_context_even_with_forged_envelope_without_writes(self) -> None:
+        resolved = switch_runtime.resolve_switch(
+            "switch dev: Implement the approved onboarding improvements in projects/app"
+        )
+        run_id = resolved["run_envelope"]["run_id"]
+        reservation_path = switch_runtime._reserved_run_path(run_id)  # type: ignore[attr-defined]
+        self.assertTrue(reservation_path.exists())
+
+        forged = deepcopy(resolved)
+        forged["ok"] = False
+        forged["error"] = {"code": "E_RUNTIME_RESOLVE", "message": "active run reservation"}
+
+        with self.assertRaisesRegex(ValueError, "context payload must be successful before persist_skill_result"):
+            switch_runtime.persist_skill_result(
+                forged,
+                skill_id="implement-task",
+                result=self._artifact_result(),
+            )
+
+        self.assertTrue(reservation_path.exists())
+        self.assertFalse((self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")).exists())
+        self.assertFalse(list(self._runtime_path("buddyswitch/objects/artifacts").glob("*.json")))
 
     def test_persist_skill_result_re_resolves_skill_definition_from_manifest(self) -> None:
         resolved = switch_runtime.resolve_switch(
@@ -3197,10 +3349,13 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(list(payload.keys()), PERSIST_SKILL_RESULT_RESPONSE_KEY_ORDER)
         self.assertEqual(payload["receipt"]["run_id"], resolved["run_envelope"]["run_id"])
+        self.assertFalse(payload["refreshed_context"]["ok"])
+        self.assertEqual(payload["refreshed_context"]["error"]["code"], "E_RUNTIME_REFRESH_CONTEXT")
         self.assertEqual(
-            payload["refreshed_context"]["run_envelope"]["previous_run_id"],
-            payload["receipt"]["run_id"],
+            payload["refreshed_context"]["error"]["recommended_switch"],
+            payload["receipt"]["recommended_switch"],
         )
+        self.assertNotIn("run_envelope", payload["refreshed_context"])
         for field in PERSIST_SKILL_RESULT_PACKET_ERA_FIELDS:
             self.assertNotIn(field, payload)
 
@@ -3208,20 +3363,22 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         resolved = switch_runtime.resolve_switch(
             "switch dev: Implement the approved onboarding improvements in projects/app"
         )
-
-        with patch("switch_runtime._build_resolve_context", side_effect=OSError("disk full during refresh reserve")):
-            payload = switch_runtime.persist_skill_result(
-                resolved,
-                skill_id="implement-task",
-                result=self._artifact_result(),
-            )
+        payload = switch_runtime.persist_skill_result(
+            resolved,
+            skill_id="implement-task",
+            result=self._artifact_result(),
+        )
 
         self._remember_persisted_paths(payload)
 
         self.assertTrue(payload["ok"])
         self.assertFalse(payload["refreshed_context"]["ok"])
         self.assertEqual(payload["refreshed_context"]["error"]["code"], "E_RUNTIME_REFRESH_CONTEXT")
-        self.assertIn("disk full during refresh reserve", payload["refreshed_context"]["error"]["message"])
+        self.assertEqual(
+            payload["refreshed_context"]["error"]["recommended_switch"],
+            payload["receipt"]["recommended_switch"],
+        )
+        self.assertNotIn("run_envelope", payload["refreshed_context"])
         receipt = payload["receipt"]
         run_json = json.loads(self._runtime_path(receipt["paths"]["run"]).read_text(encoding="utf-8"))
         self.assertEqual(run_json["resolved_task_id"], receipt["task_id"])

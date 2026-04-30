@@ -38,7 +38,7 @@ Host responsibility:
 - If `login_policy = mandatory-takeover`, keep takeover separate from downgrade handling and pause only when a required login gate is encountered.
 - If the selected skill's `tool_scope` allows temporary downgrade tools, temporary downgrade tools remain unavailable until explicit user approval.
 - Use `scripts/switch_runtime.py persist` as the current CLI wrapper for the `persist-skill-result` step when writing BuddySwitch object state and run audit payloads.
-- Check `refreshed_context.ok`; continue from `refreshed_context` when it is true, or rerun `resolve` when `refreshed_context.error.code = E_RUNTIME_REFRESH_CONTEXT`.
+- Check `refreshed_context.ok`; successful `persist` does not reserve a follow-up run, and if another turn is needed, use `receipt.recommended_switch` for the next explicit `resolve`. When `refreshed_context.error.code = E_RUNTIME_REFRESH_CONTEXT`, rerun `resolve` with `receipt.recommended_switch`.
 - Render terminal final output in the exact order `Receipt`, `Commands`, `Summary`.
 - In `Commands`, show one `Template` command from `reference_switches` and one `Recommended` command from `recommended_switch`.
 - BuddySwitch does not execute host tools; it remains a control layer for routing, resolve_context generation, and persistence.

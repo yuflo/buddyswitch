@@ -53,6 +53,10 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         return shared_root / "run" / "locks" / "runtime.lock"
 
     @staticmethod
+    def _runtime_owner_lock_path(shared_root: Path) -> Path:
+        return shared_root / "run" / "locks" / "runtime.owner.lock"
+
+    @staticmethod
     def _repo_git_common_dir(repo_root: Path = ROOT) -> Path:
         output = subprocess.check_output(
             ["git", "-C", str(repo_root), "rev-parse", "--git-common-dir"],
@@ -122,7 +126,43 @@ if calls_path:
     with Path(calls_path).open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, ensure_ascii=True) + "\\n")
 
+def remove_mcp_section(config_text, server_name):
+    lines = config_text.splitlines(keepends=True)
+    output = []
+    index = 0
+    target = f"[mcp_servers.{server_name}]"
+    while index < len(lines):
+        if lines[index].strip() == target:
+            index += 1
+            while index < len(lines) and not lines[index].lstrip().startswith("["):
+                index += 1
+            continue
+        output.append(lines[index])
+        index += 1
+    return "".join(output)
+
+def upsert_mcp_section(server_name, argv):
+    config_path = codex_home / "config.toml"
+    config_text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    config_text = remove_mcp_section(config_text, server_name).rstrip() + "\\n\\n"
+    separator_index = argv.index("--")
+    command = argv[separator_index + 1]
+    args = argv[separator_index + 2:]
+    section = (
+        f"[mcp_servers.{server_name}]\\n"
+        f"command = {json.dumps(command)}\\n"
+        f"args = {json.dumps(args)}\\n"
+    )
+    config_path.write_text(config_text + section, encoding="utf-8")
+
+if sys.argv[1:3] == ["mcp", "remove"]:
+    config_path = codex_home / "config.toml"
+    config_text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    config_path.write_text(remove_mcp_section(config_text, sys.argv[3]), encoding="utf-8")
+    raise SystemExit(0)
+
 if sys.argv[1:3] == ["mcp", "add"]:
+    upsert_mcp_section(sys.argv[3], sys.argv[1:])
     raise SystemExit(0)
 
 counter_path = codex_home / "launch-count.txt"
@@ -174,6 +214,10 @@ approval_policy = { granular = {
 command = "npx"
 args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
 
+[mcp_servers.notion]
+url = "https://mcp.notion.com/mcp"
+default_tools_approval_mode = "ask"
+
 [sandbox_workspace_write] # old managed table with an inline comment
 network_access = false
 writable_roots = ["/old"]
@@ -212,6 +256,11 @@ writable_roots = ["/old"]
             self.assertNotIn('writable_roots = ["/old"]', config_text)
             self.assertNotIn("sandbox_mode", features_section)
             self.assertNotIn("approval_policy", features_section)
+            self.assertEqual(config_text.count('default_tools_approval_mode = "approve"'), 2)
+            self.assertIn("[mcp_servers.chrome-devtools-cockpit]", config_text)
+            self.assertIn("[mcp_servers.notion]", config_text)
+            self.assertNotIn('default_tools_approval_mode = "ask"', config_text)
+            self.assertNotIn("supports_parallel_tool_calls", config_text)
 
     def test_codex_config_patch_rejects_shared_root_that_grants_forbidden_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -793,6 +842,9 @@ exec "$real_git" "$@"
             self.assertFalse((shared_root / "run" / "browser-cockpit.pid").exists())
             config_text = (instance_root / "codex-home" / "config.toml").read_text(encoding="utf-8")
             self._assert_codex_automation_config(config_text, shared_root=shared_root)
+            self.assertIn("[mcp_servers.chrome-devtools-cockpit]", config_text)
+            self.assertIn('default_tools_approval_mode = "approve"', config_text)
+            self.assertNotIn("supports_parallel_tool_calls", config_text)
             instance_auth = instance_root / "codex-home" / "auth.json"
             shared_auth = shared_root / "codex-home" / "auth.json"
             self.assertTrue(shared_auth.exists())
@@ -1322,6 +1374,8 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             self.assertIn("[mcp_servers.chrome-devtools-cockpit]", config_text)
             self.assertIn('command = "npx"', config_text)
             self.assertIn('args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]', config_text)
+            self.assertIn('default_tools_approval_mode = "approve"', config_text)
+            self.assertNotIn("supports_parallel_tool_calls", config_text)
 
             second_open_result = subprocess.run(
                 [str(LAUNCHER), "instance", "open", instance_id, "debug", "prompt-input", "continue again"],
@@ -1336,6 +1390,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             repatched_config_text = (instance_root / "codex-home" / "config.toml").read_text(encoding="utf-8")
             self._assert_codex_automation_config(repatched_config_text, shared_root=shared_root)
             self.assertEqual(repatched_config_text.count("[mcp_servers.chrome-devtools-cockpit]"), 1)
+            self.assertEqual(repatched_config_text.count('default_tools_approval_mode = "approve"'), 1)
 
     def test_instance_open_rejects_traversal_instance_id(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -2566,27 +2621,27 @@ exit 1
             self.assertIn("Reset blocked", direct_reset.stderr)
             self.assertTrue(sentinel.exists(), "helper-wrapped locked reset must not bypass root validation")
 
-    def test_runtime_lock_helper_writes_lock_and_proof_under_shared_root_run_locks(self) -> None:
+    def test_runtime_lock_helper_writes_locks_under_shared_root_run_locks(self) -> None:
         with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
             source_home_path = Path(source_home)
             temp_root_path = Path(temp_root)
             shared_root = source_home_path / ".codex-buddyswitch"
-            proof_capture_path = temp_root_path / "proof-capture.json"
+            lock_capture_path = temp_root_path / "lock-capture.json"
 
             env = os.environ.copy()
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
-            env["BUDDYSWITCH_TEST_PROOF_CAPTURE"] = str(proof_capture_path)
+            env["BUDDYSWITCH_TEST_LOCK_CAPTURE"] = str(lock_capture_path)
 
             capture_script = (
                 "import json, os\n"
                 "from pathlib import Path\n"
-                "proof_path = Path(os.environ['BUDDYSWITCH_RUNTIME_LOCK_PROOF'])\n"
+                "lock_dir = Path(os.environ['BUDDYSWITCH_SHARED_ROOT']) / 'run' / 'locks'\n"
                 "payload = {\n"
-                "  'proof_path': str(proof_path),\n"
-                "  'proof_parent': str(proof_path.parent),\n"
-                "  'proof_exists': proof_path.exists(),\n"
+                "  'lock_dir': str(lock_dir),\n"
+                "  'runtime_lock_exists': (lock_dir / 'runtime.lock').exists(),\n"
+                "  'owner_lock_exists': (lock_dir / 'runtime.owner.lock').exists(),\n"
                 "}\n"
-                "Path(os.environ['BUDDYSWITCH_TEST_PROOF_CAPTURE']).write_text(\n"
+                "Path(os.environ['BUDDYSWITCH_TEST_LOCK_CAPTURE']).write_text(\n"
                 "  json.dumps(payload, ensure_ascii=True),\n"
                 "  encoding='utf-8',\n"
                 ")\n"
@@ -2608,18 +2663,21 @@ exit 1
             )
 
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            self.assertTrue(proof_capture_path.exists(), "locked child must capture inherited proof metadata")
+            self.assertTrue(lock_capture_path.exists(), "locked child must capture lock metadata")
 
             lock_path = self._legacy_runtime_lock_path(shared_root)
             new_lock_path = self._runtime_lock_path(shared_root)
+            owner_lock_path = self._runtime_owner_lock_path(shared_root)
             self.assertFalse(lock_path.exists())
             self.assertTrue(new_lock_path.exists())
+            self.assertTrue(owner_lock_path.exists())
 
-            proof_payload = json.loads(proof_capture_path.read_text(encoding="utf-8"))
-            self.assertTrue(proof_payload["proof_exists"])
-            self.assertEqual(Path(proof_payload["proof_parent"]), shared_root / "run" / "locks")
+            lock_payload = json.loads(lock_capture_path.read_text(encoding="utf-8"))
+            self.assertEqual(Path(lock_payload["lock_dir"]), shared_root / "run" / "locks")
+            self.assertTrue(lock_payload["runtime_lock_exists"])
+            self.assertTrue(lock_payload["owner_lock_exists"])
 
-    def test_runtime_lock_assert_held_accepts_live_locked_proof(self) -> None:
+    def test_runtime_lock_assert_held_accepts_live_locked_descendant(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -2645,22 +2703,16 @@ exit 1
 
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
-    def test_runtime_lock_assert_held_rejects_forged_proof_when_lock_is_busy(self) -> None:
-        with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
+    def test_runtime_lock_assert_held_rejects_without_owner_lock_when_runtime_lock_is_busy(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
-            temp_root_path = Path(temp_root)
             shared_root = source_home_path / ".codex-buddyswitch"
-            proof_path = temp_root_path / "forged-proof"
-            proof_path.write_text("forged-token", encoding="utf-8")
             lock_path = self._runtime_lock_path(shared_root)
 
             env = os.environ.copy()
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
-            env["BUDDYSWITCH_RUNTIME_LOCK_PROOF"] = str(proof_path)
-            env["BUDDYSWITCH_RUNTIME_LOCK_TOKEN"] = "forged-token"
 
             holder = self._spawn_lock_holder(lock_path)
-            proof_holder = self._spawn_lock_holder(proof_path)
             try:
                 completed = subprocess.run(
                     [
@@ -2675,21 +2727,18 @@ exit 1
                     check=False,
                 )
             finally:
-                self._stop_lock_holder(proof_holder)
                 self._stop_lock_holder(holder)
 
             self.assertEqual(completed.returncode, 2)
             self.assertIn("runtime lock required", completed.stderr)
             self.assertNotIn("Traceback", completed.stderr)
 
-    def test_runtime_lock_assert_held_rejects_forged_posix_proof_when_runtime_lock_is_held(self) -> None:
+    def test_runtime_lock_assert_held_rejects_non_descendant_when_runtime_lock_is_held(self) -> None:
         with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
             source_home_path = Path(source_home)
             temp_root_path = Path(temp_root)
             shared_root = source_home_path / ".codex-buddyswitch"
             ready_path = temp_root_path / "holder-ready"
-            forged_proof_path = temp_root_path / "forged-posix-proof"
-            forged_proof_path.write_text("forged-token", encoding="utf-8")
 
             env = os.environ.copy()
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
@@ -2718,12 +2767,8 @@ exit 1
                     self.fail(f"runtime lock holder did not become ready: {stderr}")
 
                 forged_runner = (
-                    "import fcntl, os, subprocess, sys\n"
-                    "proof_fd = os.open(sys.argv[2], os.O_RDWR)\n"
-                    "fcntl.lockf(proof_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+                    "import os, subprocess, sys\n"
                     "env = os.environ.copy()\n"
-                    "env['BUDDYSWITCH_RUNTIME_LOCK_PROOF'] = sys.argv[2]\n"
-                    "env['BUDDYSWITCH_RUNTIME_LOCK_TOKEN'] = 'forged-token'\n"
                     "completed = subprocess.run([sys.executable, sys.argv[1], '--assert-held'], env=env, text=True, capture_output=True)\n"
                     "print(completed.returncode)\n"
                     "print(completed.stderr, end='')\n"
@@ -2734,7 +2779,6 @@ exit 1
                         "-c",
                         forged_runner,
                         str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
-                        str(forged_proof_path),
                     ],
                     cwd=ROOT,
                     env=env,
@@ -2755,17 +2799,12 @@ exit 1
             self.assertNotIn("Traceback", completed.stdout)
 
     def test_runtime_lock_assert_held_reports_controlled_failure_without_lock_dir(self) -> None:
-        with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
+        with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
-            temp_root_path = Path(temp_root)
             shared_root = source_home_path / ".codex-buddyswitch"
-            proof_path = temp_root_path / "stale-proof"
-            proof_path.write_text("stale-token", encoding="utf-8")
 
             env = os.environ.copy()
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
-            env["BUDDYSWITCH_RUNTIME_LOCK_PROOF"] = str(proof_path)
-            env["BUDDYSWITCH_RUNTIME_LOCK_TOKEN"] = "stale-token"
 
             completed = subprocess.run(
                 [
@@ -2786,19 +2825,14 @@ exit 1
             self.assertFalse(self._legacy_runtime_lock_path(shared_root).exists())
 
     def test_runtime_lock_assert_held_reports_controlled_failure_when_lock_dir_is_blocked(self) -> None:
-        with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
+        with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
-            temp_root_path = Path(temp_root)
             shared_root = source_home_path / ".codex-buddyswitch"
             shared_root.mkdir(parents=True)
             (shared_root / "run").write_text("not a directory\n", encoding="utf-8")
-            proof_path = temp_root_path / "stale-proof"
-            proof_path.write_text("stale-token", encoding="utf-8")
 
             env = os.environ.copy()
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
-            env["BUDDYSWITCH_RUNTIME_LOCK_PROOF"] = str(proof_path)
-            env["BUDDYSWITCH_RUNTIME_LOCK_TOKEN"] = "stale-token"
 
             completed = subprocess.run(
                 [

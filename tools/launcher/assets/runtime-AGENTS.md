@@ -59,7 +59,7 @@ When user sends `switch <buddy>...: <demand>`:
    - Do not reinterpret missing executor availability, login takeover, and genuine browser-native blocking as the same path.
 9. Execute the selected skill in-session and produce a structured result matching the selected skill's output schema.
 10. Persist through `scripts/switch_runtime.py persist` as the current CLI wrapper for the `persist-skill-result` step whenever you need BuddySwitch state and canonical run audit persistence.
-11. Check `refreshed_context.ok`; continue from `refreshed_context` when it is true, or rerun `resolve` when `refreshed_context.error.code = E_RUNTIME_REFRESH_CONTEXT`.
+11. Check `refreshed_context.ok`; successful `persist` does not reserve a follow-up run, and if another turn is needed, use `receipt.recommended_switch` for the next explicit `resolve`. When `refreshed_context.error.code = E_RUNTIME_REFRESH_CONTEXT`, rerun `resolve` with `receipt.recommended_switch`.
 12. BuddySwitch does not execute host tools; it remains the control layer and only supplies resolve_context plus canonical persistence.
 13. Render terminal final output in three sections, in this exact order: `Receipt`, `Commands`, `Summary`.
 14. `Receipt` section rules:
@@ -86,7 +86,9 @@ Default runtime behavior:
 - Users do not need to provide output file paths.
 - `resolve_context` is the canonical runtime handoff between BuddySwitch and the host session.
 - `persist-skill-result` is the canonical persistence step; `scripts/switch_runtime.py persist` is its current CLI wrapper.
-- `refreshed_context` is the canonical follow-up handoff after a successful persist.
+- Successful `persist` does not reserve a follow-up run; if another turn is needed, use `receipt.recommended_switch` for the next explicit `resolve`.
+- Launcher config sets all enabled MCP servers to `default_tools_approval_mode = "approve"` so MCP tool calls do not stop for per-tool approval prompts.
+- Do not set `supports_parallel_tool_calls = true` for the browser cockpit path; browser page state must stay serial.
 - Default terminal summaries must follow the `Receipt -> Commands -> Summary` contract and keep full object paths as debug-only details.
 - Requests to write BuddySwitch-managed outputs into `artifacts/*.md` or `runs/summaries/**` must be rejected.
 

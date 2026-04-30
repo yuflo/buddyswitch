@@ -49,8 +49,6 @@ buddyswitch_require_runtime_lock() {
     return 1
   fi
   python3 "${BUDDYSWITCH_RUNTIME_LOCK_HELPER}" --assert-held
-  unset BUDDYSWITCH_RUNTIME_LOCK_PROOF
-  unset BUDDYSWITCH_RUNTIME_LOCK_TOKEN
 }
 
 buddyswitch_patch_codex_config() {
