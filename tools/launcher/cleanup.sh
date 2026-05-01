@@ -147,6 +147,65 @@ buddyswitch_cleanup_run_env_cleanup() {
   fi
 }
 
+buddyswitch_count_active_launchers_for_buddy() {
+  local buddy="$1"
+  if [[ ! -d "${BUDDYSWITCH_RUN_STATE_DIR}" ]]; then
+    echo "0"
+    return
+  fi
+
+  python3 - "${BUDDYSWITCH_RUN_STATE_DIR}" "${BUDDYSWITCH_SHARED_ROOT}" "${buddy}" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+run_dir = Path(sys.argv[1])
+shared_root = Path(sys.argv[2])
+target_buddy = sys.argv[3]
+live_pids = set()
+
+
+def pid_is_live(pid):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def marker_matches_target(payload):
+    buddy = payload.get("buddy")
+    if buddy == target_buddy:
+        return True
+    instance_id = payload.get("instance_id")
+    if not isinstance(instance_id, str) or not instance_id:
+        return False
+    instance_json = shared_root / "instances" / instance_id / "instance.json"
+    try:
+        instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return instance_payload.get("buddy") == target_buddy
+
+
+for marker in run_dir.glob("launcher-*.json"):
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        pid = payload.get("pid")
+    except Exception:
+        marker.unlink(missing_ok=True)
+        continue
+    if not isinstance(pid, int) or pid <= 0 or not pid_is_live(pid):
+        marker.unlink(missing_ok=True)
+        continue
+    if marker_matches_target(payload):
+        live_pids.add(pid)
+
+print(len(live_pids))
+PY
+}
+
 buddyswitch_count_active_browsers() {
   if buddyswitch_browser_pid_marker_is_active "$(buddyswitch_browser_pid_marker)"; then
     echo "1"
@@ -164,6 +223,42 @@ buddyswitch_count_active_browsers() {
     echo "1"
     return 0
   fi
+  echo "0"
+}
+
+buddyswitch_count_active_browsers_for_buddy() {
+  local buddy="$1"
+  local instance_json instance_id instance_buddy
+
+  for instance_json in "${BUDDYSWITCH_SHARED_ROOT}"/instances/*/instance.json; do
+    [[ -f "${instance_json}" ]] || continue
+    instance_buddy="$(
+      python3 - "${instance_json}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+buddy = payload.get("buddy")
+if isinstance(buddy, str):
+    print(buddy)
+PY
+    )"
+    [[ "${instance_buddy}" == "${buddy}" ]] || continue
+    instance_id="$(basename "$(dirname "${instance_json}")")"
+    if buddyswitch_browser_instance_pid_marker_is_active "${instance_id}"; then
+      echo "1"
+      return 0
+    fi
+    if buddyswitch_browser_instance_endpoint_is_active "${instance_id}"; then
+      echo "1"
+      return 0
+    fi
+  done
+
   echo "0"
 }
 
@@ -193,22 +288,30 @@ buddyswitch_cleanup_run_locked() {
 
   buddyswitch_require_runtime_lock
   buddyswitch_cleanup_validate_shared_root || return $?
+  buddyswitch_cleanup_parse_args "$@" || return $?
 
-  active_count="$(buddyswitch_count_active_launchers)"
+  if [[ "${BUDDYSWITCH_CLEANUP_SCOPE}" == "buddy" ]]; then
+    active_count="$(buddyswitch_count_active_launchers_for_buddy "${BUDDYSWITCH_CLEANUP_BUDDY}")"
+  else
+    active_count="$(buddyswitch_count_active_launchers)"
+  fi
   if [[ "${active_count}" -gt 0 ]]; then
     echo "Cleanup blocked: ${active_count} active buddyswitch-codex instance(s) detected." >&2
     echo "Close active launcher sessions and retry." >&2
     return 3
   fi
 
-  active_browser_count="$(buddyswitch_count_active_browsers)"
+  if [[ "${BUDDYSWITCH_CLEANUP_SCOPE}" == "buddy" ]]; then
+    active_browser_count="$(buddyswitch_count_active_browsers_for_buddy "${BUDDYSWITCH_CLEANUP_BUDDY}")"
+  else
+    active_browser_count="$(buddyswitch_count_active_browsers)"
+  fi
   if [[ "${active_browser_count}" -gt 0 ]]; then
     echo "Cleanup blocked: ${active_browser_count} active browser instance(s) detected." >&2
     echo "Close active browser sessions and retry." >&2
     return 3
   fi
 
-  buddyswitch_cleanup_parse_args "$@" || return $?
   target_root="${state_root}"
   target_scope="${BUDDYSWITCH_CLEANUP_SCOPE}"
 
