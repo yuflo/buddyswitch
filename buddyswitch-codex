@@ -33,7 +33,6 @@ Usage:
   buddyswitch-codex instance delete <instance-id> [--yes]
 
   buddyswitch-codex data cleanup --buddy <buddy> [--yes] [--json]
-  buddyswitch-codex data cleanup --app-runtime [--yes] [--json]
   buddyswitch-codex data cleanup --all-data [--yes] [--json]
 
   buddyswitch-codex env status [--json]
@@ -177,7 +176,6 @@ start_locked_bootstrap() {
     buddyswitch_validate_instance_id "${requested_instance_id}" || return $?
     buddyswitch_require_buddy_agents_template "${requested_buddy}" || return $?
     buddyswitch_env_bind_instance "${requested_instance_id}" || return $?
-    buddyswitch_workspace_migrate_legacy_state_if_needed
     buddyswitch_browser_allocate_instance_port
   fi
 
@@ -188,6 +186,7 @@ start_locked_bootstrap() {
 
   if [[ -n "${requested_buddy}" ]]; then
     buddyswitch_workspace_ensure_project_worktree
+    buddyswitch_workspace_repair_runtime_projects_app_projection
     buddyswitch_instance_activate "${requested_instance_id}" "${requested_buddy}" "inactive" >/dev/null
   fi
   buddyswitch_browser_bootstrap
@@ -290,6 +289,7 @@ instance_open_locked_bootstrap() {
   buddyswitch_workspace_install_local_excludes
   buddyswitch_workspace_install_guardrail_hooks
   buddyswitch_workspace_ensure_project_worktree
+  buddyswitch_workspace_repair_runtime_projects_app_projection
   buddyswitch_browser_bootstrap
   buddyswitch_instance_set_browser_port "${instance_id}" "${BUDDYSWITCH_BROWSER_PORT}"
   buddyswitch_instance_set_status "${instance_id}" "active"
@@ -461,7 +461,6 @@ data_usage() {
   cat <<EOF
 Usage:
   buddyswitch-codex data cleanup --buddy <buddy> [--yes] [--json]
-  buddyswitch-codex data cleanup --app-runtime [--yes] [--json]
   buddyswitch-codex data cleanup --all-data [--yes] [--json]
 EOF
 }

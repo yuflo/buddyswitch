@@ -65,7 +65,7 @@ Bad example:
 ## Working Area
 
 - primarily `projects/app/`
-- project runtime temporary data must be written only to `projects/app/.runtime/`
+- runtime temporary data must be written only to `runs/raw/`
 - do not write runtime noise into source folders under `projects/app/`
 
 ## Track Object Rule

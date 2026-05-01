@@ -21,7 +21,7 @@
 
 ## Outputs
 - A smoke-test artifact with passed, failed, and blocked items plus reproduction notes.
-- Runtime outputs under `projects/app/.runtime/` when needed.
+- Runtime outputs under `runs/raw/` when needed.
 - A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
 
 ## Steps
@@ -56,7 +56,7 @@
 - Do not perform broad refactors unless explicitly requested.
 - Do not make product decisions.
 - Do not provide unstructured "looks good" output.
-- Do not write runtime noise into `projects/app/` source folders; use `projects/app/.runtime/`.
+- Do not write runtime noise into `projects/app/` source folders; use `runs/raw/`.
 
 ## Examples
 - `switch test: Run smoke checks for the onboarding CTA regression`

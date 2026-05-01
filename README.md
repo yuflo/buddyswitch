@@ -20,9 +20,9 @@ The launcher-managed product mode layout is:
 Product mode has two work surfaces:
 
 - Runtime workspace: `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`
-  BuddySwitch control flow, projected state, raw dumps, browser scratch, and `projects/app/.runtime`.
+  BuddySwitch control flow, projected state, raw dumps, browser scratch, and relative `projects/app` access.
 - Shared project workspace: `${BUDDYSWITCH_SHARED_ROOT}/project/workspace`
-  Durable product source edits for `projects/app`, exposed as `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}`.
+  Shared product source for `projects/app`; `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}` is launcher/debug context.
 
 If you are developing BuddySwitch itself, start here:
 
@@ -102,7 +102,7 @@ python3 scripts/codex_router.py "switch pm: create ai-scheduler-lp track"
 
 ### Resolve a run
 
-Run `resolve` only from the launcher-owned instance runtime workspace. In create mode it may materialize a zero-run task and reserve the next run id, so the repo-root development checkout blocks it; start the runtime workspace with `./buddyswitch-codex instance start --buddy <buddy>` first. Product mode runs from `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`, projects canonical state from `${BUDDYSWITCH_SHARED_ROOT}/state`, and exposes durable product source at `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}/projects/app`.
+Run `resolve` only from the launcher-owned instance runtime workspace. In create mode it may materialize a zero-run task and reserve the next run id, so the repo-root development checkout blocks it; start the runtime workspace with `./buddyswitch-codex instance start --buddy <buddy>` first. Product mode runs from `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`, projects canonical state from `${BUDDYSWITCH_SHARED_ROOT}/state`, and maps relative `projects/app` to the shared project workspace.
 
 ```bash
 python3 scripts/switch_runtime.py resolve "switch market: quick market research for AI scheduler landing page"
@@ -149,7 +149,6 @@ python3 scripts/serve_context_panel.py
 
 ```bash
 ./buddyswitch-codex data cleanup --buddy market
-./buddyswitch-codex data cleanup --app-runtime
 ./buddyswitch-codex data cleanup --all-data
 ```
 
@@ -326,7 +325,7 @@ These paths matter most when you are orienting yourself in the repo:
 - `framework/docs/`
   Architecture and framework specifications.
 - `projects/app/`
-  Main app code. In product mode, durable edits are made through `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}/projects/app`; runtime-only temporary data stays in `projects/app/.runtime` inside the instance runtime workspace.
+  Main app code. In product mode, keep working with relative `projects/app` from the instance runtime workspace; launcher projects it to shared product source.
 
 ## Core Storage and Object Authority
 
@@ -485,7 +484,6 @@ Manual cleanup entrypoint:
 
 ```bash
 ./buddyswitch-codex data cleanup --buddy <buddy>
-./buddyswitch-codex data cleanup --app-runtime
 ./buddyswitch-codex data cleanup --all-data
 ```
 
@@ -495,10 +493,8 @@ Useful modes:
 
 - `--buddy <buddy>`
   Cleans that buddy's raw logs, task objects, artifact objects, and run content where `switch.buddy == <buddy>`.
-- `--app-runtime`
-  Clears `projects/app/.runtime/` inside instance workspaces.
 - `--all-data`
-  Clears all-buddy shared data, all-buddy raw scratch, and app runtime scratch while keeping instance roots and the shared root.
+  Clears all-buddy shared data and all-buddy raw scratch while keeping instance roots, shared root, and shared project source.
 
 ## Terminal Output Contract
 

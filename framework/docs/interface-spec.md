@@ -70,7 +70,6 @@ No direct runtime module imports, runtime object reads, or runtime write paths a
 Panel can show copyable commands only:
 
 - `./buddyswitch-codex data cleanup --buddy <buddy>`
-- `./buddyswitch-codex data cleanup --app-runtime`
 - `./buddyswitch-codex data cleanup --all-data`
 
 Commands must not include `--yes` by default.

@@ -90,7 +90,6 @@ permissions = ["track.read", "track.create", "track.update", "task.read", "task.
             "artifacts",
             "runs/summaries/market",
             "runs/summaries/pm",
-            "projects/app/.runtime",
         ):
             self._write_text(f"{relative_dir}/.gitkeep", "")
 
@@ -100,7 +99,6 @@ permissions = ["track.read", "track.create", "track.update", "task.read", "task.
         self._write_text("runs/raw/pm/pm.log", "pm raw\n")
         self._write_text("runs/summaries/market/market.md", "market summary\n")
         self._write_text("runs/summaries/pm/pm.md", "pm summary\n")
-        self._write_text("projects/app/.runtime/session.json", "{\"ok\":true}\n")
 
         self._write_json(
             "buddyswitch/objects/tracks/track-demo.json",
@@ -323,7 +321,6 @@ class CleanupBackendTests(unittest.TestCase):
         )
 
         self.assertIn("buddyswitch/content/runs/run-market.json", plan["delete_paths"])
-        self.assertIn("projects/app/.runtime/session.json", plan["delete_paths"])
         self.assertIn("buddyswitch/objects/tasks/task-market.json", plan["delete_paths"])
         self.assertNotIn("artifacts/art-market--demo.md", plan["delete_paths"])
         self.assertNotIn("runs/summaries/market/market.md", plan["delete_paths"])
@@ -341,7 +338,6 @@ class CleanupBackendTests(unittest.TestCase):
             self.assertFalse(self.fixture.exists(relative_path))
         self.assertTrue(self.fixture.exists("artifacts/art-market--demo.md"))
         self.assertTrue(self.fixture.exists("runs/summaries/market/market.md"))
-        self.assertTrue(self.fixture.exists("projects/app/.runtime/.gitkeep"))
         for marker in (
             "runs/raw/.gitkeep",
             "buddyswitch/objects/tracks/.gitkeep",
@@ -731,8 +727,6 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         instance_root.mkdir(parents=True, exist_ok=True)
         (workspace_dir / "runs" / "raw" / buddy).mkdir(parents=True, exist_ok=True)
         (workspace_dir / "runs" / "raw" / buddy / f"{buddy}.log").write_text("instance raw\n", encoding="utf-8")
-        (workspace_dir / "projects" / "app" / ".runtime").mkdir(parents=True, exist_ok=True)
-        (workspace_dir / "projects" / "app" / ".runtime" / "session.json").write_text("{\"ok\":true}\n", encoding="utf-8")
         (instance_root / "instance.json").write_text(
             json.dumps(
                 {
@@ -811,11 +805,14 @@ class CleanupShellIntegrationTests(unittest.TestCase):
                 self.assertEqual(completed.returncode, 2)
                 self.assertIn("Removed data cleanup option", completed.stderr)
 
-    def test_shell_cleanup_rejects_multiple_target_options(self) -> None:
-        completed = self.run_cleanup("--buddy", "market", "--app-runtime")
+    def test_shell_cleanup_rejects_removed_app_runtime_target(self) -> None:
+        completed = self.run_cleanup("--app-runtime")
 
         self.assertEqual(completed.returncode, 2)
-        self.assertIn("data cleanup target must be specified exactly once", completed.stderr)
+        self.assertIn("Removed data cleanup option", completed.stderr)
+        self.assertIn("--app-runtime", completed.stderr)
+        self.assertIn("--buddy <buddy>", completed.stderr)
+        self.assertIn("--all-data", completed.stderr)
 
     def test_shell_cleanup_uses_source_manifest_when_targeting_shared_state(self) -> None:
         (self.state_root / "buddyswitch" / "manifest.toml").unlink()
@@ -827,29 +824,6 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["repo_root"], str(self.state_root))
         self.assertIn("buddyswitch/content/runs/run-market.json", payload["delete_paths"])
         self.assertTrue(self.state_fixture.exists("buddyswitch/content/runs/run-market.json"))
-
-    def test_shell_project_cleanup_only_touches_runtime(self) -> None:
-        _, market_workspace = self._create_instance_workspace("inst-market-runtime", "market")
-        _, pm_workspace = self._create_instance_workspace("inst-pm-runtime", "pm")
-
-        completed = self.run_cleanup("--app-runtime", "--yes", "--json")
-        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-        payload = json.loads(completed.stdout)
-        self.assertEqual(payload["result"]["scope"], "app-runtime")
-        self.assertIn(
-            "instances/inst-market-runtime/workspace/projects/app/.runtime/session.json",
-            payload["result"]["deleted_paths"],
-        )
-        self.assertIn(
-            "instances/inst-pm-runtime/workspace/projects/app/.runtime/session.json",
-            payload["result"]["deleted_paths"],
-        )
-        self.assertTrue(self.state_fixture.exists("buddyswitch/content/runs/run-market.json"))
-        self.assertTrue((market_workspace / "runs" / "raw" / "market" / "market.log").exists())
-        self.assertTrue((pm_workspace / "runs" / "raw" / "pm" / "pm.log").exists())
-        self.assertFalse((market_workspace / "projects" / "app" / ".runtime" / "session.json").exists())
-        self.assertFalse((pm_workspace / "projects" / "app" / ".runtime" / "session.json").exists())
-        self.assertTrue(self.fixture.exists("buddyswitch/content/runs/run-market.json"))
 
     def test_shell_all_data_cleanup_clears_shared_and_instance_local_state(self) -> None:
         _, market_workspace = self._create_instance_workspace("inst-market-all", "market")
@@ -865,8 +839,6 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         self.assertFalse(self.state_fixture.exists("buddyswitch/objects/tracks/track-demo.json"))
         self.assertFalse((market_workspace / "runs" / "raw" / "market" / "market.log").exists())
         self.assertFalse((pm_workspace / "runs" / "raw" / "pm" / "pm.log").exists())
-        self.assertFalse((market_workspace / "projects" / "app" / ".runtime" / "session.json").exists())
-        self.assertFalse((pm_workspace / "projects" / "app" / ".runtime" / "session.json").exists())
         self.assertTrue((self.state_root / "buddyswitch" / "content" / "runs").is_dir())
         self.assertTrue(self.fixture.exists("buddyswitch/content/runs/run-market.json"))
 
@@ -883,6 +855,10 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         self.assertNotIn(
             "project/workspace/projects/app/product-source-sentinel.txt",
             payload["result"]["deleted_paths"],
+        )
+        self.assertFalse(
+            any(path.startswith("project/workspace/projects/app/") for path in payload["result"]["deleted_paths"]),
+            "all-data cleanup must not delete shared project source paths",
         )
 
     def test_shell_agent_cleanup_targets_shared_state_not_legacy_workspace_or_source_checkout(self) -> None:
@@ -919,8 +895,6 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         self.assertTrue((pm_root / "instance.json").is_file())
         self.assertFalse((market_workspace / "runs" / "raw" / "market" / "market.log").exists())
         self.assertFalse((pm_workspace / "runs" / "raw" / "pm" / "pm.log").exists())
-        self.assertFalse((market_workspace / "projects" / "app" / ".runtime" / "session.json").exists())
-        self.assertFalse((pm_workspace / "projects" / "app" / ".runtime" / "session.json").exists())
 
     def test_shell_all_storage_dry_run_does_not_mutate_source_checkout_or_excludes(self) -> None:
         exclude_path = self.repo_root / ".git" / "info" / "exclude"
@@ -933,7 +907,7 @@ class CleanupShellIntegrationTests(unittest.TestCase):
             "buddyswitch/objects/tasks/**\n"
             "buddyswitch/objects/artifacts/**\n"
             "runs/raw/**\n"
-            "projects/app/.runtime/**\n",
+            "legacy/runtime/path/**\n",
             encoding="utf-8",
         )
         before_exclude_bytes = exclude_path.read_bytes()
@@ -1279,7 +1253,6 @@ class CleanupShellIntegrationTests(unittest.TestCase):
             "unsafe symlinked instance workspace should produce a warning",
         )
         self.assertTrue((unsafe_workspace / "runs" / "raw" / "market" / "market.log").exists())
-        self.assertTrue((unsafe_workspace / "projects" / "app" / ".runtime" / "session.json").exists())
 
     def test_shell_all_data_cleanup_skips_symlinked_instance_runs_raw_target_dir(self) -> None:
         instance_id = "inst-market-raw-symlink"
@@ -1309,37 +1282,6 @@ class CleanupShellIntegrationTests(unittest.TestCase):
             payload["result"]["deleted_paths"],
         )
 
-    def test_shell_app_runtime_cleanup_skips_symlinked_instance_runtime_target_dir(self) -> None:
-        instance_id = "inst-market-runtime-symlink"
-        _, workspace_dir = self._create_instance_workspace(instance_id, "market")
-        unsafe_runtime_dir = self.repo_root / "outside-instance-runtime-target"
-        unsafe_runtime_dir.mkdir(parents=True, exist_ok=True)
-        unsafe_runtime_file = unsafe_runtime_dir / "session.json"
-        unsafe_runtime_file.write_text("{\"ok\":true}\n", encoding="utf-8")
-        shutil.rmtree(workspace_dir / "projects" / "app" / ".runtime")
-        (workspace_dir / "projects" / "app" / ".runtime").symlink_to(unsafe_runtime_dir, target_is_directory=True)
-
-        completed = self.run_cleanup(
-            "--app-runtime",
-            "--yes",
-            "--json",
-        )
-
-        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-        payload = json.loads(completed.stdout)
-        self.assertTrue(
-            any("symlink" in warning.lower() for warning in payload["result"]["warnings"]),
-            "symlinked instance projects/app/.runtime path should produce a warning",
-        )
-        self.assertTrue(
-            unsafe_runtime_file.exists(),
-            "cleanup must not delete files through symlinked projects/app/.runtime targets",
-        )
-        self.assertNotIn(
-            f"instances/{instance_id}/workspace/projects/app/.runtime/session.json",
-            payload["result"]["deleted_paths"],
-        )
-
     def test_shell_all_data_cleanup_skips_symlinked_shared_state_runs_raw_target_dir(self) -> None:
         unsafe_raw_root = self.repo_root / "outside-shared-state-runs-raw-target"
         (unsafe_raw_root / "market").mkdir(parents=True, exist_ok=True)
@@ -1366,35 +1308,6 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         )
         self.assertNotIn(
             "runs/raw/market/market.log",
-            payload["result"]["deleted_paths"],
-        )
-
-    def test_shell_app_runtime_cleanup_skips_symlinked_shared_state_runtime_target_dir(self) -> None:
-        unsafe_runtime_dir = self.repo_root / "outside-shared-state-runtime-target"
-        unsafe_runtime_dir.mkdir(parents=True, exist_ok=True)
-        unsafe_runtime_file = unsafe_runtime_dir / "session.json"
-        unsafe_runtime_file.write_text("{\"ok\":true}\n", encoding="utf-8")
-        shutil.rmtree(self.state_root / "projects" / "app" / ".runtime")
-        (self.state_root / "projects" / "app" / ".runtime").symlink_to(unsafe_runtime_dir, target_is_directory=True)
-
-        completed = self.run_cleanup(
-            "--app-runtime",
-            "--yes",
-            "--json",
-        )
-
-        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-        payload = json.loads(completed.stdout)
-        self.assertTrue(
-            any("symlink" in warning.lower() for warning in payload["result"]["warnings"]),
-            "symlinked shared-state projects/app/.runtime path should produce a warning",
-        )
-        self.assertTrue(
-            unsafe_runtime_file.exists(),
-            "cleanup must not delete files through symlinked shared-state projects/app/.runtime targets",
-        )
-        self.assertNotIn(
-            "projects/app/.runtime/session.json",
             payload["result"]["deleted_paths"],
         )
 
@@ -1431,9 +1344,8 @@ class CleanupShellIntegrationTests(unittest.TestCase):
             "cleanup must reject symlinked shared root before pruning stale browser markers",
         )
         self.assertTrue(self.state_fixture.exists("buddyswitch/content/runs/run-market.json"))
-        self.assertTrue(self.state_fixture.exists("projects/app/.runtime/session.json"))
         self.assertTrue((workspace_dir / "runs" / "raw" / "market" / "market.log").exists())
-        self.assertTrue((workspace_dir / "projects" / "app" / ".runtime" / "session.json").exists())
+        self.assertTrue((workspace_dir / "runs" / "raw").is_dir())
 
     def test_shell_all_data_cleanup_rejects_symlinked_state_root(self) -> None:
         outside_state_root = self.repo_root / "outside-state"

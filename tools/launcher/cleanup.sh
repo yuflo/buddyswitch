@@ -6,24 +6,8 @@ BUDDYSWITCH_CLEANUP_REPO_ROOT="$(cd "${BUDDYSWITCH_CLEANUP_HELPER_DIR}/../.." &&
 BUDDYSWITCH_CLEANUP_ENV_CLEANUP="${BUDDYSWITCH_CLEANUP_REPO_ROOT}/scripts/env_cleanup.py"
 BUDDYSWITCH_CLEANUP_MANIFEST="${BUDDYSWITCH_CLEANUP_REPO_ROOT}/buddyswitch/manifest.toml"
 
-buddyswitch_cleanup_strip_legacy_runtime_excludes() {
-  local repo_root="$1"
-  local exclude_path="${repo_root}/.git/info/exclude"
-  local temp_path
-
-  if [[ ! -f "${exclude_path}" ]]; then
-    return 0
-  fi
-
-  temp_path="$(mktemp)"
-  grep -Fvx "# BuddySwitch runtime-only excludes" "${exclude_path}" \
-    | grep -Fvx "buddyswitch/content/runs/**" \
-    | grep -Fvx "buddyswitch/objects/tracks/**" \
-    | grep -Fvx "buddyswitch/objects/tasks/**" \
-    | grep -Fvx "buddyswitch/objects/artifacts/**" \
-    | grep -Fvx "runs/raw/**" \
-    | grep -Fvx "projects/app/.runtime/**" > "${temp_path}" || true
-  mv "${temp_path}" "${exclude_path}"
+buddyswitch_cleanup_usage_hint() {
+  echo "Use: buddyswitch-codex data cleanup --buddy <buddy>|--all-data [--yes] [--json]" >&2
 }
 
 buddyswitch_cleanup_requests_execute() {
@@ -65,13 +49,9 @@ buddyswitch_cleanup_parse_args() {
         fi
         ;;
       --app-runtime)
-        if [[ "${target_seen}" -eq 1 ]]; then
-          echo "data cleanup target must be specified exactly once" >&2
-          return 2
-        fi
-        target_seen=1
-        BUDDYSWITCH_CLEANUP_SCOPE="app-runtime"
-        shift
+        echo "Removed data cleanup option: --app-runtime" >&2
+        buddyswitch_cleanup_usage_hint
+        return 2
         ;;
       --all-data)
         if [[ "${target_seen}" -eq 1 ]]; then
@@ -92,12 +72,12 @@ buddyswitch_cleanup_parse_args() {
         ;;
       --agent | --all-agents | --project | --all-storage | --execute | --force)
         echo "Removed data cleanup option: $1" >&2
-        echo "Use: buddyswitch-codex data cleanup --buddy <buddy>|--app-runtime|--all-data [--yes] [--json]" >&2
+        buddyswitch_cleanup_usage_hint
         return 2
         ;;
       *)
         echo "Unknown data cleanup option: $1" >&2
-        echo "Use: buddyswitch-codex data cleanup --buddy <buddy>|--app-runtime|--all-data [--yes] [--json]" >&2
+        buddyswitch_cleanup_usage_hint
         return 2
         ;;
     esac
@@ -105,7 +85,7 @@ buddyswitch_cleanup_parse_args() {
 
   if [[ -z "${BUDDYSWITCH_CLEANUP_SCOPE}" ]]; then
     echo "data cleanup target is required" >&2
-    echo "Use: buddyswitch-codex data cleanup --buddy <buddy>|--app-runtime|--all-data [--yes] [--json]" >&2
+    buddyswitch_cleanup_usage_hint
     return 2
   fi
 }
@@ -118,9 +98,6 @@ buddyswitch_cleanup_run_env_cleanup() {
   case "${scope}" in
     buddy)
       target_args=(--buddy "${BUDDYSWITCH_CLEANUP_BUDDY}")
-      ;;
-    app-runtime)
-      target_args=(--app-runtime)
       ;;
     all-data)
       target_args=(--all-data)

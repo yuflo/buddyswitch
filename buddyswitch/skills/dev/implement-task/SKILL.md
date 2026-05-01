@@ -21,7 +21,7 @@
 
 ## Outputs
 - Code changes primarily under `projects/app/`.
-- Runtime-only temporary outputs under `projects/app/.runtime/`.
+- Runtime-only temporary outputs under `runs/raw/`.
 - A durable implementation artifact object plus run audit from the default runtime.
 
 ## Steps
@@ -55,7 +55,7 @@
 - Do not change product scope silently.
 - Do not make architecture direction changes without explicit note.
 - Do not skip verification reporting.
-- Do not write runtime noise into `projects/app/` source folders; use `projects/app/.runtime/`.
+- Do not write runtime noise into `projects/app/` source folders; use `runs/raw/`.
 
 ## Examples
 - `switch dev: Implement the approved P0 creator profile flow in projects/app`

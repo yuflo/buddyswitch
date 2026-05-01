@@ -26,7 +26,6 @@ CATEGORY_ORDER = (
     "run_content",
     "run_raw",
     "track_objects",
-    "project_runtime",
 )
 
 
@@ -723,7 +722,6 @@ def detach_artifact_from_task(
 def ensure_required_skeleton(root: Path, *, warnings: list[str] | None = None) -> None:
     for relative_dir in (
         "runs/raw",
-        "projects/app/.runtime",
         "buddyswitch/objects/tracks",
         "buddyswitch/objects/tasks",
         "buddyswitch/objects/artifacts",
@@ -771,14 +769,10 @@ def build_cleanup_plan(
     internal_scope = scope
     if scope == "buddy":
         internal_scope = "agent"
-    elif scope == "app-runtime":
-        internal_scope = "project"
     elif scope == "all-data":
         internal_scope = "all-storage"
     if internal_scope == "agent" and (buddy is None or buddy not in valid_buddies):
         raise ValueError(f"Invalid buddy '{buddy}'. Check buddyswitch/manifest.toml")
-    if internal_scope == "project" and buddy is not None:
-        raise ValueError("project cleanup does not accept buddy")
 
     plan = new_plan(scope, buddy=buddy)
     plan["repo_root"] = str(repo_root)
@@ -837,12 +831,8 @@ def build_cleanup_plan(
             add_path(plan, repo_root / item["path"], "task_objects")
             plan["direct_delete_paths"].append(item["path"])
 
-    elif internal_scope == "project":
-        add_dir_files(plan, "projects/app/.runtime", "project_runtime")
-
     elif internal_scope == "all-storage":
         add_dir_files(plan, "runs/raw", "run_raw")
-        add_dir_files(plan, "projects/app/.runtime", "project_runtime")
         add_dir_files(plan, "buddyswitch/objects/tracks", "track_objects")
         add_dir_files(plan, "buddyswitch/objects/tasks", "task_objects")
         add_dir_files(plan, "buddyswitch/objects/artifacts", "artifact_objects")
@@ -881,15 +871,6 @@ def build_cleanup_plan(
                     relative_dir=f"runs/raw/{buddy}",
                     category="run_raw",
                 )
-        elif internal_scope == "project":
-            for workspace in discover_instance_workspaces(plan, shared_root=shared_root, buddy_filter=None):
-                add_instance_workspace_dir_files(
-                    plan,
-                    shared_root=shared_root,
-                    workspace_dir=workspace,
-                    relative_dir="projects/app/.runtime",
-                    category="project_runtime",
-                )
         elif internal_scope == "all-storage":
             for workspace in discover_instance_workspaces(plan, shared_root=shared_root, buddy_filter=None):
                 add_instance_workspace_dir_files(
@@ -898,13 +879,6 @@ def build_cleanup_plan(
                     workspace_dir=workspace,
                     relative_dir="runs/raw",
                     category="run_raw",
-                )
-                add_instance_workspace_dir_files(
-                    plan,
-                    shared_root=shared_root,
-                    workspace_dir=workspace,
-                    relative_dir="projects/app/.runtime",
-                    category="project_runtime",
                 )
 
     plan["delete_paths"].sort()
@@ -978,11 +952,7 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
 def print_text_plan(plan: dict[str, Any]) -> None:
     if plan["scope"] in {"agent", "buddy"}:
         target = f"--buddy {plan['buddy']}"
-    elif plan["scope"] == "all-agents":
-        target = "--all-data"
-    elif plan["scope"] in {"project", "app-runtime"}:
-        target = "--app-runtime"
-    elif plan["scope"] == "all-data":
+    elif plan["scope"] in {"all-agents", "all-data"}:
         target = "--all-data"
     else:
         target = "--all-data"
@@ -1020,7 +990,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest", type=Path, help="Manifest path. Defaults to <repo-root>/buddyswitch/manifest.toml.")
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--buddy")
-    target.add_argument("--app-runtime", action="store_true")
     target.add_argument("--all-data", action="store_true")
     parser.add_argument("--yes", action="store_true")
     parser.add_argument("--json", action="store_true", help="Print cleanup plan/result as JSON.")
@@ -1030,8 +999,6 @@ def build_parser() -> argparse.ArgumentParser:
 def resolve_scope(args: argparse.Namespace) -> tuple[str, str | None]:
     if args.buddy:
         return "buddy", args.buddy
-    if args.app_runtime:
-        return "app-runtime", None
     if args.all_data:
         return "all-data", None
     raise ValueError("No cleanup target provided")

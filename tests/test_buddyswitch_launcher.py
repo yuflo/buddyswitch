@@ -147,6 +147,47 @@ elif project_workspace_dir and product_read:
         "content": product_path.read_text(encoding="utf-8").strip() if product_path.exists() else None,
     }
 
+projects_app_path = Path("projects/app")
+projects_app_probe = {
+    "path": str(projects_app_path),
+    "exists": projects_app_path.exists(),
+    "resolved": None,
+}
+try:
+    projects_app_probe["resolved"] = str(projects_app_path.resolve(strict=True))
+except FileNotFoundError:
+    pass
+except OSError as exc:
+    projects_app_probe["resolve_error"] = str(exc)
+
+relative_probe = None
+relative_write_path = os.environ.get("BUDDYSWITCH_TEST_RELATIVE_WRITE_PATH")
+relative_write_content = os.environ.get("BUDDYSWITCH_TEST_RELATIVE_WRITE_CONTENT")
+relative_read_path = os.environ.get("BUDDYSWITCH_TEST_RELATIVE_READ_PATH")
+if relative_write_path or relative_read_path:
+    relative_probe = {}
+
+if relative_write_path:
+    write_target = projects_app_path / relative_write_path
+    write_target.parent.mkdir(parents=True, exist_ok=True)
+    write_value = relative_write_content if relative_write_content is not None else "relative-write"
+    write_target.write_text(write_value + "\\n", encoding="utf-8")
+    relative_probe["write"] = {
+        "path": str(write_target),
+        "resolved": str(write_target.resolve(strict=True)),
+        "exists": write_target.exists(),
+        "content": write_target.read_text(encoding="utf-8").strip(),
+    }
+
+if relative_read_path:
+    read_target = projects_app_path / relative_read_path
+    relative_probe["read"] = {
+        "path": str(read_target),
+        "resolved": str(read_target.resolve(strict=False)),
+        "exists": read_target.exists(),
+        "content": read_target.read_text(encoding="utf-8").strip() if read_target.exists() else None,
+    }
+
 def remove_mcp_section(config_text, server_name):
     lines = config_text.splitlines(keepends=True)
     output = []
@@ -198,6 +239,8 @@ if entry["instance_json"]:
 payload = {
     **entry,
     "product_probe": product_probe,
+    "projects_app_probe": projects_app_probe,
+    "relative_probe": relative_probe,
     "launch_count": launch_count,
     "config_toml": (codex_home / "config.toml").read_text(encoding="utf-8"),
     "auth_json": json.loads((codex_home / "auth.json").read_text(encoding="utf-8")),
@@ -922,7 +965,7 @@ exec "$real_git" "$@"
                 self.assertTrue(projected_path.is_symlink(), f"projection should be a symlink: {projected_path}")
                 self.assertEqual(projected_path.resolve(), state_path.resolve())
 
-            for relative_path in ("runs/raw", "projects/app/.runtime"):
+            for relative_path in ("runs/raw",):
                 local_path = workspace_dir / relative_path
                 self.assertTrue(local_path.is_dir(), f"missing instance-local runtime dir: {local_path}")
                 self.assertFalse(local_path.is_symlink(), f"instance-local runtime dir must not be projected: {local_path}")
@@ -1071,12 +1114,238 @@ exec "$real_git" "$@"
             self.assertTrue((project_workspace_dir / "projects" / "app" / "index.html").is_file())
             self.assertTrue((project_workspace_dir / "projects" / "app" / "main.js").is_file())
             self.assertTrue((project_workspace_dir / "projects" / "app" / "styles.css").is_file())
-            self.assertTrue((runtime_workspace_dir / "projects" / "app" / ".runtime").is_dir())
-            self.assertFalse((runtime_workspace_dir / "projects" / "app" / ".runtime").is_symlink())
+            projects_app_probe = payload["projects_app_probe"]
+            self.assertTrue(projects_app_probe["exists"])
+            self.assertEqual(
+                projects_app_probe["resolved"],
+                str((project_workspace_dir / "projects" / "app").resolve()),
+            )
             self.assertFalse((project_workspace_dir / "projects" / "app" / ".runtime").exists())
 
             source_git_common_dir = self._repo_git_common_dir(ROOT)
             self.assertEqual(self._repo_git_common_dir(project_workspace_dir), source_git_common_dir)
+
+    def test_product_mode_projects_app_resolves_to_shared_project_app(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_RELATIVE_WRITE_PATH"] = "relative-path-sentinel.txt"
+            env["BUDDYSWITCH_TEST_RELATIVE_WRITE_CONTENT"] = "shared-relative-write"
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            shared_root = source_home_path / ".codex-buddyswitch"
+            runtime_workspace_dir = shared_root / "instances" / payload["instance_id"] / "workspace"
+            shared_project_workspace = shared_root / "project" / "workspace"
+            shared_project_app = shared_project_workspace / "projects" / "app"
+
+            self.assertEqual(payload["cwd"], str(runtime_workspace_dir.resolve()))
+            self.assertEqual(payload["project_workspace_dir"], str(shared_project_workspace))
+
+            projects_app_probe = payload["projects_app_probe"]
+            self.assertTrue(projects_app_probe["exists"])
+            self.assertEqual(projects_app_probe["resolved"], str(shared_project_app.resolve()))
+
+            relative_probe = payload["relative_probe"]
+            self.assertIsNotNone(relative_probe)
+            assert relative_probe is not None
+            write_probe = relative_probe["write"]
+            self.assertEqual(
+                write_probe["resolved"],
+                str((shared_project_app / "relative-path-sentinel.txt").resolve()),
+            )
+            self.assertEqual(write_probe["content"], "shared-relative-write")
+            self.assertTrue((shared_project_app / "relative-path-sentinel.txt").exists())
+
+    def test_cross_buddy_relative_projects_app_is_shared(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            pm_capture_path = temp_root_path / "capture-pm.json"
+            dev_capture_path = temp_root_path / "capture-dev.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+
+            base_env = os.environ.copy()
+            base_env["HOME"] = str(source_home_path)
+            base_env.pop("CODEX_HOME", None)
+            base_env["PATH"] = f"{fake_bin}{os.pathsep}{base_env.get('PATH', '')}"
+            base_env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            base_env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            base_env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+
+            pm_env = base_env.copy()
+            pm_env["BUDDYSWITCH_TEST_CAPTURE"] = str(pm_capture_path)
+            pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_PATH"] = "cross-buddy-sentinel.txt"
+            pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_CONTENT"] = "shared-via-relative-path"
+            pm_start = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                cwd=ROOT,
+                env=pm_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(pm_start.returncode, 0, msg=pm_start.stderr)
+
+            dev_env = base_env.copy()
+            dev_env["BUDDYSWITCH_TEST_CAPTURE"] = str(dev_capture_path)
+            dev_env["BUDDYSWITCH_TEST_RELATIVE_READ_PATH"] = "cross-buddy-sentinel.txt"
+            dev_start = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "dev", "debug", "prompt-input", "switch dev: continue"],
+                cwd=ROOT,
+                env=dev_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(dev_start.returncode, 0, msg=dev_start.stderr)
+
+            pm_payload = json.loads(pm_capture_path.read_text(encoding="utf-8"))
+            dev_payload = json.loads(dev_capture_path.read_text(encoding="utf-8"))
+            shared_root = source_home_path / ".codex-buddyswitch"
+            shared_project_app = shared_root / "project" / "workspace" / "projects" / "app"
+
+            self.assertEqual(
+                pm_payload["projects_app_probe"]["resolved"],
+                str(shared_project_app.resolve()),
+            )
+            self.assertEqual(
+                dev_payload["projects_app_probe"]["resolved"],
+                str(shared_project_app.resolve()),
+            )
+
+            dev_relative_probe = dev_payload["relative_probe"]
+            self.assertIsNotNone(dev_relative_probe)
+            assert dev_relative_probe is not None
+            read_probe = dev_relative_probe["read"]
+            self.assertTrue(read_probe["exists"])
+            self.assertEqual(read_probe["content"], "shared-via-relative-path")
+
+    def test_product_start_does_not_migrate_legacy_shared_workspace_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            shared_root = source_home_path / ".codex-buddyswitch"
+            legacy_runtime_marker = shared_root / "workspace" / "projects" / "app" / ".runtime" / "legacy.json"
+            legacy_runtime_marker.parent.mkdir(parents=True, exist_ok=True)
+            legacy_runtime_marker.write_text("{\"legacy\":true}\n", encoding="utf-8")
+
+            capture_path = temp_root_path / "capture.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            project_workspace_dir = shared_root / "project" / "workspace"
+            self.assertFalse(
+                (project_workspace_dir / "projects" / "app" / ".runtime" / "legacy.json").exists(),
+            )
 
     def test_project_workspace_is_shared_across_buddy_instances(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -1120,7 +1389,8 @@ exec "$real_git" "$@"
 
             pm_env = base_env.copy()
             pm_env["BUDDYSWITCH_TEST_CAPTURE"] = str(pm_capture_path)
-            pm_env["BUDDYSWITCH_TEST_PRODUCT_WRITE"] = "shared-pm-sentinel"
+            pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_PATH"] = "shared-product-sentinel.txt"
+            pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_CONTENT"] = "shared-pm-sentinel"
             pm_start = subprocess.run(
                 [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
                 cwd=ROOT,
@@ -1133,7 +1403,7 @@ exec "$real_git" "$@"
 
             dev_env = base_env.copy()
             dev_env["BUDDYSWITCH_TEST_CAPTURE"] = str(dev_capture_path)
-            dev_env["BUDDYSWITCH_TEST_PRODUCT_READ"] = "1"
+            dev_env["BUDDYSWITCH_TEST_RELATIVE_READ_PATH"] = "shared-product-sentinel.txt"
             dev_start = subprocess.run(
                 [str(LAUNCHER), "instance", "start", "--buddy", "dev", "debug", "prompt-input", "switch dev: continue"],
                 cwd=ROOT,
@@ -1166,36 +1436,28 @@ exec "$real_git" "$@"
                 str((shared_root / "instances" / dev_payload["instance_id"] / "workspace").resolve()),
             )
 
-            pm_probe = pm_payload["product_probe"]
-            dev_probe = dev_payload["product_probe"]
-            self.assertIsNotNone(pm_probe)
-            self.assertIsNotNone(dev_probe)
-            self.assertEqual(pm_probe["content"], "shared-pm-sentinel")
-            self.assertTrue(dev_probe["exists"])
-            self.assertEqual(dev_probe["content"], "shared-pm-sentinel")
-            self.assertEqual(pm_probe["path"], dev_probe["path"])
-            self.assertFalse(
-                (
-                    shared_root
-                    / "instances"
-                    / pm_payload["instance_id"]
-                    / "workspace"
-                    / "projects"
-                    / "app"
-                    / "shared-product-sentinel.txt"
-                ).exists()
+            shared_project_app = expected_project_workspace / "projects" / "app"
+            self.assertEqual(
+                pm_payload["projects_app_probe"]["resolved"],
+                str(shared_project_app.resolve()),
             )
-            self.assertFalse(
-                (
-                    shared_root
-                    / "instances"
-                    / dev_payload["instance_id"]
-                    / "workspace"
-                    / "projects"
-                    / "app"
-                    / "shared-product-sentinel.txt"
-                ).exists()
+            self.assertEqual(
+                dev_payload["projects_app_probe"]["resolved"],
+                str(shared_project_app.resolve()),
             )
+            pm_relative_probe = pm_payload["relative_probe"]
+            dev_relative_probe = dev_payload["relative_probe"]
+            self.assertIsNotNone(pm_relative_probe)
+            self.assertIsNotNone(dev_relative_probe)
+            assert pm_relative_probe is not None
+            assert dev_relative_probe is not None
+            self.assertEqual(
+                pm_relative_probe["write"]["resolved"],
+                str((shared_project_app / "shared-product-sentinel.txt").resolve()),
+            )
+            self.assertTrue(dev_relative_probe["read"]["exists"])
+            self.assertEqual(dev_relative_probe["read"]["content"], "shared-pm-sentinel")
+            self.assertTrue((shared_project_app / "shared-product-sentinel.txt").exists())
 
     def test_start_with_buddy_bootstrap_failure_does_not_leave_active_instance(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -1448,6 +1710,75 @@ exec "$real_git" "$@"
             self.assertEqual(len(list((shared_root / "instances").glob("inst-*"))), 1)
             stored = json.loads(Path(second_payload["instance_json"]).read_text(encoding="utf-8"))
             self.assertEqual(stored["status"], "inactive")
+
+    def test_instance_open_repairs_existing_runtime_projects_app_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_id = "inst-pm-runtime-project-copy"
+            instance_root, workspace_dir = self._write_instance_record(shared_root, instance_id, browser_port=9222)
+            self._add_test_worktree(workspace_dir)
+            stale_file = workspace_dir / "projects" / "app" / "instance-only-stale.txt"
+            stale_file.write_text("stale-runtime-copy\n", encoding="utf-8")
+
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture-open.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_RELATIVE_READ_PATH"] = "instance-only-stale.txt"
+
+            open_result = subprocess.run(
+                [str(LAUNCHER), "instance", "open", instance_id, "debug", "prompt-input", "continue"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(open_result.returncode, 0, msg=open_result.stderr)
+            payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            shared_project_app = shared_root / "project" / "workspace" / "projects" / "app"
+            self.assertEqual(
+                payload["projects_app_probe"]["resolved"],
+                str(shared_project_app.resolve()),
+            )
+            relative_probe = payload["relative_probe"]
+            self.assertIsNotNone(relative_probe)
+            assert relative_probe is not None
+            self.assertFalse(relative_probe["read"]["exists"])
+            self.assertFalse((shared_project_app / "instance-only-stale.txt").exists())
 
     def test_instance_open_patches_existing_minimal_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -3396,7 +3727,7 @@ exit 1
             self.assertIn("Top-level command removed: workspace", blocked_sync.stderr)
             self.assertFalse((shared_root / "workspace").exists(), "blocked sync must not create legacy workspace")
 
-    def test_start_with_buddy_migrates_legacy_durable_state_to_shared_state(self) -> None:
+    def test_start_with_buddy_does_not_migrate_legacy_durable_state_to_shared_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -3424,13 +3755,11 @@ exit 1
             legacy_run = legacy_workspace / "buddyswitch" / "content" / "runs" / "run-demo.json"
             legacy_reserved = legacy_workspace / "buddyswitch" / "content" / "runs" / "reserved" / "run-old.json"
             legacy_raw = legacy_workspace / "runs" / "raw" / "dump.json"
-            legacy_runtime = legacy_workspace / "projects" / "app" / ".runtime" / "session.json"
             for path, payload in (
                 (legacy_task, {"id": "task-demo", "buddy": "pm"}),
                 (legacy_run, {"run_id": "run-demo", "switch": {"buddy": "pm"}}),
                 (legacy_reserved, {"run_id": "run-old", "status": "reserved"}),
                 (legacy_raw, {"raw": True}),
-                (legacy_runtime, {"session": "demo"}),
             ):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
@@ -3463,23 +3792,18 @@ exit 1
                 0,
                 msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
             )
-            self.assertEqual(
-                (shared_root / "state" / "buddyswitch" / "objects" / "tasks" / "task-demo.json").read_text(
-                    encoding="utf-8"
-                ),
-                '{"id": "task-demo", "buddy": "pm"}\n',
+            self.assertFalse(
+                (shared_root / "state" / "buddyswitch" / "objects" / "tasks" / "task-demo.json").exists(),
+                "legacy workspace task should not be auto-migrated into shared state",
             )
-            self.assertEqual(
-                (shared_root / "state" / "buddyswitch" / "content" / "runs" / "run-demo.json").read_text(
-                    encoding="utf-8"
-                ),
-                '{"run_id": "run-demo", "switch": {"buddy": "pm"}}\n',
+            self.assertFalse(
+                (shared_root / "state" / "buddyswitch" / "content" / "runs" / "run-demo.json").exists(),
+                "legacy workspace run should not be auto-migrated into shared state",
             )
-            self.assertFalse(legacy_task.exists(), "legacy durable task should move into shared state")
-            self.assertFalse(legacy_run.exists(), "legacy durable run should move into shared state")
-            self.assertFalse(legacy_reserved.exists(), "legacy reservations should be pruned, not migrated")
-            self.assertTrue(legacy_raw.exists(), "legacy raw runtime scratch must not migrate into shared state")
-            self.assertTrue(legacy_runtime.exists(), "legacy app runtime scratch must not migrate into shared state")
+            self.assertTrue(legacy_task.exists(), "legacy workspace task should remain untouched")
+            self.assertTrue(legacy_run.exists(), "legacy workspace run should remain untouched")
+            self.assertTrue(legacy_reserved.exists(), "legacy reservation should remain untouched")
+            self.assertTrue(legacy_raw.exists(), "legacy raw runtime scratch must remain untouched")
 
     def test_env_browser_status_instance_defaults_and_explicit_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -4548,6 +4872,16 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
                     check=True,
                 ).stdout
                 self.assertNotIn(str(project_workspace_dir), worktrees_after)
+                prune_dry_run = subprocess.run(
+                    ["git", "-C", str(ROOT), "worktree", "prune", "--dry-run", "-v"],
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                self.assertNotIn(
+                    str(project_workspace_dir),
+                    prune_dry_run.stdout + prune_dry_run.stderr,
+                )
             finally:
                 subprocess.run(
                     ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(project_workspace_dir)],

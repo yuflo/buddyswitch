@@ -1047,7 +1047,6 @@ function cleanupSuggestions(track) {
     }
   });
   commands.push("./buddyswitch-codex data cleanup --all-data");
-  commands.push("./buddyswitch-codex data cleanup --app-runtime");
   return commands;
 }
 
@@ -1121,7 +1120,6 @@ function renderStandaloneSourceDetails(task) {
   [
     `./buddyswitch-codex data cleanup --buddy ${task.buddy}`,
     "./buddyswitch-codex data cleanup --all-data",
-    "./buddyswitch-codex data cleanup --app-runtime",
   ].forEach((command) => renderCommand(commandList, command));
   cleanup.append(commandList);
   sourceDetails.append(cleanup);

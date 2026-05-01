@@ -117,10 +117,9 @@ Default runtime behavior:
 - Track objects: `buddyswitch/objects/tracks/*.json`
 - Task objects: `buddyswitch/objects/tasks/*.json`
 - Artifact objects with canonical structured content: `buddyswitch/objects/artifacts/*.json`
-- Project runtime-only temporary data: `projects/app/.runtime/`
 
 ## Project Code Location
 
-Main app code lives in the shared project workspace at `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}/projects/app`.
+Main app code is edited via relative `projects/app` from the instance runtime workspace.
 
-Use the instance runtime workspace for BuddySwitch control flow, projected state, raw dumps, and `projects/app/.runtime` only. Durable product source edits must be made under `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}/projects/app`, not under the instance workspace copy of `projects/app`.
+Launcher projects that path to the shared project workspace (debug context: `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}`). Use the instance runtime workspace for BuddySwitch control flow, projected state, and raw dumps; treat `projects/app` as shared product source.

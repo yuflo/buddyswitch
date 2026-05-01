@@ -288,8 +288,8 @@ class RepoConsistencyTests(unittest.TestCase):
         combined = "\n".join(path.read_text(encoding="utf-8") for path in targets)
 
         self.assertIn("./buddyswitch-codex data cleanup --buddy", combined)
-        self.assertIn("./buddyswitch-codex data cleanup --app-runtime", combined)
         self.assertIn("./buddyswitch-codex data cleanup --all-data", combined)
+        self.assertNotIn("./buddyswitch-codex data cleanup --app-runtime", combined)
         self.assertNotIn("./buddyswitch-codex cleanup --agent", combined)
         self.assertNotIn("./buddyswitch-codex cleanup --all-agents", combined)
         self.assertNotIn("./buddyswitch-codex cleanup --project app", combined)
@@ -298,6 +298,50 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("scripts/cleanup_buddyswitch.sh --all-agents", combined)
         self.assertNotIn("scripts/cleanup_buddyswitch.sh --project app", combined)
         self.assertNotIn("scripts/cleanup_buddyswitch.sh --all-storage", combined)
+
+    def test_active_docs_remove_project_app_runtime_cleanup_surface(self) -> None:
+        docs_roots = (
+            ROOT / "README.md",
+            ROOT / "AGENTS.md",
+            ROOT / "framework" / "docs",
+            ROOT / "tools" / "launcher" / "assets",
+            ROOT / "buddyswitch" / "skills",
+            ROOT / "framework" / "console" / "app.js",
+        )
+        scanned: list[Path] = []
+        for target in docs_roots:
+            if target.is_file():
+                paths = [target]
+            else:
+                paths = [
+                    path
+                    for path in target.rglob("*")
+                    if path.is_file() and path.suffix in {".md", ".toml", ".json", ".js"}
+                ]
+            for path in paths:
+                scanned.append(path)
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn(
+                    "data cleanup --app-runtime",
+                    text,
+                    msg=f"legacy app-runtime cleanup surface should be removed from {path.relative_to(ROOT)}",
+                )
+                self.assertNotIn(
+                    "projects/app/.runtime",
+                    text,
+                    msg=f"legacy project runtime path should be removed from {path.relative_to(ROOT)}",
+                )
+        self.assertTrue(scanned)
+
+    def test_legacy_workspace_migration_and_cleanup_helpers_are_removed(self) -> None:
+        targets = (
+            ROOT / "tools" / "launcher" / "workspace.sh",
+            ROOT / "tools" / "launcher" / "cleanup.sh",
+            ROOT / "scripts" / "env_cleanup.py",
+        )
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in targets)
+        self.assertNotIn("buddyswitch_workspace_migrate_legacy_state_if_needed", combined)
+        self.assertNotIn("buddyswitch_cleanup_strip_legacy_runtime_excludes", combined)
 
     def test_active_docs_and_env_store_use_final_public_command_surface(self) -> None:
         targets = (
@@ -326,7 +370,6 @@ class RepoConsistencyTests(unittest.TestCase):
     def test_active_launcher_helpers_use_final_reset_command_surface(self) -> None:
         text = (ROOT / "tools" / "launcher" / "workspace.sh").read_text(encoding="utf-8")
 
-        self.assertIn("buddyswitch-codex env reset --yes", text)
         self.assertNotIn("buddyswitch-codex reset --yes", text)
 
     def test_readme_documents_instance_lifecycle_cli(self) -> None:
@@ -954,10 +997,12 @@ class RepoConsistencyTests(unittest.TestCase):
         )
         combined = "\n".join(path.read_text(encoding="utf-8") for path in docs).lower()
 
-        self.assertIn("buddyswitch_project_workspace_dir", combined)
-        self.assertIn("${buddyswitch_shared_root}/project/workspace", combined)
+        self.assertIn("projects/app", combined)
         self.assertIn("shared project workspace", combined)
         self.assertIn("instance runtime workspace", combined)
+        self.assertIn("shared product source", combined)
+        self.assertNotIn("${buddyswitch_project_workspace_dir}/projects/app", combined)
+        self.assertNotIn("${buddyswitch_shared_root}/project/workspace/projects/app", combined)
         self.assertNotIn(
             "durable product source edits belong under `${buddyswitch_shared_root}/instances/<instance-id>/workspace/projects/app`",
             combined,
@@ -1078,10 +1123,11 @@ class RepoConsistencyTests(unittest.TestCase):
                     "refreshed_context",
                     "receipt -> commands -> summary",
                     "runs/raw/",
-                    "projects/app/.runtime/",
+                    "projects/app",
                 )
                 for token in required_runtime_tokens:
                     self.assertIn(token, lower)
+                self.assertNotIn("projects/app/.runtime/", lower)
 
     def test_active_host_prompts_treat_recommended_command_as_canonical_receipt_field(self) -> None:
         runtime_agents = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(

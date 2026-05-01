@@ -78,5 +78,5 @@ Bad example:
 
 ## Runtime Output Rule
 
-- Temporary runtime logs, traces, or generated debug files for project checks must go to `projects/app/.runtime/`.
+- Temporary runtime logs, traces, or generated debug files for project checks must go to `runs/raw/`.
 - Do not place runtime noise in source directories under `projects/app/`.

@@ -184,6 +184,60 @@ buddyswitch_workspace_ensure_project_worktree() {
   buddyswitch_workspace_force_rebuild_project_worktree
 }
 
+buddyswitch_workspace_require_path_under_shared_root() {
+  local label="$1"
+  local raw_path="$2"
+  local normalized_path normalized_shared_root
+
+  normalized_path="$(buddyswitch_workspace_canonical_path "${raw_path%/}")"
+  normalized_shared_root="$(buddyswitch_workspace_canonical_path "${BUDDYSWITCH_SHARED_ROOT%/}")"
+  case "${normalized_path}" in
+    "${normalized_shared_root}" | "${normalized_shared_root}/"*)
+      printf '%s\n' "${normalized_path}"
+      return 0
+      ;;
+  esac
+
+  echo "${label} must resolve under BUDDYSWITCH_SHARED_ROOT" >&2
+  echo "${label}: ${normalized_path}" >&2
+  echo "shared root: ${normalized_shared_root}" >&2
+  return 1
+}
+
+buddyswitch_workspace_repair_runtime_projects_app_projection() {
+  local runtime_projects_app target_projects_app
+  local runtime_resolved target_resolved
+
+  runtime_projects_app="${BUDDYSWITCH_WORKSPACE_DIR}/projects/app"
+  target_projects_app="${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}/projects/app"
+
+  runtime_resolved="$(
+    buddyswitch_workspace_require_path_under_shared_root \
+      "runtime projects/app path" \
+      "${runtime_projects_app}"
+  )" || return $?
+  target_resolved="$(
+    buddyswitch_workspace_require_path_under_shared_root \
+      "shared projects/app target" \
+      "${target_projects_app}"
+  )" || return $?
+
+  if [[ ! -d "${target_projects_app}" ]]; then
+    echo "shared projects/app target is missing: ${target_projects_app}" >&2
+    return 1
+  fi
+
+  if [[ -L "${runtime_projects_app}" ]]; then
+    if [[ "${runtime_resolved}" == "${target_resolved}" ]]; then
+      return 0
+    fi
+  fi
+
+  mkdir -p "$(dirname "${runtime_projects_app}")"
+  rm -rf "${runtime_projects_app}"
+  ln -s "${target_projects_app}" "${runtime_projects_app}"
+}
+
 buddyswitch_workspace_runtime_output_paths() {
   cat <<'EOF'
 buddyswitch/objects/tracks
@@ -191,7 +245,6 @@ buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
 buddyswitch/content/runs
 runs/raw
-projects/app/.runtime
 EOF
 }
 
@@ -207,7 +260,6 @@ EOF
 buddyswitch_workspace_local_runtime_paths() {
   cat <<'EOF'
 runs/raw
-projects/app/.runtime
 EOF
 }
 
@@ -398,7 +450,6 @@ buddyswitch/objects/tracks/**
 buddyswitch/objects/tasks/**
 buddyswitch/objects/artifacts/**
 runs/raw/**
-projects/app/.runtime/**
 EOF
 }
 
@@ -418,7 +469,6 @@ buddyswitch_workspace_ensure_state_skeleton() {
     mkdir -p "${workspace_dir}/${relative_dir}"
   done <<'EOF'
 runs/raw
-projects/app/.runtime
 buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
@@ -438,89 +488,6 @@ buddyswitch_workspace_install_state_projections() {
     rm -rf "${projected_dir}"
     ln -s "${state_dir}" "${projected_dir}"
   done < <(buddyswitch_workspace_projected_state_paths)
-}
-
-buddyswitch_workspace_migrate_legacy_state_if_needed() {
-  python3 - "${BUDDYSWITCH_SHARED_ROOT}" <<'PY'
-import json
-import shutil
-import sys
-from pathlib import Path
-
-shared_root = Path(sys.argv[1])
-legacy_root = shared_root / "workspace"
-state_root = shared_root / "state"
-durable_dirs = (
-    Path("buddyswitch/objects/tracks"),
-    Path("buddyswitch/objects/tasks"),
-    Path("buddyswitch/objects/artifacts"),
-    Path("buddyswitch/content/runs"),
-)
-ignored_names = {".DS_Store", ".gitkeep"}
-
-
-def remove_path(path: Path) -> None:
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-        return
-    path.unlink(missing_ok=True)
-
-
-def prune_reservations(root: Path) -> None:
-    shutil.rmtree(root / "buddyswitch" / "content" / "runs" / "reserved", ignore_errors=True)
-
-
-def durable_files(root: Path) -> list[Path]:
-    rows: list[Path] = []
-    for relative_dir in durable_dirs:
-        directory = root / relative_dir
-        if not directory.exists():
-            continue
-        for path in sorted(directory.rglob("*")):
-            if path.is_dir() or path.name in ignored_names:
-                continue
-            rows.append(path)
-    return rows
-
-
-def validate_json(files: list[Path], label: str) -> None:
-    for path in files:
-        try:
-            json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"Migration blocked: invalid JSON in {label} durable state: {path}: {exc}", file=sys.stderr)
-            raise SystemExit(3)
-
-
-prune_reservations(legacy_root)
-prune_reservations(state_root)
-legacy_files = durable_files(legacy_root)
-state_files = durable_files(state_root)
-validate_json(legacy_files, "legacy workspace")
-validate_json(state_files, "shared")
-
-if legacy_files and state_files:
-    print(
-        "Migration blocked: legacy workspace durable state and shared state both contain data. "
-        "Run buddyswitch-codex env reset --yes or clean up one state root before starting product mode.",
-        file=sys.stderr,
-    )
-    raise SystemExit(3)
-
-if legacy_files:
-    for relative_dir in durable_dirs:
-        source = legacy_root / relative_dir
-        target = state_root / relative_dir
-        if not source.exists() and not source.is_symlink():
-            continue
-        if target.exists() or target.is_symlink():
-            remove_path(target)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(source), str(target))
-
-for relative_dir in durable_dirs:
-    (state_root / relative_dir).mkdir(parents=True, exist_ok=True)
-PY
 }
 
 buddyswitch_workspace_install_guardrail_hooks() {

@@ -36,14 +36,7 @@ Use `runs/raw/` for noisy intermediate output that helps a run but is not durabl
 - debugging traces
 - copied snippets and temporary analysis dumps
 
-### `projects/app/.runtime/` (project runtime-only temporary data)
-
-Use `projects/app/.runtime/` for project-level runtime artifacts that are not durable:
-- local run traces
-- temporary debug output
-- generated runtime logs for manual validation
-
-Do not write these files into `projects/app/` source folders.
+Do not write temporary runtime noise into `projects/app/` source folders.
 
 ## 3. Git Rules
 
@@ -62,7 +55,6 @@ Do not write these files into `projects/app/` source folders.
 - generated state under `buddyswitch/objects/**`
 - generated run audit content under `buddyswitch/content/runs/**`
 - `runs/raw/**`
-- `projects/app/.runtime/**`
 - temporary logs and traces
 - scratch dumps
 - machine-local clutter
