@@ -27,6 +27,7 @@ buddyswitch_workspace_init_defaults() {
   default_template="${repo_root}/tools/launcher/assets/runtime-AGENTS.md"
 
   export BUDDYSWITCH_WORKSPACE_DIR="${BUDDYSWITCH_WORKSPACE_DIR:-${BUDDYSWITCH_SHARED_ROOT}/workspace}"
+  export BUDDYSWITCH_PROJECT_WORKSPACE_DIR="${BUDDYSWITCH_PROJECT_WORKSPACE_DIR:-${BUDDYSWITCH_SHARED_ROOT}/project/workspace}"
   export BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE="${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE:-${default_template}}"
 }
 
@@ -78,6 +79,50 @@ buddyswitch_workspace_validate_workspace_dir() {
   return 1
 }
 
+buddyswitch_workspace_validate_project_workspace_dir() {
+  local project_workspace shared_root normalized_project normalized_shared_root reserved_root
+
+  project_workspace="${BUDDYSWITCH_PROJECT_WORKSPACE_DIR:-}"
+  shared_root="${BUDDYSWITCH_SHARED_ROOT:-}"
+  normalized_project="$(buddyswitch_workspace_canonical_path "${project_workspace%/}")"
+  normalized_shared_root="$(buddyswitch_workspace_canonical_path "${shared_root%/}")"
+
+  if [[ "${normalized_project}" == "${normalized_shared_root}" ]]; then
+    echo "project workspace dir must be under BUDDYSWITCH_SHARED_ROOT" >&2
+    echo "project workspace: ${normalized_project}" >&2
+    echo "shared root: ${normalized_shared_root}" >&2
+    return 1
+  fi
+
+  for reserved_root in \
+    "${normalized_shared_root}/home" \
+    "${normalized_shared_root}/codex-home" \
+    "${normalized_shared_root}/run" \
+    "${normalized_shared_root}/chrome" \
+    "${normalized_shared_root}/instances" \
+    "${normalized_shared_root}/state"; do
+    case "${normalized_project}" in
+      "${reserved_root}" | "${reserved_root}/"*)
+        echo "project workspace dir must not be inside reserved BuddySwitch runtime state" >&2
+        echo "project workspace: ${normalized_project}" >&2
+        echo "reserved root: ${reserved_root}" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  case "${normalized_project}" in
+    "${normalized_shared_root}/"*)
+      return 0
+      ;;
+  esac
+
+  echo "project workspace dir must be under BUDDYSWITCH_SHARED_ROOT" >&2
+  echo "project workspace: ${normalized_project}" >&2
+  echo "shared root: ${normalized_shared_root}" >&2
+  return 1
+}
+
 buddyswitch_workspace_is_valid_execution_worktree() {
   local workspace_dir repo_common workspace_common
 
@@ -87,6 +132,56 @@ buddyswitch_workspace_is_valid_execution_worktree() {
   git -C "${workspace_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
   workspace_common="$(git -C "${workspace_dir}" rev-parse --git-common-dir 2>/dev/null || true)"
   [[ "${workspace_common}" == "${repo_common}" ]]
+}
+
+buddyswitch_workspace_is_valid_project_worktree() {
+  local project_workspace repo_common project_common
+
+  project_workspace="${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}"
+  repo_common="$(buddyswitch_workspace_repo_common_dir)"
+
+  git -C "${project_workspace}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  project_common="$(git -C "${project_workspace}" rev-parse --git-common-dir 2>/dev/null || true)"
+  if [[ "${project_common}" != /* ]]; then
+    project_common="${project_workspace}/${project_common}"
+  fi
+  project_common="$(buddyswitch_workspace_canonical_path "${project_common}")"
+  repo_common="$(buddyswitch_workspace_canonical_path "${repo_common}")"
+  [[ "${project_common}" == "${repo_common}" ]]
+}
+
+buddyswitch_workspace_force_rebuild_project_worktree() {
+  local project_workspace repo_root
+
+  project_workspace="${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}"
+  repo_root="$(buddyswitch_workspace_repo_root)"
+  buddyswitch_workspace_validate_project_workspace_dir
+
+  mkdir -p "$(dirname "${project_workspace}")"
+  if [[ -e "${project_workspace}" ]]; then
+    git -C "${repo_root}" worktree remove --force "${project_workspace}" >/dev/null 2>&1 || true
+  fi
+  if [[ -e "${project_workspace}" ]]; then
+    if [[ -d "${project_workspace}" ]] && [[ -z "$(find "${project_workspace}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+      rmdir "${project_workspace}"
+    else
+      echo "project workspace exists and is not a valid git worktree; refusing to delete possible product source" >&2
+      echo "project workspace: ${project_workspace}" >&2
+      return 3
+    fi
+  fi
+  git -C "${repo_root}" worktree prune >/dev/null 2>&1 || true
+  git -C "${repo_root}" worktree add --detach "${project_workspace}" HEAD >/dev/null
+}
+
+buddyswitch_workspace_ensure_project_worktree() {
+  buddyswitch_workspace_init_defaults
+  buddyswitch_workspace_validate_project_workspace_dir
+  if buddyswitch_workspace_is_valid_project_worktree; then
+    return 0
+  fi
+
+  buddyswitch_workspace_force_rebuild_project_worktree
 }
 
 buddyswitch_workspace_runtime_output_paths() {

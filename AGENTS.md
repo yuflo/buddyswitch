@@ -410,6 +410,8 @@ The SHARP guidance above is the default workflow for this repository. The notes 
 
 - Use `codex` here when you are editing BuddySwitch source, tests, docs, or launcher code.
 - `./buddyswitch-codex instance start --buddy <buddy>` does not run Codex from this checkout; it launches from a launcher-managed instance worktree under `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`.
+- Product-mode durable app source lives in `${BUDDYSWITCH_SHARED_ROOT}/project/workspace/projects/app` and is exposed to sessions as `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}/projects/app`.
+- Instance workspaces remain runtime-only; do not treat `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace/projects/app` as the durable product source.
 - Shared BuddySwitch state lives under `${BUDDYSWITCH_SHARED_ROOT}/state` and is projected into each instance workspace through the repo-relative runtime paths.
 - The execution worktree carries the full runtime BuddySwitch contract in `tools/launcher/assets/runtime-AGENTS.md`.
 - Runtime BuddySwitch state is not maintained as tracked skeleton directories in the main checkout.

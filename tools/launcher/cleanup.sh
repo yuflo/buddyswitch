@@ -178,14 +178,16 @@ def marker_matches_target(payload):
     buddy = payload.get("buddy")
     if buddy == target_buddy:
         return True
+    if isinstance(buddy, str) and buddy:
+        return False
     instance_id = payload.get("instance_id")
     if not isinstance(instance_id, str) or not instance_id:
-        return False
+        return True
     instance_json = shared_root / "instances" / instance_id / "instance.json"
     try:
         instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
     except Exception:
-        return False
+        return True
     return instance_payload.get("buddy") == target_buddy
 
 
@@ -201,6 +203,17 @@ for marker in run_dir.glob("launcher-*.json"):
         continue
     if marker_matches_target(payload):
         live_pids.add(pid)
+
+for marker in run_dir.glob("launcher-*.pid"):
+    try:
+        pid = int(marker.read_text(encoding="utf-8").strip())
+    except Exception:
+        marker.unlink(missing_ok=True)
+        continue
+    if not pid_is_live(pid):
+        marker.unlink(missing_ok=True)
+        continue
+    live_pids.add(pid)
 
 print(len(live_pids))
 PY
@@ -229,6 +242,15 @@ buddyswitch_count_active_browsers() {
 buddyswitch_count_active_browsers_for_buddy() {
   local buddy="$1"
   local instance_json instance_id instance_buddy
+
+  if buddyswitch_browser_pid_marker_is_active "$(buddyswitch_browser_pid_marker)"; then
+    echo "1"
+    return 0
+  fi
+  if buddyswitch_browser_check_endpoint 2>/dev/null; then
+    echo "1"
+    return 0
+  fi
 
   for instance_json in "${BUDDYSWITCH_SHARED_ROOT}"/instances/*/instance.json; do
     [[ -f "${instance_json}" ]] || continue

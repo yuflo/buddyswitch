@@ -27,6 +27,7 @@ Inside this session, plain user requests belong to `market`. Do not ask the user
 - Cross-buddy canonical switches are external handoffs and must not execute in this session.
 - Durable BuddySwitch state lives in the projected `buddyswitch/objects/**` and `buddyswitch/content/runs/**` paths.
 - `runs/raw/` and `projects/app/.runtime/` are instance-local scratch.
+- Durable product source edits belong under `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}/projects/app`; the instance workspace is for runtime control flow and scratch only.
 
 ## Persistence And Final Output
 

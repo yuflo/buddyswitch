@@ -121,4 +121,6 @@ Default runtime behavior:
 
 ## Project Code Location
 
-Main app code lives in `projects/app/`.
+Main app code lives in the shared project workspace at `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}/projects/app`.
+
+Use the instance runtime workspace for BuddySwitch control flow, projected state, raw dumps, and `projects/app/.runtime` only. Durable product source edits must be made under `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}/projects/app`, not under the instance workspace copy of `projects/app`.

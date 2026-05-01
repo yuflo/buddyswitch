@@ -938,6 +938,31 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("launcher-owned runtime workspace", switch_spec)
         self.assertIn("repo-root source checkout", switch_spec)
 
+    def test_product_mode_docs_define_shared_project_workspace(self) -> None:
+        buddy_docs = (
+            ROOT / "tools" / "launcher" / "assets" / "buddies" / "design" / "AGENTS.md",
+            ROOT / "tools" / "launcher" / "assets" / "buddies" / "dev" / "AGENTS.md",
+            ROOT / "tools" / "launcher" / "assets" / "buddies" / "market" / "AGENTS.md",
+            ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md",
+            ROOT / "tools" / "launcher" / "assets" / "buddies" / "test" / "AGENTS.md",
+        )
+        docs = (
+            ROOT / "README.md",
+            ROOT / "AGENTS.md",
+            ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md",
+            *buddy_docs,
+        )
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in docs).lower()
+
+        self.assertIn("buddyswitch_project_workspace_dir", combined)
+        self.assertIn("${buddyswitch_shared_root}/project/workspace", combined)
+        self.assertIn("shared project workspace", combined)
+        self.assertIn("instance runtime workspace", combined)
+        self.assertNotIn(
+            "durable product source edits belong under `${buddyswitch_shared_root}/instances/<instance-id>/workspace/projects/app`",
+            combined,
+        )
+
     def test_host_docs_treat_inputs_as_conditional_selected_bundle(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
         runtime_agents = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(

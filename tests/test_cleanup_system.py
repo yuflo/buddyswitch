@@ -870,6 +870,21 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         self.assertTrue((self.state_root / "buddyswitch" / "content" / "runs").is_dir())
         self.assertTrue(self.fixture.exists("buddyswitch/content/runs/run-market.json"))
 
+    def test_shell_all_data_cleanup_keeps_shared_project_workspace(self) -> None:
+        sentinel_path = self.shared_root / "project" / "workspace" / "projects" / "app" / "product-source-sentinel.txt"
+        sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+        sentinel_path.write_text("keep\n", encoding="utf-8")
+
+        completed = self.run_cleanup("--all-data", "--yes", "--json")
+
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertTrue(sentinel_path.exists())
+        self.assertNotIn(
+            "project/workspace/projects/app/product-source-sentinel.txt",
+            payload["result"]["deleted_paths"],
+        )
+
     def test_shell_agent_cleanup_targets_shared_state_not_legacy_workspace_or_source_checkout(self) -> None:
         completed = self.run_cleanup(
             "--buddy",
@@ -997,6 +1012,21 @@ class CleanupShellIntegrationTests(unittest.TestCase):
             "cleanup must not mutate runtime state while a launcher is active",
         )
 
+    def test_shell_buddy_cleanup_blocks_unattributed_active_launcher_marker(self) -> None:
+        _, pm_workspace = self._create_instance_workspace("inst-pm-legacy-active-cleanup", "pm")
+        run_dir = self.shared_root / "run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "launcher-current.pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+        state_run_path = "buddyswitch/content/runs/run-pm.json"
+        self.assertTrue(self.state_fixture.exists(state_run_path), "precondition: shared-state run fixture exists")
+
+        completed = self.run_cleanup("--buddy", "pm", "--yes", "--json")
+
+        self.assertEqual(completed.returncode, 3)
+        self.assertIn("active buddyswitch-codex instance", completed.stderr)
+        self.assertTrue(self.state_fixture.exists(state_run_path))
+        self.assertTrue((pm_workspace / "runs" / "raw" / "pm" / "pm.log").exists())
+
     def test_shell_buddy_cleanup_allows_other_buddy_active_launcher(self) -> None:
         _, pm_workspace = self._create_instance_workspace("inst-pm-cleanup", "pm")
         run_dir = self.shared_root / "run"
@@ -1076,6 +1106,21 @@ class CleanupShellIntegrationTests(unittest.TestCase):
             "cleanup must not mutate runtime state while a browser is active",
         )
 
+    def test_shell_buddy_cleanup_blocks_shared_browser_marker(self) -> None:
+        _, pm_workspace = self._create_instance_workspace("inst-pm-shared-browser-cleanup", "pm")
+        browser_marker = self.shared_root / "run" / "browser-cockpit.pid"
+        browser_marker.parent.mkdir(parents=True, exist_ok=True)
+        browser_marker.write_text(f"{os.getpid()}\n", encoding="utf-8")
+        state_run_path = "buddyswitch/content/runs/run-pm.json"
+        self.assertTrue(self.state_fixture.exists(state_run_path), "precondition: shared-state run fixture exists")
+
+        completed = self.run_cleanup("--buddy", "pm", "--yes", "--json")
+
+        self.assertEqual(completed.returncode, 3)
+        self.assertIn("active browser", completed.stderr)
+        self.assertTrue(self.state_fixture.exists(state_run_path))
+        self.assertTrue((pm_workspace / "runs" / "raw" / "pm" / "pm.log").exists())
+
     def test_shell_buddy_cleanup_allows_other_buddy_active_browser_marker(self) -> None:
         _, pm_workspace = self._create_instance_workspace("inst-pm-browser-cleanup", "pm")
         market_root, _ = self._create_instance_workspace("inst-market-browser-active", "market")
@@ -1133,6 +1178,29 @@ class CleanupShellIntegrationTests(unittest.TestCase):
             self.state_fixture.exists(state_run_path),
             "cleanup must not mutate runtime state while a browser endpoint is active",
         )
+
+    def test_shell_buddy_cleanup_blocks_shared_browser_endpoint_without_marker(self) -> None:
+        fake_bin = self.repo_root / "bin"
+        fake_bin.mkdir(parents=True, exist_ok=True)
+        fake_curl = fake_bin / "curl"
+        fake_curl.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        fake_curl.chmod(0o755)
+        _, pm_workspace = self._create_instance_workspace("inst-pm-shared-browser-endpoint-cleanup", "pm")
+        state_run_path = "buddyswitch/content/runs/run-pm.json"
+        self.assertTrue(self.state_fixture.exists(state_run_path), "precondition: shared-state run fixture exists")
+
+        completed = self.run_cleanup(
+            "--buddy",
+            "pm",
+            "--yes",
+            "--json",
+            extra_env={"PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"},
+        )
+
+        self.assertEqual(completed.returncode, 3)
+        self.assertIn("active browser", completed.stderr)
+        self.assertTrue(self.state_fixture.exists(state_run_path))
+        self.assertTrue((pm_workspace / "runs" / "raw" / "pm" / "pm.log").exists())
 
     def test_shell_cleanup_ignores_stale_instance_browser_pid_without_endpoint(self) -> None:
         instance_id = "inst-market-stale"

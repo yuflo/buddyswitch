@@ -125,6 +125,7 @@ start_codex() {
   if [[ -n "${buddy}" ]]; then
     echo "BuddySwitch instance: ${instance_id} (${buddy})"
     echo "Workspace: ${BUDDYSWITCH_WORKSPACE_DIR}"
+    echo "Project workspace: ${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}"
     echo "Instance record: ${instance_json}"
     echo "Open existing: ./buddyswitch-codex instance open ${instance_id}"
     echo "Delete instance: ./buddyswitch-codex instance delete ${instance_id} --yes"
@@ -186,6 +187,7 @@ start_locked_bootstrap() {
   buddyswitch_workspace_prepare_execution_worktree
 
   if [[ -n "${requested_buddy}" ]]; then
+    buddyswitch_workspace_ensure_project_worktree
     buddyswitch_instance_activate "${requested_instance_id}" "${requested_buddy}" "inactive" >/dev/null
   fi
   buddyswitch_browser_bootstrap
@@ -287,6 +289,7 @@ instance_open_locked_bootstrap() {
   buddyswitch_workspace_install_runtime_agents
   buddyswitch_workspace_install_local_excludes
   buddyswitch_workspace_install_guardrail_hooks
+  buddyswitch_workspace_ensure_project_worktree
   buddyswitch_browser_bootstrap
   buddyswitch_instance_set_browser_port "${instance_id}" "${BUDDYSWITCH_BROWSER_PORT}"
   buddyswitch_instance_set_status "${instance_id}" "active"

@@ -14,7 +14,15 @@ The launcher-managed product mode layout is:
 - `${BUDDYSWITCH_SHARED_ROOT}` as the shared launcher root
 - `${BUDDYSWITCH_SHARED_ROOT}/state` for canonical BuddySwitch task, track, artifact, and run state
 - `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace` for each buddy-locked execution worktree
+- `${BUDDYSWITCH_SHARED_ROOT}/project/workspace` as the shared project workspace for durable product source edits
 - `tools/launcher/assets/buddies/<buddy>/AGENTS.md` for the instance root prompt contract
+
+Product mode has two work surfaces:
+
+- Runtime workspace: `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`
+  BuddySwitch control flow, projected state, raw dumps, browser scratch, and `projects/app/.runtime`.
+- Shared project workspace: `${BUDDYSWITCH_SHARED_ROOT}/project/workspace`
+  Durable product source edits for `projects/app`, exposed as `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}`.
 
 If you are developing BuddySwitch itself, start here:
 
@@ -94,7 +102,7 @@ python3 scripts/codex_router.py "switch pm: create ai-scheduler-lp track"
 
 ### Resolve a run
 
-Run `resolve` only from the launcher-owned runtime workspace. In create mode it may materialize a zero-run task and reserve the next run id, so the repo-root development checkout blocks it; start the runtime workspace with `./buddyswitch-codex instance start --buddy <buddy>` first. Product mode runs from `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace` and projects canonical state from `${BUDDYSWITCH_SHARED_ROOT}/state`.
+Run `resolve` only from the launcher-owned instance runtime workspace. In create mode it may materialize a zero-run task and reserve the next run id, so the repo-root development checkout blocks it; start the runtime workspace with `./buddyswitch-codex instance start --buddy <buddy>` first. Product mode runs from `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`, projects canonical state from `${BUDDYSWITCH_SHARED_ROOT}/state`, and exposes durable product source at `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}/projects/app`.
 
 ```bash
 python3 scripts/switch_runtime.py resolve "switch market: quick market research for AI scheduler landing page"
@@ -103,7 +111,7 @@ python3 scripts/switch_runtime.py resolve "switch pm: create ai-scheduler-lp tra
 
 ### Persist a structured result
 
-Run `persist` only from the launcher-owned runtime workspace. The repo-root development checkout blocks BuddySwitch runtime writes; start it with `./buddyswitch-codex instance start --buddy <buddy>` first. Product mode writes canonical state under `${BUDDYSWITCH_SHARED_ROOT}/state` and keeps instance-local scratch under `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`. This command is the current CLI wrapper for the `persist-skill-result` step.
+Run `persist` only from the launcher-owned instance runtime workspace. The repo-root development checkout blocks BuddySwitch runtime writes; start it with `./buddyswitch-codex instance start --buddy <buddy>` first. Product mode writes canonical state under `${BUDDYSWITCH_SHARED_ROOT}/state`, keeps instance-local scratch under `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`, and keeps durable product source in the shared project workspace. This command is the current CLI wrapper for the `persist-skill-result` step.
 
 ```bash
 python3 scripts/switch_runtime.py persist \
@@ -318,7 +326,7 @@ These paths matter most when you are orienting yourself in the repo:
 - `framework/docs/`
   Architecture and framework specifications.
 - `projects/app/`
-  Main app code. Runtime-only temporary data belongs in `projects/app/.runtime/` inside the launcher runtime workspace, not in the source checkout.
+  Main app code. In product mode, durable edits are made through `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}/projects/app`; runtime-only temporary data stays in `projects/app/.runtime` inside the instance runtime workspace.
 
 ## Core Storage and Object Authority
 
