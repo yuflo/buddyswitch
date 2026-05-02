@@ -213,12 +213,10 @@ class ConsoleAppContractTests(unittest.TestCase):
         return json.loads(completed.stdout)
 
     def test_track_next_step_state_reports_buddy_state_without_switch_commands(self) -> None:
-        canonical_recommended = "switch market -> track-alpha: synthesize demand evidence into pm handoff"
-
         track_payload = {
             "id": "track-alpha",
             "current_buddy": "dev",
-            "next_buddy": "market",
+            "next_buddy": "pm",
             "task_ids": ["task-dev"],
             "tasks": [
                 {
@@ -243,9 +241,18 @@ class ConsoleAppContractTests(unittest.TestCase):
                     "run_id": "run-dev-1",
                     "track_id": "track-alpha",
                     "task_id": "task-dev",
-                    "recommended_switch": canonical_recommended,
-                    "reference_switches": {
-                        "continue_current_task_in_track": "switch dev(task-dev) -> track-alpha: continue implementation"
+                    "next_state": {
+                        "task_id": "task-dev",
+                        "track_id": "track-alpha",
+                        "current_buddy": "dev",
+                        "next_buddy": "market",
+                        "mode": "handoff",
+                    },
+                    "receipt_paths": {
+                        "run": "buddyswitch/content/runs/run-dev-1.json",
+                        "task": "buddyswitch/objects/tasks/task-dev.json",
+                        "track": "buddyswitch/objects/tracks/track-alpha.json",
+                        "artifacts": ["buddyswitch/objects/artifacts/artifact-dev.json"],
                     },
                 }
             ],
@@ -256,12 +263,10 @@ class ConsoleAppContractTests(unittest.TestCase):
         self.assertEqual(next_step["currentBuddy"], "dev")
         self.assertEqual(next_step["nextBuddy"], "market")
         self.assertEqual(next_step["recommendedBuddy"], "market")
-        self.assertEqual(next_step["mode"], "recommended_handoff")
+        self.assertEqual(next_step["mode"], "handoff")
         self.assertNotIn("switch", json.dumps(next_step).lower())
 
     def test_task_next_step_state_reports_current_and_recommended_buddy_without_switch_commands(self) -> None:
-        canonical_recommended = "switch test(task-dev): run smoke checks for the latest build"
-
         task_payload = {
             "id": "task-dev",
             "buddy": "dev",
@@ -281,9 +286,18 @@ class ConsoleAppContractTests(unittest.TestCase):
                 {
                     "run_id": "run-dev-1",
                     "task_id": "task-dev",
-                    "recommended_switch": canonical_recommended,
-                    "reference_switches": {
-                        "continue_current_task": "switch dev(task-dev): continue implementation",
+                    "next_state": {
+                        "task_id": "task-dev",
+                        "track_id": None,
+                        "current_buddy": "dev",
+                        "next_buddy": "test",
+                        "mode": "handoff",
+                    },
+                    "receipt_paths": {
+                        "run": "buddyswitch/content/runs/run-dev-1.json",
+                        "task": "buddyswitch/objects/tasks/task-dev.json",
+                        "track": None,
+                        "artifacts": ["buddyswitch/objects/artifacts/artifact-dev.json"],
                     },
                 }
             ],
@@ -293,7 +307,7 @@ class ConsoleAppContractTests(unittest.TestCase):
         self.assertEqual(next_step["taskId"], "task-dev")
         self.assertEqual(next_step["currentBuddy"], "dev")
         self.assertEqual(next_step["recommendedBuddy"], "test")
-        self.assertEqual(next_step["mode"], "recommended_handoff")
+        self.assertEqual(next_step["mode"], "handoff")
         self.assertNotIn("switch", json.dumps(next_step).lower())
 
     def test_standalone_task_without_run_audit_uses_task_buddy_not_synthetic_pm_switch(self) -> None:

@@ -1,6 +1,6 @@
 {
   "contract_id": "persist-skill-result",
-  "contract_version": "2026-04-22",
+  "contract_version": "2026-05-02",
   "response_key_order": [
     "ok",
     "receipt",

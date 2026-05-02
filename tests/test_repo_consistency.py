@@ -529,11 +529,14 @@ class RepoConsistencyTests(unittest.TestCase):
             encoding="utf-8"
         ).lower()
 
-        self.assertIn("resolve_context", text)
+        self.assertIn("prepare-turn-context", text)
+        self.assertIn("request_text", text)
         self.assertIn("persist-skill-result", text)
-        self.assertIn("refreshed_context", text)
+        self.assertIn("receipt -> summary", text)
         self.assertNotIn("selected_skill_packet", text)
         self.assertNotIn("prepare-execution", text)
+        self.assertNotIn("receipt.recommended_switch", text)
+        self.assertNotIn("reference_switches", text)
 
     def test_readme_quick_start_distinguishes_development_and_launcher_modes(self) -> None:
         text = (ROOT / "README.md").read_text(encoding="utf-8").lower()
@@ -607,15 +610,17 @@ class RepoConsistencyTests(unittest.TestCase):
         text = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")
 
         self.assertIn("the host must choose one `skill_id` from `resolve_context.skills`", text)
-        self.assertIn("for multi-skill resolves, top-level `inputs` may be empty", text)
+        self.assertIn("inputs_by_skill", text)
         self.assertNotIn("artifact_selection_by_skill[chosen_skill_id]", text)
         self.assertNotIn("run_instructions_by_skill[chosen_skill_id]", text)
 
     def test_switch_spec_describes_multi_skill_choice_without_selection_maps(self) -> None:
         text = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8")
 
-        self.assertIn("`resolve_context.inputs` is the current selected input bundle only when one skill surface is already resolved", text)
+        self.assertIn("request_text", text)
+        self.assertIn("prepare-turn-context", text)
         self.assertIn("the host should choose by combining the resolved skill metadata with `task_context`, `track_context`, and the buddy contract docs", text)
+        self.assertNotIn("`resolve_context.inputs` is the current selected input bundle", text)
         self.assertNotIn("top-level `artifact_selection` is `None` for multi-skill resolves", text)
         self.assertNotIn("top-level `run_instructions` remains available as neutral host guidance", text)
 
@@ -1013,24 +1018,26 @@ class RepoConsistencyTests(unittest.TestCase):
         ).lower()
         switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
 
-        self.assertIn("when the selected skill surface is already resolved", readme)
-        self.assertIn("for multi-skill buddies", readme)
-        self.assertIn("when that skill surface is already resolved", runtime_agents)
-        self.assertIn("for multi-skill buddies", runtime_agents)
-        self.assertIn("top-level `inputs` may be empty", switch_spec)
+        self.assertIn("request_text", readme)
+        self.assertIn("prepare-turn-context", readme)
+        self.assertIn("inputs_by_skill", switch_spec)
+        self.assertNotIn("top-level `inputs` may be empty", switch_spec)
+        self.assertNotIn("resolve_context.inputs[", runtime_agents)
 
     def test_docs_place_persist_follow_up_fields_inside_receipt(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
         switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
 
-        self.assertIn("the host-facing follow-up data lives inside `receipt`", readme)
-        self.assertIn("check `refreshed_context.ok`", readme)
-        self.assertIn("e_runtime_refresh_context", readme)
-        self.assertIn("{ok, receipt, refreshed_context}", readme)
-        self.assertNotIn("- `refreshed_context`", readme)
+        self.assertTrue(
+            "the host-facing follow-up data lives inside `receipt`" in readme
+            or "host-facing follow-up fields live inside `receipt`" in readme
+        )
+        self.assertIn("receipt.next_state", readme)
+        self.assertIn("receipt_paths", readme)
         self.assertIn("host-facing follow-up fields live inside `receipt`", switch_spec)
-        self.assertIn("check `refreshed_context.ok`", switch_spec)
-        self.assertIn("e_runtime_refresh_context", switch_spec)
+        self.assertIn("receipt.next_state", switch_spec)
+        self.assertIn("receipt.receipt_paths", switch_spec)
+        self.assertNotIn("receipt.recommended_switch", switch_spec)
 
     def test_active_host_prompts_require_refresh_context_check_and_retry(self) -> None:
         targets = (
@@ -1048,7 +1055,9 @@ class RepoConsistencyTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8").lower()
             self.assertIn("check `refreshed_context.ok`", text, msg=f"missing refreshed_context.ok guard in {path.relative_to(ROOT)}")
             self.assertIn("e_runtime_refresh_context", text, msg=f"missing refresh error code in {path.relative_to(ROOT)}")
-            self.assertIn("rerun `resolve`", text, msg=f"missing resolve retry guidance in {path.relative_to(ROOT)}")
+            self.assertIn("`resolve`", text, msg=f"missing resolve retry guidance in {path.relative_to(ROOT)}")
+            self.assertIn("request_text", text, msg=f"missing request_text retry guidance in {path.relative_to(ROOT)}")
+            self.assertNotIn("receipt.recommended_switch", text, msg=f"legacy follow-up field in {path.relative_to(ROOT)}")
             self.assertNotIn(
                 legacy_unconditional_runtime,
                 text,
@@ -1065,15 +1074,19 @@ class RepoConsistencyTests(unittest.TestCase):
         switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
 
         self.assertIn("successful `persist` does not reserve a follow-up run", readme)
-        self.assertIn("receipt.recommended_switch", readme)
-        self.assertIn("run `resolve` with `receipt.recommended_switch`", readme)
-        self.assertIn("if another turn is needed, run `resolve` with `receipt.recommended_switch`", readme)
+        self.assertIn("receipt.next_state", readme)
+        self.assertIn("receipt_paths", readme)
+        self.assertIn("if another turn is needed", readme)
+        self.assertIn("`resolve`", readme)
+        self.assertIn("request_text", readme)
+        self.assertNotIn("receipt.recommended_switch", readme)
         self.assertNotIn("continue from `refreshed_context`", readme)
 
         self.assertIn("`persist` is the end-of-turn commit boundary", switch_spec)
         self.assertIn("successful `persist` does not reserve a follow-up run", switch_spec)
-        self.assertIn("receipt.recommended_switch", switch_spec)
-        self.assertIn("run explicit `resolve` with `receipt.recommended_switch`", switch_spec)
+        self.assertIn("receipt.next_state", switch_spec)
+        self.assertIn("receipt.receipt_paths", switch_spec)
+        self.assertNotIn("receipt.recommended_switch", switch_spec)
         self.assertNotIn("`refreshed_context` normally carries the next-turn resolve handoff", switch_spec)
         self.assertNotIn("continue from `refreshed_context` when it is true", switch_spec)
 
@@ -1087,8 +1100,9 @@ class RepoConsistencyTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8").lower()
             self.assertIn("check `refreshed_context.ok`", text)
             self.assertIn("e_runtime_refresh_context", text)
-            self.assertIn("receipt.recommended_switch", text)
-            self.assertIn("next explicit `resolve`", text)
+            self.assertIn("request_text", text)
+            self.assertIn("`resolve`", text)
+            self.assertNotIn("receipt.recommended_switch", text)
             self.assertIn("if another turn is needed", text)
             self.assertNotIn("continue from `refreshed_context`", text)
             self.assertNotIn(
@@ -1199,9 +1213,9 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("receipt -> summary", readme)
         self.assertIn("receipt -> summary", switch_spec)
 
-        # Keep receipt follow-up fields as internal/debug state, not terminal command rendering.
-        self.assertIn("reference_switches", switch_spec)
-        self.assertIn("recommended_switch", switch_spec)
+        # Legacy switch-command follow-up fields must stay retired from output docs.
+        self.assertNotIn("reference_switches", switch_spec)
+        self.assertNotIn("recommended_switch", switch_spec)
         self.assertNotIn("commands order", switch_spec)
 
     def test_runtime_host_prompt_defines_selected_skill_preflight_mitigation(self) -> None:

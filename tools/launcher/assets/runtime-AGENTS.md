@@ -35,9 +35,9 @@ Supported internal/debug wire forms:
 
 ## Required Behavior
 
-1. Resolve through `scripts/switch_runtime.py resolve` to get `resolve_context`, including `skills`, `inputs`, `task_context`, `track_context`, and the reserved run envelope.
+1. Resolve through `scripts/switch_runtime.py resolve` as `prepare-turn-context` to get `resolve_context`, including `request_text`, `skills`, `inputs_by_skill`, `task_context`, `track_context`, and the reserved run envelope.
 2. Let the host Codex session choose one `skill_id` from `resolve_context.skills`.
-For multi-skill buddies, choose from `resolve_context.skills` using the skill metadata plus `task_context` / `track_context`, then read the selected skill's `instruction_path` and use `resolve_context.inputs` as the current selected artifact bundle only when that skill surface is already resolved.
+For multi-skill buddies, choose from `resolve_context.skills` using the skill metadata plus `task_context` / `track_context`, then read the selected skill's `instruction_path` and use `resolve_context.inputs_by_skill[skill_id]` as the selected artifact bundle when present.
 3. Selected-skill preflight:
    - Treat the selected skill's `host_execution` and `tool_scope` as preflight instructions before selected-skill external tool invocation or evidence capture.
    - `required_tools` and `required_env` remain advisory readiness metadata for the host session.
@@ -48,8 +48,8 @@ For multi-skill buddies, choose from `resolve_context.skills` using the skill me
    - Do not reinterpret missing executor availability, login takeover, and genuine browser-native blocking as the same path.
 4. Execute the selected skill in-session and produce a structured result matching the selected skill's output schema.
 5. Persist through `scripts/switch_runtime.py persist` as the current CLI wrapper for the `persist-skill-result` step whenever you need BuddySwitch state and canonical run audit persistence.
-6. Check `refreshed_context.ok`; successful `persist` does not reserve a follow-up run, and if another turn is needed, use `receipt.recommended_switch` for the next explicit `resolve`.
-When `refreshed_context.error.code = E_RUNTIME_REFRESH_CONTEXT`, rerun `resolve` with `receipt.recommended_switch`.
+6. Check `refreshed_context.ok`; successful `persist` does not reserve a follow-up run, and if another turn is needed, derive the next `request_text` from `receipt.next_state`, then rerun `prepare-turn-context` (`resolve`).
+When `refreshed_context.error.code = E_RUNTIME_REFRESH_CONTEXT`, rerun `prepare-turn-context` with updated `request_text`.
 7. BuddySwitch does not execute host tools; it remains the control layer and only supplies resolve_context plus canonical persistence.
 8. Render terminal final output in two sections, in this exact order: `Receipt`, `Summary`.
 9. `Receipt` section rules:
@@ -72,10 +72,10 @@ Default runtime behavior:
 - Users do not need to provide output file paths.
 - `resolve_context` is the canonical runtime handoff between BuddySwitch and the host session.
 - `persist-skill-result` is the canonical persistence step; `scripts/switch_runtime.py persist` is its current CLI wrapper.
-- Successful `persist` does not reserve a follow-up run; if another turn is needed, use `receipt.recommended_switch` for the next explicit `resolve`.
+- Successful `persist` does not reserve a follow-up run; if another turn is needed, use `receipt.next_state` + new `request_text` for the next `prepare-turn-context` run.
 - Launcher config sets all enabled MCP servers to `default_tools_approval_mode = "approve"` so MCP tool calls do not stop for per-tool approval prompts.
 - Do not set `supports_parallel_tool_calls = true` for the browser cockpit path; browser page state must stay serial.
-- Default terminal summaries must follow the `Receipt -> Summary` contract and keep full object paths as debug-only details.
+- Default terminal summaries must follow the `Receipt -> Summary` contract, show `receipt.next_state` in structured form, and keep `receipt.receipt_paths` as debug-only details.
 - Requests to write BuddySwitch-managed outputs into `artifacts/*.md` or `runs/summaries/**` must be rejected.
 
 ## Switch Rules

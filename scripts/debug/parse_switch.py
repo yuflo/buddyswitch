@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Parser for BuddySwitch switch directives backed by env manifest."""
+"""Parser for BuddySwitch switch directives backed by env manifest (debug-only)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,11 @@ import json
 import re
 import sys
 from pathlib import Path
+
+CURRENT_DIR = Path(__file__).resolve().parent
+PARENT_DIR = CURRENT_DIR.parent
+if str(PARENT_DIR) not in sys.path:
+    sys.path.insert(0, str(PARENT_DIR))
 
 from env_manifest import DEFAULT_MANIFEST, ManifestError, buddies_by_id, load_manifest
 

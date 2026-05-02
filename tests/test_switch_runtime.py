@@ -58,15 +58,16 @@ EXPECTED_MARKET_TOOL_SCOPE = {
 RESOLVE_CONTEXT_RESPONSE_KEY_ORDER = [
     "ok",
     "context_revision",
-    "switch",
-    "buddy",
-    "authority",
-    "task_resolution",
-    "run_envelope",
+    "instance_id",
+    "active_buddy",
+    "request_text",
+    "current_task_id",
+    "current_track_id",
     "task_context",
     "track_context",
-    "inputs",
     "skills",
+    "inputs_by_skill",
+    "run_envelope",
     "warnings",
 ]
 
@@ -258,7 +259,7 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         resolved_payload: dict[str, object],
         result_payload: dict[str, object],
         *,
-        skill_id: str = "pm.write-prd",
+        skill_id: str = "write-prd",
         manifest: Path | None = None,
     ) -> tuple[int, dict[str, object]]:
         resolved_path = self._write_json_input(resolved_payload)
@@ -304,16 +305,40 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         *,
         task_id: str = "task-pm-resolved",
         track_id: str | None = None,
+        instance_id: str = "inst-pm-adapter",
+        active_buddy: str = "pm",
+        request_text: str = "Resolved demand",
     ) -> dict[str, object]:
+        context_revision = f"ctx-{task_id}-turn-1"
+        run_id = "run-reserved"
         return {
             "ok": True,
-            "switch": {
-                "buddy_id": "pm",
-                "task_id": task_id,
-                "track_id": track_id,
-                "demand": "Resolved demand",
+            "context_revision": context_revision,
+            "instance_id": instance_id,
+            "active_buddy": active_buddy,
+            "request_text": request_text,
+            "current_task_id": task_id,
+            "current_track_id": track_id,
+            "task_context": {"task": {"id": task_id}},
+            "track_context": {"track": {"id": track_id}} if track_id else None,
+            "skills": [{"id": "write-prd"}],
+            "inputs_by_skill": {"write-prd": {"selected_inputs": []}},
+            "run_envelope": {
+                "run_id": run_id,
+                "status": "reserved",
+                "sequence": 1,
+                "turn_identity": {
+                    "instance_id": instance_id,
+                    "active_buddy": active_buddy,
+                    "request_text": request_text,
+                    "task_id": task_id,
+                    "track_id": track_id,
+                    "context_revision": context_revision,
+                    "sequence": 1,
+                    "run_id": run_id,
+                },
             },
-            "run_envelope": {"run_id": "run-reserved"},
+            "warnings": [],
         }
 
     @staticmethod
@@ -399,7 +424,7 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertFalse(self._legacy_runtime_lock_path(shared_root).exists())
         self.assertTrue(self._runtime_lock_path(shared_root).exists())
         mock_resolve.assert_called_once_with(
-            "switch pm: Draft the PRD for onboarding improvements",
+            "Draft the PRD for onboarding improvements",
             manifest_path=switch_runtime.DEFAULT_MANIFEST,
         )
 
@@ -416,7 +441,7 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertEqual(exit_code, 0)
         self.assertTrue(payload["ok"])
         mock_resolve.assert_called_once_with(
-            "switch pm(task-pm-onboarding): Refine acceptance criteria",
+            "Refine acceptance criteria",
             manifest_path=switch_runtime.DEFAULT_MANIFEST,
         )
 
@@ -434,7 +459,7 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertEqual(exit_code, 0)
         self.assertTrue(payload["ok"])
         mock_resolve.assert_called_once_with(
-            "switch pm(task-pm-onboarding) -> track-onboarding: Finalize the revised requirements",
+            "Finalize the revised requirements",
             manifest_path=switch_runtime.DEFAULT_MANIFEST,
         )
 
@@ -452,7 +477,7 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertEqual(exit_code, 0)
         self.assertTrue(payload["ok"])
         mock_resolve.assert_called_once_with(
-            "switch pm(task-pm-onboarding) -> track-onboarding: continue the plan",
+            "continue the plan",
             manifest_path=switch_runtime.DEFAULT_MANIFEST,
         )
 
@@ -466,7 +491,7 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertEqual(exit_code, 0)
         self.assertTrue(payload["ok"])
         mock_resolve.assert_called_once_with(
-            "switch pm: switch now continue with product validation",
+            "switch now continue with product validation",
             manifest_path=switch_runtime.DEFAULT_MANIFEST,
         )
 
@@ -479,20 +504,19 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
 
         self.assertEqual(exit_code, 0)
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["buddy"]["id"], "pm")
-        self.assertEqual(payload["switch"]["buddy_id"], "pm")
-        self.assertEqual(payload["switch"]["demand"], "Draft the MVP PRD for onboarding rewrite")
-        self.assertIsInstance(payload["switch"]["task_id"], str)
+        self.assertEqual(payload["active_buddy"], "pm")
+        self.assertEqual(payload["request_text"], "Draft the MVP PRD for onboarding rewrite")
+        self.assertIsInstance(payload["current_task_id"], str)
         self.assertIsInstance(payload["run_envelope"]["run_id"], str)
         self.assertEqual(payload["run_envelope"]["status"], "reserved")
 
-        task_path = self._runtime_path(f"buddyswitch/objects/tasks/{payload['switch']['task_id']}.json")
+        task_path = self._runtime_path(f"buddyswitch/objects/tasks/{payload['current_task_id']}.json")
         reservation_path = switch_runtime._reserved_run_path(payload["run_envelope"]["run_id"])  # type: ignore[attr-defined]
         self.assertTrue(task_path.exists())
         self.assertTrue(reservation_path.exists())
 
         stored_instance = json.loads(instance_json.read_text(encoding="utf-8"))
-        self.assertEqual(stored_instance["current_task_id"], payload["switch"]["task_id"])
+        self.assertEqual(stored_instance["current_task_id"], payload["current_task_id"])
 
     def test_product_mode_plain_text_with_word_switch_is_demand_not_command(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-pm-natural-switch")
@@ -503,8 +527,8 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
 
         self.assertEqual(exit_code, 0)
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["switch"]["buddy_id"], "pm")
-        self.assertEqual(payload["switch"]["demand"], "Help users switch plans without losing draft data")
+        self.assertEqual(payload["active_buddy"], "pm")
+        self.assertEqual(payload["request_text"], "Help users switch plans without losing draft data")
 
     def test_product_mode_rejects_structural_switch_for_active_buddy(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-pm-reject-same-buddy")
@@ -513,11 +537,10 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         with patch.dict(os.environ, env, clear=True):
             exit_code, payload = self._run_cmd_resolve("switch pm: Draft the PRD")
 
-        self.assertEqual(exit_code, 1)
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["error"]["code"], "E_RUNTIME_RESOLVE")
-        self.assertIn("ordinary request", payload["error"]["message"].lower())
-        self.assertFalse(list(self._runtime_path("buddyswitch/objects/tasks").glob("*.json")))
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["active_buddy"], "pm")
+        self.assertEqual(payload["request_text"], "switch pm: Draft the PRD")
 
     def test_product_mode_rejects_structural_switch_for_other_buddy_without_writes(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-pm-reject-other-buddy")
@@ -526,11 +549,10 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         with patch.dict(os.environ, env, clear=True):
             exit_code, payload = self._run_cmd_resolve("switch dev: Implement the PRD")
 
-        self.assertEqual(exit_code, 1)
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["error"]["code"], "E_RUNTIME_RESOLVE")
-        self.assertIn("locked buddy instance", payload["error"]["message"].lower())
-        self.assertFalse(list(self._runtime_path("buddyswitch/objects/tasks").glob("*.json")))
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["active_buddy"], "pm")
+        self.assertEqual(payload["request_text"], "switch dev: Implement the PRD")
 
     def test_product_mode_rejects_empty_structural_switch_without_writes(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-pm-reject-empty-structural")
@@ -539,29 +561,42 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         with patch.dict(os.environ, env, clear=True):
             exit_code, payload = self._run_cmd_resolve("switch pm:")
 
-        self.assertEqual(exit_code, 1)
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["error"]["code"], "E_RUNTIME_RESOLVE")
-        message = payload["error"]["message"].lower()
-        self.assertTrue("ordinary request" in message or "locked buddy instance" in message)
-        self.assertFalse(list(self._runtime_path("buddyswitch/objects/tasks").glob("*.json")))
-
-        reserved_dir = switch_runtime._reserved_run_path("placeholder").parent  # type: ignore[attr-defined]
-        if reserved_dir.exists():
-            self.assertFalse(list(reserved_dir.glob("*.json")))
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["active_buddy"], "pm")
+        self.assertEqual(payload["request_text"], "switch pm:")
 
     def test_cmd_resolve_product_mode_success_updates_instance_binding(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-pm-bind")
         env = self._product_env("pm", "inst-pm-bind", instance_json)
         resolve_payload = {
             "ok": True,
-            "switch": {
-                "buddy_id": "pm",
-                "task_id": "task-pm-updated",
-                "track_id": "track-updated",
-                "demand": "Draft updated PRD",
+            "context_revision": "ctx-task-pm-updated-turn-1",
+            "instance_id": "inst-pm-bind",
+            "active_buddy": "pm",
+            "request_text": "Draft updated PRD",
+            "current_task_id": "task-pm-updated",
+            "current_track_id": "track-updated",
+            "task_context": {"task": {"id": "task-pm-updated"}},
+            "track_context": {"track": {"id": "track-updated"}},
+            "skills": [{"id": "write-prd"}],
+            "inputs_by_skill": {"write-prd": {"selected_inputs": []}},
+            "run_envelope": {
+                "run_id": "run-reserved",
+                "status": "reserved",
+                "sequence": 1,
+                "turn_identity": {
+                    "instance_id": "inst-pm-bind",
+                    "active_buddy": "pm",
+                    "request_text": "Draft updated PRD",
+                    "task_id": "task-pm-updated",
+                    "track_id": "track-updated",
+                    "context_revision": "ctx-task-pm-updated-turn-1",
+                    "sequence": 1,
+                    "run_id": "run-reserved",
+                },
             },
-            "run_envelope": {"run_id": "run-reserved"},
+            "warnings": [],
         }
 
         with patch.dict(os.environ, env, clear=True):
@@ -592,10 +627,10 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         self.assertEqual(first_reservation["status"], "reserved")
         self.assertEqual(first_reservation["run_id"], first_run_id)
-        self.assertEqual(first_reservation["task_id"], first_payload["switch"]["task_id"])
+        self.assertEqual(first_reservation["task_id"], first_payload["current_task_id"])
         self.assertEqual(first_reservation["instance_id"], "inst-pm-first")
 
-        task_id = first_payload["switch"]["task_id"]
+        task_id = first_payload["current_task_id"]
         second_instance_json = self._write_instance_json(
             instance_id="inst-pm-second",
             current_task_id=task_id,
@@ -668,13 +703,15 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
             },
             "refreshed_context": {
                 "ok": True,
-                "switch": {
-                    "task_id": "task-refreshed",
-                    "track_id": "track-refreshed",
-                },
+                "current_task_id": "task-refreshed",
+                "current_track_id": "track-refreshed",
             },
         }
-        resolved_payload = {"ok": True, "switch": {"task_id": "task-before", "track_id": "track-before"}}
+        resolved_payload = self._resolve_ok(
+            instance_id="inst-pm-persist",
+            task_id="task-before",
+            track_id="track-before",
+        )
         result_payload = {"execution_summary": "Persisted"}
 
         with patch.dict(os.environ, env, clear=True):
@@ -705,7 +742,11 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
                 "error": {"code": "E_RUNTIME_REFRESH_CONTEXT", "message": "refresh failed"},
             },
         }
-        resolved_payload = {"ok": True, "switch": {"task_id": "task-before", "track_id": "track-before"}}
+        resolved_payload = self._resolve_ok(
+            instance_id="inst-pm-persist-refresh-error",
+            task_id="task-before",
+            track_id="track-before",
+        )
         result_payload = {"execution_summary": "Persisted"}
 
         with patch.dict(os.environ, env, clear=True):
@@ -786,7 +827,7 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
             receipt = persisted_payload["receipt"]
             self.assertIsInstance(receipt, dict)
             assert isinstance(receipt, dict)
-            paths = receipt["paths"]
+            paths = receipt["receipt_paths"]
             self.assertIsInstance(paths, dict)
             assert isinstance(paths, dict)
             self.assertTrue(self._runtime_path(paths["run"]).exists())
@@ -797,10 +838,7 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
             refreshed_context = persisted_payload["refreshed_context"]
             self.assertFalse(refreshed_context["ok"])
             self.assertEqual(refreshed_context["error"]["code"], "E_RUNTIME_REFRESH_CONTEXT")
-            self.assertEqual(
-                refreshed_context["error"]["recommended_switch"],
-                receipt["recommended_switch"],
-            )
+            self.assertIn("rerun resolve", refreshed_context["error"]["message"].lower())
             self.assertNotIn("run_envelope", refreshed_context)
 
             reserved_dir = switch_runtime._reserved_run_path("placeholder").parent  # type: ignore[attr-defined]
@@ -811,8 +849,8 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
 
         self.assertEqual(followup_exit_code, 0)
         self.assertTrue(followup_payload["ok"])
-        self.assertEqual(followup_payload["switch"]["buddy_id"], "pm")
-        self.assertEqual(followup_payload["switch"]["demand"], "Continue PRD")
+        self.assertEqual(followup_payload["active_buddy"], "pm")
+        self.assertEqual(followup_payload["request_text"], "Continue PRD")
         followup_run_id = followup_payload["run_envelope"]["run_id"]
         self.assertNotEqual(followup_run_id, consumed_run_id)
         followup_path = switch_runtime._reserved_run_path(followup_run_id)  # type: ignore[attr-defined]
@@ -823,11 +861,47 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertEqual(followup_reservation["run_id"], followup_run_id)
         self.assertEqual(followup_reservation["task_id"], receipt["task_id"])
         self.assertEqual(followup_reservation["instance_id"], "inst-pm-no-post-persist-reserve")
-        self.assertEqual(followup_payload["run_envelope"]["previous_run_id"], receipt["run_id"])
 
         stored_instance = json.loads(instance_json.read_text(encoding="utf-8"))
         self.assertEqual(stored_instance["current_task_id"], persisted_payload["receipt"]["task_id"])
         self.assertEqual(stored_instance["current_track_id"], persisted_payload["receipt"]["track_id"])
+
+    def test_cmd_persist_product_mode_rejects_context_from_other_instance_without_writes(self) -> None:
+        shared_root = self.runtime_root / "shared-root"
+        first_instance_json = self._write_instance_json(instance_id="inst-pm-context-owner")
+        first_env = self._product_env("pm", "inst-pm-context-owner", first_instance_json)
+        first_env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+
+        with patch.dict(os.environ, first_env, clear=True):
+            resolve_exit_code, resolved_payload = self._run_cmd_resolve("Draft launch requirements")
+
+        self.assertEqual(resolve_exit_code, 0)
+        self.assertTrue(resolved_payload["ok"])
+        run_id = resolved_payload["run_envelope"]["run_id"]
+        reservation_path = switch_runtime._reserved_run_path(run_id)  # type: ignore[attr-defined]
+        self.assertTrue(reservation_path.exists())
+
+        second_instance_json = self._write_instance_json(instance_id="inst-pm-context-thief")
+        second_env = self._product_env("pm", "inst-pm-context-thief", second_instance_json)
+        second_env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+
+        with patch.dict(os.environ, second_env, clear=True):
+            persist_exit_code, persist_payload = self._run_cmd_persist(
+                resolved_payload,
+                self._pm_prd_result(),
+                skill_id="write-prd",
+            )
+
+        self.assertEqual(persist_exit_code, 1)
+        self.assertFalse(persist_payload["ok"])
+        self.assertEqual(persist_payload["error"]["code"], "E_RUNTIME_PERSIST")
+        self.assertIn("product-mode context instance mismatch", persist_payload["error"]["message"])
+        self.assertTrue(reservation_path.exists(), "rejected cross-instance persist must leave owner reservation intact")
+        self.assertFalse(list(self._runtime_path("buddyswitch/content/runs").glob("run-*.json")))
+        self.assertFalse(list(self._runtime_path("buddyswitch/objects/artifacts").glob("*.json")))
+        second_stored = json.loads(second_instance_json.read_text(encoding="utf-8"))
+        self.assertIsNone(second_stored["current_task_id"])
+        self.assertIsNone(second_stored["current_track_id"])
 
     def test_cmd_persist_product_mode_rejects_failed_resolve_payload_without_writes(self) -> None:
         shared_root = self.runtime_root / "shared-root"
@@ -841,7 +915,7 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertEqual(first_exit_code, 0)
         self.assertTrue(first_payload["ok"])
 
-        task_id = first_payload["switch"]["task_id"]
+        task_id = first_payload["current_task_id"]
         first_run_id = first_payload["run_envelope"]["run_id"]
         first_reservation_path = switch_runtime._reserved_run_path(first_run_id)  # type: ignore[attr-defined]
         self.assertTrue(first_reservation_path.exists())
@@ -886,7 +960,11 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         env = self._product_env("pm", "inst-pm-persist-lock", instance_json)
         env["BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"] = "0"
         self._hold_runtime_lock(Path(env["BUDDYSWITCH_SHARED_ROOT"]))
-        resolved_payload = {"ok": True, "switch": {"task_id": "task-before", "track_id": "track-before"}}
+        resolved_payload = self._resolve_ok(
+            instance_id="inst-pm-persist-binding-fail",
+            task_id="task-before",
+            track_id="track-before",
+        )
         result_payload = {"execution_summary": "Persisted"}
 
         with patch.dict(os.environ, env, clear=True):
@@ -917,7 +995,16 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
                     "context_revision": "ctx-task-refreshed-turn-2",
                     "sequence": 2,
                     "task_id": "task-refreshed",
-                    "switch": {"task_id": "task-refreshed"},
+                    "turn_identity": {
+                        "instance_id": "inst-pm-persist-binding-fail",
+                        "active_buddy": "pm",
+                        "request_text": "Draft updated PRD",
+                        "task_id": "task-refreshed",
+                        "track_id": "track-refreshed",
+                        "context_revision": "ctx-task-refreshed-turn-2",
+                        "sequence": 2,
+                        "run_id": refreshed_run_id,
+                    },
                 }
             ),
             encoding="utf-8",
@@ -930,14 +1017,16 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
             },
             "refreshed_context": {
                 "ok": True,
-                "switch": {
-                    "task_id": "task-refreshed",
-                    "track_id": "track-refreshed",
-                },
+                "current_task_id": "task-refreshed",
+                "current_track_id": "track-refreshed",
                 "run_envelope": {"run_id": refreshed_run_id},
             },
         }
-        resolved_payload = {"ok": True, "switch": {"task_id": "task-before", "track_id": "track-before"}}
+        resolved_payload = self._resolve_ok(
+            instance_id="inst-pm-persist-binding-fail",
+            task_id="task-before",
+            track_id="track-before",
+        )
         result_payload = {"execution_summary": "Persisted"}
 
         with patch.dict(os.environ, env, clear=True):
@@ -953,6 +1042,56 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertTrue(payload["ok"])
         self.assertFalse(refreshed_reservation.exists())
         self.assertEqual(payload["refreshed_context"]["error"]["code"], "E_RUNTIME_REFRESH_CONTEXT")
+
+    def test_red_native_turn_product_mode_treats_switch_like_text_as_request_text(self) -> None:
+        instance_json = self._write_instance_json(
+            instance_id="inst-pm-native-turn",
+            buddy="pm",
+            current_task_id="task-pm-native-turn",
+            current_track_id="track-pm-native-turn",
+        )
+        env = self._product_env("pm", "inst-pm-native-turn", instance_json)
+        request_text = "switch dev: Draft onboarding PRD and include acceptance criteria"
+
+        with patch.dict(os.environ, env, clear=True):
+            exit_code, payload = self._run_cmd_resolve(request_text)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["instance_id"], "inst-pm-native-turn")
+        self.assertEqual(payload["active_buddy"], "pm")
+        self.assertEqual(payload["request_text"], request_text)
+        self.assertEqual(payload["current_task_id"], "task-pm-native-turn")
+        self.assertEqual(payload["current_track_id"], "track-pm-native-turn")
+        self.assertIn("task_context", payload)
+        self.assertIn("track_context", payload)
+        self.assertIn("skills", payload)
+        self.assertIn("run_envelope", payload)
+        self.assertIn("turn_identity", payload["run_envelope"])
+        self.assertTrue(
+            "inputs_by_skill" in payload or "artifact_selection_by_skill" in payload,
+            msg="native turn context must expose per-skill input selection",
+        )
+        self.assertNotIn("switch", payload)
+        self.assertNotIn("inputs", payload)
+
+    def test_red_native_turn_product_mode_prepare_context_survives_debug_parser_unavailable(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-native-turn-no-parser", buddy="pm")
+        env = self._product_env("pm", "inst-pm-native-turn-no-parser", instance_json)
+
+        with patch.dict(os.environ, env, clear=True):
+            with patch.object(
+                switch_runtime,
+                "_parse_wire_switch",
+                side_effect=RuntimeError("debug parser unavailable"),
+            ) as mock_parse:
+                exit_code, payload = self._run_cmd_resolve("Draft onboarding PRD")
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["request_text"], "Draft onboarding PRD")
+        self.assertNotIn("switch", payload)
+        mock_parse.assert_not_called()
 
 
 class WorkspaceProjectionFacadeTests(unittest.TestCase):
@@ -1130,10 +1269,13 @@ class ContextPanelServerTests(unittest.TestCase):
             "serve_context_panel.build_workspace_projection_snapshot",
             side_effect=workspace_projections.RuntimeSnapshotLockError("busy"),
         ):
-            server = serve_context_panel.ThreadingHTTPServer(
-                ("127.0.0.1", 0),
-                serve_context_panel.ContextPanelHandler,
-            )
+            try:
+                server = serve_context_panel.ThreadingHTTPServer(
+                    ("127.0.0.1", 0),
+                    serve_context_panel.ContextPanelHandler,
+                )
+            except PermissionError:
+                self.skipTest("socket bind is not permitted in current sandbox")
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -1224,12 +1366,30 @@ class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(list(payload.keys()), RESOLVE_CONTEXT_RESPONSE_KEY_ORDER)
-        self.assertEqual(payload["task_resolution"]["task_id"], payload["task_context"]["task"]["id"])
+        self.assertEqual(payload["current_task_id"], payload["task_context"]["task"]["id"])
         self.assertEqual(payload["run_envelope"]["status"], "reserved")
-        self.assertIsNone(payload["run_envelope"]["previous_run_id"])
+        self.assertNotIn("previous_run_id", payload["run_envelope"])
         for field in RESOLVE_CONTEXT_PACKET_ERA_FIELDS:
             self.assertNotIn(field, payload)
         self.assertFalse(_contains_key_recursive(payload, "selected_skill_packet"))
+
+    def test_red_native_turn_resolve_surface_exposes_request_text_and_turn_identity(self) -> None:
+        request_text = "switch dev: Implement onboarding behavior"
+        payload = switch_runtime.resolve_switch(request_text)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["request_text"], request_text)
+        self.assertIn("instance_id", payload)
+        self.assertIn("active_buddy", payload)
+        self.assertIn("current_task_id", payload)
+        self.assertIn("current_track_id", payload)
+        self.assertIn("turn_identity", payload["run_envelope"])
+        self.assertTrue(
+            "inputs_by_skill" in payload or "artifact_selection_by_skill" in payload,
+            msg="native turn resolve must expose per-skill input mapping",
+        )
+        self.assertNotIn("switch", payload)
+        self.assertNotIn("inputs", payload)
 
     def test_single_skill_buddy_returns_resolve_context(self) -> None:
         payload = switch_runtime.resolve_switch(
@@ -1237,20 +1397,16 @@ class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         self.assertTrue(payload["ok"])
+        self.assertEqual(payload["active_buddy"], "dev")
         self.assertEqual(
-            list(payload["switch"].keys()),
-            ["raw_text", "buddy_id", "demand", "task_id", "track_id"],
+            payload["request_text"],
+            "switch dev: Implement the approved onboarding improvements in projects/app",
         )
-        self.assertEqual(payload["switch"]["buddy_id"], "dev")
-        self.assertEqual(payload["switch"]["demand"], "Implement the approved onboarding improvements in projects/app")
-        self.assertEqual(payload["authority"]["buddy_id"], "dev")
-        self.assertIn("permissions", payload["authority"])
-        self.assertIsInstance(payload["authority"]["permissions"], list)
-        self.assertEqual(list(payload["authority"].keys()), ["buddy_id", "permissions"])
-        self.assertIsInstance(payload["inputs"], list)
+        self.assertNotIn("authority", payload)
+        self.assertIn("implement-task", payload["inputs_by_skill"])
+        self.assertIsInstance(payload["inputs_by_skill"]["implement-task"]["selected_inputs"], list)
         self.assertEqual(payload["skills"][0]["id"], "implement-task")
-        self.assertEqual(payload["task_resolution"]["mode"], "create")
-        self.assertEqual(payload["task_resolution"]["task_id"], payload["task_context"]["task"]["id"])
+        self.assertEqual(payload["current_task_id"], payload["task_context"]["task"]["id"])
         self.assertEqual(payload["run_envelope"]["status"], "reserved")
         self.assertEqual(payload["warnings"], [])
         self.assertNotIn("eligible_skills", payload)
@@ -1267,7 +1423,7 @@ class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "switch dev: Implement the approved onboarding improvements in projects/app"
         )
 
-        task_id = payload["task_resolution"]["task_id"]
+        task_id = payload["current_task_id"]
         self.assertIsInstance(task_id, str)
         self.assertTrue(task_id)
         self._remember(f"buddyswitch/objects/tasks/{task_id}.json")
@@ -1281,11 +1437,11 @@ class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         payload = switch_runtime.resolve_switch("switch design: Shape the landing-page prototype")
 
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["switch"]["buddy_id"], "design")
+        self.assertEqual(payload["active_buddy"], "design")
         self.assertEqual([skill["id"] for skill in payload["skills"]], ["shape-prototype"])
         self.assertEqual(payload["skills"][0]["output_slot"], "design-handoff")
 
-        task_id = payload["task_resolution"]["task_id"]
+        task_id = payload["current_task_id"]
         self.assertIsInstance(task_id, str)
         self.assertTrue(task_id)
         self._remember(f"buddyswitch/objects/tasks/{task_id}.json")
@@ -1322,17 +1478,20 @@ class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
 
-        self._remember(first_payload["receipt"]["paths"]["run"])
-        self._remember(first_payload["receipt"]["paths"]["task"])
-        self._remember(first_payload["receipt"]["paths"]["artifacts"][0])
-        self._remember(first_payload["receipt"]["paths"]["track"])
+        self._remember(first_payload["receipt"]["receipt_paths"]["run"])
+        self._remember(first_payload["receipt"]["receipt_paths"]["task"])
+        self._remember(first_payload["receipt"]["receipt_paths"]["artifacts"][0])
+        self._remember(first_payload["receipt"]["receipt_paths"]["track"])
 
         follow_up = switch_runtime.resolve_switch(
             "switch design -> track-design-review: refine the prototype handoff"
         )
 
         self.assertEqual(
-            [(item["slot"], item["artifact_id"]) for item in follow_up["inputs"]],
+            [
+                (item["slot"], item["artifact_id"])
+                for item in follow_up["inputs_by_skill"]["shape-prototype"]["selected_inputs"]
+            ],
             [("design-handoff", first_payload["receipt"]["artifact_id"])],
         )
 
@@ -1352,8 +1511,9 @@ class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["switch"]["buddy_id"], "market")
-        self.assertEqual(payload["inputs"], [])
+        self.assertEqual(payload["active_buddy"], "market")
+        self.assertIsInstance(payload["inputs_by_skill"], dict)
+        self.assertEqual(payload["inputs_by_skill"]["research-scan"]["selected_inputs"], [])
         self.assertNotIn("invocation", payload)
         self.assertNotIn("implicit_skill_id", payload)
         self.assertNotIn("eligible_skills", payload)
@@ -1424,7 +1584,7 @@ class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track",
             ],
         )
-        self.assertEqual(pm_payload["inputs"], [])
+        self.assertEqual(pm_payload["inputs_by_skill"]["write-prd"]["selected_inputs"], [])
 
     def test_skill_card_uses_package_metadata_for_description_and_objects(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
@@ -1498,7 +1658,7 @@ class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
                     [[adapters]]
                     id = "codex"
-                    path = "scripts/codex_router.py"
+                    path = "scripts/debug/codex_router.py"
                     description = "Demo router."
 
                     [[skills]]
@@ -1537,8 +1697,7 @@ class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         payload = switch_runtime.resolve_switch("switch dev(task-dev-resolve-reuse): continue implementation")
 
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["task_resolution"]["mode"], "reuse")
-        self.assertEqual(payload["task_resolution"]["task_id"], "task-dev-resolve-reuse")
+        self.assertEqual(payload["current_task_id"], "task-dev-resolve-reuse")
         self.assertEqual(payload["task_context"]["task"]["id"], "task-dev-resolve-reuse")
 
     def test_resolve_rejects_task_buddy_mismatch(self) -> None:
@@ -1600,7 +1759,10 @@ class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         self.assertEqual(
-            [(item["slot"], item["artifact_id"], item["revision"]) for item in payload["inputs"]],
+            [
+                (item["slot"], item["artifact_id"], item["revision"])
+                for item in payload["inputs_by_skill"]["implement-task"]["selected_inputs"]
+            ],
             [("prd", "art-task-pm-index-resolve-prd-2", 2)],
         )
         self.assertNotIn("track_artifact_index", payload)
@@ -1655,10 +1817,13 @@ class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         self.assertNotIn("track_artifact_index", payload)
         self.assertEqual(
-            [(item["slot"], item["artifact_id"], item["revision"]) for item in payload["inputs"]],
+            [
+                (item["slot"], item["artifact_id"], item["revision"])
+                for item in payload["inputs_by_skill"]["implement-task"]["selected_inputs"]
+            ],
             [("prd", "art-task-pm-index-resolve-prd-r2", 2)],
         )
-        selected = payload["inputs"][0]
+        selected = payload["inputs_by_skill"]["implement-task"]["selected_inputs"][0]
         self.assertEqual(selected["task_id"], "task-pm-index-resolve-slot")
         self.assertEqual(selected["buddy"], "pm")
         self.assertEqual(selected["selection_reason"], "current artifact for required upstream slot")
@@ -1681,7 +1846,7 @@ class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertNotIn("track_artifact_index", payload)
-        self.assertEqual(payload["inputs"], [])
+        self.assertEqual(payload["inputs_by_skill"]["implement-task"]["selected_inputs"], [])
 
     def test_resolve_pm_surfaces_write_prd_selection_for_multi_skill_track_handoff(self) -> None:
         track = create_track("track-pm-market-handoff", "PM Market Handoff")
@@ -1769,9 +1934,19 @@ class ResolveRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "switch pm -> track-pm-market-handoff: draft the PRD from the active market evidence"
         )
 
-        self.assertEqual(payload["switch"]["buddy_id"], "pm")
-        self.assertEqual(payload["task_resolution"]["mode"], "create")
-        self.assertEqual(payload["inputs"], [])
+        self.assertEqual(payload["active_buddy"], "pm")
+        self.assertTrue(isinstance(payload["current_task_id"], str) and payload["current_task_id"])
+        self.assertEqual(
+            [item["slot"] for item in payload["inputs_by_skill"]["write-prd"]["selected_inputs"]],
+            [
+                "market-scan",
+                "pmf-report",
+                "customer-discovery",
+                "positioning-brief",
+                "channel-plan",
+                "launch-prep",
+            ],
+        )
         self.assertEqual(
             [card["id"] for card in payload["skills"]],
             ["write-prd", "track-manager"],
@@ -1802,7 +1977,7 @@ class ExecutionPreparationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         self.assertTrue(resolved["ok"])
-        self.assertEqual(resolved["inputs"], [])
+        self.assertEqual(resolved["inputs_by_skill"]["research-scan"]["selected_inputs"], [])
         self.assertNotIn("skill_cards", resolved)
         self.assertFalse(_contains_key_recursive(resolved, "selected_skill_packet"))
 
@@ -1953,7 +2128,7 @@ class WorkspaceDataTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("task-market-standalone-workspace", standalone_ids)
         self.assertNotIn("task-dev-workspace-linked", standalone_ids)
 
-    def test_scan_run_audits_includes_reference_switches(self) -> None:
+    def test_scan_run_audits_includes_next_state_and_receipt_paths(self) -> None:
         run_id = f"run-workspace-audit-{uuid.uuid4().hex[:8]}"
         run_path = self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")
         run_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1975,11 +2150,16 @@ class WorkspaceDataTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "artifact_ids": ["art-audit"],
                     "task_title": "Audit Task Title",
                     "track_title": "Audit Track Title",
-                    "reference_switches": {
-                        "continue_current_task": "switch dev(task-dev-audit-123abc): <demand>"
+                    "request_text": "switch dev(task-dev-audit-123abc): implement scope",
+                    "next_state": {
+                        "task_id": "task-dev-audit-123abc",
+                        "track_id": "track-audit",
+                        "current_buddy": "dev",
+                        "next_buddy": None,
+                        "mode": "continue_current_task",
                     },
+                    "receipt_paths": {"run": f"buddyswitch/content/runs/{run_id}.json"},
                     "related_run_ids": ["run-prior-a", "run-prior-b"],
-                    "recommended_switch": "switch dev(task-dev-audit-123abc): <demand>",
                     "execution_summary": "ok",
                 },
                 ensure_ascii=True,
@@ -1996,12 +2176,13 @@ class WorkspaceDataTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(row["buddy"], "dev")
         self.assertEqual(row["task_title"], "Audit Task Title")
         self.assertEqual(row["track_title"], "Audit Track Title")
-        self.assertEqual(
-            row["reference_switches"]["continue_current_task"],
-            "switch dev(task-dev-audit-123abc): <demand>",
-        )
+        self.assertEqual(row["next_state"]["mode"], "continue_current_task")
+        self.assertEqual(row["next_state"]["task_id"], "task-dev-audit-123abc")
+        self.assertEqual(row["receipt_paths"]["run"], f"buddyswitch/content/runs/{run_id}.json")
+        self.assertEqual(row["demand"], "switch dev(task-dev-audit-123abc): implement scope")
         self.assertEqual(row["related_run_ids"], ["run-prior-a", "run-prior-b"])
-        self.assertEqual(row["recommended_switch"], "switch dev(task-dev-audit-123abc): <demand>")
+        self.assertNotIn("reference_switches", row)
+        self.assertNotIn("recommended_switch", row)
         self.assertNotIn("suggested_next_switch", row)
 
     def test_scan_run_audits_falls_back_to_legacy_buddy_when_buddy_id_invalid(self) -> None:
@@ -2165,6 +2346,50 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "known_limitations": ["No production build was executed in this test."],
             },
         }
+
+    def test_red_native_turn_persist_receipt_is_structured_not_switch_command_driven(self) -> None:
+        context = switch_runtime.resolve_switch(
+            "switch dev: Implement the approved onboarding improvements in projects/app"
+        )
+        payload = switch_runtime.persist_skill_result(
+            context,
+            skill_id="implement-task",
+            result=self._artifact_result(),
+        )
+        self._remember_persisted_paths(payload)
+
+        self.assertTrue(payload["ok"])
+        receipt = payload["receipt"]
+        self.assertIsInstance(receipt, dict)
+        assert isinstance(receipt, dict)
+        self.assertIn("next_state", receipt)
+        self.assertIn("receipt_paths", receipt)
+        next_state = receipt["next_state"]
+        self.assertIsInstance(next_state, dict)
+        assert isinstance(next_state, dict)
+        for field in ("task_id", "track_id", "current_buddy", "next_buddy", "mode"):
+            self.assertIn(field, next_state)
+        self.assertNotIn("reference_switches", receipt)
+        self.assertNotIn("recommended_switch", receipt)
+
+    def test_red_native_turn_persist_rejects_skill_array_without_state_writes(self) -> None:
+        context = switch_runtime.resolve_switch(
+            "switch market: Validate an AI tool idea for indie developers"
+        )
+        run_dir = self._runtime_path("buddyswitch/content/runs")
+        artifact_dir = self._runtime_path("buddyswitch/objects/artifacts")
+        before_runs = {path.name for path in run_dir.glob("run-*.json")}
+        before_artifacts = {path.name for path in artifact_dir.glob("art-*.json")}
+
+        with self.assertRaisesRegex((TypeError, ValueError), "single skill_id"):
+            switch_runtime.persist_skill_result(
+                context,
+                skill_id=["pmf-recon"],  # type: ignore[arg-type]
+                result=self._pmf_recon_result(),
+            )
+
+        self.assertEqual({path.name for path in run_dir.glob("run-*.json")}, before_runs)
+        self.assertEqual({path.name for path in artifact_dir.glob("art-*.json")}, before_artifacts)
 
     def _design_result(self) -> dict[str, object]:
         return {
@@ -2571,10 +2796,8 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(payload["receipt"]["run_id"], resolved["run_envelope"]["run_id"])
         self.assertFalse(payload["refreshed_context"]["ok"])
         self.assertEqual(payload["refreshed_context"]["error"]["code"], "E_RUNTIME_REFRESH_CONTEXT")
-        self.assertEqual(
-            payload["refreshed_context"]["error"]["recommended_switch"],
-            payload["receipt"]["recommended_switch"],
-        )
+        self.assertIn("rerun resolve", payload["refreshed_context"]["error"]["message"].lower())
+        self.assertIn("request_text", payload["refreshed_context"]["error"]["message"])
         self.assertNotIn("run_envelope", payload["refreshed_context"])
         for field in PERSIST_SKILL_RESULT_PACKET_ERA_FIELDS:
             self.assertNotIn(field, payload)
@@ -2627,12 +2850,12 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             result=self._design_result(),
         )
 
-        self._remember(payload["receipt"]["paths"]["run"])
-        self._remember(payload["receipt"]["paths"]["task"])
-        self._remember(payload["receipt"]["paths"]["artifacts"][0])
+        self._remember(payload["receipt"]["receipt_paths"]["run"])
+        self._remember(payload["receipt"]["receipt_paths"]["task"])
+        self._remember(payload["receipt"]["receipt_paths"]["artifacts"][0])
 
         artifact_json = json.loads(
-            self._runtime_path(payload["receipt"]["paths"]["artifacts"][0]).read_text(encoding="utf-8")
+            self._runtime_path(payload["receipt"]["receipt_paths"]["artifacts"][0]).read_text(encoding="utf-8")
         )
 
         self.assertEqual(payload["receipt"]["skill_id"], "shape-prototype")
@@ -2684,9 +2907,8 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "switch dev: Implement the approved onboarding improvements in projects/app"
         )
         tampered_context = deepcopy(resolved)
-        tampered_context["buddy"]["id"] = "pm"
-        tampered_context["switch"]["buddy_id"] = "pm"
-        tampered_context["switch"]["buddy"] = "pm"
+        tampered_context["active_buddy"] = "pm"
+        tampered_context["run_envelope"]["turn_identity"]["active_buddy"] = "pm"
 
         task_id = resolved["task_context"]["task"]["id"]
         task_path = self._runtime_path(f"buddyswitch/objects/tasks/{task_id}.json")
@@ -2707,16 +2929,11 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             for path in track_dir.glob("track-*.json")
         }
 
-        with self.assertRaisesRegex(ValueError, "buddy"):
+        with self.assertRaisesRegex(ValueError, "turn_identity differs"):
             switch_runtime.persist_skill_result(
                 tampered_context,
-                skill_id="track-manager",
-                result={
-                    "execution_summary": "Reviewed track state without mutating it.",
-                    "working_notes": ["Validation should fail before any runtime writes."],
-                    "deliverables_or_changed_files": [],
-                    "track_operation": {"action": "list"},
-                },
+                skill_id="implement-task",
+                result=self._artifact_result(),
             )
 
         self.assertEqual(task_path.read_text(encoding="utf-8"), before_task_contents)
@@ -2750,10 +2967,8 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self._remember("buddyswitch/objects/tracks/track-tampered-target.json")
 
         tampered_context = deepcopy(resolved)
-        tampered_context["switch"]["track_id"] = "track-tampered-target"
-        tampered_context["run_envelope"]["switch_fingerprint"] = switch_runtime._derive_switch_fingerprint(  # type: ignore[attr-defined]
-            tampered_context["switch"]
-        )
+        tampered_context["current_track_id"] = "track-tampered-target"
+        tampered_context["run_envelope"]["turn_identity"]["track_id"] = "track-tampered-target"
 
         task_id = resolved["task_context"]["task"]["id"]
         task_path = self._runtime_path(f"buddyswitch/objects/tasks/{task_id}.json")
@@ -2774,7 +2989,7 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             for path in track_dir.glob("track-*.json")
         }
 
-        with self.assertRaisesRegex(ValueError, "reserved envelope"):
+        with self.assertRaisesRegex(ValueError, "turn_identity differs"):
             switch_runtime.persist_skill_result(
                 tampered_context,
                 skill_id="implement-task",
@@ -2804,15 +3019,13 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             before_track_contents,
         )
 
-    def test_persist_skill_result_rejects_tampered_demand_even_with_recomputed_fingerprint(self) -> None:
+    def test_persist_skill_result_rejects_tampered_request_text_without_writes(self) -> None:
         resolved = switch_runtime.resolve_switch(
             "switch dev: Implement the approved onboarding improvements in projects/app"
         )
         tampered_context = deepcopy(resolved)
-        tampered_context["switch"]["demand"] = "Ship a completely different demand without re-resolving."
-        tampered_context["run_envelope"]["switch_fingerprint"] = switch_runtime._derive_switch_fingerprint(  # type: ignore[attr-defined]
-            tampered_context["switch"]
-        )
+        tampered_context["request_text"] = "Ship a completely different demand without re-resolving."
+        tampered_context["run_envelope"]["turn_identity"]["request_text"] = tampered_context["request_text"]
 
         task_id = resolved["task_context"]["task"]["id"]
         task_path = self._runtime_path(f"buddyswitch/objects/tasks/{task_id}.json")
@@ -2828,7 +3041,7 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             for path in artifact_dir.glob("art-*.json")
         }
 
-        with self.assertRaisesRegex(ValueError, "reserved envelope"):
+        with self.assertRaisesRegex(ValueError, "turn_identity differs"):
             switch_runtime.persist_skill_result(
                 tampered_context,
                 skill_id="implement-task",
@@ -2860,9 +3073,9 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             skill_id="implement-task",
             result=self._artifact_result(),
         )
-        self._remember(first_payload["receipt"]["paths"]["run"])
-        self._remember(first_payload["receipt"]["paths"]["task"])
-        self._remember(first_payload["receipt"]["paths"]["artifacts"][0])
+        self._remember(first_payload["receipt"]["receipt_paths"]["run"])
+        self._remember(first_payload["receipt"]["receipt_paths"]["task"])
+        self._remember(first_payload["receipt"]["receipt_paths"]["artifacts"][0])
 
         second_resolved = switch_runtime.resolve_switch(
             "switch dev: Refine the onboarding analytics instrumentation"
@@ -2946,18 +3159,18 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(receipt["artifact_ids"], [receipt["artifact_id"]])
         self.assertIn("task_title", receipt)
         self.assertIsNone(receipt["track_title"])
-        self.assertIn("reference_switches", receipt)
-        self.assertEqual(
-            receipt["reference_switches"]["continue_current_task"],
-            f"switch dev({receipt['task_id']}): <demand>",
-        )
+        self.assertIn("next_state", receipt)
+        self.assertIn("receipt_paths", receipt)
+        self.assertEqual(receipt["next_state"]["mode"], "continue_current_task")
+        self.assertEqual(receipt["next_state"]["task_id"], receipt["task_id"])
         self.assertEqual(receipt["related_run_ids"], [])
-        self.assertEqual(receipt["recommended_switch"], receipt["reference_switches"]["continue_current_task"])
+        self.assertNotIn("reference_switches", receipt)
+        self.assertNotIn("recommended_switch", receipt)
         self._remember_persisted_paths(receipt)
 
-        artifact_json = json.loads(self._runtime_path(receipt["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
-        task_json = json.loads(self._runtime_path(receipt["paths"]["task"]).read_text(encoding="utf-8"))
-        run_json = json.loads(self._runtime_path(receipt["paths"]["run"]).read_text(encoding="utf-8"))
+        artifact_json = json.loads(self._runtime_path(receipt["receipt_paths"]["artifacts"][0]).read_text(encoding="utf-8"))
+        task_json = json.loads(self._runtime_path(receipt["receipt_paths"]["task"]).read_text(encoding="utf-8"))
+        run_json = json.loads(self._runtime_path(receipt["receipt_paths"]["run"]).read_text(encoding="utf-8"))
 
         self.assertEqual(artifact_json["task_id"], receipt["task_id"])
         self.assertEqual(artifact_json["source_run_id"], receipt["run_id"])
@@ -2969,12 +3182,15 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertEqual(run_json["resolved_task_id"], receipt["task_id"])
         self.assertEqual(run_json["artifact_ids"], [receipt["artifact_id"]])
-        self.assertEqual(run_json["switch"]["demand"], resolved["switch"]["demand"])
+        self.assertEqual(run_json["request_text"], resolved["request_text"])
+        self.assertEqual(run_json["current_task_id"], resolved["current_task_id"])
         self.assertEqual(run_json["task_title"], receipt["task_title"])
         self.assertEqual(run_json["track_title"], receipt["track_title"])
-        self.assertEqual(run_json["reference_switches"], receipt["reference_switches"])
+        self.assertEqual(run_json["next_state"], receipt["next_state"])
+        self.assertEqual(run_json["receipt_paths"], receipt["receipt_paths"])
         self.assertEqual(run_json["related_run_ids"], receipt["related_run_ids"])
-        self.assertEqual(run_json["recommended_switch"], receipt["recommended_switch"])
+        self.assertNotIn("reference_switches", run_json)
+        self.assertNotIn("recommended_switch", run_json)
         self.assertNotIn("suggested_next_switch", run_json)
         self.assertNotIn("artifact_content", run_json)
         self.assertFalse(
@@ -3073,7 +3289,7 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "skill_id is required",
+            "single skill_id string",
         ):
             switch_runtime.persist_skill_result(
                 resolved,
@@ -3122,18 +3338,18 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(receipt["artifact_ids"], [receipt["artifact_id"]])
         self.assertIn("task_title", receipt)
         self.assertIsNone(receipt["track_title"])
-        self.assertIn("reference_switches", receipt)
-        self.assertEqual(
-            receipt["reference_switches"]["continue_current_task"],
-            f"switch market({receipt['task_id']}): <demand>",
-        )
+        self.assertIn("next_state", receipt)
+        self.assertIn("receipt_paths", receipt)
+        self.assertEqual(receipt["next_state"]["mode"], "continue_current_task")
+        self.assertEqual(receipt["next_state"]["task_id"], receipt["task_id"])
         self.assertEqual(receipt["related_run_ids"], [])
-        self.assertEqual(receipt["recommended_switch"], receipt["reference_switches"]["continue_current_task"])
+        self.assertNotIn("reference_switches", receipt)
+        self.assertNotIn("recommended_switch", receipt)
         self._remember_persisted_paths(receipt)
 
-        artifact_json = json.loads(self._runtime_path(receipt["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
-        task_json = json.loads(self._runtime_path(receipt["paths"]["task"]).read_text(encoding="utf-8"))
-        run_json = json.loads(self._runtime_path(receipt["paths"]["run"]).read_text(encoding="utf-8"))
+        artifact_json = json.loads(self._runtime_path(receipt["receipt_paths"]["artifacts"][0]).read_text(encoding="utf-8"))
+        task_json = json.loads(self._runtime_path(receipt["receipt_paths"]["task"]).read_text(encoding="utf-8"))
+        run_json = json.loads(self._runtime_path(receipt["receipt_paths"]["run"]).read_text(encoding="utf-8"))
 
         self.assertEqual(artifact_json["task_id"], receipt["task_id"])
         self.assertEqual(artifact_json["source_run_id"], receipt["run_id"])
@@ -3151,12 +3367,14 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(run_json["resolved_task_id"], receipt["task_id"])
         self.assertEqual(run_json["artifact_ids"], [receipt["artifact_id"]])
         self.assertEqual(run_json["skill_id"], "pmf-recon")
-        self.assertEqual(run_json["switch"]["demand"], resolved["switch"]["demand"])
+        self.assertEqual(run_json["request_text"], resolved["request_text"])
         self.assertEqual(run_json["task_title"], receipt["task_title"])
         self.assertEqual(run_json["track_title"], receipt["track_title"])
-        self.assertEqual(run_json["reference_switches"], receipt["reference_switches"])
+        self.assertEqual(run_json["next_state"], receipt["next_state"])
+        self.assertEqual(run_json["receipt_paths"], receipt["receipt_paths"])
         self.assertEqual(run_json["related_run_ids"], receipt["related_run_ids"])
-        self.assertEqual(run_json["recommended_switch"], receipt["recommended_switch"])
+        self.assertNotIn("reference_switches", run_json)
+        self.assertNotIn("recommended_switch", run_json)
         self.assertNotIn("artifact_content", run_json)
 
     def test_create_mode_resolve_materializes_task_id_and_persist_reuses_it(self) -> None:
@@ -3164,14 +3382,11 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "switch dev: Implement the approved onboarding improvements in projects/app"
         )
 
-        self.assertEqual(resolved["task_resolution"]["mode"], "create")
-        self.assertIsInstance(resolved["task_resolution"]["task_id"], str)
-        self.assertTrue(resolved["task_resolution"]["task_id"])
-        self.assertIsInstance(resolved["task_resolution"]["create_token"], str)
-        self.assertTrue(resolved["task_resolution"]["create_token"])
-        self.assertEqual(resolved["switch"]["task_id"], resolved["task_resolution"]["task_id"])
+        self.assertIsInstance(resolved["current_task_id"], str)
+        self.assertTrue(resolved["current_task_id"])
+        self.assertEqual(resolved["current_task_id"], resolved["task_context"]["task"]["id"])
 
-        task_id = resolved["task_resolution"]["task_id"]
+        task_id = resolved["current_task_id"]
         assert isinstance(task_id, str)
         task_before = get_task(task_id)
         self.assertIsNotNone(task_before)
@@ -3188,17 +3403,17 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         self.assertEqual(payload["receipt"]["task_id"], task_id)
 
-        run_json = json.loads(self._runtime_path(payload["receipt"]["paths"]["run"]).read_text(encoding="utf-8"))
+        run_json = json.loads(self._runtime_path(payload["receipt"]["receipt_paths"]["run"]).read_text(encoding="utf-8"))
         self.assertEqual(run_json["resolved_task_id"], task_id)
-        self.assertEqual(run_json["switch"]["task_id"], task_id)
+        self.assertEqual(run_json["current_task_id"], task_id)
 
-    def test_persist_skill_result_rejects_tampered_switch_task_id_without_writes(self) -> None:
+    def test_persist_skill_result_rejects_tampered_current_task_id_without_writes(self) -> None:
         resolved = switch_runtime.resolve_switch(
             "switch dev: Implement the approved onboarding improvements in projects/app"
         )
 
         malformed_switch = deepcopy(resolved)
-        malformed_switch["switch"]["task_id"] = "task-dev-prefilled-from-switch"
+        malformed_switch["current_task_id"] = "task-dev-prefilled-from-switch"
         task_id = resolved["task_context"]["task"]["id"]
         task_path = self._runtime_path(f"buddyswitch/objects/tasks/{task_id}.json")
         run_dir = self._runtime_path("buddyswitch/content/runs")
@@ -3215,7 +3430,7 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "switch.task_id mismatch",
+            "current_task_id mismatch",
         ):
             switch_runtime.persist_skill_result(
                 malformed_switch,
@@ -3278,14 +3493,12 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         resolved = switch_runtime.resolve_switch(
             "switch dev: Implement the approved onboarding improvements in projects/app"
         )
-        create_token = resolved["task_resolution"]["create_token"]
-        expected_task_id = switch_runtime._derive_task_id("dev", "", create_token=create_token)
-        self._remember(f"buddyswitch/objects/tasks/{expected_task_id}.json")
+        self._remember(f"buddyswitch/objects/tasks/{resolved['current_task_id']}.json")
 
         with patch("switch_runtime._persist_artifact_skill", side_effect=ValueError("downstream persist failed")):
             with self.assertRaisesRegex(
                 ValueError,
-                rf"downstream persist failed .*created task_id: {expected_task_id}",
+                "downstream persist failed",
             ):
                 switch_runtime.persist_skill_result(
                     resolved,
@@ -3297,14 +3510,12 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         resolved = switch_runtime.resolve_switch(
             "switch dev: Implement the approved onboarding improvements in projects/app"
         )
-        create_token = resolved["task_resolution"]["create_token"]
-        expected_task_id = switch_runtime._derive_task_id("dev", "", create_token=create_token)
-        self._remember(f"buddyswitch/objects/tasks/{expected_task_id}.json")
+        self._remember(f"buddyswitch/objects/tasks/{resolved['current_task_id']}.json")
 
         with patch("switch_runtime._persist_artifact_skill", side_effect=OSError("disk full")):
             with self.assertRaisesRegex(
                 OSError,
-                rf"disk full .*created task_id: {expected_task_id}; recover with switch dev\({expected_task_id}\): <demand>",
+                "disk full",
             ):
                 switch_runtime.persist_skill_result(
                     resolved,
@@ -3319,14 +3530,12 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         resolved = switch_runtime.resolve_switch(
             "switch dev -> track-dev-recovery-hint: Implement the approved onboarding improvements in projects/app"
         )
-        create_token = resolved["task_resolution"]["create_token"]
-        expected_task_id = switch_runtime._derive_task_id("dev", "", create_token=create_token)
-        self._remember(f"buddyswitch/objects/tasks/{expected_task_id}.json")
+        self._remember(f"buddyswitch/objects/tasks/{resolved['current_task_id']}.json")
 
         with patch("switch_runtime._persist_artifact_skill", side_effect=OSError("disk full")):
             with self.assertRaisesRegex(
                 OSError,
-                rf"disk full .*created task_id: {expected_task_id}; recover with switch dev\({expected_task_id}\) -> track-dev-recovery-hint: <demand>",
+                "disk full",
             ):
                 switch_runtime.persist_skill_result(
                     resolved,
@@ -3337,9 +3546,7 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         resolved = switch_runtime.resolve_switch(
             "switch dev: Implement the approved onboarding improvements in projects/app"
         )
-        create_token = resolved["task_resolution"]["create_token"]
-        expected_task_id = switch_runtime._derive_task_id("dev", "", create_token=create_token)
-        self._remember(f"buddyswitch/objects/tasks/{expected_task_id}.json")
+        self._remember(f"buddyswitch/objects/tasks/{resolved['current_task_id']}.json")
 
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             temp_root = Path(temp_dir)
@@ -3366,14 +3573,12 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "E_RUNTIME_PERSIST")
         message = payload["error"]["message"]
         self.assertIn("disk full", message)
-        self.assertIn(f"created task_id: {expected_task_id}", message)
-        self.assertIn(f"recover with switch dev({expected_task_id}): <demand>", message)
 
     def test_cmd_persist_uses_persist_skill_result_surface(self) -> None:
         resolved = switch_runtime.resolve_switch(
             "switch dev: Implement the approved onboarding improvements in projects/app"
         )
-        self._remember(f"buddyswitch/objects/tasks/{resolved['task_resolution']['task_id']}.json")
+        self._remember(f"buddyswitch/objects/tasks/{resolved['current_task_id']}.json")
 
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             temp_root = Path(temp_dir)
@@ -3402,10 +3607,7 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(payload["receipt"]["run_id"], resolved["run_envelope"]["run_id"])
         self.assertFalse(payload["refreshed_context"]["ok"])
         self.assertEqual(payload["refreshed_context"]["error"]["code"], "E_RUNTIME_REFRESH_CONTEXT")
-        self.assertEqual(
-            payload["refreshed_context"]["error"]["recommended_switch"],
-            payload["receipt"]["recommended_switch"],
-        )
+        self.assertIn("rerun resolve", payload["refreshed_context"]["error"]["message"].lower())
         self.assertNotIn("run_envelope", payload["refreshed_context"])
         for field in PERSIST_SKILL_RESULT_PACKET_ERA_FIELDS:
             self.assertNotIn(field, payload)
@@ -3425,13 +3627,10 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertFalse(payload["refreshed_context"]["ok"])
         self.assertEqual(payload["refreshed_context"]["error"]["code"], "E_RUNTIME_REFRESH_CONTEXT")
-        self.assertEqual(
-            payload["refreshed_context"]["error"]["recommended_switch"],
-            payload["receipt"]["recommended_switch"],
-        )
+        self.assertIn("rerun resolve", payload["refreshed_context"]["error"]["message"].lower())
         self.assertNotIn("run_envelope", payload["refreshed_context"])
         receipt = payload["receipt"]
-        run_json = json.loads(self._runtime_path(receipt["paths"]["run"]).read_text(encoding="utf-8"))
+        run_json = json.loads(self._runtime_path(receipt["receipt_paths"]["run"]).read_text(encoding="utf-8"))
         self.assertEqual(run_json["resolved_task_id"], receipt["task_id"])
         self.assertFalse(
             switch_runtime._reserved_run_path(receipt["run_id"]).exists()  # type: ignore[attr-defined]
@@ -3458,8 +3657,8 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 )
                 self._remember_persisted_paths(receipt)
 
-                artifact_json = json.loads(self._runtime_path(receipt["paths"]["artifacts"][0]).read_text(encoding="utf-8"))
-                run_json = json.loads(self._runtime_path(receipt["paths"]["run"]).read_text(encoding="utf-8"))
+                artifact_json = json.loads(self._runtime_path(receipt["receipt_paths"]["artifacts"][0]).read_text(encoding="utf-8"))
+                run_json = json.loads(self._runtime_path(receipt["receipt_paths"]["run"]).read_text(encoding="utf-8"))
 
                 self.assertEqual(receipt["skill_id"], skill_id)
                 self.assertEqual(artifact_json["slot"], expected_slot)
@@ -3483,9 +3682,10 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(receipt["task_id"], "task-dev-binding")
         self.assertEqual(receipt["track_id"], "track-dev-binding")
         self.assertEqual(receipt["track_title"], "Track Binding")
-        self.assertIn("continue_current_task_in_track", receipt["reference_switches"])
-        self.assertNotIn("handoff_to_next_buddy", receipt["reference_switches"])
-        self.assertEqual(receipt["recommended_switch"], receipt["reference_switches"]["continue_current_task_in_track"])
+        self.assertEqual(receipt["next_state"]["mode"], "continue_current_task")
+        self.assertEqual(receipt["next_state"]["task_id"], "task-dev-binding")
+        self.assertNotIn("reference_switches", receipt)
+        self.assertNotIn("recommended_switch", receipt)
         track_after = get_track("track-dev-binding")
         self.assertIsNotNone(track_after)
         self.assertIn("task-dev-binding", track_after["task_ids"])
@@ -3557,16 +3757,14 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(receipt["track_action"], "create")
         self.assertEqual(receipt["track_id"], "track-task-manager-create")
         self.assertEqual(receipt["track_title"], "Track Task Manager Create")
-        self.assertIn("handoff_to_next_buddy", receipt["reference_switches"])
-        self.assertEqual(
-            receipt["reference_switches"]["handoff_to_next_buddy"],
-            "switch dev -> track-task-manager-create: <demand>",
-        )
-        self.assertEqual(receipt["recommended_switch"], receipt["reference_switches"]["handoff_to_next_buddy"])
+        self.assertEqual(receipt["next_state"]["mode"], "handoff")
+        self.assertEqual(receipt["next_state"]["next_buddy"], "dev")
+        self.assertNotIn("reference_switches", receipt)
+        self.assertNotIn("recommended_switch", receipt)
         task_json = get_task(receipt["task_id"])
         self.assertIsNotNone(task_json)
         self.assertEqual(task_json["track_id"], "track-task-manager-create")
-        track_json = json.loads(self._runtime_path(receipt["paths"]["track"]).read_text(encoding="utf-8"))
+        track_json = json.loads(self._runtime_path(receipt["receipt_paths"]["track"]).read_text(encoding="utf-8"))
         self.assertIn(receipt["task_id"], track_json["task_ids"])
 
     def test_persist_skill_result_track_creation_binds_task_and_track_ids_together(self) -> None:
@@ -3591,9 +3789,9 @@ class PersistRuntimeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
 
-        self._remember(payload["receipt"]["paths"]["run"])
-        self._remember(payload["receipt"]["paths"]["task"])
-        self._remember(payload["receipt"]["paths"]["track"])
+        self._remember(payload["receipt"]["receipt_paths"]["run"])
+        self._remember(payload["receipt"]["receipt_paths"]["task"])
+        self._remember(payload["receipt"]["receipt_paths"]["track"])
 
         task = get_task(payload["receipt"]["task_id"])
         track = get_track("track-landing-page")

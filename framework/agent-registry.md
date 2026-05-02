@@ -14,8 +14,8 @@ All buddy definitions come from `buddyswitch/manifest.toml`:
 
 ## Runtime Resolution
 
-- Parser validation: `scripts/parse_switch.py`
-- Codex routing: `scripts/codex_router.py`
+- Parser validation: `scripts/debug/parse_switch.py`
+- Codex routing: `scripts/debug/codex_router.py`
 - Skill docs: `buddyswitch/skills/<buddy>/<skill>/SKILL.md`
 
 ## Current Core Model

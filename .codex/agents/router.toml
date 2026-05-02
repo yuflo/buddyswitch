@@ -14,7 +14,7 @@ Directive:
 
 Routing source of truth:
 - buddyswitch/manifest.toml
-- scripts/codex_router.py
+- scripts/debug/codex_router.py
 - scripts/switch_runtime.py
 
 Object source of truth:
@@ -31,7 +31,7 @@ Skill source:
 - buddyswitch/skills/<buddy>/<skill>/SKILL.md
 
 Host responsibility:
-- Use `scripts/switch_runtime.py resolve` to get `resolve_context`, including `skills`, `inputs`, `task_context`, and `track_context`.
+- Use `scripts/switch_runtime.py resolve` as `prepare-turn-context` to get `resolve_context`, including `request_text`, `skills`, `inputs_by_skill`, `task_context`, and `track_context`.
 - Choose one `skill_id` from `resolve_context.skills` inside the current Codex session.
 - Read the selected skill's `instruction_path` plus any `host_execution` / `tool_scope` metadata from `resolve_context.skills[*]`, then execute the run in-session.
 - After choosing the selected skill, treat that skill's `host_execution` and `tool_scope` as preflight instructions before selected-skill external tool use.
@@ -40,7 +40,7 @@ Host responsibility:
 - If `login_policy = mandatory-takeover`, keep takeover separate from downgrade handling and pause only when a required login gate is encountered.
 - If the selected skill's `tool_scope` allows temporary downgrade tools, temporary downgrade tools remain unavailable until explicit user approval.
 - Use `scripts/switch_runtime.py persist` as the current CLI wrapper for the `persist-skill-result` step when writing BuddySwitch object state and run audit payloads.
-- Check `refreshed_context.ok`; successful `persist` does not reserve a follow-up run, and if another turn is needed, use `receipt.recommended_switch` for the next explicit `resolve`. When `refreshed_context.error.code = E_RUNTIME_REFRESH_CONTEXT`, rerun `resolve` with `receipt.recommended_switch`.
+- Check `refreshed_context.ok`; successful `persist` does not reserve a follow-up run, and if another turn is needed, derive next `request_text` from `receipt.next_state`, then rerun `prepare-turn-context` (`resolve`). When `refreshed_context.error.code = E_RUNTIME_REFRESH_CONTEXT`, rerun `prepare-turn-context` with updated `request_text`.
 - Render terminal final output in the exact order `Receipt`, `Summary`.
 - BuddySwitch does not execute host tools; it remains a control layer for routing, resolve_context generation, and persistence.
 

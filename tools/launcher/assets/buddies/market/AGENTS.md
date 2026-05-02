@@ -27,7 +27,7 @@ If work should move to another buddy, open that buddy's instance.
 
 - The active buddy is `market`.
 - Resolve ownership from launcher session metadata; do not infer buddy from product-mode user text.
-- Structural `switch <buddy>...:` commands must be rejected in this product-mode session.
+- Use ordinary `request_text` in this product-mode session; `prepare-turn-context` binds the active buddy from launcher metadata.
 - To work with another buddy, open the corresponding locked buddy instance.
 - Durable BuddySwitch state lives in projected `buddyswitch/objects/**` and `buddyswitch/content/runs/**` paths.
 - `runs/raw/` is instance-local scratch.

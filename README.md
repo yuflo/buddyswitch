@@ -42,23 +42,23 @@ If you are developing BuddySwitch itself, start here:
 2. Use **Internal Debug Wire Tools** when you need to inspect canonical switch parsing/routing behavior:
 
 ```bash
-python3 scripts/parse_switch.py "switch <buddy>: create track"
-python3 scripts/codex_router.py "switch <buddy>: create track"
+python3 scripts/debug/parse_switch.py "switch <buddy>: create track"
+python3 scripts/debug/codex_router.py "switch <buddy>: create track"
 ```
 
 3. If you want to exercise the runtime loop manually, switch into a launcher-managed runtime workspace first. `resolve` may materialize a zero-run task and reserve the next run envelope, so it is blocked in the repo-root development checkout.
 
-Resolve a real directive into BuddySwitch `resolve_context` there:
+Resolve ordinary `request_text` into BuddySwitch `resolve_context` there:
 
 ```bash
 python3 scripts/switch_runtime.py resolve \
-  "switch <buddy>: quick market research for AI scheduler landing page" \
+  "Quick market research for AI scheduler landing page" \
   > /tmp/buddyswitch-resolved.json
 ```
 
 4. Choose one `skill_id` from `resolve_context.skills`, then execute that skill in the current Codex session:
    - read the selected skill's `instruction_path`
-   - treat `resolve_context.inputs` as the current selected input bundle only when the selected skill surface is already resolved
+   - use `resolve_context.inputs_by_skill[skill_id]` as the selected input bundle when present
    - for multi-skill buddies, choose from `resolve_context.skills` using the skill metadata plus `task_context` / `track_context`
    - for market runs, apply `resolve_context.skills[*].host_execution` and `resolve_context.skills[*].tool_scope`
    - execute the run in-session and produce a structured result matching the reported schema
@@ -72,7 +72,7 @@ python3 scripts/switch_runtime.py persist \
   --result /tmp/buddyswitch-result.json
 ```
 
-6. `persist` is end-of-turn. Successful `persist` does not reserve a follow-up run. If another turn is needed, run `resolve` with `receipt.recommended_switch`, then start the read-only Context Panel:
+6. `persist` is end-of-turn. Successful `persist` does not reserve a follow-up run. If another turn is needed, start from `receipt.next_state`, write the next `request_text`, and run `prepare-turn-context` (`resolve`) again, then start the read-only Context Panel:
 
 ```bash
 python3 scripts/serve_context_panel.py
@@ -122,8 +122,8 @@ Do not ask product-mode users to type `switch <buddy>:` commands.
 ### Internal Debug Wire Tools
 
 ```bash
-python3 scripts/parse_switch.py "switch dev(task-dev-onboarding) -> track-demo: continue the implementation"
-python3 scripts/codex_router.py "switch <buddy>: create ai-scheduler-lp track"
+python3 scripts/debug/parse_switch.py "switch dev(task-dev-onboarding) -> track-demo: continue the implementation"
+python3 scripts/debug/codex_router.py "switch <buddy>: create ai-scheduler-lp track"
 ```
 
 ### Resolve a run
@@ -131,8 +131,8 @@ python3 scripts/codex_router.py "switch <buddy>: create ai-scheduler-lp track"
 Run `resolve` only from the launcher-owned instance runtime workspace. In create mode it may materialize a zero-run task and reserve the next run id, so the repo-root development checkout blocks it; start the runtime workspace with `./buddyswitch-codex instance start --buddy <buddy>` first. Product mode runs from `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`, projects canonical state from `${BUDDYSWITCH_SHARED_ROOT}/state`, and maps relative `projects/app` to the shared project workspace.
 
 ```bash
-python3 scripts/switch_runtime.py resolve "switch <buddy>: quick market research for AI scheduler landing page"
-python3 scripts/switch_runtime.py resolve "switch <buddy>: create ai-scheduler-lp track"
+python3 scripts/switch_runtime.py resolve "Quick market research for AI scheduler landing page"
+python3 scripts/switch_runtime.py resolve "Create the ai-scheduler-lp track"
 ```
 
 ### Persist a structured result
@@ -212,10 +212,10 @@ If you remember only four things, remember these:
 The default flow is:
 
 1. `parse`
-2. `resolve_context`
+2. `prepare-turn-context` (`resolve_context`)
 3. host run
 4. `persist-skill-result`
-5. if another turn is needed, run `resolve` with `receipt.recommended_switch`
+5. if another turn is needed, use `receipt.next_state` + new `request_text`, then run `prepare-turn-context` again
 
 Important runtime rules:
 
@@ -253,7 +253,7 @@ The text after `:` is a demand, not a task object. If no task id is supplied, `r
 
 ### 1. Parse
 
-`scripts/parse_switch.py` validates the `switch` directive and extracts:
+`scripts/debug/parse_switch.py` validates the internal/debug `switch` directive and extracts:
 
 - `buddy`
 - optional `task_id`
@@ -290,7 +290,7 @@ The host Codex session:
 
 1. chooses one `skill_id`
 2. reads the selected skill's `instruction_path`
-3. treats `resolve_context.inputs` as the current selected input bundle only when the selected skill surface is already resolved
+3. uses `resolve_context.inputs_by_skill[skill_id]` as the selected input bundle when present
 4. for market runs, applies `resolve_context.skills[*].host_execution` and `resolve_context.skills[*].tool_scope`
 5. executes the workflow
 6. produces a structured result matching the selected schema
@@ -316,13 +316,13 @@ Successful persistence returns `{ok, receipt, refreshed_context}`. The host-faci
 
 - `task_title`
 - optional `track_title`
-- `reference_switches`
+- `next_state`
+- `receipt_paths`
 - `related_run_ids`
-- `recommended_switch`
 
 `persist` is the end-of-turn commit boundary. Successful `persist` does not reserve a follow-up run.
 
-Check `refreshed_context.ok` before using it for the next turn. On `E_RUNTIME_REFRESH_CONTEXT`, the persist already committed successfully; if another turn is needed, run `resolve` with `receipt.recommended_switch`.
+Check `refreshed_context.ok` before using it for the next turn. On `E_RUNTIME_REFRESH_CONTEXT`, the persist already committed successfully; if another turn is needed, build the next `request_text` from `receipt.next_state` and rerun `prepare-turn-context` (`resolve`).
 
 ## Project Layout
 
@@ -408,10 +408,10 @@ These are the main operational entry points:
 
 - `scripts/switch_runtime.py`
   Main BuddySwitch runtime with `resolve` and `persist` as the current CLI wrapper for `persist-skill-result`.
-- `scripts/parse_switch.py`
-  Syntax parser for canonical `switch` directives.
-- `scripts/codex_router.py`
-  Single Codex adapter for env-backed routing.
+- `scripts/debug/parse_switch.py`
+  Debug-only syntax parser for canonical `switch` directives.
+- `scripts/debug/codex_router.py`
+  Debug-only Codex adapter for env-backed routing.
 - `scripts/env_manifest.py`
   Manifest inspection utilities.
 - `scripts/env_tracks.py`

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single Codex router for BuddySwitch env-backed switch directives."""
+"""Single Codex router for BuddySwitch debug switch directives."""
 
 from __future__ import annotations
 
@@ -7,6 +7,13 @@ import argparse
 import json
 import sys
 from pathlib import Path
+
+CURRENT_DIR = Path(__file__).resolve().parent
+PARENT_DIR = CURRENT_DIR.parent
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.insert(0, str(CURRENT_DIR))
+if str(PARENT_DIR) not in sys.path:
+    sys.path.insert(0, str(PARENT_DIR))
 
 from env_manifest import (
     DEFAULT_MANIFEST,
@@ -16,7 +23,11 @@ from env_manifest import (
     load_manifest,
     require_buddy,
 )
-from parse_switch import EXAMPLE, SYNTAX, parse_switch
+
+try:
+    from parse_switch import EXAMPLE, SYNTAX, parse_switch
+except ModuleNotFoundError:  # pragma: no cover - defensive path fallback
+    from debug.parse_switch import EXAMPLE, SYNTAX, parse_switch
 
 
 def route_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict:

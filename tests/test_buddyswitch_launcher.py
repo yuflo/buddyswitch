@@ -899,7 +899,7 @@ exec "$real_git" "$@"
                 "tool_scope",
                 "persist-skill-result",
                 "refreshed_context",
-                "receipt -> commands -> summary",
+                "receipt -> summary",
             ):
                 self.assertIn(token, copied_agents)
             self.assertTrue((instance_root / "browser" / "profile").exists())

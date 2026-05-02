@@ -24,14 +24,14 @@ The canonical wire grammar remains `switch <buddy>(<task-id>) -> <track-id>: <de
 Product-mode users do not type `switch` commands.
 
 In a launcher-managed product-mode session, `./buddyswitch-codex instance start --buddy <buddy>` binds the process to one active buddy.
-Plain user text inside that session is adapted by `scripts/switch_runtime.py resolve` before parse when all product-mode env vars are valid and active buddy from launcher session metadata is present:
+Plain user text inside that session is preserved as `request_text` by `scripts/switch_runtime.py resolve` when all product-mode env vars are valid and active buddy from launcher session metadata is present:
 
 - `BUDDYSWITCH_ACTIVE_BUDDY`
 - `BUDDYSWITCH_INSTANCE_ID`
 - `BUDDYSWITCH_INSTANCE_JSON`
 
-Any structural `switch <buddy>...:` input in a product-mode buddy instance must reject before parse or resolve mutation.
-Missing product-mode env keeps strict canonical wire behavior.
+In product-mode buddy instances, user text is handled as `request_text` by `prepare-turn-context` and does not require structural switch input.
+Missing product-mode env fails closed for product-mode calls; strict canonical wire behavior belongs to the debug/manual parser.
 Partial product-mode env rejects before mutation.
 
 ## Buddy Validation
@@ -43,16 +43,16 @@ Partial product-mode env rejects before mutation.
 
 BuddySwitch uses four primitives:
 
-1. `parse`
-2. `resolve_context`
-3. `run`
+1. debug/manual `parse`
+2. product `prepare-turn-context` / `resolve_context`
+3. host `run`
 4. `persist-skill-result`
 
-`parse`, `resolve_context`, and `persist-skill-result` belong to BuddySwitch. `run` belongs to the host Codex session.
+`prepare-turn-context` and `persist-skill-result` belong to BuddySwitch. Debug/manual `parse` belongs to isolated tooling. `run` belongs to the host Codex session.
 
 The current CLI entrypoints are:
 
-- `python3 scripts/switch_runtime.py resolve`
+- `python3 scripts/switch_runtime.py resolve` (prepare-turn-context)
 - `python3 scripts/switch_runtime.py persist`
 
 `persist` is the current CLI wrapper for the `persist-skill-result` step.
@@ -76,7 +76,7 @@ Current control-layer expectations:
 - `parse`
   - minor CLI spacing variation around `:` => `normalize`
   - unknown buddy / empty demand / non-switch input => `reject`
-- `resolve_context`
+- `prepare-turn-context`
   - advisory runtime metadata such as `required_tools` / `required_env` => `warn`
   - multi-skill selection belongs to the host decision loop => `ask`
   - missing explicit task/track references or unsafe task-track conflicts => `reject`
@@ -94,28 +94,29 @@ Runtime entry: `scripts/switch_runtime.py`.
 Core fields:
 
 - `context_revision`
-- `switch`
-- `buddy`
-- `authority`
-- `task_resolution`
-- `run_envelope`
+- `active_buddy`
+- `request_text`
+- `current_task_id`
+- `current_track_id`
 - `task_context`
 - `track_context`
-- `inputs`
 - `skills`
+- `inputs_by_skill`
+- `run_envelope`
 - `warnings`
 
 Resolution order:
 
-1. parse the switch
-2. load the selected buddy's skill catalog from skill packages under `buddyswitch/skills/**/` (`skill.toml` + `SKILL.md`)
-3. validate explicit task id, explicit track id, and task ownership when supplied
-4. derive task resolution (`create` or `reuse`) and effective track id
-5. materialize create-mode task context when needed and reserve the next run envelope
-6. build task context and optional track context from canonical objects
-7. reject explicit requests for retired markdown outputs under `artifacts/*.md` or `runs/summaries/**`
-8. select current artifact inputs only when one skill surface is already unambiguous
-9. return compact skill cards plus any resolved `host_execution` / `tool_scope` metadata needed by the host
+1. bind `instance_id`, `active_buddy`, current task, and current track from launcher/runtime metadata
+2. preserve the user input as `request_text`
+3. load the active buddy's skill catalog from skill packages under `buddyswitch/skills/**/` (`skill.toml` + `SKILL.md`)
+4. validate current task id, current track id, and task ownership when present
+5. derive task resolution (`create` or `reuse`) and effective track id
+6. materialize create-mode task context when needed and reserve the next run envelope
+7. build task context and optional track context from canonical objects
+8. reject explicit requests for retired markdown outputs under `artifacts/*.md` or `runs/summaries/**`
+9. select current artifact inputs only when one skill surface is already unambiguous
+10. return compact skill cards plus any resolved `host_execution` / `tool_scope` metadata needed by the host
 
 Create-mode contract:
 
@@ -142,8 +143,8 @@ Current runtime defaults:
 Multi-skill resolution notes:
 
 - multi-skill buddies never auto-select in runtime; the host must choose one `skill_id` from `resolve_context.skills`
-- `resolve_context.inputs` is the current selected input bundle only when one skill surface is already resolved
-- for multi-skill resolves, top-level `inputs` may be empty until the host chooses the skill turn
+- `resolve_context.inputs_by_skill[skill_id]` is the selected input bundle when that skill surface is already resolved
+- for multi-skill resolves, `inputs_by_skill` may stay sparse until the host chooses the skill turn
 - the host should choose by combining the resolved skill metadata with `task_context`, `track_context`, and the buddy contract docs
 
 Market runtime note:
@@ -158,15 +159,15 @@ Market runtime note:
 
 Recommended fixed host flow:
 
-1. call `scripts/switch_runtime.py resolve`
+1. call `scripts/switch_runtime.py resolve` as `prepare-turn-context`
 2. choose exactly one `skill_id` from `resolve_context.skills`
 3. read the selected skill package instruction markdown from `instruction_path`
-4. treat `resolve_context.inputs` as the current selected input bundle for the run when the selected skill surface is already resolved
+4. use `resolve_context.inputs_by_skill[skill_id]` as the selected input bundle for the run when present
 5. for market runs, apply `resolve_context.skills[*].host_execution` and `resolve_context.skills[*].tool_scope` before browser work
 6. execute the selected skill in-session
 7. produce a structured result payload matching the selected skill schema
 8. call `scripts/switch_runtime.py persist` to perform the `persist-skill-result` step
-9. check `refreshed_context.ok`; the default successful persist path returns `E_RUNTIME_REFRESH_CONTEXT`, and if another turn is needed, run explicit `resolve` with `receipt.recommended_switch`
+9. check `refreshed_context.ok`; the default successful persist path returns `E_RUNTIME_REFRESH_CONTEXT`, and if another turn is needed, use `receipt.next_state` + new `request_text`, then rerun `prepare-turn-context`
 
 Boundary for execution:
 
@@ -210,13 +211,13 @@ Host-facing follow-up fields live inside `receipt`, including:
 
 - `task_title`
 - optional `track_title`
-- `reference_switches`
+- `next_state`
+- `receipt_paths`
 - `related_run_ids`
-- `recommended_switch`
 
 `persist` is the end-of-turn commit boundary. Successful `persist` does not reserve a follow-up run.
 
-Check `refreshed_context.ok` before using it for the next turn. The default successful persist path returns `{ok: false, error.code: E_RUNTIME_REFRESH_CONTEXT}`; if another turn is needed, run explicit `resolve` with `receipt.recommended_switch`.
+Check `refreshed_context.ok` before using it for the next turn. The default successful persist path returns `{ok: false, error.code: E_RUNTIME_REFRESH_CONTEXT}`; if another turn is needed, use `receipt.next_state` and new `request_text`, then rerun `prepare-turn-context`.
 
 Host terminal rendering contract:
 
@@ -233,7 +234,8 @@ Host terminal rendering contract:
 - `Summary` constraints:
   - execution summary in 1-2 lines
   - open questions up to 4 items
-- `reference_switches` and `recommended_switch` may remain in receipt as internal/debug follow-up fields.
+- show structured next-step data from `receipt.next_state`; do not reconstruct command text
+- `receipt.receipt_paths` may be rendered as debug detail lines
 - Keep full object paths as optional debug output, not the primary summary surface.
 
 ## Error Handling
@@ -260,7 +262,7 @@ For syntax and unknown-buddy errors include:
 
 ## Reference Commands
 
-- Parser: `python3 scripts/parse_switch.py "switch pm -> track-demo: continue scope definition"`
-- Router: `python3 scripts/codex_router.py "switch pm -> track-demo: continue scope definition"`
-- Runtime resolve (launcher-owned runtime workspace): `python3 scripts/switch_runtime.py resolve "switch dev: continue implementation"`
+- Parser: `python3 scripts/debug/parse_switch.py "switch pm -> track-demo: continue scope definition"`
+- Router: `python3 scripts/debug/codex_router.py "switch pm -> track-demo: continue scope definition"`
+- Runtime prepare-turn-context (launcher-owned runtime workspace): `python3 scripts/switch_runtime.py resolve "continue implementation"`
 - Runtime persist (launcher-owned runtime workspace): `python3 scripts/switch_runtime.py persist --resolved resolved.json --skill-id write-prd --result result.json`

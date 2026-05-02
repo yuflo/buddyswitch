@@ -29,26 +29,27 @@ WORKSPACE_PROJECTION_CONTRACT = CONTRACTS_DIR / "workspace-projection.json"
 
 EXPECTED_RESOLVE_CONTEXT_CONTRACT = {
     "contract_id": "resolve-context",
-    "contract_version": "2026-04-22",
+    "contract_version": "2026-05-02",
     "response_key_order": [
         "ok",
         "context_revision",
-        "switch",
-        "buddy",
-        "authority",
-        "task_resolution",
-        "run_envelope",
+        "instance_id",
+        "active_buddy",
+        "request_text",
+        "current_task_id",
+        "current_track_id",
         "task_context",
         "track_context",
-        "inputs",
         "skills",
+        "inputs_by_skill",
+        "run_envelope",
         "warnings",
     ],
 }
 
 EXPECTED_PERSIST_SKILL_RESULT_CONTRACT = {
     "contract_id": "persist-skill-result",
-    "contract_version": "2026-04-22",
+    "contract_version": "2026-05-02",
     "response_key_order": [
         "ok",
         "receipt",
@@ -193,19 +194,20 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
 
     def test_contract_matches_real_resolve_context_surface(self) -> None:
         contract = _load_json(RESOLVE_CONTEXT_CONTRACT)
+        request_text = "switch dev: Implement the approved onboarding improvements in projects/app"
 
-        payload = switch_runtime.resolve_switch(
-            "switch dev: Implement the approved onboarding improvements in projects/app"
-        )
+        payload = switch_runtime.resolve_switch(request_text)
 
         self.assertEqual(contract, EXPECTED_RESOLVE_CONTEXT_CONTRACT)
         self.assertTrue(payload["ok"])
         self.assertEqual(list(payload.keys()), contract["response_key_order"])
-        self.assertEqual(payload["task_resolution"]["task_id"], payload["task_context"]["task"]["id"])
+        self.assertEqual(payload["request_text"], request_text)
+        self.assertEqual(payload["current_task_id"], payload["task_context"]["task"]["id"])
         self.assertEqual(payload["run_envelope"]["status"], "reserved")
-        self.assertIsNone(payload["run_envelope"]["previous_run_id"])
-        self.assertNotIn("eligible_skills", payload)
-        self.assertNotIn("implicit_skill_id", payload)
+        self.assertIn("turn_identity", payload["run_envelope"])
+        self.assertNotIn("switch", payload)
+        self.assertNotIn("inputs", payload)
+        self.assertNotIn("artifact_selection_by_skill", payload)
         self.assertFalse(_contains_key_recursive(payload, "selected_skill_packet"))
 
     def test_contract_matches_real_persist_skill_result_surface(self) -> None:
@@ -224,13 +226,10 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         self.assertTrue(persisted["ok"])
         self.assertEqual(list(persisted.keys()), contract["response_key_order"])
         self.assertEqual(persisted["receipt"]["run_id"], context["run_envelope"]["run_id"])
-        self.assertFalse(persisted["refreshed_context"]["ok"])
-        self.assertEqual(persisted["refreshed_context"]["error"]["code"], "E_RUNTIME_REFRESH_CONTEXT")
-        self.assertEqual(
-            persisted["refreshed_context"]["error"]["recommended_switch"],
-            persisted["receipt"]["recommended_switch"],
-        )
-        self.assertNotIn("run_envelope", persisted["refreshed_context"])
+        self.assertIn("next_state", persisted["receipt"])
+        self.assertIn("receipt_paths", persisted["receipt"])
+        self.assertNotIn("reference_switches", persisted["receipt"])
+        self.assertNotIn("recommended_switch", persisted["receipt"])
         self.assertNotIn("skill_id", persisted)
         self.assertNotIn("task_id", persisted)
         self.assertNotIn("artifact_id", persisted)
@@ -254,12 +253,59 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
 
         self.assertTrue(persisted["ok"])
         self.assertFalse(consumed_path.exists())
-        self.assertFalse(persisted["refreshed_context"]["ok"])
-        self.assertNotIn("run_envelope", persisted["refreshed_context"])
+        self.assertNotIn("reference_switches", persisted["receipt"])
+        self.assertNotIn("recommended_switch", persisted["receipt"])
 
         reserved_dir = switch_runtime._reserved_run_path("placeholder").parent  # type: ignore[attr-defined]
         remaining = sorted(reserved_dir.glob("*.json")) if reserved_dir.exists() else []
         self.assertEqual(remaining, [])
+
+    def test_red_native_turn_persist_rejects_skill_array_without_side_effects(self) -> None:
+        context = switch_runtime.resolve_switch(
+            "switch market: Validate an AI tool idea for indie developers"
+        )
+        run_dir = self._runtime_path("buddyswitch/content/runs")
+        artifact_dir = self._runtime_path("buddyswitch/objects/artifacts")
+        before_runs = {path.name for path in run_dir.glob("run-*.json")}
+        before_artifacts = {path.name for path in artifact_dir.glob("art-*.json")}
+
+        with self.assertRaisesRegex((TypeError, ValueError), "single skill_id"):
+            switch_runtime.persist_skill_result(
+                context,
+                skill_id=["pmf-recon"],  # type: ignore[arg-type]
+                result={
+                    "execution_summary": "Completed PMF recon",
+                    "working_notes": [],
+                    "deliverables_or_changed_files": [],
+                    "artifact_content": {
+                        "research_question": "Is there early demand?",
+                        "research_strategy": {
+                            "depth": "quick",
+                            "rationale": "fast probe",
+                            "collection_mode": "manual",
+                            "initial_hypotheses": ["demand exists"],
+                            "source_category_targets": ["forums"],
+                        },
+                        "channel_plan": ["forums"],
+                        "iteration_log": [],
+                        "evidence": [],
+                        "source_traceability": [],
+                        "assumptions_used": [],
+                        "candidate_icps": [],
+                        "strongest_pain_signals": [],
+                        "existing_alternatives": [],
+                        "why_current_solutions_fall_short": [],
+                        "pmf_confidence": {"level": "low", "rationale": "no data"},
+                        "recommended_next_step": {"action": "interviews", "rationale": "collect primary data"},
+                        "suggested_interview_angles": [],
+                        "risks_and_unknowns": [],
+                        "conclusion": "insufficient evidence",
+                    },
+                },
+            )
+
+        self.assertEqual({path.name for path in run_dir.glob("run-*.json")}, before_runs)
+        self.assertEqual({path.name for path in artifact_dir.glob("art-*.json")}, before_artifacts)
 
 
 class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -312,9 +358,20 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
                     "track_title": track["title"],
                     "track_action": "continue",
                     "execution_summary": "Completed implementation",
-                    "reference_switches": {"upstream": "switch pm: handoff implementation"},
                     "related_run_ids": ["run-dev-contract-seed"],
-                    "recommended_switch": "switch test: verify contract freeze",
+                    "next_state": {
+                        "task_id": tracked_task["id"],
+                        "track_id": track["id"],
+                        "current_buddy": "dev",
+                        "next_buddy": "test",
+                        "mode": "handoff",
+                    },
+                    "receipt_paths": {
+                        "run": "buddyswitch/content/runs/run-dev-contract-freeze.json",
+                        "task": f"buddyswitch/objects/tasks/{tracked_task['id']}.json",
+                        "track": f"buddyswitch/objects/tracks/{track['id']}.json",
+                        "artifacts": [f"buddyswitch/objects/artifacts/{artifact['id']}.json"],
+                    },
                 },
                 ensure_ascii=True,
             ),
@@ -342,6 +399,10 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
         _assert_shape(self, payload["tracks"][0], contract["view_shapes"]["track"])
         _assert_shape(self, task_rows[tracked_task["id"]], contract["view_shapes"]["task"])
         _assert_shape(self, payload["artifacts"][0], contract["view_shapes"]["artifact"])
+        self.assertIn("next_state", payload["run_audits"][0])
+        self.assertIn("receipt_paths", payload["run_audits"][0])
+        self.assertNotIn("reference_switches", payload["run_audits"][0])
+        self.assertNotIn("recommended_switch", payload["run_audits"][0])
         _assert_shape(self, payload["run_audits"][0], contract["view_shapes"]["run_audit"])
         _assert_shape(self, payload["tracks"][0]["tasks"][0], contract["view_shapes"]["task"])
         _assert_shape(

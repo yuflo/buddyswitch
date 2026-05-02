@@ -272,35 +272,69 @@ def scan_run_audits() -> list[dict[str, Any]]:
 
         switch = payload.get("switch")
         switch_payload = switch if isinstance(switch, dict) else {}
-        raw_buddy_id = switch_payload.get("buddy_id")
-        buddy_id = raw_buddy_id.strip() if isinstance(raw_buddy_id, str) else None
-        if not buddy_id or buddy_id not in valid_buddy_ids:
-            buddy_id = None
-        raw_legacy_buddy = switch_payload.get("buddy")
-        legacy_buddy = raw_legacy_buddy.strip() if isinstance(raw_legacy_buddy, str) else None
-        if not legacy_buddy or legacy_buddy not in valid_buddy_ids:
-            legacy_buddy = None
+
+        def _clean(value: Any) -> str | None:
+            if not isinstance(value, str):
+                return None
+            text = value.strip()
+            return text or None
+
+        def _known_buddy(value: Any) -> str | None:
+            buddy = _clean(value)
+            if buddy is None or buddy not in valid_buddy_ids:
+                return None
+            return buddy
+
+        buddy = (
+            _known_buddy(payload.get("active_buddy"))
+            or _known_buddy(switch_payload.get("buddy_id"))
+            or _known_buddy(switch_payload.get("buddy"))
+        )
+        task_id = (
+            _clean(payload.get("current_task_id"))
+            or _clean(payload.get("resolved_task_id"))
+            or _clean(switch_payload.get("task_id"))
+        )
+        track_id = (
+            _clean(payload.get("current_track_id"))
+            or _clean(payload.get("effective_track_id"))
+            or _clean(switch_payload.get("track_id"))
+        )
+        demand = _clean(payload.get("request_text")) or _clean(switch_payload.get("demand"))
+        next_state = payload.get("next_state")
+        if not isinstance(next_state, dict):
+            mode = "archive" if payload.get("track_action") == "archive" else "continue_current_task"
+            next_state = {
+                "task_id": task_id,
+                "track_id": track_id,
+                "current_buddy": buddy,
+                "next_buddy": None,
+                "mode": mode,
+            }
+        receipt_paths = payload.get("receipt_paths")
+        if not isinstance(receipt_paths, dict):
+            # Legacy runs used "paths" before receipt_paths was introduced.
+            receipt_paths = payload.get("paths") if isinstance(payload.get("paths"), dict) else {}
+
         rows.append(
             {
                 "run_id": payload.get("run_id", path.stem),
                 "path": rel(path),
-                "buddy": buddy_id or legacy_buddy,
-                "task_id": payload.get("resolved_task_id") or switch_payload.get("task_id"),
+                "buddy": buddy,
+                "task_id": task_id,
                 "task_title": payload.get("task_title"),
-                "demand": switch_payload.get("demand"),
+                "demand": demand,
                 "skill_id": payload.get("skill_id"),
                 "artifact_ids": payload.get("artifact_ids") or [],
-                "track_id": payload.get("effective_track_id") or switch_payload.get("track_id"),
+                "track_id": track_id,
                 "track_title": payload.get("track_title"),
                 "track_action": payload.get("track_action"),
                 "execution_summary": payload.get("execution_summary"),
-                "reference_switches": payload.get("reference_switches")
-                if isinstance(payload.get("reference_switches"), dict)
-                else {},
+                "next_state": next_state,
+                "receipt_paths": receipt_paths,
                 "related_run_ids": payload.get("related_run_ids")
                 if isinstance(payload.get("related_run_ids"), list)
                 else [],
-                "recommended_switch": payload.get("recommended_switch"),
                 "updated_at": payload.get("timestamp") or iso_time(path),
                 "status": "ok",
             }

@@ -16,11 +16,12 @@ In this repository, the normal host is the current Codex CLI session.
 
 BuddySwitch is responsible for:
 
-- parsing internal/debug `switch ...` wire commands
+- preparing native turn context from the active instance metadata and `request_text`
 - loading buddy and skill metadata
 - returning the allowed skill candidates
 - validating structured output
 - persisting task, artifact, track, and run state
+- keeping historical `switch ...` parsing isolated to debug/manual tooling
 
 The host Codex session is responsible for:
 
@@ -52,7 +53,7 @@ Think of BuddySwitch as the traffic controller and recorder.
 
 It decides:
 
-- which buddy the command is for
+- which active buddy the instance is bound to
 - which skills are allowed for that buddy
 - whether the request can be persisted safely
 - where the resulting state should be written
@@ -63,14 +64,13 @@ It does not decide business quality and it does not run a second hidden LLM rout
 
 BuddySwitch uses one standard flow:
 
-1. `parse`
-2. `resolve`
-3. `run`
-4. `persist`
+1. `prepare-turn-context`
+2. `run`
+3. `persist`
 
-### `parse`
+### Debug `parse`
 
-Read an internal/debug `switch` wire command and break it into:
+Historical `switch ...` parsing is debug/manual tooling only. It reads an internal/debug wire command and breaks it into:
 
 - `buddy`
 - optional `task_id`
@@ -88,15 +88,16 @@ becomes:
 - `buddy = market`
 - `demand = research demand for AI voice-enhanced headphones`
 
-### `resolve`
+Product-mode buddy instances do not use this parser. The launcher has already selected one active buddy, and user text is handled as ordinary `request_text`.
+
+### `prepare-turn-context`
 
 Prepare execution context for the host session without writing final artifact output or run audit state.
 
 Product mode selects the buddy at launcher startup and product-mode users send ordinary requests.
-The canonical wire form remains `switch ...`.
-Plain product-mode text is adapted to the canonical wire form only inside a valid buddy-locked session.
+`prepare-turn-context` binds the active buddy from instance metadata and preserves the user's text as `request_text`; it does not parse the text as a routing command.
 
-For create-mode switches, `resolve_context` may materialize a zero-run task immediately in create mode.
+For create-mode requests, `turn_context` may materialize a zero-run task immediately in create mode.
 `resolve_context` assigns the concrete `task_id`.
 `resolve_context` reserves the next run envelope.
 
@@ -110,16 +111,21 @@ This step loads:
 
 It returns fields such as:
 
+- `instance_id`
+- `active_buddy`
+- `request_text`
+- `current_task_id`
+- `current_track_id`
 - `skills`
 - `task_context`
 - `track_context`
-- `inputs`
+- `inputs_by_skill`
 - `run_envelope`
 - `warnings`
 
 Important rule:
 
-- `resolve` does not write final artifact output or run audit content. In create mode it may materialize a zero-run task and reserve the next run envelope so the host has a concrete task/run identity before execution.
+- `prepare-turn-context` does not write final artifact output or run audit content. In create mode it may materialize a zero-run task and reserve the next run envelope so the host has a concrete task/run identity before execution.
 
 ### `run`
 
@@ -153,11 +159,11 @@ Then it writes:
 
 ## How Skill Selection Works
 
-Skill selection does not happen automatically inside BuddySwitch `resolve`.
+Skill selection does not happen automatically inside BuddySwitch `prepare-turn-context`.
 
 Instead:
 
-1. BuddySwitch returns the allowed skill candidates in `resolve_context.skills`.
+1. BuddySwitch returns the allowed skill candidates in `turn_context.skills`.
 2. The host Codex session chooses one of them.
 
 This means:
@@ -169,16 +175,16 @@ For multi-skill buddies, the host must choose explicitly before persistence.
 
 ## Example: A Market Request
 
-Internal wire input:
+Product-mode input in a `market` instance:
 
 ```text
-switch <buddy>: Help me analyze the market for AI voice-enhanced headphones
+Help me analyze the market for AI voice-enhanced headphones
 ```
 
 Current `market` buddy behavior:
 
-1. `parse` identifies `buddy = market`
-2. `resolve` loads the `market` buddy and returns:
+1. `prepare-turn-context` reads `active_buddy = market` from instance metadata and preserves the text as `request_text`
+2. It loads the `market` buddy and returns:
    - `skills = ["research-scan", "pmf-recon", "customer-discovery", "positioning-copy", "channel-discovery", "launch-prep"]`
    - `task_context`
    - optional `track_context`
@@ -228,9 +234,9 @@ Use this shortcut:
 - Product mode selects the buddy when the launcher starts.
 - Product-mode users send ordinary requests.
 - The canonical wire form remains internal/debug `switch ...`.
-- Plain product-mode text is adapted only inside a valid buddy-locked session.
+- Product-mode text is preserved as `request_text` and never rewritten into a command.
 
-- `switch` tells BuddySwitch which buddy owns the request
+- instance metadata tells BuddySwitch which buddy owns the request
 - BuddySwitch tells the host which skills are allowed
 - the host chooses one skill and does the work
 - BuddySwitch validates and records the result

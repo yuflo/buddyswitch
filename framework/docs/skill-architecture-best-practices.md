@@ -23,9 +23,10 @@ Across current coding-agent ecosystems, the common pattern is:
 
 BuddySwitch follows that pattern, but keeps one extra control layer:
 
-- canonical internal/debug wire input uses `switch <buddy>...: <demand>`. Product-mode sessions use ordinary requests because the launcher has already selected one active buddy.
-- BuddySwitch treats the text after `:` as demand text; `resolve` determines task mode and `persist` creates the task only in create mode
-- BuddySwitch constrains the host model to that buddy's allowlisted skill set while keeping invocation parsing tolerant to minor CLI formatting variation
+- product-mode sessions use ordinary `request_text` because the launcher has already selected one active buddy.
+- historical `switch <buddy>...: <demand>` parsing remains debug/manual tooling only.
+- BuddySwitch prepares native turn context, determines task mode, and persists state only after the host returns a schema-valid single-skill result.
+- BuddySwitch constrains the host model to that buddy's allowlisted skill set without routing product-mode text through a parser.
 
 ## Layer Responsibilities
 
@@ -39,7 +40,8 @@ BuddySwitch follows that pattern, but keeps one extra control layer:
 
 ### BuddySwitch
 
-- parse supported internal/debug `switch <buddy>...: <demand>` wire forms
+- prepare native turn context from instance metadata and `request_text`
+- keep supported internal/debug `switch <buddy>...: <demand>` wire parsing out of the product path
 - load manifest, buddy scope, object authority metadata, and allowed skills
 - apply only the deterministic gates needed for safe resolution
 - resolve task context, optional track context, and reject retired markdown output requests
@@ -54,13 +56,13 @@ In this model:
 
 ## Canonical Flow
 
-1. `parse`
-2. `resolve`
-3. `run`
-4. `persist`
+1. `prepare-turn-context`
+2. `run`
+3. `persist`
 
-`parse`, `resolve`, and `persist` are BuddySwitch primitives.
+`prepare-turn-context` and `persist` are BuddySwitch primitives.
 `run` is performed by the host Codex session.
+Debug/manual `parse` remains available only for internal wire tooling.
 
 ## Skill Contract
 
@@ -115,7 +117,7 @@ The host Codex session should not improvise persistence structure.
 
 Instead:
 
-- `resolve` reports `required_output_schema_by_skill`
+- `prepare-turn-context` reports each allowed schema through `resolve_context.skills[*].output_schema`
 - the host emits a structured payload that matches that schema
 - `persist` reuses the referenced task in reuse mode, or creates the task and assigns the final task id in create mode
 - `persist` writes canonical artifact content into artifact objects for artifact-producing skills

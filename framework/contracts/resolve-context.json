@@ -1,18 +1,19 @@
 {
   "contract_id": "resolve-context",
-  "contract_version": "2026-04-22",
+  "contract_version": "2026-05-02",
   "response_key_order": [
     "ok",
     "context_revision",
-    "switch",
-    "buddy",
-    "authority",
-    "task_resolution",
-    "run_envelope",
+    "instance_id",
+    "active_buddy",
+    "request_text",
+    "current_task_id",
+    "current_track_id",
     "task_context",
     "track_context",
-    "inputs",
     "skills",
+    "inputs_by_skill",
+    "run_envelope",
     "warnings"
   ]
 }

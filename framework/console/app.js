@@ -39,7 +39,6 @@ let workspace = normalizeWorkspaceData(emptyWorkspace);
 let selectedTrack = null;
 let selectedTaskId = null;
 let selectedStandalone = false;
-const SWITCH_BUDDY_PATTERN = /^\s*switch\s+([a-z][a-z0-9-]*)/i;
 
 function normalizeWorkspaceData(rawData) {
   return {
@@ -334,77 +333,49 @@ function renderReadOnlyCommand(parent, label, command) {
   parent.append(block);
 }
 
-function normalizeReferenceSwitches(audit) {
-  return audit?.reference_switches && typeof audit.reference_switches === "object"
-    ? audit.reference_switches
-    : {};
-}
-
-function deriveTemplateSwitch(audit, references) {
-  if (typeof references.continue_current_task_in_track === "string" && references.continue_current_task_in_track) {
-    return references.continue_current_task_in_track;
-  }
-  if (typeof references.continue_current_task === "string" && references.continue_current_task) {
-    return references.continue_current_task;
-  }
-  const buddy = audit?.buddy || "pm";
-  const taskId = audit?.task_id || "task-id";
-  if (audit?.track_id) {
-    return `switch ${buddy}(${taskId}) -> ${audit.track_id}: <demand>`;
-  }
-  return `switch ${buddy}(${taskId}): <demand>`;
-}
-
-function deriveRecommendedSwitch(audit, references, templateCommand, track) {
-  if (typeof audit?.recommended_switch === "string" && audit.recommended_switch.trim()) {
-    return audit.recommended_switch.trim();
-  }
-  const fallbackOrder = [
-    references.handoff_to_next_buddy,
-    references.continue_current_task_in_track,
-    references.continue_current_task,
-  ];
-  const fromReference = fallbackOrder.find((item) => typeof item === "string" && item);
-  if (fromReference) {
-    return fromReference;
-  }
-  if (track?.next_buddy) {
-    return `switch ${track.next_buddy} -> ${track.id}: <demand>`;
-  }
-  if (track?.current_buddy) {
-    return `switch ${track.current_buddy} -> ${track.id}: <demand>`;
-  }
-  return templateCommand || "";
-}
-
-function switchBuddyId(command) {
-  if (typeof command !== "string") {
+function textValue(value) {
+  if (typeof value !== "string") {
     return "";
   }
-  const match = command.trim().match(SWITCH_BUDDY_PATTERN);
-  return match?.[1]?.toLowerCase() || "";
+  return value.trim();
+}
+
+function deriveRunNextState(latestRun, fallback = {}) {
+  if (isObject(latestRun?.next_state)) {
+    const runNextState = latestRun.next_state;
+    return {
+      mode: textValue(runNextState.mode) || textValue(fallback.mode) || "continue_current_task",
+      task_id: textValue(runNextState.task_id) || textValue(fallback.task_id) || "",
+      track_id: textValue(runNextState.track_id) || textValue(fallback.track_id) || "",
+      current_buddy: textValue(runNextState.current_buddy) || textValue(fallback.current_buddy) || "",
+      next_buddy: textValue(runNextState.next_buddy) || textValue(fallback.next_buddy) || "",
+    };
+  }
+  return {
+    mode: textValue(fallback.mode) || "continue_current_task",
+    task_id: textValue(fallback.task_id) || "",
+    track_id: textValue(fallback.track_id) || "",
+    current_buddy: textValue(fallback.current_buddy) || "",
+    next_buddy: textValue(fallback.next_buddy) || "",
+  };
 }
 
 function deriveNextStepStateForTrack(track) {
   const latestRun = latestRunForTrack(track);
-  const references = normalizeReferenceSwitches(latestRun);
-  const template = deriveTemplateSwitch(latestRun, references);
-  const recommended = deriveRecommendedSwitch(latestRun, references, template, track);
-  const recommendedBuddy = switchBuddyId(recommended) || track?.next_buddy || track?.current_buddy || "";
-  const currentBuddy = track?.current_buddy || latestRun?.buddy || "";
-  const nextBuddy = track?.next_buddy || "";
-  let mode = "continue_current_task";
-  if (recommendedBuddy && currentBuddy && recommendedBuddy !== currentBuddy) {
-    mode = "recommended_handoff";
-  }
-  if (trackNeedsTest(track) && recommendedBuddy === "test") {
-    mode = "needs_test_validation";
-  }
-  const summary = mode === "recommended_handoff"
+  const state = deriveRunNextState(latestRun, {
+    task_id: latestRun?.task_id || latestTaskForTrack(track)?.id || "",
+    track_id: track?.id || latestRun?.track_id || "",
+    current_buddy: track?.current_buddy || latestRun?.buddy || "",
+    next_buddy: track?.next_buddy || "",
+    mode: "continue_current_task",
+  });
+  const currentBuddy = state.current_buddy;
+  const nextBuddy = state.next_buddy;
+  const recommendedBuddy = nextBuddy || currentBuddy;
+  const mode = state.mode || "continue_current_task";
+  const summary = recommendedBuddy && currentBuddy && recommendedBuddy !== currentBuddy
     ? `Handoff to ${buddyLabel(recommendedBuddy)} for the next turn.`
-    : mode === "needs_test_validation"
-      ? "Latest implementation still needs test validation."
-      : `Continue with ${buddyLabel(currentBuddy || recommendedBuddy)} on the active task.`;
+    : `Continue with ${buddyLabel(currentBuddy || recommendedBuddy)} on the active task.`;
 
   return {
     mode,
@@ -412,22 +383,24 @@ function deriveNextStepStateForTrack(track) {
     currentBuddy,
     nextBuddy,
     recommendedBuddy,
-    trackId: track?.id || "",
-    taskId: latestRun?.task_id || latestTaskForTrack(track)?.id || "",
+    trackId: state.track_id || track?.id || "",
+    taskId: state.task_id || latestTaskForTrack(track)?.id || "",
   };
 }
 
 function deriveNextStepStateForTask(task) {
   const latestRun = latestRunForTask(task);
-  const references = normalizeReferenceSwitches(latestRun);
-  const template = latestRun ? deriveTemplateSwitch(latestRun, references) : "";
-  const recommended = latestRun ? deriveRecommendedSwitch(latestRun, references, template, null) : "";
-  const currentBuddy = task?.buddy || latestRun?.buddy || "";
-  const recommendedBuddy = switchBuddyId(recommended) || currentBuddy;
-  const mode = recommendedBuddy && currentBuddy && recommendedBuddy !== currentBuddy
-    ? "recommended_handoff"
-    : "continue_current_task";
-  const summary = mode === "recommended_handoff"
+  const state = deriveRunNextState(latestRun, {
+    task_id: task?.id || latestRun?.task_id || "",
+    track_id: task?.track_id || latestRun?.track_id || "",
+    current_buddy: task?.buddy || latestRun?.buddy || "",
+    next_buddy: "",
+    mode: "continue_current_task",
+  });
+  const currentBuddy = state.current_buddy;
+  const recommendedBuddy = state.next_buddy || currentBuddy;
+  const mode = state.mode || "continue_current_task";
+  const summary = recommendedBuddy && currentBuddy && recommendedBuddy !== currentBuddy
     ? `Next step likely belongs to ${buddyLabel(recommendedBuddy)}.`
     : `Continue with ${buddyLabel(currentBuddy)} on this task.`;
 
@@ -436,9 +409,9 @@ function deriveNextStepStateForTask(task) {
     summary,
     currentBuddy,
     recommendedBuddy,
-    nextBuddy: "",
-    taskId: task?.id || latestRun?.task_id || "",
-    trackId: latestRun?.track_id || task?.track_id || "",
+    nextBuddy: state.next_buddy || "",
+    taskId: state.task_id || task?.id || "",
+    trackId: state.track_id || task?.track_id || "",
   };
 }
 
@@ -986,6 +959,28 @@ function formatArtifactLabel(audit) {
   return `${artifactIds[0]} (+${artifactIds.length - 1} more)`;
 }
 
+function formatReceiptPaths(audit) {
+  if (!isObject(audit?.receipt_paths)) {
+    return "";
+  }
+  const receiptPaths = audit.receipt_paths;
+  const rows = [];
+  if (textValue(receiptPaths.run)) {
+    rows.push(`run=${receiptPaths.run}`);
+  }
+  if (textValue(receiptPaths.task)) {
+    rows.push(`task=${receiptPaths.task}`);
+  }
+  if (textValue(receiptPaths.track)) {
+    rows.push(`track=${receiptPaths.track}`);
+  }
+  const artifacts = asArray(receiptPaths.artifacts).filter((item) => typeof item === "string" && item);
+  if (artifacts.length > 0) {
+    rows.push(`artifacts=${artifacts.length}`);
+  }
+  return rows.join(" | ");
+}
+
 function renderRunHistory(track) {
   runAuditList.replaceChildren();
   const runs = getTrackRuns(track);
@@ -1002,10 +997,15 @@ function renderRunHistory(track) {
 
   runs.slice(0, 8).forEach((audit) => {
     const item = createEl("article", "summary-item run-card");
-    const references = normalizeReferenceSwitches(audit);
-    const template = deriveTemplateSwitch(audit, references);
-    const recommended = deriveRecommendedSwitch(audit, references, template, track);
-    const recommendedBuddy = switchBuddyId(recommended);
+    const state = deriveRunNextState(audit, {
+      task_id: audit?.task_id || "",
+      track_id: audit?.track_id || track?.id || "",
+      current_buddy: audit?.buddy || track?.current_buddy || "",
+      next_buddy: track?.next_buddy || "",
+      mode: "continue_current_task",
+    });
+    const recommendedBuddy = state.next_buddy || state.current_buddy;
+    const receiptPathSummary = formatReceiptPaths(audit);
     const header = createEl("div", "run-header");
     header.append(
       createEl("strong", "", `${audit.buddy || "unknown"} / ${audit.skill_id || "unknown"}`),
@@ -1021,6 +1021,10 @@ function renderRunHistory(track) {
     renderKeyValue(grid, "Task", formatTaskLabel(audit));
     renderKeyValue(grid, "Artifact", formatArtifactLabel(audit));
     renderKeyValue(grid, "Run", audit.run_id || "run-unknown");
+    renderKeyValue(grid, "Next mode", humanizeKey(state.mode || "continue_current_task"));
+    if (receiptPathSummary) {
+      renderKeyValue(grid, "Receipt paths", receiptPathSummary);
+    }
     item.append(grid);
     if (recommendedBuddy) {
       renderKeyValue(grid, "Recommended buddy", buddyLabel(recommendedBuddy));
@@ -1045,10 +1049,15 @@ function renderRunHistoryForTask(task) {
 
   runs.slice(0, 8).forEach((audit) => {
     const item = createEl("article", "summary-item run-card");
-    const references = normalizeReferenceSwitches(audit);
-    const template = deriveTemplateSwitch(audit, references);
-    const recommended = deriveRecommendedSwitch(audit, references, template, null);
-    const recommendedBuddy = switchBuddyId(recommended);
+    const state = deriveRunNextState(audit, {
+      task_id: audit?.task_id || task?.id || "",
+      track_id: audit?.track_id || task?.track_id || "",
+      current_buddy: audit?.buddy || task?.buddy || "",
+      next_buddy: "",
+      mode: "continue_current_task",
+    });
+    const recommendedBuddy = state.next_buddy || state.current_buddy;
+    const receiptPathSummary = formatReceiptPaths(audit);
     const header = createEl("div", "run-header");
     header.append(
       createEl("strong", "", `${audit.buddy || "unknown"} / ${audit.skill_id || "unknown"}`),
@@ -1064,6 +1073,10 @@ function renderRunHistoryForTask(task) {
     renderKeyValue(grid, "Task", formatTaskLabel(audit));
     renderKeyValue(grid, "Artifact", formatArtifactLabel(audit));
     renderKeyValue(grid, "Run", audit.run_id || "run-unknown");
+    renderKeyValue(grid, "Next mode", humanizeKey(state.mode || "continue_current_task"));
+    if (receiptPathSummary) {
+      renderKeyValue(grid, "Receipt paths", receiptPathSummary);
+    }
     item.append(grid);
     if (recommendedBuddy) {
       renderKeyValue(grid, "Recommended buddy", buddyLabel(recommendedBuddy));

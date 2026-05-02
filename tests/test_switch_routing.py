@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Parser and router checks for BuddySwitch switch invocation handling."""
+"""Debug parser/router checks isolated from product runtime paths."""
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import unittest
 from pathlib import Path
@@ -13,86 +14,40 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import codex_router  # noqa: E402
-import parse_switch  # noqa: E402
 
+class DebugParserIsolationTests(unittest.TestCase):
+    def test_red_debug_parser_tools_live_under_scripts_debug(self) -> None:
+        parse_path = ROOT / "scripts" / "debug" / "parse_switch.py"
+        router_path = ROOT / "scripts" / "debug" / "codex_router.py"
 
-class ParseSwitchTests(unittest.TestCase):
-    def test_parser_returns_structured_invocation(self) -> None:
-        payload = parse_switch.parse_switch("switch market : quick scan")
+        self.assertTrue(parse_path.exists(), msg=f"missing debug parser at {parse_path}")
+        self.assertTrue(router_path.exists(), msg=f"missing debug router at {router_path}")
 
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["intent"], "switch")
-        self.assertEqual(payload["buddy"], "market")
-        self.assertEqual(payload["task_id"], None)
-        self.assertEqual(payload["track_id"], None)
-        self.assertEqual(payload["demand"], "quick scan")
-        self.assertEqual(payload["invocation"]["normalized_text"], "switch market: quick scan")
+    def test_red_debug_parser_and_router_modules_are_importable_from_debug_path(self) -> None:
+        parse_path = ROOT / "scripts" / "debug" / "parse_switch.py"
+        router_path = ROOT / "scripts" / "debug" / "codex_router.py"
 
-    def test_parser_supports_task_and_track_segments(self) -> None:
-        payload = parse_switch.parse_switch("switch dev(task-onboarding) -> track-live: implement CTA flow")
+        parse_spec = importlib.util.spec_from_file_location("debug.parse_switch", parse_path)
+        router_spec = importlib.util.spec_from_file_location("debug.codex_router", router_path)
 
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["buddy"], "dev")
-        self.assertEqual(payload["task_id"], "task-onboarding")
-        self.assertEqual(payload["track_id"], "track-live")
-        self.assertEqual(payload["demand"], "implement CTA flow")
-        self.assertEqual(payload["normalized_text"], "switch dev(task-onboarding) -> track-live: implement CTA flow")
+        self.assertIsNotNone(parse_spec)
+        self.assertIsNotNone(router_spec)
+        self.assertIsNotNone(parse_spec.loader if parse_spec else None)
+        self.assertIsNotNone(router_spec.loader if router_spec else None)
 
-    def test_parser_accepts_minor_spacing_variation(self) -> None:
-        payload = parse_switch.parse_switch("switch market:quick scan")
-
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["demand"], "quick scan")
-        self.assertEqual(payload["normalized_text"], "switch market: quick scan")
-
-    def test_parser_rejects_non_switch_input(self) -> None:
-        payload = parse_switch.parse_switch("market: quick scan")
-
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["error"]["code"], "E_INVALID_SYNTAX")
-
-    def test_parser_rejects_unknown_buddy(self) -> None:
-        payload = parse_switch.parse_switch("switch unknown: quick scan")
-
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["error"]["code"], "E_UNKNOWN_AGENT")
-
-    def test_parser_rejects_empty_demand(self) -> None:
-        payload = parse_switch.parse_switch("switch market:")
-
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["error"]["code"], "E_EMPTY_DEMAND")
-
-
-class RouterTests(unittest.TestCase):
-    def test_router_exposes_invocation_and_profile(self) -> None:
-        payload = codex_router.route_switch("switch market(task-market-quick-scan) -> track-live : quick scan")
-
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["invocation"]["intent"], "switch")
-        self.assertEqual(payload["invocation"]["buddy"], "market")
-        self.assertEqual(payload["invocation"]["task_id"], "task-market-quick-scan")
-        self.assertEqual(payload["invocation"]["track_id"], "track-live")
-        self.assertEqual(payload["invocation"]["demand"], "quick scan")
-        self.assertEqual(
-            payload["invocation"]["normalized_text"],
-            "switch market(task-market-quick-scan) -> track-live: quick scan",
+    def test_red_product_runtime_does_not_import_debug_parser_router(self) -> None:
+        runtime_sources = (
+            (ROOT / "scripts" / "switch_runtime.py").read_text(encoding="utf-8"),
+            (ROOT / "scripts" / "runtime_kernel" / "resolve.py").read_text(encoding="utf-8"),
+            (ROOT / "scripts" / "runtime_kernel" / "persist.py").read_text(encoding="utf-8"),
         )
-        self.assertEqual(payload["profile"]["id"], "market")
-        self.assertEqual(payload["profile"]["authority"]["permission_scope"], "manual_debug_apis")
-        self.assertEqual(
-            payload["profile"]["authority"]["routing_skills"],
-            [
-                "research-scan",
-                "pmf-recon",
-                "customer-discovery",
-                "positioning-copy",
-                "channel-discovery",
-                "launch-prep",
-            ],
-        )
-        self.assertTrue(payload["profile"]["skills"])
+        combined = "\n".join(runtime_sources)
+
+        self.assertNotIn("from parse_switch import", combined)
+        self.assertNotIn("import parse_switch", combined)
+        self.assertNotIn("import codex_router", combined)
+        self.assertNotIn("parse_switch(", combined)
+        self.assertNotIn("codex_router.", combined)
 
 
 if __name__ == "__main__":

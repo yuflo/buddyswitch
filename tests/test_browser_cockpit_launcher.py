@@ -21,6 +21,24 @@ class BrowserCockpitLauncherTests(unittest.TestCase):
         path.write_text(content, encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
+    def _write_instance_record(self, shared_root: Path, instance_id: str = "inst-pm-browser") -> Path:
+        instance_root = shared_root / "instances" / instance_id
+        instance_root.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "instance_id": instance_id,
+            "buddy": "pm",
+            "status": "inactive",
+            "current_task_id": None,
+            "current_track_id": None,
+            "workspace_dir": str(instance_root / "workspace"),
+            "browser_port": None,
+            "created_at": "2026-05-02T00:00:00Z",
+            "updated_at": "2026-05-02T00:00:00Z",
+        }
+        record_path = instance_root / "instance.json"
+        record_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        return instance_root
+
     def _write_fake_curl(self, path: Path) -> None:
         self._write_exec(
             path,
@@ -85,8 +103,12 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_id = "inst-pm-browser"
+            instance_root = self._write_instance_record(shared_root, instance_id)
+
             completed = subprocess.run(
-                [str(LAUNCHER), "browser", "ensure"],
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -100,9 +122,8 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             )
             self.assertTrue(ready_file.exists(), "browser ensure should make endpoint reachable")
 
-            shared_root = source_home_path / ".codex-buddyswitch"
-            self.assertTrue((shared_root / "chrome" / "shared-browser").exists())
-            self.assertTrue((shared_root / "run" / "browser-cockpit.pid").exists())
+            self.assertTrue((instance_root / "browser" / "profile").exists())
+            self.assertTrue((instance_root / "browser" / "chrome.pid").exists())
 
             payloads = [
                 json.loads(line)
@@ -110,14 +131,14 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 if line.strip()
             ]
             mcp_add_names = [payload["argv"][2] for payload in payloads if payload["argv"][:2] == ["mcp", "add"]]
-            self.assertEqual(mcp_add_names, ["chrome-devtools", "chrome-devtools-cockpit"])
+            self.assertEqual(mcp_add_names, ["chrome-devtools-cockpit"])
 
-            expected_home = source_home_path / ".codex-buddyswitch" / "home"
-            expected_codex_home = source_home_path / ".codex-buddyswitch" / "codex-home"
+            expected_home = instance_root / "home"
+            expected_codex_home = instance_root / "codex-home"
             for payload in payloads:
                 self.assertEqual(payload["home"], str(expected_home))
                 self.assertEqual(payload["codex_home"], str(expected_codex_home))
-                self.assertEqual(payload["xdg_config_home"], str(expected_home / ".config"))
+                self.assertEqual(payload["xdg_config_home"], str(instance_root / "xdg-config"))
 
     def test_browser_ensure_does_not_create_runtime_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -141,8 +162,12 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_id = "inst-pm-browser"
+            instance_root = self._write_instance_record(shared_root, instance_id)
+
             completed = subprocess.run(
-                [str(LAUNCHER), "browser", "ensure"],
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -155,8 +180,10 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 0,
                 msg=f"browser ensure failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
             )
-            workspace_dir = source_home_path / ".codex-buddyswitch" / "workspace"
-            self.assertFalse(workspace_dir.exists(), "browser ensure should not create the runtime workspace")
+            shared_workspace_dir = shared_root / "workspace"
+            instance_workspace_dir = instance_root / "workspace"
+            self.assertFalse(shared_workspace_dir.exists(), "browser ensure should not create the legacy runtime workspace")
+            self.assertFalse(instance_workspace_dir.exists(), "browser ensure should not create the instance runtime workspace")
             payloads = [
                 json.loads(line)
                 for line in capture_path.read_text(encoding="utf-8").splitlines()
@@ -164,8 +191,8 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             ]
             self.assertEqual(
                 payloads[0]["home"],
-                str(source_home_path / ".codex-buddyswitch" / "home"),
-                "browser ensure should bootstrap from HOME-scoped runtime state, not main-checkout skeletons",
+                str(instance_root / "home"),
+                "browser ensure should bootstrap from instance-scoped runtime state, not main-checkout skeletons",
             )
 
     def test_browser_status_does_not_create_shared_root(self) -> None:
@@ -178,7 +205,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env.pop("CODEX_HOME", None)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "browser", "status", "--port", "65530"],
+                [str(LAUNCHER), "env", "browser", "status", "--port", "65530"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -202,7 +229,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env.pop("CODEX_HOME", None)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "browser", "status", "--port"],
+                [str(LAUNCHER), "env", "browser", "status", "--port"],
                 cwd=ROOT,
                 env=env,
                 text=True,

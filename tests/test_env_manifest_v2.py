@@ -82,7 +82,7 @@ class SkillPackageLoaderTests(unittest.TestCase):
 
                     [[adapters]]
                     id = "codex"
-                    path = "scripts/codex_router.py"
+                    path = "scripts/debug/codex_router.py"
                     description = "Demo router."
 
                     [[skills]]
@@ -175,7 +175,7 @@ class SkillPackageLoaderTests(unittest.TestCase):
 
                     [[adapters]]
                     id = "codex"
-                    path = "scripts/codex_router.py"
+                    path = "scripts/debug/codex_router.py"
                     description = "Demo router."
 
                     [[skills]]
@@ -275,7 +275,7 @@ class SkillPackageLoaderTests(unittest.TestCase):
 
                     [[adapters]]
                     id = "codex"
-                    path = "scripts/codex_router.py"
+                    path = "scripts/debug/codex_router.py"
                     description = "Demo router."
 
                     [[skills]]
@@ -548,7 +548,7 @@ class SkillPackageLoaderTests(unittest.TestCase):
 
                     [[adapters]]
                     id = "codex"
-                    path = "scripts/codex_router.py"
+                    path = "scripts/debug/codex_router.py"
                     description = "Demo router."
 
                     [[skills]]
@@ -623,7 +623,7 @@ class SkillPackageLoaderTests(unittest.TestCase):
 
                     [[adapters]]
                     id = "codex"
-                    path = "scripts/codex_router.py"
+                    path = "scripts/debug/codex_router.py"
                     description = "Demo router."
 
                     [[skills]]
@@ -775,7 +775,7 @@ class SkillPackageLoaderTests(unittest.TestCase):
 
                     [[adapters]]
                     id = "codex"
-                    path = "scripts/codex_router.py"
+                    path = "scripts/debug/codex_router.py"
                     description = "Demo router."
 
                     [[skills]]
