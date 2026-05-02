@@ -13,11 +13,11 @@ def persist_skill_result_request(
     result: dict[str, Any],
     manifest_path: "Path | None" = None,
 ) -> dict[str, Any]:
-    import switch_runtime
+    import turn_runtime
 
     if manifest_path is None:
-        manifest_path = switch_runtime.DEFAULT_MANIFEST
-    return switch_runtime._persist_skill_result(
+        manifest_path = turn_runtime.DEFAULT_MANIFEST
+    return turn_runtime.persist_skill_result(
         context,
         skill_id=skill_id,
         result=result,

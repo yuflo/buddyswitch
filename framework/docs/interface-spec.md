@@ -2,15 +2,13 @@
 
 ## Purpose
 
-The context panel is a read-only workspace viewer.
-
-It shows:
+The context panel is a read-only workspace viewer for:
 
 - track objects
 - task objects
 - artifact objects
 - run audits
-- next-step state summaries and cleanup commands
+- next-step state summaries
 
 ## Boundary
 
@@ -24,53 +22,48 @@ The interface must not:
 
 ## Data Source
 
-The local server serves live data at `/api/workspace`.
-
-Canonical machine-readable contract source: `framework/contracts/workspace-projection.json`.
-
-The exact payload shape, per-entity projection row shapes, and source mapping are frozen in that contract file.
+Live data endpoint: `/api/workspace`.
+Canonical contract: `framework/contracts/workspace-projection.json`.
 
 No static snapshot fallback is supported.
 
-Task and track projections in the panel are slot-aware:
+Task and track projections are slot-aware:
 
-- task view exposes current artifacts by artifact slot
-- artifact lineage is represented through revision metadata
-- track summaries derive "latest material" from slot-aware current artifacts
+- task view exposes current artifacts by slot
+- artifact lineage uses revision metadata
+- track summaries derive latest material from current slot artifacts
 
 ## UI Surface Boundary
 
-The UI surfaces are:
+UI surfaces:
 
 - `framework/console/app.js`
 - `projects/app/main.js`
 
-These files are browser-layer entrypoints and must not reference runtime internals.
-
+These browser entrypoints must not reference runtime internals.
 Runtime internals that must not be referenced from UI surfaces include:
 
 - `env_store`
 - `runtime_store.repositories`
 - `runtime_store.projections`
-- `switch_runtime`
+- `turn_runtime`
 - `workspace_data`
 
-The console UI reads runtime state only from `/api/workspace`.
+Console UI reads runtime state only from `/api/workspace`.
 No direct runtime module imports, runtime object reads, or runtime write paths are allowed in browser code.
 
 ## Refresh Flow
 
 1. Start server: `python3 scripts/serve_context_panel.py`
 2. Open `http://127.0.0.1:8765/`
-3. Panel auto-fetches once on load.
-4. User can click `Refresh workspace` for subsequent fetches.
+3. Panel auto-fetches on load
+4. User can click `Refresh workspace`
 
 ## Cleanup Integration
 
-Panel can show cleanup commands only:
+Panel may show cleanup commands only:
 
 - `./buddyswitch-codex data cleanup --buddy <buddy>`
 - `./buddyswitch-codex data cleanup --all-data`
 
 Commands must not include `--yes` by default.
-The cleanup command covers task objects, artifact objects, runtime files, and run audit content under `buddyswitch/content/runs/**` without deleting instance roots.

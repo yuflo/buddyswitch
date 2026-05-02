@@ -193,12 +193,10 @@ permissions = ["track.read", "track.create", "track.update", "task.read", "task.
             {
                 "run_id": "run-market",
                 "timestamp": "2026-04-11T10:00:00+08:00",
-                "switch": {
-                    "buddy_id": "market",
-                    "demand": "research",
-                    "task_id": "task-market",
-                    "track_id": "track-demo",
-                },
+                "request_text": "research",
+                "active_buddy": "market",
+                "current_task_id": "task-market",
+                "current_track_id": "track-demo",
                 "resolved_task_id": "task-market",
                 "effective_track_id": "track-demo",
                 "skill_id": "research-scan",
@@ -224,12 +222,10 @@ permissions = ["track.read", "track.create", "track.update", "task.read", "task.
             {
                 "run_id": "run-pm",
                 "timestamp": "2026-04-11T10:00:00+08:00",
-                "switch": {
-                    "buddy": "pm",
-                    "demand": "manage track",
-                    "task_id": "task-pm",
-                    "track_id": "track-demo",
-                },
+                "request_text": "manage track",
+                "active_buddy": "pm",
+                "current_task_id": "task-pm",
+                "current_track_id": "track-demo",
                 "skill_id": "track-manager",
                 "resolved_task_id": "task-pm",
                 "effective_track_id": "track-demo",
@@ -467,7 +463,8 @@ class CleanupBackendTests(unittest.TestCase):
             json.dumps(
                 {
                     "run_id": "run-market",
-                    "switch": {"buddy_id": "market", "task_id": "task-market"},
+                    "active_buddy": "market",
+                    "current_task_id": "task-market",
                 },
                 ensure_ascii=True,
                 indent=2,
@@ -918,7 +915,8 @@ class CleanupShellIntegrationTests(unittest.TestCase):
             json.dumps(
                 {
                     "run_id": "source-dry-run",
-                    "switch": {"buddy_id": "market", "task_id": "task-market"},
+                    "active_buddy": "market",
+                    "current_task_id": "task-market",
                 },
                 ensure_ascii=True,
                 indent=2,

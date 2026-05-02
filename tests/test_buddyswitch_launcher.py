@@ -680,7 +680,7 @@ exec "$real_git" "$@"
 
     def test_bare_codex_args_fail_closed_without_runtime_mutation(self) -> None:
         self.assertTrue(LAUNCHER.exists(), "expected root launcher to exist")
-        self._assert_unknown_top_level_command(["debug", "prompt-input", "switch pm: draft prd"], "debug")
+        self._assert_unknown_top_level_command(["debug", "prompt-input", "Draft the onboarding PRD"], "debug")
 
     def test_start_execution_worktree_uses_runtime_workspace_agents_header(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -723,7 +723,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "--", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "--", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -785,7 +785,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_GIT_CAPTURE"] = str(temp_root_path / "git-calls.log")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -849,7 +849,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -873,7 +873,7 @@ exec "$real_git" "$@"
             self.assertIn("Delete instance:", completed.stdout)
             self.assertIn(f"./buddyswitch-codex instance delete {payload['instance_id']} --yes", completed.stdout)
 
-            self.assertEqual(payload["argv"], ["debug", "prompt-input", "switch pm: draft prd"])
+            self.assertEqual(payload["argv"], ["debug", "prompt-input", "Draft the onboarding PRD"])
             self.assertEqual(payload["active_buddy"], "pm")
             self.assertIsInstance(payload["instance_id"], str)
             self.assertTrue(payload["instance_id"])
@@ -1022,7 +1022,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1088,7 +1088,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1168,7 +1168,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_RELATIVE_WRITE_CONTENT"] = "shared-relative-write"
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1246,7 +1246,7 @@ exec "$real_git" "$@"
             pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_PATH"] = "cross-buddy-sentinel.txt"
             pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_CONTENT"] = "shared-via-relative-path"
             pm_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=pm_env,
                 text=True,
@@ -1259,7 +1259,7 @@ exec "$real_git" "$@"
             dev_env["BUDDYSWITCH_TEST_CAPTURE"] = str(dev_capture_path)
             dev_env["BUDDYSWITCH_TEST_RELATIVE_READ_PATH"] = "cross-buddy-sentinel.txt"
             dev_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "dev", "debug", "prompt-input", "switch dev: continue"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "dev", "debug", "prompt-input", "Continue implementation for onboarding"],
                 cwd=ROOT,
                 env=dev_env,
                 text=True,
@@ -1334,7 +1334,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1392,7 +1392,7 @@ exec "$real_git" "$@"
             pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_PATH"] = "shared-product-sentinel.txt"
             pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_CONTENT"] = "shared-pm-sentinel"
             pm_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=pm_env,
                 text=True,
@@ -1405,7 +1405,7 @@ exec "$real_git" "$@"
             dev_env["BUDDYSWITCH_TEST_CAPTURE"] = str(dev_capture_path)
             dev_env["BUDDYSWITCH_TEST_RELATIVE_READ_PATH"] = "shared-product-sentinel.txt"
             dev_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "dev", "debug", "prompt-input", "switch dev: continue"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "dev", "debug", "prompt-input", "Continue implementation for onboarding"],
                 cwd=ROOT,
                 env=dev_env,
                 text=True,
@@ -1493,7 +1493,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1528,7 +1528,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "unknown", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "unknown", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1676,7 +1676,7 @@ exec "$real_git" "$@"
             start_env = env.copy()
             start_env["BUDDYSWITCH_TEST_CAPTURE"] = str(first_capture)
             start_result = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=start_env,
                 text=True,
@@ -2253,7 +2253,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             env["BUDDYSWITCH_TEST_PRODUCT_WRITE"] = "persist-after-delete"
 
             start_result = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -2645,7 +2645,7 @@ exit 1
             env["BUDDYSWITCH_INSTANCE_JSON"] = str(temp_root_path / "leaked-instance.json")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "start", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "start", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -2948,7 +2948,7 @@ exit 1
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             debug_result = subprocess.run(
-                [str(LAUNCHER), "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -3779,7 +3779,7 @@ exit 1
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -4739,7 +4739,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -4829,7 +4829,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             start_result = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -4948,7 +4948,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
 
             try:
                 completed = subprocess.run(
-                    [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                    [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                     cwd=ROOT,
                     env=env,
                     text=True,
@@ -5017,7 +5017,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -5073,7 +5073,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             env["BUDDYSWITCH_WORKSPACE_DIR"] = str(external_workspace)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "start", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "start", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -5130,7 +5130,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             )
 
             completed = subprocess.run(
-                [str(LAUNCHER), "start", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "start", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -5182,7 +5182,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             env["BUDDYSWITCH_WORKSPACE_DIR"] = str(shared_root)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "start", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "start", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -5249,7 +5249,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
                     run_env["BUDDYSWITCH_WORKSPACE_DIR"] = str(reserved_workspace)
 
                     completed = subprocess.run(
-                        [str(LAUNCHER), "start", "debug", "prompt-input", "switch pm: draft prd"],
+                        [str(LAUNCHER), "start", "debug", "prompt-input", "Draft the onboarding PRD"],
                         cwd=ROOT,
                         env=run_env,
                         text=True,

@@ -159,7 +159,7 @@ Bad example:
 - Follow `framework/docs/track-registry.md`.
 - This buddy can read tracks and create/update artifact objects through the resolved task.
 - Do not directly mutate track status/current/next/task_ids.
-- Use an explicit switch track target or existing task binding when research output belongs to a specific track.
+- Use an explicit turn-context track target or existing task binding when research output belongs to a specific track.
 
 ## Default BuddySwitch State
 

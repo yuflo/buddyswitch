@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BuddySwitch runtime: resolve switch context and persist structured results."""
+"""BuddySwitch runtime: prepare turn context and persist structured results."""
 
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ from env_manifest import (
     load_manifest,
     require_buddy,
 )
+import env_store
 from env_store import (
-    ROOT,
     add_run_to_task,
     build_track_artifact_index,
     create_artifact,
@@ -53,6 +53,9 @@ from output_schema import OutputSchemaError, load_output_schema, validate_output
 from artifact_selection import select_artifacts_for_run
 
 
+ROOT = env_store.ROOT
+
+
 TRACK_ACTIONS = ("create", "update", "advance", "archive")
 STATUS_VALUES = ("active", "blocked", "done", "archived")
 LEGACY_OUTPUT_ERROR = (
@@ -70,14 +73,6 @@ _PRODUCT_MODE_ENV_KEYS = (
 _RUNTIME_LOCK_TIMEOUT_ENV = "BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"
 _RUNTIME_LOCK_DEFAULT_TIMEOUT_SECONDS = 30.0
 _RUNTIME_LOCK_POLL_SECONDS = 0.05
-WIRE_SYNTAX = "switch <buddy>(<task-id>) -> <track-id>: <demand>"
-WIRE_EXAMPLE = "switch pm(task-live-space) -> track-live-space: Draft the MVP PRD and refine acceptance criteria"
-_STRUCTURAL_SWITCH_PATTERN = re.compile(
-    r"^switch\s+([a-z][a-z0-9-]*)"
-    r"(?:\s*\(\s*([a-z0-9][a-z0-9-]*)\s*\))?"
-    r"(?:\s*->\s*([a-z0-9][a-z0-9-]*))?"
-    r"\s*:(.*)$"
-)
 
 
 def runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -86,8 +81,6 @@ def runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) 
         "error": {
             "code": code,
             "message": message,
-            "expected_syntax": WIRE_SYNTAX,
-            "example": WIRE_EXAMPLE,
         },
     }
     if extra:
@@ -211,30 +204,6 @@ def _hold_product_runtime_lock(product_session: dict[str, Any]):
         os.close(lock_fd)
 
 
-def _parse_wire_switch(text: str) -> dict[str, Any] | None:
-    match = _STRUCTURAL_SWITCH_PATTERN.match(text.strip())
-    if match is None:
-        return None
-
-    demand = match.group(4).strip()
-    if not demand:
-        return runtime_error(
-            "E_EMPTY_DEMAND",
-            "Demand is empty. Provide content after ':'.",
-        )
-
-    task_id = match.group(2).strip().lower() if match.group(2) else None
-    track_id = match.group(3).strip().lower() if match.group(3) else None
-    return {
-        "ok": True,
-        "active_buddy": match.group(1).strip().lower(),
-        "request_text": text,
-        "demand": demand,
-        "current_task_id": task_id,
-        "current_track_id": track_id,
-    }
-
-
 def _write_product_session_binding(
     product_session: dict[str, Any],
     *,
@@ -264,7 +233,7 @@ def _resolve_binding_from_payload(payload: dict[str, Any]) -> tuple[str, str | N
     task_id = payload.get("current_task_id")
     track_id = payload.get("current_track_id")
     if not isinstance(task_id, str) or not task_id.strip():
-        raise ValueError("resolve payload current_task_id is required for product session binding")
+        raise ValueError("prepare payload current_task_id is required for product session binding")
     if not isinstance(track_id, str) or not track_id.strip():
         track_id = None
     return task_id.strip(), track_id.strip() if isinstance(track_id, str) else None
@@ -350,7 +319,7 @@ def _mark_committed_binding_update_failed(payload: dict[str, Any], product_sessi
         "ok": False,
         "error": {
             "code": "E_RUNTIME_REFRESH_CONTEXT",
-            "message": "instance binding update failed after persist commit; rerun resolve for next turn",
+            "message": "instance binding update failed after persist commit; rerun prepare for next turn",
             "instance_id": product_session.get("instance_id"),
             "instance_json": str(product_session.get("instance_json")),
         },
@@ -362,6 +331,19 @@ def _ensure_no_legacy_outputs(demand: str) -> None:
         match = pattern.search(demand)
         if match:
             raise ValueError(f"{LEGACY_OUTPUT_ERROR} Rejecting requested path '{match.group(1)}'.")
+
+
+def _is_legacy_command_shaped_request(request_text: str) -> bool:
+    stripped = request_text.lstrip()
+    if not stripped.lower().startswith("switch "):
+        return False
+    remainder = stripped[len("switch ") :]
+    colon_index = remainder.find(":")
+    if colon_index < 0:
+        return False
+    command_prefix = remainder[:colon_index].strip()
+    command_body = remainder[colon_index + 1 :].strip()
+    return bool(command_prefix and command_body)
 
 
 def _next_unique(base: str, existing: set[str]) -> str:
@@ -495,7 +477,7 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
             "required_tools": required_tools,
             "required_env": required_env,
             "policy": ADVISORY_RUNTIME_METADATA_POLICY,
-            "note": "These fields inform the host session and do not reject resolve candidates.",
+            "note": "These fields inform the host session and do not reject prepare candidates.",
         },
         "produces": runtime.get("produces", []),
         "consumes": runtime.get("consumes", []),
@@ -570,7 +552,7 @@ def _build_run_instructions(
         "execution_rule": "The host Codex session runs the selected skill workflow and produces a structured result that matches the selected skill's output_schema.",
         "persistence_rule": "Call persist with the resolved payload, selected skill_id, and structured result when the run should become BuddySwitch state.",
         "resolve_notes": [
-            "resolve parses the invocation, derives candidates and context, and does not write BuddySwitch state."
+            "prepare parses the invocation, derives candidates and context, and does not write BuddySwitch state."
         ],
         "host_execution": host_execution,
         "selected_inputs": selected_inputs,
@@ -653,38 +635,11 @@ def _validate_result_against_skill(skill: dict[str, Any], result: dict[str, Any]
         raise ValueError("result payload failed schema validation: " + "; ".join(errors))
 
 
-def _authoritative_context_buddy_id(
-    *,
-    stored_task: dict[str, Any],
-    buddy_payload: dict[str, Any] | None,
-    switch_payload: dict[str, Any],
-) -> str:
-    buddy_id = stored_task.get("buddy")
-    if not isinstance(buddy_id, str) or not buddy_id.strip():
-        raise ValueError("stored task buddy is required")
-    buddy_id = buddy_id.strip()
-
-    for field_name, raw_value in (
-        ("buddy.id", buddy_payload.get("id") if isinstance(buddy_payload, dict) else None),
-        ("switch.buddy_id", switch_payload.get("buddy_id")),
-        ("switch.buddy", switch_payload.get("buddy")),
-    ):
-        if raw_value is None:
-            continue
-        if not isinstance(raw_value, str) or not raw_value.strip():
-            raise ValueError(f"{field_name} must be a non-empty string when provided")
-        candidate = raw_value.strip()
-        if candidate != buddy_id:
-            raise ValueError(f"{field_name} mismatch: expected '{buddy_id}', received '{candidate}'")
-
-    return buddy_id
-
-
 def _assert_run_id_unused(run_id: str) -> None:
     normalized_run_id = run_id.strip()
     if any(normalized_run_id in task.get("run_ids", []) for task in list_tasks()):
         raise ValueError(f"run_id already exists: {normalized_run_id}")
-    if (ROOT / run_content_path(normalized_run_id)).exists():
+    if (env_store.ROOT / run_content_path(normalized_run_id)).exists():
         raise ValueError(f"run_id already exists: {normalized_run_id}")
 
 
@@ -724,51 +679,6 @@ def _validate_market_host_execution(
     )
 
 
-def _rebuild_selected_inputs_for_execution(
-    *,
-    resolved: dict[str, Any],
-    selected_skill: dict[str, Any],
-) -> list[dict[str, Any]]:
-    switch_payload = resolved.get("switch") or {}
-    demand = switch_payload.get("demand")
-    if not isinstance(demand, str) or not demand.strip():
-        raise ValueError("resolved.switch.demand is required")
-
-    task_id = switch_payload.get("task_id")
-    if not isinstance(task_id, str) or not task_id.strip():
-        task_id = None
-
-    effective_track_id = resolved.get("effective_track_id")
-    if not isinstance(effective_track_id, str) or not effective_track_id.strip():
-        task_context = resolved.get("task_context")
-        context_task: dict[str, Any] | None = None
-        if isinstance(task_context, dict):
-            raw_context_task = task_context.get("task")
-            if isinstance(raw_context_task, dict):
-                context_task = raw_context_task
-        context_track_id = context_task.get("track_id") if isinstance(context_task, dict) else None
-        switch_track_id = switch_payload.get("track_id")
-        resolved_track_id = switch_track_id if isinstance(switch_track_id, str) else context_track_id
-        if isinstance(resolved_track_id, str) and resolved_track_id.strip():
-            effective_track_id = resolved_track_id
-        else:
-            effective_track_id = None
-
-    selection = _build_artifact_selection_context(
-        demand=demand,
-        required_slots=_skill_required_slots(selected_skill),
-        task_id=task_id,
-        track_artifact_index=build_track_artifact_index(effective_track_id),
-    )
-    if not isinstance(selection, dict):
-        return []
-
-    raw_inputs = selection.get("selected_inputs")
-    if not isinstance(raw_inputs, list):
-        return []
-    return [item for item in raw_inputs if isinstance(item, dict)]
-
-
 def _track_object_path(track_id: str) -> str:
     return f"buddyswitch/objects/tracks/{track_id}.json"
 
@@ -782,7 +692,7 @@ def _artifact_object_path(artifact_id: str) -> str:
 
 
 def _reserved_run_path(run_id: str) -> Path:
-    return ROOT / "buddyswitch" / "content" / "runs" / "reserved" / f"{run_id}.json"
+    return env_store.ROOT / "buddyswitch" / "content" / "runs" / "reserved" / f"{run_id}.json"
 
 
 def _write_runtime_json(path: Path, payload: dict[str, Any]) -> None:
@@ -810,7 +720,7 @@ def _normalize_turn_identity(turn_identity: dict[str, Any]) -> dict[str, Any]:
 
 
 def _scan_task_recent_runs(task_id: str, *, limit: int = 3) -> list[dict[str, Any]]:
-    run_root = ROOT / "buddyswitch" / "content" / "runs"
+    run_root = env_store.ROOT / "buddyswitch" / "content" / "runs"
     if not run_root.exists():
         return []
     rows: list[dict[str, Any]] = []
@@ -1118,7 +1028,7 @@ def _post_persist_refreshed_context_unavailable(receipt: dict[str, Any]) -> dict
             "code": "E_RUNTIME_REFRESH_CONTEXT",
             "message": (
                 "persist completed without reserving a follow-up run; "
-                "rerun resolve with a new request_text to continue"
+                "rerun prepare with a new request_text to continue"
             ),
         },
     }
@@ -1131,35 +1041,33 @@ def _derive_context_sequence(task: dict[str, Any]) -> int:
     return 1
 
 
-def _build_resolve_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
+def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
     request_text = text
     if not isinstance(request_text, str) or not request_text.strip():
         return runtime_error("E_EMPTY_INPUT", "Input is empty.")
 
     product_session = _load_product_mode_session(manifest_path)
-    is_product_mode = product_session is not None
     if product_session is None:
-        parsed = _parse_wire_switch(request_text)
-        if parsed is None:
-            return runtime_error("E_INVALID_SYNTAX", "Invalid switch syntax.")
-        if not parsed.get("ok"):
-            return parsed
-        active_buddy = parsed["active_buddy"]
-        demand = parsed["demand"]
-        explicit_task_id = parsed.get("current_task_id")
-        explicit_track_id = parsed.get("current_track_id")
-        instance_id = None
-    else:
-        active_buddy = product_session["active_buddy"]
-        instance_id = product_session["instance_id"]
-        demand = request_text.strip()
-        payload = product_session.get("payload")
-        payload_dict = payload if isinstance(payload, dict) else {}
-        payload_task = payload_dict.get("current_task_id")
-        payload_track = payload_dict.get("current_track_id")
-        explicit_task_id = payload_task.strip() if isinstance(payload_task, str) and payload_task.strip() else None
-        explicit_track_id = payload_track.strip() if isinstance(payload_track, str) and payload_track.strip() else None
+        return runtime_error(
+            "E_PRODUCT_MODE_REQUIRED",
+            "prepare-turn-context requires a launcher-managed buddy instance. Start a buddy instance and use an ordinary request.",
+        )
+    if _is_legacy_command_shaped_request(request_text):
+        return runtime_error(
+            "E_LEGACY_COMMAND_INPUT",
+            "This buddy instance accepts ordinary requests in the current locked buddy. Remove command syntax and submit an ordinary request.",
+        )
+
+    active_buddy = product_session["active_buddy"]
+    instance_id = product_session["instance_id"]
+    demand = request_text.strip()
+    payload = product_session.get("payload")
+    payload_dict = payload if isinstance(payload, dict) else {}
+    payload_task = payload_dict.get("current_task_id")
+    payload_track = payload_dict.get("current_track_id")
+    explicit_task_id = payload_task.strip() if isinstance(payload_task, str) and payload_task.strip() else None
+    explicit_track_id = payload_track.strip() if isinstance(payload_track, str) and payload_track.strip() else None
 
     _ensure_no_legacy_outputs(demand)
 
@@ -1169,8 +1077,6 @@ def _build_resolve_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) ->
     if explicit_task_id:
         existing_task = get_task(explicit_task_id)
         if existing_task is None:
-            if not is_product_mode:
-                raise ValueError(f"Referenced task '{explicit_task_id}' not found.")
             if explicit_track_id and get_track(explicit_track_id) is None:
                 create_track(
                     explicit_track_id,
@@ -1195,8 +1101,6 @@ def _build_resolve_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) ->
             )
 
     if explicit_track_id and get_track(explicit_track_id) is None:
-        if not is_product_mode:
-            raise ValueError(f"Referenced track '{explicit_track_id}' not found.")
         create_track(
             explicit_track_id,
             explicit_track_id.replace("-", " ").title(),
@@ -1316,10 +1220,8 @@ def _build_resolve_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) ->
     }
 
 
-def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
-    from runtime_kernel.resolve import resolve_switch_request
-
-    return resolve_switch_request(text, manifest_path=manifest_path)
+def prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
+    return _build_prepare_turn_context(text, manifest_path=manifest_path)
 
 
 def _read_json_input(source: str, *, stdin_text: str | None = None) -> dict[str, Any]:
@@ -1697,6 +1599,17 @@ def _persist_skill_result(
     run_envelope = context.get("run_envelope")
     if not isinstance(run_envelope, dict):
         raise ValueError("run_envelope is required")
+    context_turn_identity = run_envelope.get("turn_identity")
+    if not isinstance(context_turn_identity, dict):
+        raise ValueError("run_envelope.turn_identity is required")
+    if context_turn_identity.get("active_buddy") != active_buddy:
+        raise ValueError("run_envelope.turn_identity active_buddy mismatch")
+    if context_turn_identity.get("request_text") != request_text:
+        raise ValueError("run_envelope.turn_identity request_text mismatch")
+    if context_turn_identity.get("task_id") != current_task_id:
+        raise ValueError("run_envelope.turn_identity task_id mismatch")
+    if context_turn_identity.get("track_id") != current_track_id:
+        raise ValueError("run_envelope.turn_identity track_id mismatch")
     reserved_run_id = run_envelope.get("run_id")
     if not isinstance(reserved_run_id, str) or not reserved_run_id.strip():
         raise ValueError("run_envelope.run_id is required")
@@ -1713,7 +1626,6 @@ def _persist_skill_result(
     if reserved_sequence != run_envelope.get("sequence"):
         raise ValueError("run reservation mismatch: sequence differs from reserved envelope")
     reservation_turn_identity = reservation.get("turn_identity")
-    context_turn_identity = run_envelope.get("turn_identity")
     if not isinstance(reservation_turn_identity, dict) or not isinstance(context_turn_identity, dict):
         raise ValueError("run reservation mismatch: turn_identity payload is missing")
     if _normalize_turn_identity(reservation_turn_identity) != _normalize_turn_identity(context_turn_identity):
@@ -1776,9 +1688,7 @@ def persist_skill_result(
     result: dict[str, Any],
     manifest_path: Path = DEFAULT_MANIFEST,
 ) -> dict[str, Any]:
-    from runtime_kernel.persist import persist_skill_result_request
-
-    return persist_skill_result_request(
+    return _persist_skill_result(
         context,
         skill_id=skill_id,
         result=result,
@@ -1786,26 +1696,26 @@ def persist_skill_result(
     )
 
 
-def _cmd_resolve(args: argparse.Namespace) -> int:
+def _cmd_prepare(args: argparse.Namespace) -> int:
     try:
         product_session = _load_product_mode_session(args.manifest)
         if product_session is None:
-            payload = resolve_switch(args.text, manifest_path=args.manifest)
+            payload = prepare_turn_context(args.text, manifest_path=args.manifest)
         else:
             with _hold_product_runtime_lock(product_session):
                 product_session = _load_product_mode_session(args.manifest)
                 if product_session is None:
                     raise ValueError("product-mode env disappeared while acquiring runtime lock")
-                payload = resolve_switch(args.text, manifest_path=args.manifest)
+                payload = prepare_turn_context(args.text, manifest_path=args.manifest)
                 if payload.get("ok"):
                     task_id, track_id = _resolve_binding_from_payload(payload)
                     try:
                         _write_product_session_binding(product_session, task_id=task_id, track_id=track_id)
                     except (OSError, ValueError) as exc:
                         _clear_reservation_from_payload(payload, fail_on_warning=True)
-                        raise ValueError(f"instance binding update failed after resolve: {exc}") from exc
+                        raise ValueError(f"instance binding update failed after prepare: {exc}") from exc
     except (ManifestError, ValueError, OutputSchemaError, OSError) as exc:
-        payload = runtime_error("E_RUNTIME_RESOLVE", str(exc))
+        payload = runtime_error("E_RUNTIME_PREPARE", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0 if payload.get("ok") else 1
 
@@ -1819,14 +1729,14 @@ def _derive_cli_persist_skill_id(
 
     skills = context.get("skills")
     if not isinstance(skills, list) or len(skills) != 1:
-        raise ValueError("skill_id is required unless resolve_context exposes exactly one available skill")
+        raise ValueError("skill_id is required unless prepare context exposes exactly one available skill")
 
     only_skill = skills[0]
     if not isinstance(only_skill, dict):
-        raise ValueError("resolve_context.skills[0] must be an object")
+        raise ValueError("prepare context skills[0] must be an object")
     skill_id = only_skill.get("id")
     if not isinstance(skill_id, str) or not skill_id.strip():
-        raise ValueError("resolve_context.skills[0].id is required")
+        raise ValueError("prepare context skills[0].id is required")
     return skill_id.strip()
 
 
@@ -1876,16 +1786,16 @@ def _validate_product_persist_context_binding(context: dict[str, Any], product_s
 
 def _cmd_persist(args: argparse.Namespace) -> int:
     try:
-        if args.resolved == "-" and args.result == "-":
-            raise ValueError("resolved and result cannot both read from stdin")
-        stdin_text = sys.stdin.read() if args.resolved == "-" or args.result == "-" else None
-        resolved = _read_json_input(args.resolved, stdin_text=stdin_text if args.resolved == "-" else None)
+        if args.context == "-" and args.result == "-":
+            raise ValueError("context and result cannot both read from stdin")
+        stdin_text = sys.stdin.read() if args.context == "-" or args.result == "-" else None
+        context = _read_json_input(args.context, stdin_text=stdin_text if args.context == "-" else None)
         result = _read_json_input(args.result, stdin_text=stdin_text if args.result == "-" else None)
         product_session = _load_product_mode_session(args.manifest)
         if product_session is None:
             payload = persist_skill_result(
-                resolved,
-                skill_id=_derive_cli_persist_skill_id(resolved, args.skill_id),
+                context,
+                skill_id=_derive_cli_persist_skill_id(context, args.skill_id),
                 result=result,
                 manifest_path=args.manifest,
             )
@@ -1894,10 +1804,10 @@ def _cmd_persist(args: argparse.Namespace) -> int:
                 product_session = _load_product_mode_session(args.manifest)
                 if product_session is None:
                     raise ValueError("product-mode env disappeared while acquiring runtime lock")
-                _validate_product_persist_context_binding(resolved, product_session)
+                _validate_product_persist_context_binding(context, product_session)
                 payload = persist_skill_result(
-                    resolved,
-                    skill_id=_derive_cli_persist_skill_id(resolved, args.skill_id),
+                    context,
+                    skill_id=_derive_cli_persist_skill_id(context, args.skill_id),
                     result=result,
                     manifest_path=args.manifest,
                 )
@@ -1920,16 +1830,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    resolve_cmd = subparsers.add_parser("resolve", help="Resolve switch directive into BuddySwitch preflight context.")
-    resolve_cmd.add_argument("text", help="switch directive")
-    resolve_cmd.set_defaults(func=_cmd_resolve)
+    prepare_cmd = subparsers.add_parser("prepare", help="Prepare a BuddySwitch turn context from request text.")
+    prepare_cmd.add_argument("text", help="ordinary request text")
+    prepare_cmd.set_defaults(func=_cmd_prepare)
 
     persist_cmd = subparsers.add_parser("persist", help="Persist a structured BuddySwitch run result.")
-    persist_cmd.add_argument("--resolved", required=True, help="Resolved JSON payload file, or '-' for stdin")
+    persist_cmd.add_argument("--context", required=True, help="Prepared turn context JSON file, or '-' for stdin")
     persist_cmd.add_argument("--result", required=True, help="Structured result JSON file, or '-' for stdin")
     persist_cmd.add_argument(
         "--skill-id",
-        help="Chosen skill id. Optional only when resolve_context exposes exactly one available skill.",
+        help="Chosen skill id. Optional only when the prepared context exposes exactly one available skill.",
     )
     persist_cmd.set_defaults(func=_cmd_persist)
 

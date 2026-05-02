@@ -252,7 +252,7 @@ def _load_json(path: Path) -> dict[str, Any]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Deterministic track artifact selection helper.")
     parser.add_argument("--buddy", required=True, help="Current executing buddy id")
-    parser.add_argument("--demand", required=True, help="Switch demand text")
+    parser.add_argument("--demand", required=True, help="Turn request text")
     parser.add_argument("--index-file", type=Path, required=True, help="Path to track_artifact_index JSON")
     parser.add_argument("--required-slot", action="append", dest="required_slots", default=[], help="Required input slot")
     parser.add_argument("--current-task-id", help="Current task id when continuing an existing task")

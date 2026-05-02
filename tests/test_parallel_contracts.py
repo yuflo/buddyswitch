@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,14 +16,13 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import switch_runtime  # noqa: E402
+import turn_runtime  # noqa: E402
 import workspace_data  # noqa: E402
 from env_store import create_artifact, create_task, create_track  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
 CONTRACTS_DIR = ROOT / "framework" / "contracts"
-SWITCH_GRAMMAR_CONTRACT = CONTRACTS_DIR / "switch-grammar.json"
 RESOLVE_CONTEXT_CONTRACT = CONTRACTS_DIR / "resolve-context.json"
 PERSIST_SKILL_RESULT_CONTRACT = CONTRACTS_DIR / "persist-skill-result.json"
 SELECTED_SKILL_PACKET_CONTRACT = CONTRACTS_DIR / "selected-skill-packet.json"
@@ -132,52 +133,71 @@ def _assert_shape(
 
 
 class ParallelContractFreezeTests(unittest.TestCase):
-    def test_switch_grammar_contract_surface(self) -> None:
-        contract = _load_json(SWITCH_GRAMMAR_CONTRACT)
-
-        self.assertEqual(contract["contract_id"], "switch-grammar")
-        self.assertEqual(
-            contract["canonical_syntax"],
-            "switch <buddy>(<task-id>) -> <track-id>: <demand>",
-        )
-        self.assertEqual(
-            contract["supported_forms"],
-            [
-                "switch <buddy>: <demand>",
-                "switch <buddy> -> <track-id>: <demand>",
-                "switch <buddy>(<task-id>): <demand>",
-                "switch <buddy>(<task-id>) -> <track-id>: <demand>",
-            ],
-        )
-        self.assertEqual(
-            contract["rules"],
-            [
-                "message must start with 'switch'",
-                "<buddy> is one token",
-                "optional <task-id> appears in parentheses immediately after buddy",
-                "optional <track-id> appears after '->'",
-                "':' is required",
-                "<demand> must be non-empty",
-                "text after ':' is demand text, not a task object",
-                "minor CLI whitespace variation around ':', '->', and task parentheses may be normalized",
-            ],
-        )
-        self.assertEqual(
-            contract["parse_error_codes"],
-            [
-                "E_EMPTY_INPUT",
-                "E_INVALID_SYNTAX",
-                "E_UNKNOWN_AGENT",
-                "E_EMPTY_DEMAND",
-                "E_ENV_MANIFEST",
-            ],
-        )
+    def test_legacy_switch_grammar_contract_is_removed(self) -> None:
+        legacy_contract = CONTRACTS_DIR / ("switch" + "-grammar.json")
+        self.assertFalse(legacy_contract.exists())
 
     def test_selected_skill_packet_contract_is_retired(self) -> None:
         self.assertFalse(SELECTED_SKILL_PACKET_CONTRACT.exists())
 
 
 class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _write_instance_json(self, *, instance_id: str, buddy: str) -> Path:
+        instance_root = self.runtime_root / "instances" / instance_id
+        instance_root.mkdir(parents=True, exist_ok=True)
+        instance_json = instance_root / "instance.json"
+        instance_json.write_text(
+            json.dumps(
+                {
+                    "instance_id": instance_id,
+                    "buddy": buddy,
+                    "status": "active",
+                    "current_task_id": None,
+                    "current_track_id": None,
+                    "workspace_dir": str(instance_root / "workspace"),
+                    "created_at": "2026-05-02T00:00:00Z",
+                    "updated_at": "2026-05-02T00:00:00Z",
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return instance_json
+
+    @staticmethod
+    def _product_env(instance_json: Path, *, buddy: str, instance_id: str, shared_root: Path) -> dict[str, str]:
+        return {
+            "BUDDYSWITCH_ACTIVE_BUDDY": buddy,
+            "BUDDYSWITCH_INSTANCE_ID": instance_id,
+            "BUDDYSWITCH_INSTANCE_JSON": str(instance_json),
+            "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
+        }
+
+    def _prepare(self, request_text: str, *, env: dict[str, str]) -> dict[str, object]:
+        with patch.dict(os.environ, env, clear=True):
+            return turn_runtime.prepare_turn_context(
+                request_text,
+                manifest_path=turn_runtime.DEFAULT_MANIFEST,
+            )
+
+    def _persist(
+        self,
+        context: dict[str, object],
+        *,
+        skill_id: object,
+        result: dict[str, object],
+        env: dict[str, str],
+    ) -> dict[str, object]:
+        with patch.dict(os.environ, env, clear=True):
+            return turn_runtime.persist_skill_result(
+                context,
+                skill_id=skill_id,  # type: ignore[arg-type]
+                result=result,
+                manifest_path=turn_runtime.DEFAULT_MANIFEST,
+            )
+
     def _artifact_result(self) -> dict[str, object]:
         return {
             "execution_summary": "Implemented the requested change and verified the core path.",
@@ -194,9 +214,16 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
 
     def test_contract_matches_real_resolve_context_surface(self) -> None:
         contract = _load_json(RESOLVE_CONTEXT_CONTRACT)
-        request_text = "switch dev: Implement the approved onboarding improvements in projects/app"
+        request_text = "Implement the approved onboarding improvements in projects/app"
+        instance_json = self._write_instance_json(instance_id="inst-contract-01", buddy="dev")
+        env = self._product_env(
+            instance_json,
+            buddy="dev",
+            instance_id="inst-contract-01",
+            shared_root=self.runtime_root,
+        )
 
-        payload = switch_runtime.resolve_switch(request_text)
+        payload = self._prepare(request_text, env=env)
 
         self.assertEqual(contract, EXPECTED_RESOLVE_CONTEXT_CONTRACT)
         self.assertTrue(payload["ok"])
@@ -212,14 +239,23 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
 
     def test_contract_matches_real_persist_skill_result_surface(self) -> None:
         contract = _load_json(PERSIST_SKILL_RESULT_CONTRACT)
-        context = switch_runtime.resolve_switch(
-            "switch dev: Implement the approved onboarding improvements in projects/app"
+        instance_json = self._write_instance_json(instance_id="inst-contract-02", buddy="dev")
+        env = self._product_env(
+            instance_json,
+            buddy="dev",
+            instance_id="inst-contract-02",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare(
+            "Implement the approved onboarding improvements in projects/app",
+            env=env,
         )
         result = self._artifact_result()
-        persisted = switch_runtime.persist_skill_result(
+        persisted = self._persist(
             context,
             skill_id="implement-task",
             result=result,
+            env=env,
         )
 
         self.assertEqual(contract, EXPECTED_PERSIST_SKILL_RESULT_CONTRACT)
@@ -238,17 +274,26 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         self.assertNotIn("writes", persisted)
 
     def test_persist_contract_does_not_leave_hidden_follow_up_reservation(self) -> None:
-        context = switch_runtime.resolve_switch(
-            "switch dev: Implement the approved onboarding improvements in projects/app"
+        instance_json = self._write_instance_json(instance_id="inst-contract-03", buddy="dev")
+        env = self._product_env(
+            instance_json,
+            buddy="dev",
+            instance_id="inst-contract-03",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare(
+            "Implement the approved onboarding improvements in projects/app",
+            env=env,
         )
         consumed_run_id = context["run_envelope"]["run_id"]
-        consumed_path = switch_runtime._reserved_run_path(consumed_run_id)  # type: ignore[attr-defined]
+        consumed_path = turn_runtime._reserved_run_path(consumed_run_id)  # type: ignore[attr-defined]
         self.assertTrue(consumed_path.exists())
 
-        persisted = switch_runtime.persist_skill_result(
+        persisted = self._persist(
             context,
             skill_id="implement-task",
             result=self._artifact_result(),
+            env=env,
         )
 
         self.assertTrue(persisted["ok"])
@@ -256,13 +301,21 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         self.assertNotIn("reference_switches", persisted["receipt"])
         self.assertNotIn("recommended_switch", persisted["receipt"])
 
-        reserved_dir = switch_runtime._reserved_run_path("placeholder").parent  # type: ignore[attr-defined]
+        reserved_dir = turn_runtime._reserved_run_path("placeholder").parent  # type: ignore[attr-defined]
         remaining = sorted(reserved_dir.glob("*.json")) if reserved_dir.exists() else []
         self.assertEqual(remaining, [])
 
     def test_red_native_turn_persist_rejects_skill_array_without_side_effects(self) -> None:
-        context = switch_runtime.resolve_switch(
-            "switch market: Validate an AI tool idea for indie developers"
+        instance_json = self._write_instance_json(instance_id="inst-contract-04", buddy="market")
+        env = self._product_env(
+            instance_json,
+            buddy="market",
+            instance_id="inst-contract-04",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare(
+            "Validate an AI tool idea for indie developers",
+            env=env,
         )
         run_dir = self._runtime_path("buddyswitch/content/runs")
         artifact_dir = self._runtime_path("buddyswitch/objects/artifacts")
@@ -270,7 +323,7 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         before_artifacts = {path.name for path in artifact_dir.glob("art-*.json")}
 
         with self.assertRaisesRegex((TypeError, ValueError), "single skill_id"):
-            switch_runtime.persist_skill_result(
+            self._persist(
                 context,
                 skill_id=["pmf-recon"],  # type: ignore[arg-type]
                 result={
@@ -302,6 +355,7 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
                         "conclusion": "insufficient evidence",
                     },
                 },
+                env=env,
             )
 
         self.assertEqual({path.name for path in run_dir.glob("run-*.json")}, before_runs)
@@ -344,12 +398,10 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
                 {
                     "run_id": "run-dev-contract-freeze",
                     "timestamp": "2026-04-21T12:00:00+08:00",
-                    "switch": {
-                        "buddy": "dev",
-                        "task_id": tracked_task["id"],
-                        "track_id": track["id"],
-                        "demand": "implement scope",
-                    },
+                    "active_buddy": "dev",
+                    "current_task_id": tracked_task["id"],
+                    "current_track_id": track["id"],
+                    "request_text": "implement scope",
                     "resolved_task_id": tracked_task["id"],
                     "task_title": tracked_task["title"],
                     "skill_id": "implement-task",

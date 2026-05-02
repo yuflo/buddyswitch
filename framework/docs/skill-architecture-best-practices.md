@@ -1,88 +1,36 @@
 # BuddySwitch Skill Architecture Best Practices
 
-## Current Target
+## Runtime Model
 
-BuddySwitch is a host-CLI orchestration framework, not a standalone agent runtime and not a native Codex skill pack.
+BuddySwitch is not a standalone agent runtime.
+It is a deterministic control layer around host execution.
 
-That means:
+- Host Codex chooses and executes one skill.
+- BuddySwitch prepares context and persists validated state.
+- Skill packages live under `buddyswitch/skills/**/`.
 
-- Codex CLI provides the general-agent runtime.
-- BuddySwitch owns protocol, authority, state, and persistence.
-- BuddySwitch skills are skill packages under `buddyswitch/skills/**/` with `skill.toml` + `SKILL.md`.
-- The host Codex session chooses the skill from BuddySwitch-provided candidates.
-- BuddySwitch scripts never call a second LLM backend to route skills.
+## Package Contract
 
-## Why This Matches Best Practice
+Each skill package includes:
 
-Across current coding-agent ecosystems, the common pattern is:
+- `skill.toml` metadata
+- `SKILL.md` workflow instructions
 
-1. keep workflow bundles in skill-like packages
-2. expose compact metadata first
-3. let the host agent choose when to use a workflow
-4. keep deterministic validation and state mutation outside the model
-
-BuddySwitch follows that pattern, but keeps one extra control layer:
-
-- product-mode sessions use ordinary `request_text` because the launcher has already selected one active buddy.
-- historical `switch <buddy>...: <demand>` parsing remains debug/manual tooling only.
-- BuddySwitch prepares native turn context, determines task mode, and persists state only after the host returns a schema-valid single-skill result.
-- BuddySwitch constrains the host model to that buddy's allowlisted skill set without routing product-mode text through a parser.
-
-## Layer Responsibilities
-
-### Host Codex
-
-- interpret the current user task
-- choose one `skill_id` from `eligible_skills`
-- read the selected skill package instruction file `buddyswitch/skills/.../SKILL.md`
-- execute the workflow
-- emit structured output matching the chosen schema
-
-### BuddySwitch
-
-- prepare native turn context from instance metadata and `request_text`
-- keep supported internal/debug `switch <buddy>...: <demand>` wire parsing out of the product path
-- load manifest, buddy scope, object authority metadata, and allowed skills
-- apply only the deterministic gates needed for safe resolution
-- resolve task context, optional track context, and reject retired markdown output requests
-- validate structured outputs at persistence time
-- write task/artifact/track state and run audit payloads
-
-In this model:
-
-- `buddy -> skills` is the main runtime routing authority
-- `permissions` are object-authority metadata for manual/debug mutation APIs
-- `required_tools` and `required_env` are advisory metadata for the host session, not resolve gates
-
-## Canonical Flow
-
-1. `prepare-turn-context`
-2. `run`
-3. `persist`
-
-`prepare-turn-context` and `persist` are BuddySwitch primitives.
-`run` is performed by the host Codex session.
-Debug/manual `parse` remains available only for internal wire tooling.
-
-## Skill Contract
-
-Each BuddySwitch skill package should contain:
-
-Required metadata in `skill.toml`:
+Required metadata:
 
 - `id`
 - `buddy`
-- `description` as activation-style trigger wording that starts with `Use when `
+- `description` (activation-style text beginning with `Use when`)
 - `objects`
 - `produces_artifact`
 - `input_slots`
 - `output_schema`
 
-Conditional metadata in `skill.toml`:
+Conditional metadata:
 
-- `output_slot` (required when `produces_artifact=true`)
+- `output_slot` when `produces_artifact = true`
 
-Recommended metadata in `skill.toml`:
+Recommended metadata:
 
 - `side_effect_level`
 - `required_tools`
@@ -91,60 +39,31 @@ Recommended metadata in `skill.toml`:
 - `consumes`
 - `allowed_task_kinds`
 
-`required_tools` and `required_env` stay host-facing advisory metadata. They are not resolve reject gates.
+## Selection Rules
 
-The top-level env manifest keeps only `id` and `path` for each `[[skills]]` entry. BuddySwitch loads the package metadata from `skill.toml` and uses it as the authoritative source for skill descriptions, object coverage, and runtime buddy identity.
+- `prepare-turn-context` returns candidate skills.
+- Host selects exactly one `skill_id`.
+- Multi-skill buddies are never auto-selected by runtime.
 
-Routing is validated by checking that the `buddy` declared in `skill.toml` is present in the matching `[[buddies]]` entry's `skills` list. The manifest no longer duplicates skill descriptions or object lists.
+## Persistence Rules
 
-Artifact-producing skills share durable runtime rules through `framework/docs/skill-runtime-shared-rules.md` rather than duplicating execution-summary, task/artifact boundary, and output-path guidance in each `SKILL.md`.
-
-Required body sections:
-
-- `Purpose`
-- `Use when`
-- `Do not use when`
-- `Inputs`
-- `Outputs`
-- `Verification`
-- `Examples`
-- `Counterexamples`
-- `Gotchas`
-
-## Output Contract
-
-The host Codex session should not improvise persistence structure.
-
-Instead:
-
-- `prepare-turn-context` reports each allowed schema through `resolve_context.skills[*].output_schema`
-- the host emits a structured payload that matches that schema
-- `persist` reuses the referenced task in reuse mode, or creates the task and assigns the final task id in create mode
-- `persist` writes canonical artifact content into artifact objects for artifact-producing skills
-- `persist` writes run audit JSON to `buddyswitch/content/runs/**`
-- BuddySwitch does not maintain a derived markdown compatibility layer
-
-This keeps structured state canonical and removes duplicated runtime outputs.
-
-`output_schema.py` is a structure validator only. It may reject malformed payloads, unsupported fields, or invalid enum/type combinations, but it must not become a business-quality or workflow-quality review layer.
-
-## Deliberate Non-Goals
-
-BuddySwitch does not do these things in the production path:
-
-- internal semantic routing via OpenAI API or any second backend
-- trigger-first compatibility routing as the default
-- native Codex `.agents/skills` discovery for BuddySwitch-owned skills
-- business-quality review during persistence
-
-## Why Persist Stays Thin
-
-`persist` is not a review stage.
-
-It is a lightweight technical gate for:
+`persist-skill-result` validates only technical boundaries:
 
 - selected skill identity
 - schema conformance
-- state/reference sanity
+- task/track/run identity integrity
 
-Business quality stays in the host agent flow and the next buddy handoff, not in BuddySwitch persistence.
+Business-quality review stays in host workflow, not persistence gate logic.
+
+## Output Discipline
+
+- Emit schema-valid structured payloads.
+- Persist canonical object/run state only.
+- Do not emit legacy markdown output paths.
+
+## Shared Runtime Guidance
+
+Use the shared runtime docs for cross-skill rules:
+
+- `framework/docs/turn-runtime-spec.md`
+- `framework/docs/skill-runtime-shared-rules.md`

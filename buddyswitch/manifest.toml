@@ -4,11 +4,6 @@ schema_version = 1
 id = "buddyswitch"
 label = "BuddySwitch Env"
 
-[[adapters]]
-id = "codex"
-path = "scripts/debug/codex_router.py"
-description = "Debug-only adapter for internal `switch <buddy>...: <demand>` wire parsing/routing with env-backed buddy scope, skills, and object permissions."
-
 [[skills]]
 id = "research-scan"
 path = "buddyswitch/skills/market/research-scan"

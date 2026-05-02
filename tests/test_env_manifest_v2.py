@@ -58,10 +58,10 @@ class SkillPackageLoaderTests(unittest.TestCase):
                     - Confirm evidence quality and open questions.
 
                     ## Examples
-                    - `switch market: validate a workflow`
+                    - `Validate a workflow for the current market goal`
 
                     ## Counterexamples
-                    - `switch dev: implement the workflow`
+                    - `Implement the workflow in project code`
 
                     ## Gotchas
                     - Keep evidence grounded in sources.
@@ -79,11 +79,6 @@ class SkillPackageLoaderTests(unittest.TestCase):
                     [env]
                     id = "demo"
                     label = "Demo"
-
-                    [[adapters]]
-                    id = "codex"
-                    path = "scripts/debug/codex_router.py"
-                    description = "Demo router."
 
                     [[skills]]
                     id = "demo-skill"
@@ -151,10 +146,10 @@ class SkillPackageLoaderTests(unittest.TestCase):
                     - Confirm scope and open questions.
 
                     ## Examples
-                    - `switch pm: define scope`
+                    - `Define scope for the current product request`
 
                     ## Counterexamples
-                    - `switch dev: implement scope`
+                    - `Implement the approved scope`
 
                     ## Gotchas
                     - Keep scope narrow.
@@ -172,11 +167,6 @@ class SkillPackageLoaderTests(unittest.TestCase):
                     [env]
                     id = "demo"
                     label = "Demo"
-
-                    [[adapters]]
-                    id = "codex"
-                    path = "scripts/debug/codex_router.py"
-                    description = "Demo router."
 
                     [[skills]]
                     id = "demo-skill"
@@ -251,10 +241,10 @@ class SkillPackageLoaderTests(unittest.TestCase):
                     - Confirm scope and open questions.
 
                     ## Examples
-                    - `switch pm: define scope`
+                    - `Define scope for the current product request`
 
                     ## Counterexamples
-                    - `switch dev: implement scope`
+                    - `Implement the approved scope`
 
                     ## Gotchas
                     - Keep scope narrow.
@@ -272,11 +262,6 @@ class SkillPackageLoaderTests(unittest.TestCase):
                     [env]
                     id = "demo"
                     label = "Demo"
-
-                    [[adapters]]
-                    id = "codex"
-                    path = "scripts/debug/codex_router.py"
-                    description = "Demo router."
 
                     [[skills]]
                     id = "demo-skill"
@@ -546,11 +531,6 @@ class SkillPackageLoaderTests(unittest.TestCase):
                     id = "demo"
                     label = "Demo"
 
-                    [[adapters]]
-                    id = "codex"
-                    path = "scripts/debug/codex_router.py"
-                    description = "Demo router."
-
                     [[skills]]
                     id = "demo-skill"
                     path = "{skill_file.relative_to(ROOT).as_posix()}"
@@ -621,11 +601,6 @@ class SkillPackageLoaderTests(unittest.TestCase):
                     id = "demo"
                     label = "Demo"
 
-                    [[adapters]]
-                    id = "codex"
-                    path = "scripts/debug/codex_router.py"
-                    description = "Demo router."
-
                     [[skills]]
                     id = "demo-skill"
                     path = "{package_root.relative_to(ROOT).as_posix()}"
@@ -693,10 +668,10 @@ class SkillPackageLoaderTests(unittest.TestCase):
                     - Confirm scope and open questions.
 
                     ## Examples
-                    - `switch pm: define scope`
+                    - `Define scope for the current product request`
 
                     ## Counterexamples
-                    - `switch dev: implement scope`
+                    - `Implement the approved scope`
 
                     ## Gotchas
                     - Keep scope narrow.
@@ -751,10 +726,10 @@ class SkillPackageLoaderTests(unittest.TestCase):
                     - Confirm the requested track change.
 
                     ## Examples
-                    - `switch pm: update track`
+                    - `Update the current track summary`
 
                     ## Counterexamples
-                    - `switch dev: implement code`
+                    - `Implement the approved code changes`
 
                     ## Gotchas
                     - Keep scope narrow.
@@ -772,11 +747,6 @@ class SkillPackageLoaderTests(unittest.TestCase):
                     [env]
                     id = "demo"
                     label = "Demo"
-
-                    [[adapters]]
-                    id = "codex"
-                    path = "scripts/debug/codex_router.py"
-                    description = "Demo router."
 
                     [[skills]]
                     id = "demo-skill"

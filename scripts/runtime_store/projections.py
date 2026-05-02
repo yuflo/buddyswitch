@@ -270,9 +270,6 @@ def scan_run_audits() -> list[dict[str, Any]]:
             )
             continue
 
-        switch = payload.get("switch")
-        switch_payload = switch if isinstance(switch, dict) else {}
-
         def _clean(value: Any) -> str | None:
             if not isinstance(value, str):
                 return None
@@ -285,22 +282,16 @@ def scan_run_audits() -> list[dict[str, Any]]:
                 return None
             return buddy
 
-        buddy = (
-            _known_buddy(payload.get("active_buddy"))
-            or _known_buddy(switch_payload.get("buddy_id"))
-            or _known_buddy(switch_payload.get("buddy"))
-        )
+        buddy = _known_buddy(payload.get("active_buddy"))
         task_id = (
             _clean(payload.get("current_task_id"))
             or _clean(payload.get("resolved_task_id"))
-            or _clean(switch_payload.get("task_id"))
         )
         track_id = (
             _clean(payload.get("current_track_id"))
             or _clean(payload.get("effective_track_id"))
-            or _clean(switch_payload.get("track_id"))
         )
-        demand = _clean(payload.get("request_text")) or _clean(switch_payload.get("demand"))
+        demand = _clean(payload.get("request_text"))
         next_state = payload.get("next_state")
         if not isinstance(next_state, dict):
             mode = "archive" if payload.get("track_action") == "archive" else "continue_current_task"

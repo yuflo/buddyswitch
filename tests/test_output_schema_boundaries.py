@@ -88,7 +88,7 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
             "execution_summary": "Implemented onboarding flow",
             "working_notes": [],
             "deliverables_or_changed_files": ["projects/app/src/onboarding.tsx"],
-            "suggested_next_switch": "switch test: run smoke",
+            "suggested_next_switch": "Run smoke validation with the test buddy",
             "artifact_content": {
                 "task_summary": "Implemented onboarding flow",
                 "changed_files": ["projects/app/src/onboarding.tsx"],
@@ -105,7 +105,7 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
             "execution_summary": "Completed market scan",
             "working_notes": [],
             "deliverables_or_changed_files": [],
-            "suggested_next_switch": "switch pm: scope the opportunity",
+            "suggested_next_switch": "Scope the opportunity with the PM buddy",
             "artifact_content": {
                 "research_question": "Do founders need faster validation loops?",
                 "research_strategy": {
