@@ -493,20 +493,18 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("track_mode", text, msg=f"track_mode should not appear in {path.relative_to(ROOT)}")
         self.assertTrue(checked_files)
 
-    def test_active_docs_define_three_section_terminal_contract(self) -> None:
-        targets = (
-            ROOT / "AGENTS.md",
-            ROOT / "README.md",
-            ROOT / "framework" / "docs" / "switch-spec.md",
+    def test_product_buddy_prompts_define_receipt_summary_contract(self) -> None:
+        buddy_docs = (
+            ROOT / "tools" / "launcher" / "assets" / "buddies" / "design" / "AGENTS.md",
+            ROOT / "tools" / "launcher" / "assets" / "buddies" / "dev" / "AGENTS.md",
+            ROOT / "tools" / "launcher" / "assets" / "buddies" / "market" / "AGENTS.md",
+            ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md",
+            ROOT / "tools" / "launcher" / "assets" / "buddies" / "test" / "AGENTS.md",
         )
-        combined = "\n".join(path.read_text(encoding="utf-8") for path in targets).lower()
-
-        self.assertIn("receipt", combined)
-        self.assertIn("commands", combined)
-        self.assertIn("summary", combined)
-        self.assertIn("reference_switches", combined)
-        self.assertIn("recommended_switch", combined)
-        self.assertIn("related_run_ids", combined)
+        for path in buddy_docs:
+            text = path.read_text(encoding="utf-8").lower()
+            self.assertIn("receipt -> summary", text)
+            self.assertNotIn("receipt -> commands -> summary", text)
 
     def test_root_agents_describes_execution_worktree_without_full_runtime_contract(self) -> None:
         text = (ROOT / "AGENTS.md").read_text(encoding="utf-8").lower()
@@ -1098,6 +1096,17 @@ class RepoConsistencyTests(unittest.TestCase):
                 text,
             )
 
+    def _assert_buddy_prompt_base_contract(self, buddy_id: str, path: Path) -> tuple[str, str]:
+        self.assertTrue(path.exists(), msg=f"missing buddy prompt asset: {path.relative_to(ROOT)}")
+        text = path.read_text(encoding="utf-8")
+        lower = text.lower()
+        self.assertTrue(text.startswith("# BuddySwitch Runtime Workspace\n"))
+        self.assertIn(f"locked to the `{buddy_id}` buddy", lower)
+        self.assertIn("scripts/switch_runtime.py resolve", text)
+        self.assertIn("scripts/switch_runtime.py persist", text)
+        self.assertIn(f"ordinary user requests belong to `{buddy_id}`", lower)
+        return text, lower
+
     def test_buddy_prompt_assets_exist_for_every_manifest_buddy(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         buddies = manifest.get("buddies", [])
@@ -1106,14 +1115,25 @@ class RepoConsistencyTests(unittest.TestCase):
             buddy_id = buddy["id"]
             path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy_id / "AGENTS.md"
             with self.subTest(buddy=buddy_id):
-                self.assertTrue(path.exists(), msg=f"missing buddy prompt asset: {path.relative_to(ROOT)}")
-                text = path.read_text(encoding="utf-8")
-                lower = text.lower()
-                self.assertTrue(text.startswith("# BuddySwitch Runtime Workspace\n"))
-                self.assertIn(f"locked to the `{buddy_id}` buddy", lower)
-                self.assertIn("scripts/switch_runtime.py resolve", text)
-                self.assertIn("scripts/switch_runtime.py persist", text)
-                self.assertIn("cross-buddy canonical switches", lower)
+                _, lower = self._assert_buddy_prompt_base_contract(buddy_id, path)
+                self.assertIn("resolve_context", lower)
+                self.assertIn("refreshed_context", lower)
+                self.assertIn("runs/raw/", lower)
+                self.assertIn("projects/app", lower)
+
+    def test_buddy_prompts_do_not_allow_user_facing_switch_commands(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        buddies = manifest.get("buddies", [])
+        self.assertTrue(buddies)
+        for buddy in buddies:
+            buddy_id = buddy["id"]
+            path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy_id / "AGENTS.md"
+            with self.subTest(buddy=buddy_id):
+                _, lower = self._assert_buddy_prompt_base_contract(buddy_id, path)
+                self.assertNotIn("same-buddy canonical", lower)
+                self.assertNotIn(f"switch {buddy_id}", lower)
+                self.assertNotIn("receipt -> commands -> summary", lower)
+                self.assertIn("receipt -> summary", lower)
                 required_runtime_tokens = (
                     "resolve_context",
                     "selected-skill preflight",
@@ -1121,7 +1141,6 @@ class RepoConsistencyTests(unittest.TestCase):
                     "tool_scope",
                     "persist-skill-result",
                     "refreshed_context",
-                    "receipt -> commands -> summary",
                     "runs/raw/",
                     "projects/app",
                 )
@@ -1129,22 +1148,61 @@ class RepoConsistencyTests(unittest.TestCase):
                     self.assertIn(token, lower)
                 self.assertNotIn("projects/app/.runtime/", lower)
 
-    def test_active_host_prompts_treat_recommended_command_as_canonical_receipt_field(self) -> None:
+    def test_runtime_prompt_does_not_present_switch_as_product_ui(self) -> None:
         runtime_agents = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
             encoding="utf-8"
         ).lower()
-        router = (ROOT / ".codex" / "agents" / "router.toml").read_text(encoding="utf-8").lower()
+        self.assertIn("internal/debug wire", runtime_agents)
+        self.assertNotIn("canonical ui", runtime_agents)
+        self.assertNotIn("use the canonical directive", runtime_agents)
 
-        self.assertIn("recommended_switch", runtime_agents)
-        self.assertIn("one `recommended` command from `recommended_switch`", runtime_agents)
-        self.assertNotIn("prefer `handoff_to_next_buddy`", runtime_agents)
-        self.assertNotIn("handoff_to_next_buddy", runtime_agents)
-        self.assertIn("recommended_switch", router)
-        self.assertIn("one `recommended` command from `recommended_switch`", router)
-        self.assertNotIn("prefer `handoff_to_next_buddy`", router)
-        self.assertNotIn("handoff_to_next_buddy", router)
-        self.assertNotIn("sub_task", runtime_agents)
-        self.assertNotIn("sub_task", router)
+    def test_product_docs_do_not_teach_switch_as_buddy_instance_input(self) -> None:
+        docs = (
+            ROOT / "README.md",
+            ROOT / "framework" / "docs" / "architecture-overview.md",
+            ROOT / "framework" / "docs" / "skill-architecture-best-practices.md",
+        )
+        forbidden_tokens = ("switch pm:", "switch dev:", "switch market:", "switch test:", "switch design:")
+        for path in docs:
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(product_doc=str(path.relative_to(ROOT))):
+                for token in forbidden_tokens:
+                    self.assertNotIn(token, text)
+
+    def test_switch_spec_is_marked_internal_debug_wire_contract(self) -> None:
+        switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
+        self.assertIn("internal/debug wire", switch_spec)
+        self.assertNotIn("product-mode users should type", switch_spec)
+
+    def test_product_output_docs_do_not_reintroduce_command_section_or_copyable_switch_guidance(self) -> None:
+        product_output_docs = (
+            ROOT / "README.md",
+            ROOT / "framework" / "docs" / "switch-spec.md",
+            ROOT / "framework" / "docs" / "interface-spec.md",
+            *sorted((ROOT / "framework" / "contracts").glob("*.md")),
+        )
+        forbidden_tokens = (
+            "receipt -> commands -> summary",
+            "suggested next switch",
+            "one `template`",
+            "one `recommended`",
+            "copyable switch",
+        )
+        for path in product_output_docs:
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(product_output_doc=str(path.relative_to(ROOT))):
+                for token in forbidden_tokens:
+                    self.assertNotIn(token, text)
+
+        readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
+        switch_spec = (ROOT / "framework" / "docs" / "switch-spec.md").read_text(encoding="utf-8").lower()
+        self.assertIn("receipt -> summary", readme)
+        self.assertIn("receipt -> summary", switch_spec)
+
+        # Keep receipt follow-up fields as internal/debug state, not terminal command rendering.
+        self.assertIn("reference_switches", switch_spec)
+        self.assertIn("recommended_switch", switch_spec)
+        self.assertNotIn("commands order", switch_spec)
 
     def test_runtime_host_prompt_defines_selected_skill_preflight_mitigation(self) -> None:
         text = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(

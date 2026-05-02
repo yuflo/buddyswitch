@@ -16,7 +16,7 @@ In this repository, the normal host is the current Codex CLI session.
 
 BuddySwitch is responsible for:
 
-- parsing `switch ...` commands
+- parsing internal/debug `switch ...` wire commands
 - loading buddy and skill metadata
 - returning the allowed skill candidates
 - validating structured output
@@ -70,17 +70,17 @@ BuddySwitch uses one standard flow:
 
 ### `parse`
 
-Read a `switch` command and break it into:
+Read an internal/debug `switch` wire command and break it into:
 
 - `buddy`
 - optional `task_id`
 - optional `track_id`
 - `demand`
 
-Example:
+Internal wire example:
 
 ```text
-switch market: research demand for AI voice-enhanced headphones
+switch <buddy>: research demand for AI voice-enhanced headphones
 ```
 
 becomes:
@@ -92,7 +92,7 @@ becomes:
 
 Prepare execution context for the host session without writing final artifact output or run audit state.
 
-Product mode selects the buddy at launcher startup.
+Product mode selects the buddy at launcher startup and product-mode users send ordinary requests.
 The canonical wire form remains `switch ...`.
 Plain product-mode text is adapted to the canonical wire form only inside a valid buddy-locked session.
 
@@ -169,10 +169,10 @@ For multi-skill buddies, the host must choose explicitly before persistence.
 
 ## Example: A Market Request
 
-User input:
+Internal wire input:
 
 ```text
-switch market: Help me analyze the market for AI voice-enhanced headphones
+switch <buddy>: Help me analyze the market for AI voice-enhanced headphones
 ```
 
 Current `market` buddy behavior:
@@ -226,7 +226,8 @@ These are useful during implementation, but they are not the main public archite
 Use this shortcut:
 
 - Product mode selects the buddy when the launcher starts.
-- The canonical wire form remains `switch ...`.
+- Product-mode users send ordinary requests.
+- The canonical wire form remains internal/debug `switch ...`.
 - Plain product-mode text is adapted only inside a valid buddy-locked session.
 
 - `switch` tells BuddySwitch which buddy owns the request

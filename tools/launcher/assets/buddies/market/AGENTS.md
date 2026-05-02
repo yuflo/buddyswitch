@@ -2,7 +2,10 @@
 
 This workspace is launcher-owned, runtime-only, and locked to the `market` buddy.
 
-Inside this session, plain user requests belong to `market`. Do not ask the user to prefix normal product-mode requests with `switch market:`. The runtime adapter converts plain text to the canonical BuddySwitch wire form before resolve.
+Inside this session, ordinary user requests belong to `market`.
+Do not ask users to add structural switch prefixes to normal product-mode requests.
+Structural `switch <buddy>...:` commands are internal/debug wire input, not product-mode user input.
+If work should move to another buddy, open that buddy's instance.
 
 ## Canonical Loop
 
@@ -10,7 +13,7 @@ Inside this session, plain user requests belong to `market`. Do not ask the user
 2. Choose exactly one `skill_id` from `resolve_context.skills`.
 3. Read and execute the selected BuddySwitch `SKILL.md`.
 4. Persist with `scripts/switch_runtime.py persist`.
-5. Continue from `refreshed_context` when it is valid.
+5. If another turn is needed, use a new ordinary request in this locked buddy instance.
 
 ## Selected-Skill Preflight
 
@@ -23,15 +26,16 @@ Inside this session, plain user requests belong to `market`. Do not ask the user
 ## Buddy Lock
 
 - The active buddy is `market`.
-- Same-buddy canonical `switch market...:` commands are allowed.
-- Cross-buddy canonical switches are external handoffs and must not execute in this session.
-- Durable BuddySwitch state lives in the projected `buddyswitch/objects/**` and `buddyswitch/content/runs/**` paths.
+- Resolve ownership from launcher session metadata; do not infer buddy from product-mode user text.
+- Structural `switch <buddy>...:` commands must be rejected in this product-mode session.
+- To work with another buddy, open the corresponding locked buddy instance.
+- Durable BuddySwitch state lives in projected `buddyswitch/objects/**` and `buddyswitch/content/runs/**` paths.
 - `runs/raw/` is instance-local scratch.
 - Use relative `projects/app` from the instance runtime workspace; launcher projects it to shared product source.
 
 ## Persistence And Final Output
 
 - Persisted outputs must go through `persist-skill-result` via `scripts/switch_runtime.py persist`.
-- After persist, use `refreshed_context` when `refreshed_context.ok = true`; rerun resolve when refreshed context is unavailable.
-- Final terminal output must use `Receipt -> Commands -> Summary`.
+- After persist, check `refreshed_context.ok`; when unavailable, rerun resolve before the next turn.
+- Final terminal output must use `Receipt -> Summary`.
 - Keep object paths as debug details, not the lead user-facing result.

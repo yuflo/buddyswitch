@@ -10,7 +10,7 @@ It shows:
 - task objects
 - artifact objects
 - run audits
-- copyable switch/cleanup commands
+- next-step state summaries and cleanup commands
 
 ## Boundary
 
@@ -67,7 +67,7 @@ No direct runtime module imports, runtime object reads, or runtime write paths a
 
 ## Cleanup Integration
 
-Panel can show copyable commands only:
+Panel can show cleanup commands only:
 
 - `./buddyswitch-codex data cleanup --buddy <buddy>`
 - `./buddyswitch-codex data cleanup --all-data`

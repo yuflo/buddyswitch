@@ -212,10 +212,6 @@ def _hold_product_runtime_lock(product_session: dict[str, Any]):
 
 def _match_structural_switch(text: str) -> re.Match[str] | None:
     match = _STRUCTURAL_SWITCH_PATTERN.match(text)
-    if match is None:
-        return None
-    if not match.group(4).strip():
-        return None
     return match
 
 
@@ -362,12 +358,11 @@ def _adapt_resolve_text_for_product_session(text: str, *, product_session: dict[
     structural_switch = _match_structural_switch(trimmed)
     if structural_switch:
         requested_buddy = structural_switch.group(1).strip().lower()
-        if requested_buddy != active_buddy:
-            raise ValueError(
-                "Session is locked to buddy "
-                f"'{active_buddy}'. Received canonical switch for '{requested_buddy}'."
-            )
-        return trimmed
+        raise ValueError(
+            "Locked buddy instance accepts ordinary requests only; "
+            f"received structural switch command for '{requested_buddy}'. "
+            f"Open the '{requested_buddy}' buddy instance instead when that is the intended owner."
+        )
 
     binding = product_session["payload"]
     return _build_plain_text_switch(active_buddy, binding, trimmed)

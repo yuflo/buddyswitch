@@ -470,35 +470,85 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
             manifest_path=switch_runtime.DEFAULT_MANIFEST,
         )
 
-    def test_cmd_resolve_product_mode_allows_canonical_switch_for_active_buddy(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-pm-canonical")
-        env = self._product_env("pm", "inst-pm-canonical", instance_json)
-        canonical = "switch pm(task-pm-existing) -> track-product: Continue execution"
+    def test_product_mode_plain_text_creates_single_turn_task_and_reserved_run(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-plain-real")
+        env = self._product_env("pm", "inst-pm-plain-real", instance_json)
+
         with patch.dict(os.environ, env, clear=True):
-            with patch.object(switch_runtime, "resolve_switch", return_value=self._resolve_ok()) as mock_resolve:
-                exit_code, payload = self._run_cmd_resolve(canonical)
+            exit_code, payload = self._run_cmd_resolve("Draft the MVP PRD for onboarding rewrite")
 
         self.assertEqual(exit_code, 0)
         self.assertTrue(payload["ok"])
-        mock_resolve.assert_called_once_with(
-            canonical,
-            manifest_path=switch_runtime.DEFAULT_MANIFEST,
-        )
+        self.assertEqual(payload["buddy"]["id"], "pm")
+        self.assertEqual(payload["switch"]["buddy_id"], "pm")
+        self.assertEqual(payload["switch"]["demand"], "Draft the MVP PRD for onboarding rewrite")
+        self.assertIsInstance(payload["switch"]["task_id"], str)
+        self.assertIsInstance(payload["run_envelope"]["run_id"], str)
+        self.assertEqual(payload["run_envelope"]["status"], "reserved")
 
-    def test_cmd_resolve_product_mode_rejects_canonical_switch_for_other_buddy(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-pm-locked")
-        env = self._product_env("pm", "inst-pm-locked", instance_json)
+        task_path = self._runtime_path(f"buddyswitch/objects/tasks/{payload['switch']['task_id']}.json")
+        reservation_path = switch_runtime._reserved_run_path(payload["run_envelope"]["run_id"])  # type: ignore[attr-defined]
+        self.assertTrue(task_path.exists())
+        self.assertTrue(reservation_path.exists())
+
+        stored_instance = json.loads(instance_json.read_text(encoding="utf-8"))
+        self.assertEqual(stored_instance["current_task_id"], payload["switch"]["task_id"])
+
+    def test_product_mode_plain_text_with_word_switch_is_demand_not_command(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-natural-switch")
+        env = self._product_env("pm", "inst-pm-natural-switch", instance_json)
+
         with patch.dict(os.environ, env, clear=True):
-            with patch.object(switch_runtime, "resolve_switch", return_value={"ok": True}) as mock_resolve:
-                exit_code, payload = self._run_cmd_resolve("switch dev: Continue implementation")
+            exit_code, payload = self._run_cmd_resolve("Help users switch plans without losing draft data")
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["switch"]["buddy_id"], "pm")
+        self.assertEqual(payload["switch"]["demand"], "Help users switch plans without losing draft data")
+
+    def test_product_mode_rejects_structural_switch_for_active_buddy(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-reject-same-buddy")
+        env = self._product_env("pm", "inst-pm-reject-same-buddy", instance_json)
+
+        with patch.dict(os.environ, env, clear=True):
+            exit_code, payload = self._run_cmd_resolve("switch pm: Draft the PRD")
 
         self.assertEqual(exit_code, 1)
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error"]["code"], "E_RUNTIME_RESOLVE")
-        self.assertIn("session is locked", payload["error"]["message"].lower())
-        self.assertIn("'pm'", payload["error"]["message"])
-        self.assertIn("'dev'", payload["error"]["message"])
-        mock_resolve.assert_not_called()
+        self.assertIn("ordinary request", payload["error"]["message"].lower())
+        self.assertFalse(list(self._runtime_path("buddyswitch/objects/tasks").glob("*.json")))
+
+    def test_product_mode_rejects_structural_switch_for_other_buddy_without_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-reject-other-buddy")
+        env = self._product_env("pm", "inst-pm-reject-other-buddy", instance_json)
+
+        with patch.dict(os.environ, env, clear=True):
+            exit_code, payload = self._run_cmd_resolve("switch dev: Implement the PRD")
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_RUNTIME_RESOLVE")
+        self.assertIn("locked buddy instance", payload["error"]["message"].lower())
+        self.assertFalse(list(self._runtime_path("buddyswitch/objects/tasks").glob("*.json")))
+
+    def test_product_mode_rejects_empty_structural_switch_without_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-pm-reject-empty-structural")
+        env = self._product_env("pm", "inst-pm-reject-empty-structural", instance_json)
+
+        with patch.dict(os.environ, env, clear=True):
+            exit_code, payload = self._run_cmd_resolve("switch pm:")
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_RUNTIME_RESOLVE")
+        message = payload["error"]["message"].lower()
+        self.assertTrue("ordinary request" in message or "locked buddy instance" in message)
+        self.assertFalse(list(self._runtime_path("buddyswitch/objects/tasks").glob("*.json")))
+
+        reserved_dir = switch_runtime._reserved_run_path("placeholder").parent  # type: ignore[attr-defined]
+        if reserved_dir.exists():
+            self.assertFalse(list(reserved_dir.glob("*.json")))
 
     def test_cmd_resolve_product_mode_success_updates_instance_binding(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-pm-bind")
@@ -757,11 +807,12 @@ class ResolveProductModeInputAdapterTests(RuntimeWorkspaceTestMixin, unittest.Te
             remaining = sorted(reserved_dir.glob("*.json")) if reserved_dir.exists() else []
             self.assertEqual(remaining, [])
 
-            followup_switch = receipt["recommended_switch"].replace("<demand>", "Continue PRD")
-            followup_exit_code, followup_payload = self._run_cmd_resolve(followup_switch)
+            followup_exit_code, followup_payload = self._run_cmd_resolve("Continue PRD")
 
         self.assertEqual(followup_exit_code, 0)
         self.assertTrue(followup_payload["ok"])
+        self.assertEqual(followup_payload["switch"]["buddy_id"], "pm")
+        self.assertEqual(followup_payload["switch"]["demand"], "Continue PRD")
         followup_run_id = followup_payload["run_envelope"]["run_id"]
         self.assertNotEqual(followup_run_id, consumed_run_id)
         followup_path = switch_runtime._reserved_run_path(followup_run_id)  # type: ignore[attr-defined]

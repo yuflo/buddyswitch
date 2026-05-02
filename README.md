@@ -9,6 +9,18 @@ Two modes exist:
 1. **Develop BuddySwitch:** run `codex` from the repo root.
 2. **Run BuddySwitch product mode:** run `./buddyswitch-codex instance start --buddy <buddy>`.
 
+Product-mode task assignment uses ordinary requests in the locked buddy instance:
+
+```bash
+./buddyswitch-codex instance start --buddy pm
+```
+
+Then type a normal request (no `switch <buddy>:` prefix), for example:
+
+```text
+Draft the MVP PRD for onboarding rewrite
+```
+
 The launcher-managed product mode layout is:
 
 - `${BUDDYSWITCH_SHARED_ROOT}` as the shared launcher root
@@ -27,11 +39,11 @@ Product mode has two work surfaces:
 If you are developing BuddySwitch itself, start here:
 
 1. Read `AGENTS.md` first. It describes the repo-root development workspace.
-2. Validate the parser and router:
+2. Use **Internal Debug Wire Tools** when you need to inspect canonical switch parsing/routing behavior:
 
 ```bash
-python3 scripts/parse_switch.py "switch pm: create track"
-python3 scripts/codex_router.py "switch pm: create track"
+python3 scripts/parse_switch.py "switch <buddy>: create track"
+python3 scripts/codex_router.py "switch <buddy>: create track"
 ```
 
 3. If you want to exercise the runtime loop manually, switch into a launcher-managed runtime workspace first. `resolve` may materialize a zero-run task and reserve the next run envelope, so it is blocked in the repo-root development checkout.
@@ -40,7 +52,7 @@ Resolve a real directive into BuddySwitch `resolve_context` there:
 
 ```bash
 python3 scripts/switch_runtime.py resolve \
-  "switch market: quick market research for AI scheduler landing page" \
+  "switch <buddy>: quick market research for AI scheduler landing page" \
   > /tmp/buddyswitch-resolved.json
 ```
 
@@ -93,11 +105,25 @@ To remove one stored instance without deleting shared BuddySwitch state:
 
 ## Daily Use
 
-### Parse or route a switch directive
+### Product-mode task assignment (ordinary text)
+
+Run the buddy-locked instance, then type a normal request:
+
+```bash
+./buddyswitch-codex instance start --buddy pm
+```
+
+```text
+Draft the MVP PRD for onboarding rewrite
+```
+
+Do not ask product-mode users to type `switch <buddy>:` commands.
+
+### Internal Debug Wire Tools
 
 ```bash
 python3 scripts/parse_switch.py "switch dev(task-dev-onboarding) -> track-demo: continue the implementation"
-python3 scripts/codex_router.py "switch pm: create ai-scheduler-lp track"
+python3 scripts/codex_router.py "switch <buddy>: create ai-scheduler-lp track"
 ```
 
 ### Resolve a run
@@ -105,8 +131,8 @@ python3 scripts/codex_router.py "switch pm: create ai-scheduler-lp track"
 Run `resolve` only from the launcher-owned instance runtime workspace. In create mode it may materialize a zero-run task and reserve the next run id, so the repo-root development checkout blocks it; start the runtime workspace with `./buddyswitch-codex instance start --buddy <buddy>` first. Product mode runs from `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace`, projects canonical state from `${BUDDYSWITCH_SHARED_ROOT}/state`, and maps relative `projects/app` to the shared project workspace.
 
 ```bash
-python3 scripts/switch_runtime.py resolve "switch market: quick market research for AI scheduler landing page"
-python3 scripts/switch_runtime.py resolve "switch pm: create ai-scheduler-lp track"
+python3 scripts/switch_runtime.py resolve "switch <buddy>: quick market research for AI scheduler landing page"
+python3 scripts/switch_runtime.py resolve "switch <buddy>: create ai-scheduler-lp track"
 ```
 
 ### Persist a structured result
@@ -178,7 +204,7 @@ The host Codex session is responsible for:
 
 If you remember only four things, remember these:
 
-- `switch` is the canonical entry point.
+- Product-mode users send ordinary requests in a buddy-locked instance.
 - The host session does the real work.
 - BuddySwitch is the control layer and recorder.
 - State lives in task, artifact, track, and run objects.
@@ -198,9 +224,9 @@ Important runtime rules:
 - `persist-skill-result` is the canonical write boundary; `scripts/switch_runtime.py persist` is its current CLI wrapper.
 - BuddySwitch-managed outputs do not go into `artifacts/*.md` or `runs/summaries/**`.
 
-## Canonical Switch Syntax
+## Internal Debug Wire Syntax
 
-BuddySwitch uses this canonical directive:
+BuddySwitch uses this canonical internal wire directive:
 
 ```text
 switch <buddy>(<task-id>) -> <track-id>: <demand>
@@ -215,11 +241,11 @@ Supported forms:
 
 Examples:
 
-- `switch market: Research demand for AI companion live spaces`
-- `switch pm -> track-ai-companion: Define MVP scope`
-- `switch pm(task-pm-ai-companion): Continue scope refinement`
-- `switch dev(task-dev-ai-companion) -> track-ai-companion: Implement the approved P0 scope in projects/app`
-- `switch test: Run smoke checks for the latest implementation`
+- `switch <buddy>: Research demand for AI companion live spaces`
+- `switch <buddy> -> <track-id>: Define MVP scope`
+- `switch <buddy>(<task-id>): Continue scope refinement`
+- `switch <buddy>(<task-id>) -> <track-id>: Implement the approved P0 scope in projects/app`
+- `switch <buddy>: Run smoke checks for the latest implementation`
 
 The text after `:` is a demand, not a task object. If no task id is supplied, `resolve_context` may materialize a zero-run task immediately and reserve the next run id before `persist-skill-result` records the run. Minor spacing variation around `:` and `->` can be normalized as long as buddy, optional task id, optional track id, and demand remain clear.
 
@@ -419,7 +445,7 @@ The panel shows:
 - task objects
 - artifact objects
 - run audits
-- copyable switch and cleanup commands
+- next-step state summaries and cleanup commands
 
 The panel must not:
 
@@ -498,18 +524,16 @@ Useful modes:
 
 ## Terminal Output Contract
 
-Normal BuddySwitch terminal summaries should use exactly three sections in this order:
+Normal BuddySwitch terminal summaries should use exactly two sections in this order:
+Terminal final output should follow `Receipt -> Summary`.
 
 1. `Receipt`
-2. `Commands`
-3. `Summary`
+2. `Summary`
 
 Expected contents:
 
 - `Receipt`
-  `Persisted`, `Task`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`
-- `Commands`
-  exactly one `Template` command and one `Recommended` command
+  `Persisted`, `Task`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`, optional next-step state/handoff note
 - `Summary`
   1-2 lines of execution summary and up to 4 open questions
 

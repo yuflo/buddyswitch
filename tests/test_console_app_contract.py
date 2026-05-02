@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contract tests for console command derivation behavior."""
+"""Contract tests for console next-step state derivation behavior."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ CONSOLE_APP = ROOT / "framework" / "console" / "app.js"
 
 
 class ConsoleAppContractTests(unittest.TestCase):
-    def _derive_track_commands(self, workspace_payload: dict, track_payload: dict) -> dict:
+    def _derive_track_next_step_state(self, workspace_payload: dict, track_payload: dict) -> dict:
         script = textwrap.dedent(
             """
             const fs = require("fs");
@@ -79,14 +79,14 @@ class ConsoleAppContractTests(unittest.TestCase):
 
             const source = fs.readFileSync(process.env.CONSOLE_APP_PATH, "utf8");
             vm.runInContext(
-              source + "\\nglobalThis.__consoleContract = { applyWorkspaceData, deriveSwitchCommandsForTrack };\\n",
+              source + "\\nglobalThis.__consoleContract = { applyWorkspaceData, deriveNextStepStateForTrack };\\n",
               context,
             );
 
             const workspacePayload = JSON.parse(process.env.WORKSPACE_PAYLOAD_JSON);
             const trackPayload = JSON.parse(process.env.TRACK_PAYLOAD_JSON);
             context.__consoleContract.applyWorkspaceData(workspacePayload);
-            const result = context.__consoleContract.deriveSwitchCommandsForTrack(trackPayload);
+            const result = context.__consoleContract.deriveNextStepStateForTrack(trackPayload);
             process.stdout.write(JSON.stringify(result));
             """
         )
@@ -114,9 +114,106 @@ class ConsoleAppContractTests(unittest.TestCase):
         )
         return json.loads(completed.stdout)
 
-    def test_track_recommended_command_keeps_canonical_switch_when_test_guidance_exists(self) -> None:
+    def _derive_task_next_step_state(self, workspace_payload: dict, task_payload: dict) -> dict:
+        script = textwrap.dedent(
+            """
+            const fs = require("fs");
+            const vm = require("vm");
+
+            function makeElement(tagName = "div") {
+              return {
+                tagName,
+                children: [],
+                className: "",
+                textContent: "",
+                type: "",
+                disabled: false,
+                dataset: {},
+                append(...nodes) { this.children.push(...nodes); },
+                appendChild(node) { this.children.push(node); return node; },
+                replaceChildren(...nodes) { this.children = [...nodes]; },
+                addEventListener() {},
+                removeEventListener() {},
+                setAttribute() {},
+                classList: {
+                  add() {},
+                  remove() {},
+                  toggle() {},
+                  contains() { return false; },
+                },
+              };
+            }
+
+            const elements = new Map();
+            const document = {
+              getElementById(id) {
+                if (!elements.has(id)) {
+                  elements.set(id, makeElement("div"));
+                }
+                return elements.get(id);
+              },
+              createElement(tag) {
+                return makeElement(tag);
+              },
+            };
+
+            const context = {
+              console,
+              window: {
+                location: { protocol: "file:" },
+                prompt() {},
+              },
+              document,
+              navigator: {
+                clipboard: {
+                  writeText: async () => {},
+                },
+              },
+              setTimeout() {},
+              clearTimeout() {},
+            };
+            context.globalThis = context;
+            vm.createContext(context);
+
+            const source = fs.readFileSync(process.env.CONSOLE_APP_PATH, "utf8");
+            vm.runInContext(
+              source + "\\nglobalThis.__consoleContract = { applyWorkspaceData, deriveNextStepStateForTask };\\n",
+              context,
+            );
+
+            const workspacePayload = JSON.parse(process.env.WORKSPACE_PAYLOAD_JSON);
+            const taskPayload = JSON.parse(process.env.TASK_PAYLOAD_JSON);
+            context.__consoleContract.applyWorkspaceData(workspacePayload);
+            const result = context.__consoleContract.deriveNextStepStateForTask(taskPayload);
+            process.stdout.write(JSON.stringify(result));
+            """
+        )
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "CONSOLE_APP_PATH": str(CONSOLE_APP),
+                "WORKSPACE_PAYLOAD_JSON": json.dumps(workspace_payload),
+                "TASK_PAYLOAD_JSON": json.dumps(task_payload),
+            }
+        )
+        completed = subprocess.run(
+            ["node", "-e", script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=f"node harness failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+        )
+        return json.loads(completed.stdout)
+
+    def test_track_next_step_state_reports_buddy_state_without_switch_commands(self) -> None:
         canonical_recommended = "switch market -> track-alpha: synthesize demand evidence into pm handoff"
-        synthetic_test_guidance = "switch test -> track-alpha: Run smoke checks for latest implementation"
 
         track_payload = {
             "id": "track-alpha",
@@ -154,32 +251,26 @@ class ConsoleAppContractTests(unittest.TestCase):
             ],
         }
 
-        commands = self._derive_track_commands(workspace_payload, track_payload)
-        self.assertEqual(commands["recommended"], canonical_recommended)
-        self.assertEqual(commands["handoff"], synthetic_test_guidance)
+        next_step = self._derive_track_next_step_state(workspace_payload, track_payload)
+        self.assertEqual(next_step["trackId"], "track-alpha")
+        self.assertEqual(next_step["currentBuddy"], "dev")
+        self.assertEqual(next_step["nextBuddy"], "market")
+        self.assertEqual(next_step["recommendedBuddy"], "market")
+        self.assertEqual(next_step["mode"], "recommended_handoff")
+        self.assertNotIn("switch", json.dumps(next_step).lower())
 
-    def test_track_handoff_prefers_persisted_reference_over_synthetic_test_guidance(self) -> None:
-        canonical_recommended = "switch market -> track-alpha: synthesize demand evidence into pm handoff"
-        persisted_handoff = "switch market -> track-alpha: deliver market sizing and risk caveats to pm"
-        synthetic_test_guidance = "switch test -> track-alpha: Run smoke checks for latest implementation"
+    def test_task_next_step_state_reports_current_and_recommended_buddy_without_switch_commands(self) -> None:
+        canonical_recommended = "switch test(task-dev): run smoke checks for the latest build"
 
-        track_payload = {
-            "id": "track-alpha",
-            "current_buddy": "dev",
-            "next_buddy": "market",
-            "task_ids": ["task-dev"],
-            "tasks": [
-                {
-                    "id": "task-dev",
-                    "buddy": "dev",
-                    "artifact_ids": ["artifact-dev"],
-                    "run_ids": ["run-dev-1"],
-                }
-            ],
+        task_payload = {
+            "id": "task-dev",
+            "buddy": "dev",
+            "artifact_ids": ["artifact-dev"],
+            "run_ids": ["run-dev-1"],
         }
         workspace_payload = {
-            "tracks": [track_payload],
-            "tasks": track_payload["tasks"],
+            "tracks": [],
+            "tasks": [task_payload],
             "artifacts": [
                 {
                     "id": "artifact-dev",
@@ -189,21 +280,44 @@ class ConsoleAppContractTests(unittest.TestCase):
             "run_audits": [
                 {
                     "run_id": "run-dev-1",
-                    "track_id": "track-alpha",
                     "task_id": "task-dev",
                     "recommended_switch": canonical_recommended,
                     "reference_switches": {
-                        "handoff_to_next_buddy": persisted_handoff,
-                        "continue_current_task_in_track": "switch dev(task-dev) -> track-alpha: continue implementation",
+                        "continue_current_task": "switch dev(task-dev): continue implementation",
                     },
                 }
             ],
         }
 
-        commands = self._derive_track_commands(workspace_payload, track_payload)
-        self.assertEqual(commands["recommended"], canonical_recommended)
-        self.assertEqual(commands["handoff"], persisted_handoff)
-        self.assertNotEqual(commands["handoff"], synthetic_test_guidance)
+        next_step = self._derive_task_next_step_state(workspace_payload, task_payload)
+        self.assertEqual(next_step["taskId"], "task-dev")
+        self.assertEqual(next_step["currentBuddy"], "dev")
+        self.assertEqual(next_step["recommendedBuddy"], "test")
+        self.assertEqual(next_step["mode"], "recommended_handoff")
+        self.assertNotIn("switch", json.dumps(next_step).lower())
+
+    def test_standalone_task_without_run_audit_uses_task_buddy_not_synthetic_pm_switch(self) -> None:
+        task_payload = {
+            "id": "task-dev-zero",
+            "buddy": "dev",
+            "artifact_ids": [],
+            "run_ids": [],
+        }
+        workspace_payload = {
+            "tracks": [],
+            "tasks": [task_payload],
+            "artifacts": [],
+            "run_audits": [],
+        }
+
+        next_step = self._derive_task_next_step_state(workspace_payload, task_payload)
+        self.assertEqual(next_step["taskId"], "task-dev-zero")
+        self.assertEqual(next_step["currentBuddy"], "dev")
+        self.assertEqual(next_step["recommendedBuddy"], "dev")
+        self.assertEqual(next_step["mode"], "continue_current_task")
+        self.assertNotIn("switch", json.dumps(next_step).lower())
+        self.assertNotIn("pm", str(next_step.get("summary", "")).lower())
+        self.assertNotIn("handoff", str(next_step.get("summary", "")).lower())
 
     def test_refresh_workspace_busy_keeps_existing_data_and_status(self) -> None:
         script = textwrap.dedent(

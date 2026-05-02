@@ -132,11 +132,11 @@ Every run should return:
 2. working notes
 3. deliverables or changed files
 
-Follow-up switch suggestions come from BuddySwitch receipt rendering, not from the market structured result payload.
+Follow-up state or handoff notes come from BuddySwitch receipt rendering, not from the market structured result payload.
 
-Terminal final output must follow `Receipt -> Commands -> Summary`:
+Terminal final output must follow `Receipt -> Summary`:
 - `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`)
-- `Commands` shows one `Template` and one `Recommended`
+- `Receipt` may include an optional next-step state or handoff note (non-command wording)
 - `Summary` keeps 1-2 lines, with up to 4 open questions
 
 ## Execution Summary Rule

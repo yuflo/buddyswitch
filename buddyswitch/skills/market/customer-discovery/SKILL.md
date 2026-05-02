@@ -79,14 +79,14 @@
 - Do not invent participant quotes, pain severity, or demand signals.
 
 ## Examples
-- `switch market: Prepare customer-discovery interviews for an AI bookkeeping assistant`
-- `switch market: Turn these founder notes into a problem-discovery brief and interview guide`
-- `switch market: Synthesize early interview notes for solo-founder CRM pain patterns`
+- `Prepare customer-discovery interviews for an AI bookkeeping assistant`
+- `Turn these founder notes into a problem-discovery brief and interview guide`
+- `Synthesize early interview notes for solo-founder CRM pain patterns`
 
 ## Counterexamples
-- `switch market: Decide if the AI bookkeeping assistant has credible PMF`
-- `switch market: Write homepage messaging for the solo-founder CRM`
-- `switch pm: Turn the interview findings into MVP scope`
+- `Decide if the AI bookkeeping assistant has credible PMF`
+- `Write homepage messaging for the solo-founder CRM`
+- `Turn the interview findings into MVP scope`
 
 ## Gotchas
 - Discovery interviews should stay focused on current behavior, pain, and alternatives before solution feedback.

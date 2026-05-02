@@ -23,7 +23,7 @@ Across current coding-agent ecosystems, the common pattern is:
 
 BuddySwitch follows that pattern, but keeps one extra control layer:
 
-- canonical runtime input uses `switch <buddy>...: <demand>`. Product-mode sessions may accept plain text because the launcher has already selected one active buddy and the resolve adapter converts the text to canonical wire form.
+- canonical internal/debug wire input uses `switch <buddy>...: <demand>`. Product-mode sessions use ordinary requests because the launcher has already selected one active buddy.
 - BuddySwitch treats the text after `:` as demand text; `resolve` determines task mode and `persist` creates the task only in create mode
 - BuddySwitch constrains the host model to that buddy's allowlisted skill set while keeping invocation parsing tolerant to minor CLI formatting variation
 
@@ -39,7 +39,7 @@ BuddySwitch follows that pattern, but keeps one extra control layer:
 
 ### BuddySwitch
 
-- parse supported `switch <buddy>...: <demand>` forms
+- parse supported internal/debug `switch <buddy>...: <demand>` wire forms
 - load manifest, buddy scope, object authority metadata, and allowed skills
 - apply only the deterministic gates needed for safe resolution
 - resolve task context, optional track context, and reject retired markdown output requests

@@ -1,6 +1,8 @@
-# BuddySwitch Switch Spec
+# BuddySwitch Internal Wire Spec
 
-## Canonical Syntax
+This document defines the internal/debug wire contract for BuddySwitch switch routing.
+
+## Canonical Wire Syntax
 
 ```text
 switch <buddy>(<task-id>) -> <track-id>: <demand>
@@ -19,14 +21,18 @@ Supported canonical forms:
 
 The canonical wire grammar remains `switch <buddy>(<task-id>) -> <track-id>: <demand>`.
 `parse_switch.py` stays strict and only parses canonical `switch ...` text.
+Product-mode users do not type `switch` commands.
 
-In a launcher-managed product-mode session, `./buddyswitch-codex instance start --buddy <buddy>` binds the process to one active buddy. Plain user text inside that session is adapted by `scripts/switch_runtime.py resolve` before parse when all product-mode env vars are valid:
+In a launcher-managed product-mode session, `./buddyswitch-codex instance start --buddy <buddy>` binds the process to one active buddy.
+Plain user text inside that session is adapted by `scripts/switch_runtime.py resolve` before parse when all product-mode env vars are valid and active buddy from launcher session metadata is present:
 
 - `BUDDYSWITCH_ACTIVE_BUDDY`
 - `BUDDYSWITCH_INSTANCE_ID`
 - `BUDDYSWITCH_INSTANCE_JSON`
 
-Same-buddy canonical switches are allowed. Cross-buddy canonical switches reject before parse or resolve mutation. Missing product-mode env keeps strict canonical behavior. Partial product-mode env rejects before mutation.
+Any structural `switch <buddy>...:` input in a product-mode buddy instance must reject before parse or resolve mutation.
+Missing product-mode env keeps strict canonical wire behavior.
+Partial product-mode env rejects before mutation.
 
 ## Buddy Validation
 
@@ -199,7 +205,8 @@ It writes:
 - run audit payloads under `buddyswitch/content/runs/*.json`
 - track objects under `buddyswitch/objects/tracks/*.json` when task binding or PM track-manager mutations are requested
 
-Successful persist responses include `receipt` plus `refreshed_context`. Host-facing follow-up fields live inside `receipt`, including:
+Successful persist responses include `receipt` plus `refreshed_context`.
+Host-facing follow-up fields live inside `receipt`, including:
 
 - `task_title`
 - optional `track_title`
@@ -213,7 +220,8 @@ Check `refreshed_context.ok` before using it for the next turn. The default succ
 
 Host terminal rendering contract:
 
-- Render exactly three sections in order: `Receipt`, `Commands`, `Summary`.
+- Render exactly two sections in order: `Receipt`, `Summary`.
+- Terminal final output should follow `Receipt -> Summary`.
 - `Receipt` order:
   - `Persisted`
   - `Task` (`task_title` + `task_id`)
@@ -221,12 +229,11 @@ Host terminal rendering contract:
   - `Artifact` (`artifact_id` or `none`)
   - `Run`
   - `Related Runs` only when `related_run_ids` is non-empty
-- `Commands` order:
-  - one `Template` command from `reference_switches`
-  - one `Recommended` command from `recommended_switch`
+  - Optional next-step state/handoff note (non-command wording)
 - `Summary` constraints:
   - execution summary in 1-2 lines
   - open questions up to 4 items
+- `reference_switches` and `recommended_switch` may remain in receipt as internal/debug follow-up fields.
 - Keep full object paths as optional debug output, not the primary summary surface.
 
 ## Error Handling

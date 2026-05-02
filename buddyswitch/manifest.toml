@@ -7,7 +7,7 @@ label = "BuddySwitch Env"
 [[adapters]]
 id = "codex"
 path = "scripts/codex_router.py"
-description = "Resolve supported `switch <buddy>...: <demand>` directives with env-backed buddy scope, skills, and object permissions."
+description = "Resolve internal/debug `switch <buddy>...: <demand>` wire directives with env-backed buddy scope, skills, and object permissions."
 
 [[skills]]
 id = "research-scan"

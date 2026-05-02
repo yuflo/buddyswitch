@@ -58,14 +58,14 @@
 - Do not collapse PM, dev, and test handoff into one mixed note list.
 
 ## Examples
-- `switch design: Shape the landing-page prototype`
-- `switch design: Turn the approved onboarding requirements into a first prototype handoff`
-- `switch design: Refine the pricing-to-demo-request flow and package the design handoff`
+- `Shape the landing-page prototype`
+- `Turn the approved onboarding requirements into a first prototype handoff`
+- `Refine the pricing-to-demo-request flow and package the design handoff`
 
 ## Counterexamples
-- `switch pm: Define the MVP scope for the landing page`
-- `switch dev: Implement the landing page in projects/app`
-- `switch test: Smoke test the onboarding prototype`
+- `Define the MVP scope for the landing page`
+- `Implement the landing page in projects/app`
+- `Smoke test the onboarding prototype`
 
 ## Gotchas
 - Prototype shaping can use market and PRD inputs, but it should still end in a design artifact instead of a scope artifact.

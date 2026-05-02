@@ -14,7 +14,7 @@
 - The task is really about changing product scope rather than manipulating track state.
 
 ## Inputs
-- A track-focused demand in a supported `switch pm...: ...` form.
+- A track-focused demand in ordinary product-mode request text.
 - Optional explicit `track-id`, `task-id`, `status`, `current_buddy`, `next_buddy`, or summary text.
 - Existing track and task objects from the env store.
 
@@ -42,14 +42,14 @@
 - Track linkage is task-centric: tracks store `task_ids`, and artifacts flow through their owning tasks.
 
 ## Examples
-- `switch pm: create onboarding-rewrite track for MVP handoff`
-- `switch pm -> track-onboarding-rewrite: advance next_buddy dev status active`
-- `switch pm(task-pm-onboarding) -> track-onboarding-rewrite: update summary for handoff readiness`
+- `create onboarding-rewrite track for MVP handoff`
+- `advance next_buddy dev status active`
+- `update summary for handoff readiness`
 
 ## Counterexamples
-- `switch pm: draft the MVP PRD for onboarding rewrite`
-- `switch pm: continue onboarding-rewrite track and refine the prototype flow`
-- `switch dev: implement the approved onboarding rewrite scope`
+- `draft the MVP PRD for onboarding rewrite`
+- `continue onboarding-rewrite track and refine the prototype flow`
+- `implement the approved onboarding rewrite scope`
 
 ## Gotchas
 - Track mutation is explicit; do not infer a lifecycle change from vague planning language.

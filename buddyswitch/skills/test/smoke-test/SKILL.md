@@ -59,14 +59,14 @@
 - Do not write runtime noise into `projects/app/` source folders; use `runs/raw/`.
 
 ## Examples
-- `switch test: Run smoke checks for the onboarding CTA regression`
-- `switch test: Verify the playlist reorder flow after the latest dev handoff`
-- `switch test: Smoke test the creator profile release candidate in projects/app`
+- `Run smoke checks for the onboarding CTA regression`
+- `Verify the playlist reorder flow after the latest dev handoff`
+- `Smoke test the creator profile release candidate in projects/app`
 
 ## Counterexamples
-- `switch dev: Fix the onboarding CTA regression`
-- `switch pm: Define the MVP scope for creator profile`
-- `switch market: Research competitor onboarding funnels`
+- `Fix the onboarding CTA regression`
+- `Define the MVP scope for creator profile`
+- `Research competitor onboarding funnels`
 
 ## Gotchas
 - Smoke testing should stay tight and outcome-focused; do not turn it into broad exploratory QA unless asked.
