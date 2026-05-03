@@ -21,14 +21,12 @@ buddyswitch_workspace_repo_common_dir() {
 }
 
 buddyswitch_workspace_init_defaults() {
-  local repo_root default_template
+  local repo_root
 
   repo_root="$(buddyswitch_workspace_repo_root)"
-  default_template="${repo_root}/tools/launcher/assets/runtime-AGENTS.md"
 
   export BUDDYSWITCH_WORKSPACE_DIR="${BUDDYSWITCH_WORKSPACE_DIR:-${BUDDYSWITCH_SHARED_ROOT}/workspace}"
   export BUDDYSWITCH_PROJECT_WORKSPACE_DIR="${BUDDYSWITCH_PROJECT_WORKSPACE_DIR:-${BUDDYSWITCH_SHARED_ROOT}/project/workspace}"
-  export BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE="${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE:-${default_template}}"
 }
 
 buddyswitch_workspace_canonical_path() {
@@ -416,7 +414,11 @@ buddyswitch_workspace_install_runtime_agents() {
   local workspace_dir template_path
 
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
-  template_path="${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
+  template_path="${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE:-}"
+  if [[ -z "${template_path}" ]]; then
+    echo "BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE is required for runtime AGENTS installation." >&2
+    return 1
+  fi
   if [[ ! -f "${template_path}" ]]; then
     echo "Runtime AGENTS template not found: ${template_path}" >&2
     return 1

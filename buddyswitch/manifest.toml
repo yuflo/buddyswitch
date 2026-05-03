@@ -4,11 +4,6 @@ schema_version = 1
 id = "buddyswitch"
 label = "BuddySwitch Env"
 
-[[adapters]]
-id = "codex"
-path = "scripts/codex_router.py"
-description = "Resolve supported `switch <buddy>...: <demand>` directives with env-backed buddy scope, skills, and object permissions."
-
 [[skills]]
 id = "research-scan"
 path = "buddyswitch/skills/market/research-scan"

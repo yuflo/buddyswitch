@@ -58,14 +58,14 @@
 - Do not write runtime noise into `projects/app/` source folders; use `runs/raw/`.
 
 ## Examples
-- `switch dev: Implement the approved P0 creator profile flow in projects/app`
-- `switch dev: Fix the regression in onboarding CTA behavior and report verification`
-- `switch dev: Build the playlist reorder interaction from the approved handoff`
+- `Implement the approved P0 creator profile flow in projects/app`
+- `Fix the regression in onboarding CTA behavior and report verification`
+- `Build the playlist reorder interaction from the approved handoff`
 
 ## Counterexamples
-- `switch pm: Define the MVP scope for creator profile`
-- `switch pm: Clarify the product scope for playlist reorder`
-- `switch test: Run smoke checks for the onboarding CTA regression`
+- `Define the MVP scope for creator profile`
+- `Clarify the product scope for playlist reorder`
+- `Run smoke checks for the onboarding CTA regression`
 
 ## Gotchas
 - This skill can use track context, but it does not own track lifecycle changes.

@@ -45,7 +45,7 @@
 
 ## PM Track Handling
 
-- A `switch pm -> track-*` PRD task may use the track as context, but the core deliverable is still product-definition output.
+- A PRD task that references `track-*` may use the track as context, but the core deliverable is still product-definition output.
 - If the user is actually asking to create, update, advance, archive, or hand off a track, use `track-manager` for that lifecycle change.
 - Keep track progression or buddy handoff explicit in demand text or in a separate `track-manager` result; do not silently turn PRD work into track mutation.
 
@@ -67,14 +67,14 @@
 - Do not expand scope without calling it out explicitly.
 
 ## Examples
-- `switch pm: Draft the MVP PRD for onboarding rewrite track`
-- `switch pm -> track-growth-loop: Continue product definition and define P0/P1 scope`
-- `switch pm: Write acceptance criteria and risks for the creator livestream MVP`
+- `Draft the MVP PRD for onboarding rewrite track`
+- `Continue product definition and define P0/P1 scope`
+- `Write acceptance criteria and risks for the creator livestream MVP`
 
 ## Counterexamples
-- `switch pm -> track-creator-livestream: create track and set next_buddy design`
-- `switch pm: refine the onboarding prototype and flow`
-- `switch market: research competitor positioning for creator livestream tools`
+- `create track and set next_buddy design`
+- `refine the onboarding prototype and flow`
+- `research competitor positioning for creator livestream tools`
 
 ## Gotchas
 - Tasks mentioning a track are not automatically track-management tasks; PRD work often references a track as context.

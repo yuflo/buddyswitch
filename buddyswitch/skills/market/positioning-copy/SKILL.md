@@ -79,14 +79,14 @@
 - Do not imply traction, conversion, or customer validation that the evidence does not support.
 
 ## Examples
-- `switch market: Turn the PMF findings into founder-facing homepage positioning`
-- `switch market: Write a positioning brief for an AI assistant for operations leads`
-- `switch market: Develop three evidence-grounded homepage angles from these market artifacts`
+- `Turn the PMF findings into founder-facing homepage positioning`
+- `Write a positioning brief for an AI assistant for operations leads`
+- `Develop three evidence-grounded homepage angles from these market artifacts`
 
 ## Counterexamples
-- `switch pm: Create the landing page prototype direction for the operations assistant`
-- `switch market: Decide whether the operations assistant has enough PMF to pursue`
-- `switch market: Prepare discovery interviews for operations leads`
+- `Create the landing page prototype direction for the operations assistant`
+- `Decide whether the operations assistant has enough PMF to pursue`
+- `Prepare discovery interviews for operations leads`
 
 ## Gotchas
 - Positioning language should simplify and sharpen the evidence, not outrun it.

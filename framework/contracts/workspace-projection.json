@@ -173,9 +173,9 @@
         "track_title",
         "track_action",
         "execution_summary",
-        "reference_switches",
+        "next_state",
+        "receipt_paths",
         "related_run_ids",
-        "recommended_switch",
         "updated_at",
         "status"
       ],
@@ -192,9 +192,9 @@
         "track_title": "string-or-null",
         "track_action": "string-or-null",
         "execution_summary": "string-or-null",
-        "reference_switches": "string-map",
+        "next_state": "object",
+        "receipt_paths": "object",
         "related_run_ids": "string-array",
-        "recommended_switch": "string-or-null",
         "updated_at": "string",
         "status": "string"
       }

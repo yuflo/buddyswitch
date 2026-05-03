@@ -41,12 +41,13 @@ Every run should return:
 1. execution summary
 2. working notes
 3. deliverables or changed files
-4. suggested next switch (optional)
+4. next-step state or handoff note (optional)
 
-Terminal final output must follow `Receipt -> Commands -> Summary`:
+Terminal final output must follow `Receipt -> Summary`:
 - `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`)
-- `Commands` shows one `Template` and one `Recommended`
+- `Receipt` may include an optional next-step state or handoff note (non-command wording)
 - `Summary` keeps 1-2 lines, with up to 4 open questions
+- Runtime commit boundary is `persist-skill-result`.
 
 ## Execution Summary Rule
 
@@ -68,7 +69,7 @@ Bad example:
 - Follow `framework/docs/track-registry.md`.
 - This buddy can read tracks and write artifact objects through the resolved task.
 - Do not directly mutate track `status/current_buddy/next_buddy/task_ids`.
-- Use an explicit switch track target or existing task binding when test output belongs to a specific track.
+- Use an explicit turn-context track target or existing task binding when test output belongs to a specific track.
 
 ## Default BuddySwitch State
 

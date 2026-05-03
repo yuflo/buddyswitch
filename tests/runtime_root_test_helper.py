@@ -15,7 +15,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_store  # noqa: E402
-import switch_runtime  # noqa: E402
+import turn_runtime  # noqa: E402
 import workspace_data  # noqa: E402
 
 
@@ -59,7 +59,7 @@ class RuntimeWorkspaceSandbox:
             patch.object(env_store, "ARTIFACT_OBJECTS_DIR", objects_root / "artifacts"),
             patch.object(env_store, "CONTENT_ROOT", content_root),
             patch.object(env_store, "RUN_CONTENT_DIR", content_root / "runs"),
-            patch.object(switch_runtime, "ROOT", self.root),
+            patch.object(turn_runtime, "ROOT", self.root),
             patch.object(workspace_data, "ROOT", self.root),
             patch.object(workspace_data, "rel", _relative_to_runtime_or_repo),
         ]

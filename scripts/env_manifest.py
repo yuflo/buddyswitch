@@ -534,9 +534,12 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
     _require_string(env_node, "id", "env")
     _require_string(env_node, "label", "env")
 
-    adapters = manifest.get("adapters")
-    if not isinstance(adapters, list) or not adapters:
-        raise ManifestError("adapters must be a non-empty list")
+    adapters = manifest.get("adapters", [])
+    if adapters is None:
+        adapters = []
+    if not isinstance(adapters, list):
+        raise ManifestError("adapters must be a list when provided")
+    manifest["adapters"] = adapters
     for index, adapter in enumerate(adapters):
         label = f"adapters[{index}]"
         if not isinstance(adapter, dict):
@@ -641,7 +644,7 @@ def buddy_authority_profile(manifest: dict[str, Any], buddy_id: str) -> dict[str
         "object_permissions": list(buddy.get("permissions", [])),
         "permission_scope": DEBUG_API_PERMISSION_SCOPE,
         "runtime_note": (
-            "switch runtime uses buddy->skills as routing authority and leaves "
+            "turn runtime uses buddy->skills as selection authority and leaves "
             "object permission enforcement to manual/debug mutation APIs."
         ),
     }

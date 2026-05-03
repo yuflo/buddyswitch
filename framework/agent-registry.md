@@ -1,6 +1,6 @@
 # Buddy Registry (Env Source)
 
-BuddySwitch no longer uses a separate hardcoded agent registry.
+BuddySwitch uses manifest-defined buddy metadata only.
 
 ## Source Of Truth
 
@@ -14,12 +14,12 @@ All buddy definitions come from `buddyswitch/manifest.toml`:
 
 ## Runtime Resolution
 
-- Parser validation: `scripts/parse_switch.py`
-- Codex routing: `scripts/codex_router.py`
-- Skill docs: `buddyswitch/skills/<buddy>/<skill>/SKILL.md`
+- Turn runtime entry: `scripts/turn_runtime.py`
+- Skill packages: `buddyswitch/skills/<buddy>/<skill>/`
+- Canonical prepare/persist flow: `framework/docs/turn-runtime-spec.md`
 
 ## Current Core Model
 
-- `pm` owns track lifecycle.
-- Other buddies read track context and produce artifacts.
-- Tracks and artifacts are persisted as object dumps under `buddyswitch/objects/`.
+- `pm` owns track lifecycle coordination.
+- Other buddies operate on task/artifact outputs within their manifest scope.
+- Track, task, artifact, and run state are persisted under `buddyswitch/objects/` and `buddyswitch/content/runs/`.

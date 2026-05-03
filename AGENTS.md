@@ -414,7 +414,7 @@ The SHARP guidance above is the default workflow for this repository. The notes 
 - `${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}` remains launcher/debug context, not a required buddy input path.
 - Instance runtime workspaces stay runtime-only; `projects/app` resolves to the shared project source.
 - Shared BuddySwitch state lives under `${BUDDYSWITCH_SHARED_ROOT}/state` and is projected into each instance workspace through the repo-relative runtime paths.
-- The execution worktree carries the full runtime BuddySwitch contract in `tools/launcher/assets/runtime-AGENTS.md`.
+- Product instances load runtime host instructions from `tools/launcher/assets/buddies/<buddy>/AGENTS.md`.
 - Runtime BuddySwitch state is not maintained as tracked skeleton directories in the main checkout.
 
 ## Canonical Sources

@@ -2,36 +2,46 @@
 
 This workspace is launcher-owned, runtime-only, and locked to the `dev` buddy.
 
-Inside this session, plain user requests belong to `dev`. Do not ask the user to prefix normal product-mode requests with `switch dev:`. The runtime adapter converts plain text to the canonical BuddySwitch wire form before resolve.
+Inside this session, ordinary user requests belong to `dev`.
+Do not ask users for command-shaped routing input.
+If work should move to another buddy, open that buddy's locked instance.
 
 ## Canonical Loop
 
-1. Resolve with `scripts/switch_runtime.py resolve`.
-2. Choose exactly one `skill_id` from `resolve_context.skills`.
+1. Prepare with `scripts/turn_runtime.py prepare "<ordinary request>"`.
+2. Choose exactly one `skill_id` from `prepare_context.skills`.
 3. Read and execute the selected BuddySwitch `SKILL.md`.
-4. Persist with `scripts/switch_runtime.py persist`.
-5. Continue from `refreshed_context` when it is valid.
+4. Persist with `scripts/turn_runtime.py persist` (`persist-skill-result`).
+5. If another turn is needed, derive a new `request_text` from `receipt.next_state`, then run `prepare` again.
 
 ## Selected-Skill Preflight
 
-- Treat the selected skill's `host_execution` and `tool_scope` as binding preflight instructions.
-- `required_tools` and `required_env` are advisory readiness metadata for the host session.
-- If the selected skill declares `discovery_mode = browser-native`, begin discovery and evidence capture in the declared `browser_executor`.
-- If `login_policy = mandatory-takeover` and a required login gate is encountered, pause for takeover before continuing.
-- If fallback or downgrade is needed, request explicit user approval before widening tool scope.
+- Treat the selected skill's `host_execution` and `tool_scope` as preflight instructions.
+- `required_tools` and `required_env` remain advisory readiness metadata for the host session.
+- Browser-native execution metadata stays fail-closed unless explicit user approval widens tool scope.
 
 ## Buddy Lock
 
 - The active buddy is `dev`.
-- Same-buddy canonical `switch dev...:` commands are allowed.
-- Cross-buddy canonical switches are external handoffs and must not execute in this session.
-- Durable BuddySwitch state lives in the projected `buddyswitch/objects/**` and `buddyswitch/content/runs/**` paths.
+- Resolve ownership from launcher session metadata; user text does not change the active buddy.
+- Durable BuddySwitch state lives in projected `buddyswitch/objects/**` and `buddyswitch/content/runs/**`.
 - `runs/raw/` is instance-local scratch.
-- Use relative `projects/app` from the instance runtime workspace; launcher projects it to shared product source.
+- Use relative `projects/app` from the runtime workspace; launcher projects it to shared product source.
 
-## Persistence And Final Output
+## Receipt Contract
 
-- Persisted outputs must go through `persist-skill-result` via `scripts/switch_runtime.py persist`.
-- After persist, use `refreshed_context` when `refreshed_context.ok = true`; rerun resolve when refreshed context is unavailable.
-- Final terminal output must use `Receipt -> Commands -> Summary`.
-- Keep object paths as debug details, not the lead user-facing result.
+- Final terminal output must use exactly two sections in this order: `Receipt`, `Summary`.
+- In `Receipt`, render:
+  - `Persisted: ok|failed`
+  - `Task: <task_title> [<task_id>]`
+  - `Track: <track_title> [<track_id>]` only when `receipt.track_id` exists
+  - `Artifact: <artifact_id|none>`
+  - `Run: <run_id>`
+  - `Related Runs: <run_id_1>, <run_id_2>` only when present
+- Use IDs and titles from `receipt`; object paths stay debug-only details.
+
+## Summary Contract
+
+- Keep execution summary to 1-2 lines.
+- Keep open questions to at most 4 items.
+- Do not lead with object paths or artifact filenames.

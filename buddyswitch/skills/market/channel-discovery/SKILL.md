@@ -79,14 +79,14 @@
 - Do not invent channel reach, conversion assumptions, or distribution access.
 
 ## Examples
-- `switch market: Choose the first channel to test an AI assistant for sales engineers`
-- `switch market: Rank early acquisition channels for this founder-led workflow tool`
-- `switch market: Plan a small experiment to test whether niche communities can drive first users`
+- `Choose the first channel to test an AI assistant for sales engineers`
+- `Rank early acquisition channels for this founder-led workflow tool`
+- `Plan a small experiment to test whether niche communities can drive first users`
 
 ## Counterexamples
-- `switch market: Build the launch checklist for the first public release`
-- `switch market: Write the homepage positioning for the workflow tool`
-- `switch market: Research whether the workflow tool solves a meaningful pain point`
+- `Build the launch checklist for the first public release`
+- `Write the homepage positioning for the workflow tool`
+- `Research whether the workflow tool solves a meaningful pain point`
 
 ## Gotchas
 - The easiest channel to name is often not the most believable first channel to execute.

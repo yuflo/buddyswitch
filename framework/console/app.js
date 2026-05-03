@@ -30,7 +30,7 @@ const runAuditList = document.getElementById("runAuditList");
 const selectedType = document.getElementById("selectedType");
 const topicTitle = document.getElementById("topicTitle");
 const topicSlug = document.getElementById("topicSlug");
-const switchCommands = document.getElementById("switchCommands");
+const nextStepState = document.getElementById("nextStepState");
 const sourceDetails = document.getElementById("sourceDetails");
 const refreshButton = document.getElementById("refreshButton");
 const dataStatus = document.getElementById("dataStatus");
@@ -333,76 +333,85 @@ function renderReadOnlyCommand(parent, label, command) {
   parent.append(block);
 }
 
-function normalizeReferenceSwitches(audit) {
-  return audit?.reference_switches && typeof audit.reference_switches === "object"
-    ? audit.reference_switches
-    : {};
+function textValue(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim();
 }
 
-function deriveTemplateSwitch(audit, references) {
-  if (typeof references.continue_current_task_in_track === "string" && references.continue_current_task_in_track) {
-    return references.continue_current_task_in_track;
+function deriveRunNextState(latestRun, fallback = {}) {
+  if (isObject(latestRun?.next_state)) {
+    const runNextState = latestRun.next_state;
+    return {
+      mode: textValue(runNextState.mode) || textValue(fallback.mode) || "continue_current_task",
+      task_id: textValue(runNextState.task_id) || textValue(fallback.task_id) || "",
+      track_id: textValue(runNextState.track_id) || textValue(fallback.track_id) || "",
+      current_buddy: textValue(runNextState.current_buddy) || textValue(fallback.current_buddy) || "",
+      next_buddy: textValue(runNextState.next_buddy) || textValue(fallback.next_buddy) || "",
+    };
   }
-  if (typeof references.continue_current_task === "string" && references.continue_current_task) {
-    return references.continue_current_task;
-  }
-  const buddy = audit?.buddy || "pm";
-  const taskId = audit?.task_id || "task-id";
-  if (audit?.track_id) {
-    return `switch ${buddy}(${taskId}) -> ${audit.track_id}: <demand>`;
-  }
-  return `switch ${buddy}(${taskId}): <demand>`;
-}
-
-function deriveRecommendedSwitch(audit, references, templateCommand, track) {
-  if (typeof audit?.recommended_switch === "string" && audit.recommended_switch.trim()) {
-    return audit.recommended_switch.trim();
-  }
-  const fallbackOrder = [
-    references.handoff_to_next_buddy,
-    references.continue_current_task_in_track,
-    references.continue_current_task,
-  ];
-  const fromReference = fallbackOrder.find((item) => typeof item === "string" && item);
-  if (fromReference) {
-    return fromReference;
-  }
-  if (track?.next_buddy) {
-    return `switch ${track.next_buddy} -> ${track.id}: <demand>`;
-  }
-  if (track?.current_buddy) {
-    return `switch ${track.current_buddy} -> ${track.id}: <demand>`;
-  }
-  return templateCommand || "";
-}
-
-function deriveSwitchCommandsForTrack(track) {
-  const latestRun = latestRunForTrack(track);
-  const references = normalizeReferenceSwitches(latestRun);
-  const template = deriveTemplateSwitch(latestRun, references);
-  const testCommand = trackNeedsTest(track)
-    ? `switch test -> ${track.id}: Run smoke checks for latest implementation`
-    : "";
-  const recommended = deriveRecommendedSwitch(latestRun, references, template, track);
   return {
-    recommended,
-    template,
-    continueTask: references.continue_current_task || "",
-    continueTaskInTrack: references.continue_current_task_in_track || template,
-    handoff: references.handoff_to_next_buddy || testCommand || (track?.next_buddy ? `switch ${track.next_buddy} -> ${track.id}: <demand>` : ""),
+    mode: textValue(fallback.mode) || "continue_current_task",
+    task_id: textValue(fallback.task_id) || "",
+    track_id: textValue(fallback.track_id) || "",
+    current_buddy: textValue(fallback.current_buddy) || "",
+    next_buddy: textValue(fallback.next_buddy) || "",
   };
 }
 
-function deriveSwitchCommandsForTask(task) {
-  const latestRun = latestRunForTask(task);
-  const references = normalizeReferenceSwitches(latestRun);
-  const template = deriveTemplateSwitch(latestRun, references);
+function deriveNextStepStateForTrack(track) {
+  const latestRun = latestRunForTrack(track);
+  const state = deriveRunNextState(latestRun, {
+    task_id: latestRun?.task_id || latestTaskForTrack(track)?.id || "",
+    track_id: track?.id || latestRun?.track_id || "",
+    current_buddy: track?.current_buddy || latestRun?.buddy || "",
+    next_buddy: track?.next_buddy || "",
+    mode: "continue_current_task",
+  });
+  const currentBuddy = state.current_buddy;
+  const nextBuddy = state.next_buddy;
+  const recommendedBuddy = nextBuddy || currentBuddy;
+  const mode = state.mode || "continue_current_task";
+  const summary = recommendedBuddy && currentBuddy && recommendedBuddy !== currentBuddy
+    ? `Handoff to ${buddyLabel(recommendedBuddy)} for the next turn.`
+    : `Continue with ${buddyLabel(currentBuddy || recommendedBuddy)} on the active task.`;
+
   return {
-    recommended: deriveRecommendedSwitch(latestRun, references, template, null),
-    template,
-    continueTask: references.continue_current_task || template,
-    continueTaskInTrack: references.continue_current_task_in_track || "",
-    handoff: references.handoff_to_next_buddy || "",
+    mode,
+    summary,
+    currentBuddy,
+    nextBuddy,
+    recommendedBuddy,
+    trackId: state.track_id || track?.id || "",
+    taskId: state.task_id || latestTaskForTrack(track)?.id || "",
+  };
+}
+
+function deriveNextStepStateForTask(task) {
+  const latestRun = latestRunForTask(task);
+  const state = deriveRunNextState(latestRun, {
+    task_id: task?.id || latestRun?.task_id || "",
+    track_id: task?.track_id || latestRun?.track_id || "",
+    current_buddy: task?.buddy || latestRun?.buddy || "",
+    next_buddy: "",
+    mode: "continue_current_task",
+  });
+  const currentBuddy = state.current_buddy;
+  const recommendedBuddy = state.next_buddy || currentBuddy;
+  const mode = state.mode || "continue_current_task";
+  const summary = recommendedBuddy && currentBuddy && recommendedBuddy !== currentBuddy
+    ? `Next step likely belongs to ${buddyLabel(recommendedBuddy)}.`
+    : `Continue with ${buddyLabel(currentBuddy)} on this task.`;
+
+  return {
+    mode,
+    summary,
+    currentBuddy,
+    recommendedBuddy,
+    nextBuddy: state.next_buddy || "",
+    taskId: state.task_id || task?.id || "",
+    trackId: state.track_id || task?.track_id || "",
   };
 }
 
@@ -568,7 +577,7 @@ function renderTracks() {
   setText(trackCount, String(tracks.length + looseTasks.length));
 
   if (tracks.length === 0 && looseTasks.length === 0) {
-    trackList.append(createEl("p", "note", "No work items found. Start with: switch pm: create a track for <project goal>"));
+    trackList.append(createEl("p", "note", "No work items found. Start a buddy instance, then send a normal request to create the first task."));
     return;
   }
 
@@ -600,7 +609,7 @@ function renderTrackSummary(track) {
   const artifacts = getTrackArtifacts(track);
   const latestRun = latestRunForTrack(track);
   const latestArtifact = latestArtifactForTrack(track);
-  const commands = deriveSwitchCommandsForTrack(track);
+  const nextStep = deriveNextStepStateForTrack(track);
 
   renderKeyValue(trackSummary, "Goal", track.summary || "No track summary");
   renderKeyValue(trackSummary, "State", track.status || "active");
@@ -609,7 +618,7 @@ function renderTrackSummary(track) {
   renderKeyValue(trackSummary, "Materials", String(artifacts.length));
   renderKeyValue(trackSummary, "Latest run", latestRun?.run_id || "none");
   renderKeyValue(trackSummary, "Latest material", artifactTitle(latestArtifact));
-  renderKeyValue(trackSummary, "Next", commands.recommended || "No recommended command available");
+  renderKeyValue(trackSummary, "Next", nextStep.summary || "No next step available");
 }
 
 function renderStandaloneSummary(task) {
@@ -622,7 +631,7 @@ function renderStandaloneSummary(task) {
   const artifacts = getTaskArtifacts(task);
   const latestRun = latestRunForTask(task);
   const latestArtifact = artifacts[0] || null;
-  const commands = deriveSwitchCommandsForTask(task);
+  const nextStep = deriveNextStepStateForTask(task);
 
   renderKeyValue(trackSummary, "Task", task.title || task.id);
   renderKeyValue(trackSummary, "Buddy", buddyLabel(task.buddy));
@@ -630,7 +639,7 @@ function renderStandaloneSummary(task) {
   renderKeyValue(trackSummary, "Materials", String(artifacts.length));
   renderKeyValue(trackSummary, "Latest run", latestRun?.run_id || task.latest_run_id || "none");
   renderKeyValue(trackSummary, "Latest material", artifactTitle(latestArtifact));
-  renderKeyValue(trackSummary, "Next", commands.recommended || "No recommended command available");
+  renderKeyValue(trackSummary, "Next", nextStep.summary || "No next step available");
 }
 
 function renderTasks(track) {
@@ -890,45 +899,46 @@ function renderStandaloneProgress(task) {
   }
 }
 
-function renderNextCommands(track) {
-  switchCommands.replaceChildren();
+function renderNextStepForTrack(track) {
+  nextStepState.replaceChildren();
   if (!track) {
-    switchCommands.append(createEl("p", "note", "No track selected."));
+    nextStepState.append(createEl("p", "note", "No track selected."));
     return;
   }
 
-  const commands = deriveSwitchCommandsForTrack(track);
-  renderLabeledCommand(switchCommands, "Recommended", commands.recommended, true);
-  renderLabeledCommand(switchCommands, "Template", commands.template);
-  if (commands.continueTask && commands.continueTask !== commands.template) {
-    renderLabeledCommand(switchCommands, "Continue current task", commands.continueTask);
+  const nextStep = deriveNextStepStateForTrack(track);
+  renderKeyValue(nextStepState, "Summary", nextStep.summary || "No next step available");
+  renderKeyValue(nextStepState, "Mode", humanizeKey(nextStep.mode || "unknown"));
+  renderKeyValue(nextStepState, "Current buddy", buddyLabel(nextStep.currentBuddy));
+  renderKeyValue(nextStepState, "Recommended buddy", buddyLabel(nextStep.recommendedBuddy));
+  if (nextStep.nextBuddy) {
+    renderKeyValue(nextStepState, "Configured next buddy", buddyLabel(nextStep.nextBuddy));
   }
-  if (commands.continueTaskInTrack && commands.continueTaskInTrack !== commands.template) {
-    renderLabeledCommand(switchCommands, "Continue task in track", commands.continueTaskInTrack);
+  if (nextStep.taskId) {
+    renderKeyValue(nextStepState, "Task id", nextStep.taskId);
   }
-  if (commands.handoff && commands.handoff !== commands.recommended) {
-    renderLabeledCommand(switchCommands, "Handoff", commands.handoff);
+  if (nextStep.trackId) {
+    renderKeyValue(nextStepState, "Track id", nextStep.trackId);
   }
 }
 
-function renderStandaloneCommands(task) {
-  switchCommands.replaceChildren();
+function renderNextStepForTask(task) {
+  nextStepState.replaceChildren();
   if (!task) {
-    switchCommands.append(createEl("p", "note", "No standalone task selected."));
+    nextStepState.append(createEl("p", "note", "No standalone task selected."));
     return;
   }
 
-  const commands = deriveSwitchCommandsForTask(task);
-  renderLabeledCommand(switchCommands, "Recommended", commands.recommended, true);
-  renderLabeledCommand(switchCommands, "Template", commands.template);
-  if (commands.continueTask && commands.continueTask !== commands.template) {
-    renderLabeledCommand(switchCommands, "Continue current task", commands.continueTask);
+  const nextStep = deriveNextStepStateForTask(task);
+  renderKeyValue(nextStepState, "Summary", nextStep.summary || "No next step available");
+  renderKeyValue(nextStepState, "Mode", humanizeKey(nextStep.mode || "unknown"));
+  renderKeyValue(nextStepState, "Current buddy", buddyLabel(nextStep.currentBuddy));
+  renderKeyValue(nextStepState, "Recommended buddy", buddyLabel(nextStep.recommendedBuddy));
+  if (nextStep.taskId) {
+    renderKeyValue(nextStepState, "Task id", nextStep.taskId);
   }
-  if (commands.continueTaskInTrack && commands.continueTaskInTrack !== commands.template) {
-    renderLabeledCommand(switchCommands, "Continue task in track", commands.continueTaskInTrack);
-  }
-  if (commands.handoff && commands.handoff !== commands.recommended) {
-    renderLabeledCommand(switchCommands, "Handoff", commands.handoff);
+  if (nextStep.trackId) {
+    renderKeyValue(nextStepState, "Track id", nextStep.trackId);
   }
 }
 
@@ -949,6 +959,28 @@ function formatArtifactLabel(audit) {
   return `${artifactIds[0]} (+${artifactIds.length - 1} more)`;
 }
 
+function formatReceiptPaths(audit) {
+  if (!isObject(audit?.receipt_paths)) {
+    return "";
+  }
+  const receiptPaths = audit.receipt_paths;
+  const rows = [];
+  if (textValue(receiptPaths.run)) {
+    rows.push(`run=${receiptPaths.run}`);
+  }
+  if (textValue(receiptPaths.task)) {
+    rows.push(`task=${receiptPaths.task}`);
+  }
+  if (textValue(receiptPaths.track)) {
+    rows.push(`track=${receiptPaths.track}`);
+  }
+  const artifacts = asArray(receiptPaths.artifacts).filter((item) => typeof item === "string" && item);
+  if (artifacts.length > 0) {
+    rows.push(`artifacts=${artifacts.length}`);
+  }
+  return rows.join(" | ");
+}
+
 function renderRunHistory(track) {
   runAuditList.replaceChildren();
   const runs = getTrackRuns(track);
@@ -965,9 +997,15 @@ function renderRunHistory(track) {
 
   runs.slice(0, 8).forEach((audit) => {
     const item = createEl("article", "summary-item run-card");
-    const references = normalizeReferenceSwitches(audit);
-    const template = deriveTemplateSwitch(audit, references);
-    const recommended = deriveRecommendedSwitch(audit, references, template, track);
+    const state = deriveRunNextState(audit, {
+      task_id: audit?.task_id || "",
+      track_id: audit?.track_id || track?.id || "",
+      current_buddy: audit?.buddy || track?.current_buddy || "",
+      next_buddy: track?.next_buddy || "",
+      mode: "continue_current_task",
+    });
+    const recommendedBuddy = state.next_buddy || state.current_buddy;
+    const receiptPathSummary = formatReceiptPaths(audit);
     const header = createEl("div", "run-header");
     header.append(
       createEl("strong", "", `${audit.buddy || "unknown"} / ${audit.skill_id || "unknown"}`),
@@ -983,11 +1021,13 @@ function renderRunHistory(track) {
     renderKeyValue(grid, "Task", formatTaskLabel(audit));
     renderKeyValue(grid, "Artifact", formatArtifactLabel(audit));
     renderKeyValue(grid, "Run", audit.run_id || "run-unknown");
+    renderKeyValue(grid, "Next mode", humanizeKey(state.mode || "continue_current_task"));
+    if (receiptPathSummary) {
+      renderKeyValue(grid, "Receipt paths", receiptPathSummary);
+    }
     item.append(grid);
-    if (recommended) {
-      const commandList = createEl("div", "command-list compact-command");
-      renderReadOnlyCommand(commandList, "Recommended then", recommended);
-      item.append(commandList);
+    if (recommendedBuddy) {
+      renderKeyValue(grid, "Recommended buddy", buddyLabel(recommendedBuddy));
     }
     runAuditList.append(item);
   });
@@ -1009,9 +1049,15 @@ function renderRunHistoryForTask(task) {
 
   runs.slice(0, 8).forEach((audit) => {
     const item = createEl("article", "summary-item run-card");
-    const references = normalizeReferenceSwitches(audit);
-    const template = deriveTemplateSwitch(audit, references);
-    const recommended = deriveRecommendedSwitch(audit, references, template, null);
+    const state = deriveRunNextState(audit, {
+      task_id: audit?.task_id || task?.id || "",
+      track_id: audit?.track_id || task?.track_id || "",
+      current_buddy: audit?.buddy || task?.buddy || "",
+      next_buddy: "",
+      mode: "continue_current_task",
+    });
+    const recommendedBuddy = state.next_buddy || state.current_buddy;
+    const receiptPathSummary = formatReceiptPaths(audit);
     const header = createEl("div", "run-header");
     header.append(
       createEl("strong", "", `${audit.buddy || "unknown"} / ${audit.skill_id || "unknown"}`),
@@ -1027,11 +1073,13 @@ function renderRunHistoryForTask(task) {
     renderKeyValue(grid, "Task", formatTaskLabel(audit));
     renderKeyValue(grid, "Artifact", formatArtifactLabel(audit));
     renderKeyValue(grid, "Run", audit.run_id || "run-unknown");
+    renderKeyValue(grid, "Next mode", humanizeKey(state.mode || "continue_current_task"));
+    if (receiptPathSummary) {
+      renderKeyValue(grid, "Receipt paths", receiptPathSummary);
+    }
     item.append(grid);
-    if (recommended) {
-      const commandList = createEl("div", "command-list compact-command");
-      renderReadOnlyCommand(commandList, "Recommended then", recommended);
-      item.append(commandList);
+    if (recommendedBuddy) {
+      renderKeyValue(grid, "Recommended buddy", buddyLabel(recommendedBuddy));
     }
     runAuditList.append(item);
   });
@@ -1139,7 +1187,7 @@ function renderSelectedTrack() {
     taskList.replaceChildren(createEl("p", "note", "No task data available."));
     taskMaterials.replaceChildren(createEl("p", "note", "No task selected."));
     trackProgress.replaceChildren(createEl("p", "note", "No progress notes available."));
-    switchCommands.replaceChildren();
+    nextStepState.replaceChildren();
     runAuditList.replaceChildren(createEl("p", "note", "No run history available."));
     sourceDetails.replaceChildren(createEl("summary", "", "Object paths and raw source"));
     return;
@@ -1156,7 +1204,7 @@ function renderSelectedTrack() {
     renderStandaloneTasks();
     renderTaskMaterialsForTask(task);
     renderStandaloneProgress(task);
-    renderStandaloneCommands(task);
+    renderNextStepForTask(task);
     renderRunHistoryForTask(task);
     renderStandaloneSourceDetails(task);
     return;
@@ -1172,7 +1220,7 @@ function renderSelectedTrack() {
   renderTasks(selectedTrack);
   renderTaskMaterials(selectedTrack);
   renderTrackProgress(selectedTrack);
-  renderNextCommands(selectedTrack);
+  renderNextStepForTrack(selectedTrack);
   renderRunHistory(selectedTrack);
   renderSourceDetails(selectedTrack);
 }

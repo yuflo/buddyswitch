@@ -79,14 +79,14 @@
 - Do not imply operational readiness that the current evidence does not support.
 
 ## Examples
-- `switch market: Prepare a first validation launch for an AI assistant landing page`
-- `switch market: Build the launch-prep brief for a founder-led beta announcement`
-- `switch market: Define feedback collection and instrumentation for a niche workflow launch`
+- `Prepare a first validation launch for an AI assistant landing page`
+- `Build the launch-prep brief for a founder-led beta announcement`
+- `Define feedback collection and instrumentation for a niche workflow launch`
 
 ## Counterexamples
-- `switch dev: Ship the beta announcement flow in projects/app`
-- `switch market: Choose the first acquisition channel for the workflow launch`
-- `switch market: Automate the full growth funnel after launch`
+- `Ship the beta announcement flow in projects/app`
+- `Choose the first acquisition channel for the workflow launch`
+- `Automate the full growth funnel after launch`
 
 ## Gotchas
 - A strong launch-prep brief should make the feedback loop explicit before public release.

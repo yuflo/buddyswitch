@@ -113,14 +113,14 @@
 - Do not use silent search API/snippet/crawler fallback.
 
 ## Examples
-- `switch market: Validate whether an AI note-taking tool for consultants has enough PMF signal to test`
-- `switch market: Narrow the best ICP for a lightweight CRM aimed at solo founders`
-- `switch market: Compare current alternatives and pain signals for a devtool onboarding assistant`
+- `Validate whether an AI note-taking tool for consultants has enough PMF signal to test`
+- `Narrow the best ICP for a lightweight CRM aimed at solo founders`
+- `Compare current alternatives and pain signals for a devtool onboarding assistant`
 
 ## Counterexamples
-- `switch market: Research the creator analytics category broadly and summarize competitors`
-- `switch pm: Draft the MVP PRD for a consultant note-taking tool`
-- `switch dev: Implement the onboarding assistant in projects/app`
+- `Research the creator analytics category broadly and summarize competitors`
+- `Draft the MVP PRD for a consultant note-taking tool`
+- `Implement the onboarding assistant in projects/app`
 
 ## Gotchas
 - A PMF-shaped research request can still mention competitors, but the output should stay focused on pain, alternatives, and next validation action.

@@ -680,7 +680,7 @@ exec "$real_git" "$@"
 
     def test_bare_codex_args_fail_closed_without_runtime_mutation(self) -> None:
         self.assertTrue(LAUNCHER.exists(), "expected root launcher to exist")
-        self._assert_unknown_top_level_command(["debug", "prompt-input", "switch pm: draft prd"], "debug")
+        self._assert_unknown_top_level_command(["debug", "prompt-input", "Draft the onboarding PRD"], "debug")
 
     def test_start_execution_worktree_uses_runtime_workspace_agents_header(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -723,7 +723,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "--", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "--", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -745,6 +745,91 @@ exec "$real_git" "$@"
                 encoding="utf-8"
             )
             self.assertEqual(agents_md.read_text(encoding="utf-8"), expected_agents)
+            runtime_prompt = agents_md.read_text(encoding="utf-8")
+            for token in (
+                "## Receipt Contract",
+                "Persisted: ok|failed",
+                "Task: <task_title> [<task_id>]",
+                "Artifact: <artifact_id|none>",
+                "Run: <run_id>",
+                "Related Runs: <run_id_1>, <run_id_2>",
+                "## Summary Contract",
+            ):
+                self.assertIn(token, runtime_prompt)
+
+    def test_start_execution_worktree_uses_design_buddy_prompt_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            ready_file = temp_root_path / "browser-ready.flag"
+            capture_path = temp_root_path / "capture-design.json"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "design", "--", "debug", "prompt-input", "Shape prototype for onboarding"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(
+                completed.returncode,
+                0,
+                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+            )
+
+            payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            workspace_dir = Path(payload["cwd"])
+            agents_md = workspace_dir / "AGENTS.md"
+            expected_agents = (ROOT / "tools" / "launcher" / "assets" / "buddies" / "design" / "AGENTS.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertEqual(agents_md.read_text(encoding="utf-8"), expected_agents)
+            prompt_text = agents_md.read_text(encoding="utf-8")
+            self.assertIn("locked to the `design` buddy", prompt_text)
+            for token in (
+                "## Receipt Contract",
+                "Persisted: ok|failed",
+                "Task: <task_title> [<task_id>]",
+                "Artifact: <artifact_id|none>",
+                "Run: <run_id>",
+                "Related Runs: <run_id_1>, <run_id_2>",
+                "## Summary Contract",
+            ):
+                self.assertIn(token, prompt_text)
 
     def test_start_writes_launcher_marker_before_workspace_bootstrap(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -785,7 +870,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_GIT_CAPTURE"] = str(temp_root_path / "git-calls.log")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -849,7 +934,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -873,7 +958,7 @@ exec "$real_git" "$@"
             self.assertIn("Delete instance:", completed.stdout)
             self.assertIn(f"./buddyswitch-codex instance delete {payload['instance_id']} --yes", completed.stdout)
 
-            self.assertEqual(payload["argv"], ["debug", "prompt-input", "switch pm: draft prd"])
+            self.assertEqual(payload["argv"], ["debug", "prompt-input", "Draft the onboarding PRD"])
             self.assertEqual(payload["active_buddy"], "pm")
             self.assertIsInstance(payload["instance_id"], str)
             self.assertTrue(payload["instance_id"])
@@ -898,8 +983,13 @@ exec "$real_git" "$@"
                 "host_execution",
                 "tool_scope",
                 "persist-skill-result",
-                "refreshed_context",
-                "receipt -> commands -> summary",
+                "## receipt contract",
+                "## summary contract",
+                "persisted: ok|failed",
+                "task: <task_title> [<task_id>]",
+                "artifact: <artifact_id|none>",
+                "run: <run_id>",
+                "related runs: <run_id_1>, <run_id_2>",
             ):
                 self.assertIn(token, copied_agents)
             self.assertTrue((instance_root / "browser" / "profile").exists())
@@ -1022,7 +1112,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1088,7 +1178,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1168,7 +1258,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_RELATIVE_WRITE_CONTENT"] = "shared-relative-write"
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1246,7 +1336,7 @@ exec "$real_git" "$@"
             pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_PATH"] = "cross-buddy-sentinel.txt"
             pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_CONTENT"] = "shared-via-relative-path"
             pm_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=pm_env,
                 text=True,
@@ -1259,7 +1349,7 @@ exec "$real_git" "$@"
             dev_env["BUDDYSWITCH_TEST_CAPTURE"] = str(dev_capture_path)
             dev_env["BUDDYSWITCH_TEST_RELATIVE_READ_PATH"] = "cross-buddy-sentinel.txt"
             dev_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "dev", "debug", "prompt-input", "switch dev: continue"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "dev", "debug", "prompt-input", "Continue implementation for onboarding"],
                 cwd=ROOT,
                 env=dev_env,
                 text=True,
@@ -1334,7 +1424,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1392,7 +1482,7 @@ exec "$real_git" "$@"
             pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_PATH"] = "shared-product-sentinel.txt"
             pm_env["BUDDYSWITCH_TEST_RELATIVE_WRITE_CONTENT"] = "shared-pm-sentinel"
             pm_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=pm_env,
                 text=True,
@@ -1405,7 +1495,7 @@ exec "$real_git" "$@"
             dev_env["BUDDYSWITCH_TEST_CAPTURE"] = str(dev_capture_path)
             dev_env["BUDDYSWITCH_TEST_RELATIVE_READ_PATH"] = "shared-product-sentinel.txt"
             dev_start = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "dev", "debug", "prompt-input", "switch dev: continue"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "dev", "debug", "prompt-input", "Continue implementation for onboarding"],
                 cwd=ROOT,
                 env=dev_env,
                 text=True,
@@ -1493,7 +1583,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1528,7 +1618,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "unknown", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "unknown", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -1676,7 +1766,7 @@ exec "$real_git" "$@"
             start_env = env.copy()
             start_env["BUDDYSWITCH_TEST_CAPTURE"] = str(first_capture)
             start_result = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=start_env,
                 text=True,
@@ -2253,7 +2343,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             env["BUDDYSWITCH_TEST_PRODUCT_WRITE"] = "persist-after-delete"
 
             start_result = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -2645,7 +2735,7 @@ exit 1
             env["BUDDYSWITCH_INSTANCE_JSON"] = str(temp_root_path / "leaked-instance.json")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "start", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "start", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -2948,7 +3038,7 @@ exit 1
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             debug_result = subprocess.run(
-                [str(LAUNCHER), "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -3779,7 +3869,7 @@ exit 1
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -4572,6 +4662,36 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             self.assertEqual(raw_dump.read_text(encoding="utf-8"), '{"raw":true}\n')
             self.assertEqual(runtime_session.read_text(encoding="utf-8"), '{"session":"demo"}\n')
 
+    def test_workspace_install_runtime_agents_requires_explicit_template(self) -> None:
+        command = r'''
+set -euo pipefail
+source "tools/launcher/workspace.sh"
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "${tmp_root}"' EXIT
+export BUDDYSWITCH_SHARED_ROOT="${tmp_root}/shared"
+export BUDDYSWITCH_WORKSPACE_DIR="${tmp_root}/workspace"
+mkdir -p "${BUDDYSWITCH_WORKSPACE_DIR}"
+unset BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE || true
+set +e
+buddyswitch_workspace_install_runtime_agents 1>/dev/null 2>"${tmp_root}/stderr.txt"
+exit_code=$?
+set -e
+if [[ "${exit_code}" -eq 0 ]]; then
+  echo "expected failure when template var is unset" >&2
+  exit 97
+fi
+cat "${tmp_root}/stderr.txt"
+'''
+        completed = subprocess.run(
+            ["/bin/zsh", "-lc", command],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertIn("BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE is required", completed.stdout + completed.stderr)
+
     def test_workspace_sync_restores_runtime_outputs_when_worktree_rebuild_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -4739,7 +4859,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -4829,7 +4949,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             start_result = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -4948,7 +5068,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
 
             try:
                 completed = subprocess.run(
-                    [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                    [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                     cwd=ROOT,
                     env=env,
                     text=True,
@@ -5017,7 +5137,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
 
             completed = subprocess.run(
-                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -5073,7 +5193,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             env["BUDDYSWITCH_WORKSPACE_DIR"] = str(external_workspace)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "start", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "start", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -5130,7 +5250,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             )
 
             completed = subprocess.run(
-                [str(LAUNCHER), "start", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "start", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -5182,7 +5302,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             env["BUDDYSWITCH_WORKSPACE_DIR"] = str(shared_root)
 
             completed = subprocess.run(
-                [str(LAUNCHER), "start", "debug", "prompt-input", "switch pm: draft prd"],
+                [str(LAUNCHER), "start", "debug", "prompt-input", "Draft the onboarding PRD"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -5249,7 +5369,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
                     run_env["BUDDYSWITCH_WORKSPACE_DIR"] = str(reserved_workspace)
 
                     completed = subprocess.run(
-                        [str(LAUNCHER), "start", "debug", "prompt-input", "switch pm: draft prd"],
+                        [str(LAUNCHER), "start", "debug", "prompt-input", "Draft the onboarding PRD"],
                         cwd=ROOT,
                         env=run_env,
                         text=True,

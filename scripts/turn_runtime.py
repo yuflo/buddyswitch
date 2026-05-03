@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BuddySwitch runtime: resolve switch context and persist structured results."""
+"""BuddySwitch runtime: prepare turn context and persist structured results."""
 
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ from env_manifest import (
     load_manifest,
     require_buddy,
 )
+import env_store
 from env_store import (
-    ROOT,
     add_run_to_task,
     build_track_artifact_index,
     create_artifact,
@@ -50,8 +50,10 @@ from env_store import (
     update_track,
 )
 from output_schema import OutputSchemaError, load_output_schema, validate_output_payload
-from parse_switch import EXAMPLE, SYNTAX, parse_switch
 from artifact_selection import select_artifacts_for_run
+
+
+ROOT = env_store.ROOT
 
 
 TRACK_ACTIONS = ("create", "update", "advance", "archive")
@@ -71,12 +73,6 @@ _PRODUCT_MODE_ENV_KEYS = (
 _RUNTIME_LOCK_TIMEOUT_ENV = "BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"
 _RUNTIME_LOCK_DEFAULT_TIMEOUT_SECONDS = 30.0
 _RUNTIME_LOCK_POLL_SECONDS = 0.05
-_STRUCTURAL_SWITCH_PATTERN = re.compile(
-    r"^switch\s+([a-z][a-z0-9-]*)"
-    r"(?:\s*\(\s*([a-z0-9][a-z0-9-]*)\s*\))?"
-    r"(?:\s*->\s*([a-z0-9][a-z0-9-]*))?"
-    r"\s*:(.*)$"
-)
 
 
 def runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -85,8 +81,6 @@ def runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) 
         "error": {
             "code": code,
             "message": message,
-            "expected_syntax": SYNTAX,
-            "example": EXAMPLE,
         },
     }
     if extra:
@@ -210,29 +204,6 @@ def _hold_product_runtime_lock(product_session: dict[str, Any]):
         os.close(lock_fd)
 
 
-def _match_structural_switch(text: str) -> re.Match[str] | None:
-    match = _STRUCTURAL_SWITCH_PATTERN.match(text)
-    if match is None:
-        return None
-    if not match.group(4).strip():
-        return None
-    return match
-
-
-def _build_plain_text_switch(active_buddy: str, binding: dict[str, Any], demand: str) -> str:
-    current_task_id = binding.get("current_task_id")
-    current_track_id = binding.get("current_track_id")
-
-    if isinstance(current_task_id, str) and current_task_id.strip():
-        command = f"switch {active_buddy}({current_task_id.strip()})"
-        if isinstance(current_track_id, str) and current_track_id.strip():
-            command = f"{command} -> {current_track_id.strip()}"
-    else:
-        command = f"switch {active_buddy}"
-
-    return f"{command}: {demand}"
-
-
 def _write_product_session_binding(
     product_session: dict[str, Any],
     *,
@@ -259,13 +230,10 @@ def _write_product_session_binding(
 
 
 def _resolve_binding_from_payload(payload: dict[str, Any]) -> tuple[str, str | None]:
-    switch_payload = payload.get("switch")
-    if not isinstance(switch_payload, dict):
-        raise ValueError("resolve payload switch is required for product session binding")
-    task_id = switch_payload.get("task_id")
-    track_id = switch_payload.get("track_id")
+    task_id = payload.get("current_task_id")
+    track_id = payload.get("current_track_id")
     if not isinstance(task_id, str) or not task_id.strip():
-        raise ValueError("resolve payload switch.task_id is required for product session binding")
+        raise ValueError("prepare payload current_task_id is required for product session binding")
     if not isinstance(track_id, str) or not track_id.strip():
         track_id = None
     return task_id.strip(), track_id.strip() if isinstance(track_id, str) else None
@@ -318,8 +286,13 @@ def _persist_binding_from_payload(payload: dict[str, Any]) -> tuple[str, str | N
         and refreshed_error.get("code") == "E_RUNTIME_REFRESH_CONTEXT"
         and not _receipt_has_binding_update_warning(receipt)
     ):
-        task_id = receipt.get("task_id")
-        track_id = receipt.get("track_id")
+        next_state = receipt.get("next_state")
+        if isinstance(next_state, dict):
+            task_id = next_state.get("task_id")
+            track_id = next_state.get("track_id")
+        else:
+            task_id = receipt.get("task_id")
+            track_id = receipt.get("track_id")
         if not isinstance(task_id, str) or not task_id.strip():
             return None
         if not isinstance(track_id, str) or not track_id.strip():
@@ -346,38 +319,11 @@ def _mark_committed_binding_update_failed(payload: dict[str, Any], product_sessi
         "ok": False,
         "error": {
             "code": "E_RUNTIME_REFRESH_CONTEXT",
-            "message": "instance binding update failed after persist commit; rerun resolve for next turn",
+            "message": "instance binding update failed after persist commit; rerun prepare for next turn",
             "instance_id": product_session.get("instance_id"),
             "instance_json": str(product_session.get("instance_json")),
         },
     }
-
-
-def _adapt_resolve_text_for_product_session(text: str, *, product_session: dict[str, Any]) -> str:
-    trimmed = text.strip()
-    if not trimmed:
-        return text
-
-    active_buddy = product_session["active_buddy"]
-    structural_switch = _match_structural_switch(trimmed)
-    if structural_switch:
-        requested_buddy = structural_switch.group(1).strip().lower()
-        if requested_buddy != active_buddy:
-            raise ValueError(
-                "Session is locked to buddy "
-                f"'{active_buddy}'. Received canonical switch for '{requested_buddy}'."
-            )
-        return trimmed
-
-    binding = product_session["payload"]
-    return _build_plain_text_switch(active_buddy, binding, trimmed)
-
-
-def _adapt_resolve_text_for_session(text: str, *, manifest_path: Path) -> str:
-    product_session = _load_product_mode_session(manifest_path)
-    if product_session is None:
-        return text
-    return _adapt_resolve_text_for_product_session(text, product_session=product_session)
 
 
 def _ensure_no_legacy_outputs(demand: str) -> None:
@@ -385,6 +331,19 @@ def _ensure_no_legacy_outputs(demand: str) -> None:
         match = pattern.search(demand)
         if match:
             raise ValueError(f"{LEGACY_OUTPUT_ERROR} Rejecting requested path '{match.group(1)}'.")
+
+
+def _is_legacy_command_shaped_request(request_text: str) -> bool:
+    stripped = request_text.lstrip()
+    if not stripped.lower().startswith("switch "):
+        return False
+    remainder = stripped[len("switch ") :]
+    colon_index = remainder.find(":")
+    if colon_index < 0:
+        return False
+    command_prefix = remainder[:colon_index].strip()
+    command_body = remainder[colon_index + 1 :].strip()
+    return bool(command_prefix and command_body)
 
 
 def _next_unique(base: str, existing: set[str]) -> str:
@@ -454,11 +413,11 @@ def _derive_task_title(demand: str) -> str:
     return snippet if snippet else "Task"
 
 
-def _derive_artifact_title(buddy: str, skill_id: str, demand: str) -> str:
-    snippet = " ".join(demand.split()[:8]).strip()
+def _derive_artifact_title(active_buddy: str, skill_id: str, request_text: str) -> str:
+    snippet = " ".join(request_text.split()[:8]).strip()
     if snippet:
-        return f"{buddy.upper()} {skill_id} - {snippet}"
-    return f"{buddy.upper()} {skill_id}"
+        return f"{active_buddy.upper()} {skill_id} - {snippet}"
+    return f"{active_buddy.upper()} {skill_id}"
 
 
 def _derive_artifact_id(task_id: str, kind: str) -> str:
@@ -467,29 +426,25 @@ def _derive_artifact_id(task_id: str, kind: str) -> str:
     return _next_unique(base, existing)
 
 
-def _build_reference_switches(
+def _build_next_state(
     *,
-    buddy_id: str,
     task_id: str,
     track_id: str | None,
+    current_buddy: str,
     next_buddy: str | None,
-) -> dict[str, str]:
-    references: dict[str, str] = {
-        "continue_current_task": f"switch {buddy_id}({task_id}): <demand>",
+    track_action: str | None = None,
+) -> dict[str, Any]:
+    resolved_next_buddy = next_buddy if isinstance(next_buddy, str) and next_buddy.strip() else None
+    mode = "handoff" if resolved_next_buddy and resolved_next_buddy != current_buddy else "continue_current_task"
+    if track_action == "archive":
+        mode = "track_archived"
+    return {
+        "task_id": task_id,
+        "track_id": track_id,
+        "current_buddy": current_buddy,
+        "next_buddy": resolved_next_buddy,
+        "mode": mode,
     }
-    if track_id:
-        references["continue_current_task_in_track"] = f"switch {buddy_id}({task_id}) -> {track_id}: <demand>"
-        if next_buddy:
-            references["handoff_to_next_buddy"] = f"switch {next_buddy} -> {track_id}: <demand>"
-    return references
-
-
-def _pick_recommended_switch(reference_switches: dict[str, str]) -> str:
-    for key in ("handoff_to_next_buddy", "continue_current_task_in_track", "continue_current_task"):
-        command = reference_switches.get(key)
-        if command:
-            return command
-    return ""
 
 
 def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
@@ -522,7 +477,7 @@ def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
             "required_tools": required_tools,
             "required_env": required_env,
             "policy": ADVISORY_RUNTIME_METADATA_POLICY,
-            "note": "These fields inform the host session and do not reject resolve candidates.",
+            "note": "These fields inform the host session and do not reject prepare candidates.",
         },
         "produces": runtime.get("produces", []),
         "consumes": runtime.get("consumes", []),
@@ -560,11 +515,11 @@ def _build_run_instructions(
         next_actions = [f"Use implicit_skill_id '{implicit_skill_id}' for this run."]
     elif selected_skill_id:
         next_actions = [
-            "Choose one skill_id from eligible_skills.",
+            "Choose one skill_id from skills.",
             f"If you choose skill_id '{selected_skill_id}', use the selected inputs below for that run.",
         ]
     else:
-        next_actions = ["Choose one skill_id from eligible_skills."]
+        next_actions = ["Choose one skill_id from skills."]
 
     next_actions.append("When track_artifact_index is present, select relevant inputs by slot before running the skill.")
     if selected_inputs:
@@ -576,10 +531,9 @@ def _build_run_instructions(
         next_actions.append(f"Read selected inputs by slot: {joined_slots}.")
     next_actions.extend(
         [
-            "After choosing skill_id, call prepare-execution to materialize selected_skill_packet.",
-            "Inject selected_skill_packet.skill_instructions verbatim into the current host turn.",
-            "Treat selected_skill_packet.execution_steps as ordered requirements for this run.",
-            "Produce a structured result payload matching required_output_schema_by_skill[skill_id].",
+            "After choosing skill_id, read skills[*].instruction_path for the selected skill.",
+            "Follow the selected skill instructions in the current host turn.",
+            "Produce a structured result payload matching the selected skill's output_schema.",
             "Call persist when you want BuddySwitch to write task/artifact/track state and run audit metadata.",
         ]
     )
@@ -594,11 +548,11 @@ def _build_run_instructions(
         artifact_read_commands.append(f"python3 scripts/env_artifacts.py get {artifact_id}")
     return {
         "host": "codex",
-        "selection_rule": "Choose exactly one skill_id from eligible_skills. Multi-skill buddies are never auto-selected by the runtime.",
-        "execution_rule": "The host Codex session runs the selected skill workflow and produces a structured result that matches required_output_schema_by_skill[skill_id].",
+        "selection_rule": "Choose exactly one skill_id from skills. Multi-skill buddies are never auto-selected by the runtime.",
+        "execution_rule": "The host Codex session runs the selected skill workflow and produces a structured result that matches the selected skill's output_schema.",
         "persistence_rule": "Call persist with the resolved payload, selected skill_id, and structured result when the run should become BuddySwitch state.",
         "resolve_notes": [
-            "resolve parses the invocation, derives candidates and context, and does not write BuddySwitch state."
+            "prepare parses the invocation, derives candidates and context, and does not write BuddySwitch state."
         ],
         "host_execution": host_execution,
         "selected_inputs": selected_inputs,
@@ -681,38 +635,11 @@ def _validate_result_against_skill(skill: dict[str, Any], result: dict[str, Any]
         raise ValueError("result payload failed schema validation: " + "; ".join(errors))
 
 
-def _authoritative_context_buddy_id(
-    *,
-    stored_task: dict[str, Any],
-    buddy_payload: dict[str, Any] | None,
-    switch_payload: dict[str, Any],
-) -> str:
-    buddy_id = stored_task.get("buddy")
-    if not isinstance(buddy_id, str) or not buddy_id.strip():
-        raise ValueError("stored task buddy is required")
-    buddy_id = buddy_id.strip()
-
-    for field_name, raw_value in (
-        ("buddy.id", buddy_payload.get("id") if isinstance(buddy_payload, dict) else None),
-        ("switch.buddy_id", switch_payload.get("buddy_id")),
-        ("switch.buddy", switch_payload.get("buddy")),
-    ):
-        if raw_value is None:
-            continue
-        if not isinstance(raw_value, str) or not raw_value.strip():
-            raise ValueError(f"{field_name} must be a non-empty string when provided")
-        candidate = raw_value.strip()
-        if candidate != buddy_id:
-            raise ValueError(f"{field_name} mismatch: expected '{buddy_id}', received '{candidate}'")
-
-    return buddy_id
-
-
 def _assert_run_id_unused(run_id: str) -> None:
     normalized_run_id = run_id.strip()
     if any(normalized_run_id in task.get("run_ids", []) for task in list_tasks()):
         raise ValueError(f"run_id already exists: {normalized_run_id}")
-    if (ROOT / run_content_path(normalized_run_id)).exists():
+    if (env_store.ROOT / run_content_path(normalized_run_id)).exists():
         raise ValueError(f"run_id already exists: {normalized_run_id}")
 
 
@@ -752,51 +679,6 @@ def _validate_market_host_execution(
     )
 
 
-def _rebuild_selected_inputs_for_execution(
-    *,
-    resolved: dict[str, Any],
-    selected_skill: dict[str, Any],
-) -> list[dict[str, Any]]:
-    switch_payload = resolved.get("switch") or {}
-    demand = switch_payload.get("demand")
-    if not isinstance(demand, str) or not demand.strip():
-        raise ValueError("resolved.switch.demand is required")
-
-    task_id = switch_payload.get("task_id")
-    if not isinstance(task_id, str) or not task_id.strip():
-        task_id = None
-
-    effective_track_id = resolved.get("effective_track_id")
-    if not isinstance(effective_track_id, str) or not effective_track_id.strip():
-        task_context = resolved.get("task_context")
-        context_task: dict[str, Any] | None = None
-        if isinstance(task_context, dict):
-            raw_context_task = task_context.get("task")
-            if isinstance(raw_context_task, dict):
-                context_task = raw_context_task
-        context_track_id = context_task.get("track_id") if isinstance(context_task, dict) else None
-        switch_track_id = switch_payload.get("track_id")
-        resolved_track_id = switch_track_id if isinstance(switch_track_id, str) else context_track_id
-        if isinstance(resolved_track_id, str) and resolved_track_id.strip():
-            effective_track_id = resolved_track_id
-        else:
-            effective_track_id = None
-
-    selection = _build_artifact_selection_context(
-        demand=demand,
-        required_slots=_skill_required_slots(selected_skill),
-        task_id=task_id,
-        track_artifact_index=build_track_artifact_index(effective_track_id),
-    )
-    if not isinstance(selection, dict):
-        return []
-
-    raw_inputs = selection.get("selected_inputs")
-    if not isinstance(raw_inputs, list):
-        return []
-    return [item for item in raw_inputs if isinstance(item, dict)]
-
-
 def _track_object_path(track_id: str) -> str:
     return f"buddyswitch/objects/tracks/{track_id}.json"
 
@@ -810,7 +692,7 @@ def _artifact_object_path(artifact_id: str) -> str:
 
 
 def _reserved_run_path(run_id: str) -> Path:
-    return ROOT / "buddyswitch" / "content" / "runs" / "reserved" / f"{run_id}.json"
+    return env_store.ROOT / "buddyswitch" / "content" / "runs" / "reserved" / f"{run_id}.json"
 
 
 def _write_runtime_json(path: Path, payload: dict[str, Any]) -> None:
@@ -822,20 +704,23 @@ def _write_runtime_json(path: Path, payload: dict[str, Any]) -> None:
     os.replace(temp_name, path)
 
 
-def _normalized_switch_identity(switch_payload: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(switch_payload, dict):
-        raise ValueError("switch payload is required")
+def _normalize_turn_identity(turn_identity: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(turn_identity, dict):
+        raise ValueError("turn_identity payload is required")
     return {
-        "raw_text": switch_payload.get("raw_text"),
-        "buddy_id": switch_payload.get("buddy_id"),
-        "demand": switch_payload.get("demand"),
-        "task_id": switch_payload.get("task_id"),
-        "track_id": switch_payload.get("track_id"),
+        "instance_id": turn_identity.get("instance_id"),
+        "active_buddy": turn_identity.get("active_buddy"),
+        "request_text": turn_identity.get("request_text"),
+        "task_id": turn_identity.get("task_id"),
+        "track_id": turn_identity.get("track_id"),
+        "context_revision": turn_identity.get("context_revision"),
+        "sequence": turn_identity.get("sequence"),
+        "run_id": turn_identity.get("run_id"),
     }
 
 
 def _scan_task_recent_runs(task_id: str, *, limit: int = 3) -> list[dict[str, Any]]:
-    run_root = ROOT / "buddyswitch" / "content" / "runs"
+    run_root = env_store.ROOT / "buddyswitch" / "content" / "runs"
     if not run_root.exists():
         return []
     rows: list[dict[str, Any]] = []
@@ -852,10 +737,9 @@ def _scan_task_recent_runs(task_id: str, *, limit: int = 3) -> list[dict[str, An
         if isinstance(resolved_task_id, str) and resolved_task_id:
             persisted_task_id = resolved_task_id
         else:
-            switch = payload.get("switch")
-            if not isinstance(switch, dict):
+            persisted_task_id = payload.get("current_task_id")
+            if not isinstance(persisted_task_id, str) or not persisted_task_id:
                 continue
-            persisted_task_id = switch.get("task_id")
         if persisted_task_id != task_id:
             continue
         rows.append(
@@ -1023,14 +907,27 @@ def _derive_context_revision(task: dict[str, Any], sequence: int) -> str:
     return f"ctx-{task_id}-turn-{sequence}"
 
 
-def _derive_switch_fingerprint(switch_payload: dict[str, Any]) -> str:
-    normalized = json.dumps(
-        _normalized_switch_identity(switch_payload),
-        sort_keys=True,
-        ensure_ascii=True,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+def _build_turn_identity(
+    *,
+    instance_id: str | None,
+    active_buddy: str,
+    request_text: str,
+    task_id: str,
+    track_id: str | None,
+    context_revision: str,
+    sequence: int,
+    run_id: str,
+) -> dict[str, Any]:
+    return {
+        "instance_id": instance_id,
+        "active_buddy": active_buddy,
+        "request_text": request_text,
+        "task_id": task_id,
+        "track_id": track_id,
+        "context_revision": context_revision,
+        "sequence": sequence,
+        "run_id": run_id,
+    }
 
 
 def _current_product_instance_id() -> str | None:
@@ -1064,10 +961,10 @@ def _save_run_reservation(
     context_revision: str,
     sequence: int,
     task_id: str,
-    switch_payload: dict[str, Any],
+    turn_identity: dict[str, Any],
+    instance_id: str | None,
 ) -> None:
     require_runtime_workspace_write_root()
-    instance_id = _current_product_instance_id()
     if instance_id is not None:
         existing = _find_active_task_reservation(task_id)
         if existing is not None:
@@ -1083,7 +980,7 @@ def _save_run_reservation(
         "context_revision": context_revision,
         "sequence": sequence,
         "task_id": task_id,
-        "switch": _normalized_switch_identity(switch_payload),
+        "turn_identity": _normalize_turn_identity(turn_identity),
         "reserved_at": now_iso(),
     }
     if instance_id is not None:
@@ -1125,20 +1022,16 @@ def _clear_run_reservation(run_id: str) -> dict[str, Any] | None:
 
 
 def _post_persist_refreshed_context_unavailable(receipt: dict[str, Any]) -> dict[str, Any]:
-    recommended_switch = receipt.get("recommended_switch")
-    reference_switches = receipt.get("reference_switches")
-    error: dict[str, Any] = {
-        "code": "E_RUNTIME_REFRESH_CONTEXT",
-        "message": (
-            "persist completed without reserving a follow-up run; "
-            "rerun resolve with receipt.recommended_switch to continue"
-        ),
+    return {
+        "ok": False,
+        "error": {
+            "code": "E_RUNTIME_REFRESH_CONTEXT",
+            "message": (
+                "persist completed without reserving a follow-up run; "
+                "rerun prepare with a new request_text to continue"
+            ),
+        },
     }
-    if isinstance(recommended_switch, str) and recommended_switch.strip():
-        error["recommended_switch"] = recommended_switch
-    if isinstance(reference_switches, dict):
-        error["reference_switches"] = reference_switches
-    return {"ok": False, "error": error}
 
 
 def _derive_context_sequence(task: dict[str, Any]) -> int:
@@ -1148,41 +1041,83 @@ def _derive_context_sequence(task: dict[str, Any]) -> int:
     return 1
 
 
-def _build_resolve_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
+def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
-    parsed = parse_switch(text, manifest_path=manifest_path)
-    if not parsed.get("ok"):
-        return parsed
+    request_text = text
+    if not isinstance(request_text, str) or not request_text.strip():
+        return runtime_error("E_EMPTY_INPUT", "Input is empty.")
 
-    buddy_id = parsed["buddy"]
-    demand = parsed["demand"]
-    explicit_task_id = parsed.get("task_id")
-    explicit_track_id = parsed.get("track_id")
+    product_session = _load_product_mode_session(manifest_path)
+    if product_session is None:
+        return runtime_error(
+            "E_PRODUCT_MODE_REQUIRED",
+            "prepare-turn-context requires a launcher-managed buddy instance. Start a buddy instance and use an ordinary request.",
+        )
+    if _is_legacy_command_shaped_request(request_text):
+        return runtime_error(
+            "E_LEGACY_COMMAND_INPUT",
+            "This buddy instance accepts ordinary requests in the current locked buddy. Remove command syntax and submit an ordinary request.",
+        )
+
+    active_buddy = product_session["active_buddy"]
+    instance_id = product_session["instance_id"]
+    demand = request_text.strip()
+    payload = product_session.get("payload")
+    payload_dict = payload if isinstance(payload, dict) else {}
+    payload_task = payload_dict.get("current_task_id")
+    payload_track = payload_dict.get("current_track_id")
+    explicit_task_id = payload_task.strip() if isinstance(payload_task, str) and payload_task.strip() else None
+    explicit_track_id = payload_track.strip() if isinstance(payload_track, str) and payload_track.strip() else None
+
     _ensure_no_legacy_outputs(demand)
 
-    buddy = require_buddy(manifest, buddy_id)
+    buddy = require_buddy(manifest, active_buddy)
 
     existing_task: dict[str, Any] | None = None
     if explicit_task_id:
         existing_task = get_task(explicit_task_id)
         if existing_task is None:
-            raise ValueError(f"Referenced task '{explicit_task_id}' not found.")
-        if existing_task["buddy"] != buddy_id:
+            if explicit_track_id and get_track(explicit_track_id) is None:
+                create_track(
+                    explicit_track_id,
+                    explicit_track_id.replace("-", " ").title(),
+                    status="active",
+                    current_buddy=active_buddy,
+                    next_buddy=None,
+                    summary="",
+                )
+            existing_task = create_task(
+                explicit_task_id,
+                _derive_task_title(demand),
+                buddy=active_buddy,
+                track_id=explicit_track_id,
+                status="active",
+                summary="",
+                initial_run_id=None,
+            )
+        if existing_task["buddy"] != active_buddy:
             raise ValueError(
-                f"Task '{explicit_task_id}' belongs to buddy '{existing_task['buddy']}', not '{buddy_id}'."
+                f"Task '{explicit_task_id}' belongs to buddy '{existing_task['buddy']}', not '{active_buddy}'."
             )
 
     if explicit_track_id and get_track(explicit_track_id) is None:
-        raise ValueError(f"Referenced track '{explicit_track_id}' not found.")
+        create_track(
+            explicit_track_id,
+            explicit_track_id.replace("-", " ").title(),
+            status="active",
+            current_buddy=active_buddy,
+            next_buddy=None,
+            summary="",
+        )
 
     if existing_task and explicit_track_id and existing_task.get("track_id") not in {None, explicit_track_id}:
         raise ValueError(
             f"Task '{existing_task['id']}' is bound to track '{existing_task['track_id']}', cannot switch to '{explicit_track_id}'."
         )
 
-    eligible_skills = buddy_skill_docs(manifest, buddy_id)
+    eligible_skills = buddy_skill_docs(manifest, active_buddy)
     if not eligible_skills:
-        raise ValueError(f"Buddy '{buddy_id}' currently has no registered skills.")
+        raise ValueError(f"Buddy '{active_buddy}' currently has no registered skills.")
 
     skill_cards: list[dict[str, Any]] = []
     for skill in eligible_skills:
@@ -1191,18 +1126,11 @@ def _build_resolve_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) ->
     effective_track_id = explicit_track_id or (existing_task.get("track_id") if existing_task else None)
     if existing_task:
         resolved_task = existing_task
-        task_resolution = {
-            "mode": "reuse",
-            "task_id": resolved_task["id"],
-            "task_exists": True,
-            "task_buddy": resolved_task["buddy"],
-            "task_track_id": resolved_task.get("track_id"),
-        }
         task_context = _build_task_context(existing_task)
     else:
         create_token = _derive_create_token(demand)
         task_id = _derive_task_id(
-            buddy_id,
+            active_buddy,
             demand,
             create_token=create_token,
         )
@@ -1211,15 +1139,17 @@ def _build_resolve_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) ->
             resolved_task = create_task(
                 task_id,
                 _derive_task_title(demand),
-                buddy=buddy_id,
+                buddy=active_buddy,
                 track_id=effective_track_id,
                 status="active",
                 summary="",
                 initial_run_id=None,
             )
         else:
-            if preexisting_task["buddy"] != buddy_id:
-                raise ValueError(f"Task '{task_id}' belongs to buddy '{preexisting_task['buddy']}', not '{buddy_id}'.")
+            if preexisting_task["buddy"] != active_buddy:
+                raise ValueError(
+                    f"Task '{task_id}' belongs to buddy '{preexisting_task['buddy']}', not '{active_buddy}'."
+                )
             if effective_track_id and preexisting_task.get("track_id") not in {None, effective_track_id}:
                 raise ValueError(
                     f"Task '{task_id}' is bound to track '{preexisting_task.get('track_id')}', cannot switch to '{effective_track_id}'."
@@ -1229,14 +1159,6 @@ def _build_resolve_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) ->
                 resolved_task = register_task_to_track(effective_track_id, task_id)
         if effective_track_id is None:
             effective_track_id = resolved_task.get("track_id")
-        task_resolution = {
-            "mode": "create",
-            "task_id": task_id,
-            "task_exists": preexisting_task is not None,
-            "task_buddy": buddy_id,
-            "task_track_id": effective_track_id,
-            "create_token": create_token,
-        }
         task_context = _build_task_context(resolved_task)
 
     skill_ids = [skill["id"] for skill in eligible_skills]
@@ -1251,195 +1173,55 @@ def _build_resolve_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) ->
         implicit_skill_id=implicit_skill_id,
     )
 
-    selected_inputs: list[dict[str, Any]] = []
-    if isinstance(implicit_skill_id, str):
-        implicit_selection = artifact_selection_by_skill.get(implicit_skill_id)
-        if isinstance(implicit_selection, dict):
-            raw_selected_inputs = implicit_selection.get("selected_inputs")
-            if isinstance(raw_selected_inputs, list):
-                selected_inputs = [item for item in raw_selected_inputs if isinstance(item, dict)]
-
     sequence = _derive_context_sequence(resolved_task)
-    previous_run_id = task_context["task"]["latest_run_id"] if task_context.get("task") else None
-    switch_payload = {
-        "raw_text": parsed.get("raw_text", text),
-        "buddy_id": buddy_id,
-        "demand": demand,
-        "task_id": resolved_task["id"],
-        "track_id": effective_track_id,
-    }
     context_revision = _derive_context_revision(resolved_task, sequence)
     run_id = f"run-{uuid.uuid4().hex[:10]}"
+    turn_identity = _build_turn_identity(
+        instance_id=instance_id,
+        active_buddy=active_buddy,
+        request_text=request_text,
+        task_id=resolved_task["id"],
+        track_id=effective_track_id,
+        context_revision=context_revision,
+        sequence=sequence,
+        run_id=run_id,
+    )
     _save_run_reservation(
         run_id=run_id,
         context_revision=context_revision,
         sequence=sequence,
         task_id=resolved_task["id"],
-        switch_payload=switch_payload,
+        turn_identity=turn_identity,
+        instance_id=instance_id,
     )
+
+    current_task_id = resolved_task["id"]
+    current_track_id = effective_track_id
 
     return {
         "ok": True,
         "context_revision": context_revision,
-        "switch": switch_payload,
-        "buddy": {"id": buddy["id"], "label": buddy["label"], "scope": buddy["scope"]},
-        "authority": {
-            "buddy_id": buddy_id,
-            "permissions": buddy.get("permissions", []),
-        },
-        "task_resolution": task_resolution,
+        "instance_id": instance_id,
+        "active_buddy": buddy["id"],
+        "request_text": request_text,
+        "current_task_id": current_task_id,
+        "current_track_id": current_track_id,
+        "task_context": task_context,
+        "track_context": track_context,
+        "skills": skill_cards,
+        "inputs_by_skill": artifact_selection_by_skill,
         "run_envelope": {
             "run_id": run_id,
             "status": "reserved",
             "sequence": sequence,
-            "previous_run_id": previous_run_id,
-            "switch_fingerprint": _derive_switch_fingerprint(switch_payload),
+            "turn_identity": turn_identity,
         },
-        "task_context": task_context,
-        "track_context": track_context,
-        "inputs": selected_inputs,
-        "skills": skill_cards,
         "warnings": [],
     }
 
 
-def _legacy_resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
-    manifest = load_manifest(manifest_path)
-    parsed = parse_switch(text, manifest_path=manifest_path)
-    if not parsed.get("ok"):
-        return parsed
-
-    buddy_id = parsed["buddy"]
-    demand = parsed["demand"]
-    explicit_task_id = parsed.get("task_id")
-    explicit_track_id = parsed.get("track_id")
-    _ensure_no_legacy_outputs(demand)
-
-    buddy = require_buddy(manifest, buddy_id)
-
-    existing_task: dict[str, Any] | None = None
-    if explicit_task_id:
-        existing_task = get_task(explicit_task_id)
-        if existing_task is None:
-            raise ValueError(f"Referenced task '{explicit_task_id}' not found.")
-        if existing_task["buddy"] != buddy_id:
-            raise ValueError(
-                f"Task '{explicit_task_id}' belongs to buddy '{existing_task['buddy']}', not '{buddy_id}'."
-            )
-
-    if explicit_track_id and get_track(explicit_track_id) is None:
-        raise ValueError(f"Referenced track '{explicit_track_id}' not found.")
-
-    if existing_task and explicit_track_id and existing_task.get("track_id") not in {None, explicit_track_id}:
-        raise ValueError(
-            f"Task '{existing_task['id']}' is bound to track '{existing_task['track_id']}', cannot switch to '{explicit_track_id}'."
-        )
-
-    if existing_task:
-        resolved_task_id = existing_task["id"]
-        task_resolution = {
-            "mode": "reuse",
-            "task_id": resolved_task_id,
-            "task_exists": True,
-            "task_buddy": existing_task["buddy"],
-            "task_track_id": existing_task.get("track_id"),
-        }
-    else:
-        resolved_task_id = None
-        create_token = _derive_create_token(demand)
-        task_resolution = {
-            "mode": "create",
-            "task_id": None,
-            "task_exists": False,
-            "task_buddy": buddy_id,
-            "task_track_id": None,
-            "create_token": create_token,
-        }
-
-    effective_track_id = explicit_track_id or (existing_task.get("track_id") if existing_task else None)
-
-    eligible_skills = buddy_skill_docs(manifest, buddy_id)
-    eligible_skill_ids: list[str] = []
-    skill_cards: list[dict[str, Any]] = []
-    required_output_schema_by_skill: dict[str, str] = {}
-    for skill in eligible_skills:
-        eligible_skill_ids.append(skill["id"])
-        skill_cards.append(_build_skill_card(skill))
-        required_output_schema_by_skill[skill["id"]] = skill["runtime"]["output_schema"]
-
-    if not eligible_skill_ids:
-        raise ValueError(f"Buddy '{buddy_id}' currently has no registered skills.")
-
-    implicit_skill_id = eligible_skill_ids[0] if len(eligible_skill_ids) == 1 else None
-    implicit_skill = next((skill for skill in eligible_skills if skill["id"] == implicit_skill_id), None)
-    normalized_text = parsed.get("normalized_text")
-    switch_payload = {
-        "buddy": buddy_id,
-        "task_id": resolved_task_id,
-        "track_id": explicit_track_id,
-        "demand": demand,
-        "raw_text": parsed.get("raw_text", text),
-        "normalized_text": normalized_text,
-    }
-
-    track_context = _build_track_context(effective_track_id)
-    track_artifact_index = build_track_artifact_index(effective_track_id)
-    artifact_selection_by_skill, run_instructions_by_skill = _build_selection_contexts_by_skill(
-        demand=demand,
-        skills=eligible_skills,
-        task_id=resolved_task_id,
-        track_artifact_index=track_artifact_index,
-        implicit_skill_id=implicit_skill_id,
-    )
-    artifact_selection = _build_artifact_selection_context(
-        demand=demand,
-        required_slots=(
-            _skill_required_slots(implicit_skill)
-            if implicit_skill
-            else []
-        ),
-        task_id=resolved_task_id,
-        track_artifact_index=track_artifact_index,
-    )
-    if implicit_skill is None:
-        artifact_selection = None
-
-    return {
-        "ok": True,
-        "intent": parsed.get("intent", "switch"),
-        "raw_text": parsed.get("raw_text", text),
-        "normalized_text": normalized_text,
-        "invocation": parsed.get("invocation", switch_payload),
-        "switch": switch_payload,
-        "profile": {
-            "buddy": {"id": buddy["id"], "label": buddy["label"], "scope": buddy["scope"]},
-            "permissions": buddy.get("permissions", []),
-            "authority": buddy_authority_profile(manifest, buddy_id),
-        },
-        "task_resolution": task_resolution,
-        "effective_track_id": effective_track_id,
-        "task_context": _build_task_context(existing_task),
-        "track_context": track_context,
-        "track_artifact_index": track_artifact_index,
-        "artifact_selection": artifact_selection,
-        "artifact_selection_by_skill": artifact_selection_by_skill,
-        "eligible_skills": eligible_skill_ids,
-        "skill_cards": skill_cards,
-        "implicit_skill_id": implicit_skill_id,
-        "required_output_schema_by_skill": required_output_schema_by_skill,
-        "run_instructions": _build_run_instructions(
-            implicit_skill_id,
-            artifact_selection,
-            host_execution=implicit_skill["runtime"].get("host_execution", {}) if implicit_skill else {},
-        ),
-        "run_instructions_by_skill": run_instructions_by_skill,
-    }
-
-
-def resolve_switch(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
-    from runtime_kernel.resolve import resolve_switch_request
-
-    return resolve_switch_request(text, manifest_path=manifest_path)
+def prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
+    return _build_prepare_turn_context(text, manifest_path=manifest_path)
 
 
 def _read_json_input(source: str, *, stdin_text: str | None = None) -> dict[str, Any]:
@@ -1492,26 +1274,28 @@ def _build_run_audit(
     result: dict[str, Any],
     task_title: str,
     track_title: str | None,
-    reference_switches: dict[str, str],
     related_run_ids: list[str],
-    recommended_switch: str,
+    next_state: dict[str, Any],
 ) -> dict[str, Any]:
     audit = {
         "run_id": run_id,
         "timestamp": now_iso(),
-        "switch": resolved["switch"],
+        "request_text": resolved.get("request_text"),
+        "active_buddy": resolved.get("active_buddy"),
+        "current_task_id": resolved.get("current_task_id"),
+        "current_track_id": resolved.get("current_track_id"),
         "resolved_task_id": task_id,
         "effective_track_id": effective_track_id,
         "skill_id": skill_id,
         "artifact_ids": artifact_ids,
         "track_action": track_action,
-        "paths": paths,
-        "writes": writes,
         "task_title": task_title,
         "track_title": track_title,
-        "reference_switches": reference_switches,
+        "next_state": next_state,
+        "receipt_paths": paths,
         "related_run_ids": related_run_ids,
-        "recommended_switch": recommended_switch,
+        "paths": paths,
+        "writes": writes,
     }
     audit.update(_strip_run_fields(result))
     return audit
@@ -1543,6 +1327,14 @@ def _persist_track_manager(
     task: dict[str, Any],
     effective_track_id: str | None,
 ) -> dict[str, Any]:
+    active_buddy = resolved.get("active_buddy")
+    if not isinstance(active_buddy, str) or not active_buddy.strip():
+        raise ValueError("active_buddy is required")
+    active_buddy = active_buddy.strip()
+    request_text = resolved.get("request_text")
+    if not isinstance(request_text, str) or not request_text.strip():
+        raise ValueError("request_text is required")
+
     op = dict(result.get("track_operation") or {})
     action = str(op.get("action") or "").lower()
     if action not in TRACK_ACTIONS:
@@ -1554,7 +1346,7 @@ def _persist_track_manager(
     next_buddy: str | None = None
 
     if action == "create":
-        new_id = op.get("track_id") or _derive_track_id(resolved["switch"]["demand"])
+        new_id = op.get("track_id") or _derive_track_id(request_text)
         title = op.get("title") or new_id.replace("-", " ").title()
         status = op.get("status") or "active"
         if status not in STATUS_VALUES:
@@ -1563,7 +1355,7 @@ def _persist_track_manager(
             new_id,
             title,
             status=status,
-            current_buddy=op.get("current_buddy") or "pm",
+            current_buddy=op.get("current_buddy") or active_buddy,
             next_buddy=op.get("next_buddy"),
             summary=op.get("summary") or "",
         )
@@ -1607,21 +1399,18 @@ def _persist_track_manager(
     run_content_path_value = run_content_path(run_id)
     artifact_ids: list[str] = []
     related_run_ids = _related_run_ids_for_task(task["id"], run_id, limit=2)
-    switch_buddy = resolved["switch"].get("buddy_id") or resolved["switch"].get("buddy")
-    if not isinstance(switch_buddy, str) or not switch_buddy:
-        raise ValueError("resolved.switch.buddy is required")
-    reference_switches = _build_reference_switches(
-        buddy_id=switch_buddy,
-        task_id=task["id"],
-        track_id=persisted_track_id,
-        next_buddy=next_buddy,
-    )
-    recommended_switch = _pick_recommended_switch(reference_switches)
-    paths = _receipt_paths(
+    receipt_paths = _receipt_paths(
         run_content_path_value=run_content_path_value,
         task_id=task["id"],
         artifact_ids=artifact_ids,
         track_id=persisted_track_id,
+    )
+    next_state = _build_next_state(
+        task_id=task["id"],
+        track_id=persisted_track_id,
+        current_buddy=active_buddy,
+        next_buddy=next_buddy,
+        track_action=action,
     )
     writes = list(dict.fromkeys(writes + [run_content_path_value]))
     save_run_content(
@@ -1634,31 +1423,29 @@ def _persist_track_manager(
             run_id=run_id,
             artifact_ids=artifact_ids,
             track_action=action,
-            paths=paths,
+            paths=receipt_paths,
             writes=writes,
             result=result,
             task_title=task["title"],
             track_title=persisted_track_title,
-            reference_switches=reference_switches,
             related_run_ids=related_run_ids,
-            recommended_switch=recommended_switch,
+            next_state=next_state,
         ),
     )
     return {
         "ok": True,
-        "switch": resolved["switch"],
         "skill_id": "track-manager",
         "track_action": action,
         "task_id": task["id"],
         "track_id": persisted_track_id,
         "task_title": task["title"],
         "track_title": persisted_track_title,
-        "reference_switches": reference_switches,
+        "next_state": next_state,
+        "receipt_paths": receipt_paths,
         "related_run_ids": related_run_ids,
-        "recommended_switch": recommended_switch,
         "artifact_ids": artifact_ids,
         "run_id": run_id,
-        "paths": paths,
+        "paths": receipt_paths,
         "writes": writes,
     }
 
@@ -1672,10 +1459,13 @@ def _persist_artifact_skill(
     task: dict[str, Any],
     effective_track_id: str | None,
 ) -> dict[str, Any]:
-    buddy = resolved["switch"].get("buddy_id") or resolved["switch"].get("buddy")
-    if not isinstance(buddy, str) or not buddy:
-        raise ValueError("resolved.switch.buddy is required")
-    demand = resolved["switch"]["demand"]
+    active_buddy = resolved.get("active_buddy")
+    if not isinstance(active_buddy, str) or not active_buddy.strip():
+        raise ValueError("active_buddy is required")
+    active_buddy = active_buddy.strip()
+    request_text = resolved.get("request_text")
+    if not isinstance(request_text, str) or not request_text.strip():
+        raise ValueError("request_text is required")
     skill_id = skill["id"]
     output_slot = skill["runtime"].get("output_slot")
     if not isinstance(output_slot, str) or not output_slot:
@@ -1687,8 +1477,8 @@ def _persist_artifact_skill(
     artifact_summary = str(result.get("execution_summary") or "")
     artifact = create_artifact(
         artifact_id=artifact_id,
-        title=_derive_artifact_title(buddy, skill_id, demand),
-        buddy=buddy,
+        title=_derive_artifact_title(active_buddy, skill_id, request_text),
+        buddy=active_buddy,
         skill_id=skill_id,
         slot=output_slot,
         task_id=task["id"],
@@ -1709,18 +1499,18 @@ def _persist_artifact_skill(
         if track:
             track_title = track["title"]
             next_buddy = track.get("next_buddy")
-    reference_switches = _build_reference_switches(
-        buddy_id=buddy,
-        task_id=task["id"],
-        track_id=effective_track_id,
-        next_buddy=next_buddy,
-    )
-    recommended_switch = _pick_recommended_switch(reference_switches)
-    paths = _receipt_paths(
+    receipt_paths = _receipt_paths(
         run_content_path_value=run_content_path_value,
         task_id=task["id"],
         artifact_ids=artifact_ids,
         track_id=effective_track_id,
+    )
+    next_state = _build_next_state(
+        task_id=task["id"],
+        track_id=effective_track_id,
+        current_buddy=active_buddy,
+        next_buddy=next_buddy,
+        track_action=None,
     )
     writes = [_task_object_path(task["id"]), _artifact_object_path(artifact["id"]), run_content_path_value]
     if effective_track_id:
@@ -1736,19 +1526,17 @@ def _persist_artifact_skill(
             run_id=run_id,
             artifact_ids=artifact_ids,
             track_action=None,
-            paths=paths,
+            paths=receipt_paths,
             writes=writes,
             result=result,
             task_title=task["title"],
             track_title=track_title,
-            reference_switches=reference_switches,
             related_run_ids=related_run_ids,
-            recommended_switch=recommended_switch,
+            next_state=next_state,
         ),
     )
     return {
         "ok": True,
-        "switch": resolved["switch"],
         "skill_id": skill_id,
         "task_id": task["id"],
         "artifact_id": artifact["id"],
@@ -1756,11 +1544,11 @@ def _persist_artifact_skill(
         "track_id": effective_track_id,
         "task_title": task["title"],
         "track_title": track_title,
-        "reference_switches": reference_switches,
+        "next_state": next_state,
+        "receipt_paths": receipt_paths,
         "related_run_ids": related_run_ids,
-        "recommended_switch": recommended_switch,
         "run_id": run_id,
-        "paths": paths,
+        "paths": receipt_paths,
         "writes": writes,
     }
 
@@ -1775,36 +1563,53 @@ def _persist_skill_result(
     if not context.get("ok"):
         raise ValueError("context payload must be successful before persist_skill_result")
     if not isinstance(skill_id, str) or not skill_id.strip():
-        raise ValueError("skill_id is required")
+        raise ValueError("persist requires a single skill_id string")
     selected_skill_id = skill_id.strip()
     if not isinstance(result, dict):
         raise ValueError("result payload must be a JSON object")
 
     stored_task = _validate_context_revision(context)
+    active_buddy = context.get("active_buddy")
+    if not isinstance(active_buddy, str) or not active_buddy.strip():
+        raise ValueError("active_buddy is required")
+    active_buddy = active_buddy.strip()
+    request_text = context.get("request_text")
+    if not isinstance(request_text, str) or not request_text.strip():
+        raise ValueError("request_text is required")
+    current_task_id = context.get("current_task_id")
+    if not isinstance(current_task_id, str) or not current_task_id.strip():
+        raise ValueError("current_task_id is required")
+    current_task_id = current_task_id.strip()
+    if current_task_id != stored_task["id"]:
+        raise ValueError(f"current_task_id mismatch: expected '{stored_task['id']}', received '{current_task_id}'")
+    raw_current_track_id = context.get("current_track_id")
+    current_track_id = raw_current_track_id.strip() if isinstance(raw_current_track_id, str) and raw_current_track_id.strip() else None
 
-    switch_payload = context.get("switch")
-    if not isinstance(switch_payload, dict):
-        raise ValueError("switch context is required")
-    demand = switch_payload.get("demand")
-    if not isinstance(demand, str) or not demand.strip():
-        raise ValueError("switch.demand is required")
-
-    switch_task_id = switch_payload.get("task_id")
-    if isinstance(switch_task_id, str) and switch_task_id and switch_task_id != stored_task["id"]:
-        raise ValueError(
-            f"switch.task_id mismatch: expected '{stored_task['id']}', received '{switch_task_id}'"
-        )
-
-    buddy_payload = context.get("buddy")
-    buddy_id = _authoritative_context_buddy_id(
-        stored_task=stored_task,
-        buddy_payload=buddy_payload if isinstance(buddy_payload, dict) else None,
-        switch_payload=switch_payload,
-    )
+    skills_payload = context.get("skills")
+    if not isinstance(skills_payload, list):
+        raise ValueError("context.skills is required")
+    skill_ids = {
+        item.get("id").strip()
+        for item in skills_payload
+        if isinstance(item, dict) and isinstance(item.get("id"), str) and item.get("id").strip()
+    }
+    if selected_skill_id not in skill_ids:
+        raise ValueError(f"selected skill_id '{selected_skill_id}' must be one of context.skills ids")
 
     run_envelope = context.get("run_envelope")
     if not isinstance(run_envelope, dict):
         raise ValueError("run_envelope is required")
+    context_turn_identity = run_envelope.get("turn_identity")
+    if not isinstance(context_turn_identity, dict):
+        raise ValueError("run_envelope.turn_identity is required")
+    if context_turn_identity.get("active_buddy") != active_buddy:
+        raise ValueError("run_envelope.turn_identity active_buddy mismatch")
+    if context_turn_identity.get("request_text") != request_text:
+        raise ValueError("run_envelope.turn_identity request_text mismatch")
+    if context_turn_identity.get("task_id") != current_task_id:
+        raise ValueError("run_envelope.turn_identity task_id mismatch")
+    if context_turn_identity.get("track_id") != current_track_id:
+        raise ValueError("run_envelope.turn_identity track_id mismatch")
     reserved_run_id = run_envelope.get("run_id")
     if not isinstance(reserved_run_id, str) or not reserved_run_id.strip():
         raise ValueError("run_envelope.run_id is required")
@@ -1820,38 +1625,26 @@ def _persist_skill_result(
     reserved_sequence = reservation.get("sequence")
     if reserved_sequence != run_envelope.get("sequence"):
         raise ValueError("run reservation mismatch: sequence differs from reserved envelope")
-    reserved_switch = reservation.get("switch")
-    if not isinstance(reserved_switch, dict):
-        raise ValueError("run reservation mismatch: switch payload is missing")
-
-    reserved_switch_fingerprint = run_envelope.get("switch_fingerprint")
-    if not isinstance(reserved_switch_fingerprint, str) or not reserved_switch_fingerprint.strip():
-        raise ValueError("run_envelope.switch_fingerprint is required")
-    authoritative_switch_fingerprint = _derive_switch_fingerprint(reserved_switch)
-    if reserved_switch_fingerprint.strip() != authoritative_switch_fingerprint:
-        raise ValueError("run_envelope.switch_fingerprint mismatch: reserved envelope was tampered")
-    current_switch_fingerprint = _derive_switch_fingerprint(switch_payload)
-    if current_switch_fingerprint != authoritative_switch_fingerprint:
-        raise ValueError("switch payload mismatch: resolve_context must not be tampered before persist")
+    reservation_turn_identity = reservation.get("turn_identity")
+    if not isinstance(reservation_turn_identity, dict) or not isinstance(context_turn_identity, dict):
+        raise ValueError("run reservation mismatch: turn_identity payload is missing")
+    if _normalize_turn_identity(reservation_turn_identity) != _normalize_turn_identity(context_turn_identity):
+        raise ValueError("run reservation mismatch: turn_identity differs from reserved envelope")
 
     selected_skill = _resolve_execution_skill(
-        buddy_id=buddy_id,
+        buddy_id=active_buddy,
         skill_id=selected_skill_id,
         manifest_path=manifest_path,
     )
     _validate_result_against_skill(selected_skill, result)
 
-    persist_context = dict(context)
-    persist_switch = dict(reserved_switch)
-    persist_switch["buddy_id"] = buddy_id
-    persist_switch.pop("buddy", None)
-    persist_context["switch"] = persist_switch
-
-    task_resolution = context.get("task_resolution")
-    task_mode = task_resolution.get("mode") if isinstance(task_resolution, dict) else None
-    explicit_track_id = persist_switch.get("track_id")
-    task, effective_track_id, _ = _ensure_task_binding(task=stored_task, explicit_track_id=explicit_track_id)
-    created_task_id_for_recovery = task["id"] if task_mode == "create" else None
+    task, effective_track_id, _ = _ensure_task_binding(task=stored_task, explicit_track_id=current_track_id)
+    persist_context = {
+        "active_buddy": active_buddy,
+        "request_text": request_text,
+        "current_task_id": current_task_id,
+        "current_track_id": current_track_id,
+    }
 
     try:
         if selected_skill_id == "track-manager":
@@ -1871,15 +1664,7 @@ def _persist_skill_result(
                 task=task,
                 effective_track_id=effective_track_id,
             )
-    except (ValueError, OSError) as exc:
-        if isinstance(created_task_id_for_recovery, str) and created_task_id_for_recovery:
-            recovery_switch = f"switch {buddy_id}({created_task_id_for_recovery})"
-            if isinstance(explicit_track_id, str) and explicit_track_id:
-                recovery_switch += f" -> {explicit_track_id}"
-            recovery_switch += ": <demand>"
-            raise exc.__class__(
-                f"{exc} (created task_id: {created_task_id_for_recovery}; recover with {recovery_switch})"
-            ) from exc
+    except (ValueError, OSError):
         raise
 
     reservation_clear_warning = _clear_run_reservation(run_id)
@@ -1903,9 +1688,7 @@ def persist_skill_result(
     result: dict[str, Any],
     manifest_path: Path = DEFAULT_MANIFEST,
 ) -> dict[str, Any]:
-    from runtime_kernel.persist import persist_skill_result_request
-
-    return persist_skill_result_request(
+    return _persist_skill_result(
         context,
         skill_id=skill_id,
         result=result,
@@ -1913,28 +1696,26 @@ def persist_skill_result(
     )
 
 
-def _cmd_resolve(args: argparse.Namespace) -> int:
+def _cmd_prepare(args: argparse.Namespace) -> int:
     try:
         product_session = _load_product_mode_session(args.manifest)
         if product_session is None:
-            adapted_text = args.text
-            payload = resolve_switch(adapted_text, manifest_path=args.manifest)
+            payload = prepare_turn_context(args.text, manifest_path=args.manifest)
         else:
             with _hold_product_runtime_lock(product_session):
                 product_session = _load_product_mode_session(args.manifest)
                 if product_session is None:
                     raise ValueError("product-mode env disappeared while acquiring runtime lock")
-                adapted_text = _adapt_resolve_text_for_product_session(args.text, product_session=product_session)
-                payload = resolve_switch(adapted_text, manifest_path=args.manifest)
+                payload = prepare_turn_context(args.text, manifest_path=args.manifest)
                 if payload.get("ok"):
                     task_id, track_id = _resolve_binding_from_payload(payload)
                     try:
                         _write_product_session_binding(product_session, task_id=task_id, track_id=track_id)
                     except (OSError, ValueError) as exc:
                         _clear_reservation_from_payload(payload, fail_on_warning=True)
-                        raise ValueError(f"instance binding update failed after resolve: {exc}") from exc
+                        raise ValueError(f"instance binding update failed after prepare: {exc}") from exc
     except (ManifestError, ValueError, OutputSchemaError, OSError) as exc:
-        payload = runtime_error("E_RUNTIME_RESOLVE", str(exc))
+        payload = runtime_error("E_RUNTIME_PREPARE", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0 if payload.get("ok") else 1
 
@@ -1948,29 +1729,73 @@ def _derive_cli_persist_skill_id(
 
     skills = context.get("skills")
     if not isinstance(skills, list) or len(skills) != 1:
-        raise ValueError("skill_id is required unless resolve_context exposes exactly one available skill")
+        raise ValueError("skill_id is required unless prepare context exposes exactly one available skill")
 
     only_skill = skills[0]
     if not isinstance(only_skill, dict):
-        raise ValueError("resolve_context.skills[0] must be an object")
+        raise ValueError("prepare context skills[0] must be an object")
     skill_id = only_skill.get("id")
     if not isinstance(skill_id, str) or not skill_id.strip():
-        raise ValueError("resolve_context.skills[0].id is required")
+        raise ValueError("prepare context skills[0].id is required")
     return skill_id.strip()
+
+
+def _validate_product_persist_context_binding(context: dict[str, Any], product_session: dict[str, Any]) -> None:
+    if not context.get("ok"):
+        return
+
+    session_instance_id = product_session.get("instance_id")
+    if not isinstance(session_instance_id, str) or not session_instance_id.strip():
+        raise ValueError("product-mode session instance_id is required")
+    session_instance_id = session_instance_id.strip()
+
+    session_buddy = product_session.get("active_buddy")
+    if not isinstance(session_buddy, str) or not session_buddy.strip():
+        raise ValueError("product-mode session active_buddy is required")
+    session_buddy = session_buddy.strip()
+
+    context_instance_id = context.get("instance_id")
+    if context_instance_id != session_instance_id:
+        raise ValueError(
+            "product-mode context instance mismatch: "
+            f"expected '{session_instance_id}', received '{context_instance_id}'"
+        )
+
+    context_buddy = context.get("active_buddy")
+    if context_buddy != session_buddy:
+        raise ValueError(
+            "product-mode context buddy mismatch: "
+            f"expected '{session_buddy}', received '{context_buddy}'"
+        )
+
+    run_envelope = context.get("run_envelope")
+    turn_identity = run_envelope.get("turn_identity") if isinstance(run_envelope, dict) else None
+    if not isinstance(turn_identity, dict):
+        raise ValueError("product-mode context turn_identity is required")
+    if turn_identity.get("instance_id") != session_instance_id:
+        raise ValueError(
+            "product-mode turn_identity instance mismatch: "
+            f"expected '{session_instance_id}', received '{turn_identity.get('instance_id')}'"
+        )
+    if turn_identity.get("active_buddy") != session_buddy:
+        raise ValueError(
+            "product-mode turn_identity buddy mismatch: "
+            f"expected '{session_buddy}', received '{turn_identity.get('active_buddy')}'"
+        )
 
 
 def _cmd_persist(args: argparse.Namespace) -> int:
     try:
-        if args.resolved == "-" and args.result == "-":
-            raise ValueError("resolved and result cannot both read from stdin")
-        stdin_text = sys.stdin.read() if args.resolved == "-" or args.result == "-" else None
-        resolved = _read_json_input(args.resolved, stdin_text=stdin_text if args.resolved == "-" else None)
+        if args.context == "-" and args.result == "-":
+            raise ValueError("context and result cannot both read from stdin")
+        stdin_text = sys.stdin.read() if args.context == "-" or args.result == "-" else None
+        context = _read_json_input(args.context, stdin_text=stdin_text if args.context == "-" else None)
         result = _read_json_input(args.result, stdin_text=stdin_text if args.result == "-" else None)
         product_session = _load_product_mode_session(args.manifest)
         if product_session is None:
             payload = persist_skill_result(
-                resolved,
-                skill_id=_derive_cli_persist_skill_id(resolved, args.skill_id),
+                context,
+                skill_id=_derive_cli_persist_skill_id(context, args.skill_id),
                 result=result,
                 manifest_path=args.manifest,
             )
@@ -1979,9 +1804,10 @@ def _cmd_persist(args: argparse.Namespace) -> int:
                 product_session = _load_product_mode_session(args.manifest)
                 if product_session is None:
                     raise ValueError("product-mode env disappeared while acquiring runtime lock")
+                _validate_product_persist_context_binding(context, product_session)
                 payload = persist_skill_result(
-                    resolved,
-                    skill_id=_derive_cli_persist_skill_id(resolved, args.skill_id),
+                    context,
+                    skill_id=_derive_cli_persist_skill_id(context, args.skill_id),
                     result=result,
                     manifest_path=args.manifest,
                 )
@@ -2004,16 +1830,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    resolve_cmd = subparsers.add_parser("resolve", help="Resolve switch directive into BuddySwitch preflight context.")
-    resolve_cmd.add_argument("text", help="switch directive")
-    resolve_cmd.set_defaults(func=_cmd_resolve)
+    prepare_cmd = subparsers.add_parser("prepare", help="Prepare a BuddySwitch turn context from request text.")
+    prepare_cmd.add_argument("text", help="ordinary request text")
+    prepare_cmd.set_defaults(func=_cmd_prepare)
 
     persist_cmd = subparsers.add_parser("persist", help="Persist a structured BuddySwitch run result.")
-    persist_cmd.add_argument("--resolved", required=True, help="Resolved JSON payload file, or '-' for stdin")
+    persist_cmd.add_argument("--context", required=True, help="Prepared turn context JSON file, or '-' for stdin")
     persist_cmd.add_argument("--result", required=True, help="Structured result JSON file, or '-' for stdin")
     persist_cmd.add_argument(
         "--skill-id",
-        help="Chosen skill id. Optional only when resolve_context exposes exactly one available skill.",
+        help="Chosen skill id. Optional only when the prepared context exposes exactly one available skill.",
     )
     persist_cmd.set_defaults(func=_cmd_persist)
 

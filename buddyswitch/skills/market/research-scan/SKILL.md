@@ -125,14 +125,14 @@ For each round, run this fixed loop:
 - Do not use silent search API/snippet/crawler fallback.
 
 ## Examples
-- `switch market: Research demand for AI companion live spaces`
-- `switch market: Compare creator monetization products and capture evidence`
-- `switch market: Validate whether playlist collaboration is becoming a standard expectation`
+- `Research demand for AI companion live spaces`
+- `Compare creator monetization products and capture evidence`
+- `Validate whether playlist collaboration is becoming a standard expectation`
 
 ## Counterexamples
-- `switch pm: Write the MVP PRD for playlist collaboration`
-- `switch dev: Implement playlist collaboration in projects/app`
-- `switch test: Run smoke checks on the playlist collaboration release candidate`
+- `Write the MVP PRD for playlist collaboration`
+- `Implement playlist collaboration in projects/app`
+- `Run smoke checks on the playlist collaboration release candidate`
 
 ## Gotchas
 - Source snippets are not final evidence; browse and validate pages directly.
