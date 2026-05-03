@@ -48,7 +48,6 @@ Do not write temporary runtime noise into `projects/app/` source folders.
 - `buddyswitch/skills/**/SKILL.md`
 - `framework/**`
 - `projects/app/**`
-- `evals/**`
 
 ### Do not commit by default
 

@@ -480,11 +480,71 @@ class RepoConsistencyTests(unittest.TestCase):
         targets = (
             ROOT / "README.md",
             ROOT / "framework" / "docs" / "artifacts-runs-git-policy.md",
-            ROOT / "evals" / "cases" / "07-cleanup-storage-script.md",
         )
         combined = "\n".join(path.read_text(encoding="utf-8") for path in targets).lower()
-        self.assertIn("launcher runtime workspace", combined)
+        self.assertIn("launcher-owned execution workspace", combined)
         self.assertNotIn(".gitkeep", combined)
+
+    def test_legacy_eval_assets_are_removed(self) -> None:
+        self.assertFalse(
+            (ROOT / "evals").exists(),
+            msg="legacy evals must not remain in the active checkout; current behavior is covered by contracts and pytest",
+        )
+
+    def test_active_docs_do_not_reference_legacy_evals_as_verification_assets(self) -> None:
+        active_targets = (
+            ROOT / "README.md",
+            ROOT / "AGENTS.md",
+            ROOT / "framework" / "docs",
+            ROOT / "framework" / "contracts",
+            ROOT / "tools" / "launcher",
+            ROOT / "scripts",
+        )
+        eval_root = "evals" + "/"
+        forbidden_tokens = (
+            eval_root,
+            eval_root + "**",
+            eval_root + "cases",
+            eval_root + "rubrics",
+        )
+
+        checked_files: list[Path] = []
+        for target in active_targets:
+            if target.is_file():
+                paths = [target]
+            else:
+                paths = [path for path in target.rglob("*") if path.is_file() and "__pycache__" not in path.parts]
+            for path in paths:
+                try:
+                    text = path.read_text(encoding="utf-8").lower()
+                except UnicodeDecodeError:
+                    continue
+                checked_files.append(path)
+                for token in forbidden_tokens:
+                    self.assertNotIn(token, text, msg=f"legacy eval token {token!r} found in {path.relative_to(ROOT)}")
+
+        self.assertTrue(checked_files, msg="expected active documentation/runtime files to be scanned")
+
+    def test_residual_risk_memo_records_eval_cleanup_closure(self) -> None:
+        memo_path = ROOT / "docs" / "memo" / "2026-05-03-final-review-residual-risks.md"
+        text = memo_path.read_text(encoding="utf-8")
+        lower = text.lower()
+        eval_root = "evals" + "/"
+
+        self.assertIn("## Risk 1: Switch-Era Evals Remain Outside The Scoped Residue Scan", text)
+        self.assertIn("Status: Closed by follow-up cleanup.", text)
+        self.assertIn(f"active `{eval_root}` tree was removed", lower)
+        self.assertIn("must not be restored as compatibility fixtures", lower)
+        self.assertIn("Status: Closed by independent rerun.", text)
+        self.assertIn("Independent rerun result: 259 passed, 1 skipped.", text)
+
+        stale_phrases = (
+            "For active evals, replace switch-era setup",
+            "Determine whether " + eval_root + " are active verification assets",
+            "move them out of active searchable guidance",
+        )
+        for phrase in stale_phrases:
+            self.assertNotIn(phrase.lower(), lower, msg=f"stale suggested action remains in residual-risk memo: {phrase}")
 
     def test_active_docs_and_skills_do_not_use_track_mode_field(self) -> None:
         targets = (
