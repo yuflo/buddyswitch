@@ -1,3 +1,8 @@
+---
+name: research-scan
+description: Use when the task is building broad market reality, category structure, competitor coverage, or external context before narrower demand or launch analysis.
+---
+
 # research-scan
 
 ## Execution Order

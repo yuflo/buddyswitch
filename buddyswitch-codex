@@ -286,6 +286,7 @@ instance_open_locked_bootstrap() {
   buddyswitch_ensure_shared_env
   buddyswitch_workspace_ensure_state_skeleton
   buddyswitch_workspace_install_runtime_agents
+  buddyswitch_workspace_install_runtime_skills
   buddyswitch_workspace_install_local_excludes
   buddyswitch_workspace_install_guardrail_hooks
   buddyswitch_workspace_ensure_project_worktree

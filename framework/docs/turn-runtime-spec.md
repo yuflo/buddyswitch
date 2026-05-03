@@ -47,8 +47,7 @@ python3 scripts/turn_runtime.py persist \
 - `current_track_id`
 - `task_context`
 - `track_context`
-- `skills`
-- `inputs_by_skill`
+- `track_artifact_index`
 - `run_envelope`
 - `warnings`
 
@@ -57,7 +56,7 @@ Behavior:
 - Uses locked buddy from instance metadata.
 - Resolves/reuses active task and optional track binding.
 - Reserves one run envelope for the turn.
-- Returns selected input bundles per skill.
+- Does not return custom skill selection or instruction-loading fields.
 
 ## Persist Contract
 
@@ -97,9 +96,11 @@ Legacy command-style follow-up keys must not be present in `receipt`.
 
 Behavior:
 
-- Rejects missing, array, or out-of-context skill ids.
+- Rejects missing/empty/non-string skill ids.
+- Rejects skill ids outside active buddy membership in manifest.
 - Rejects tampered context identity (buddy/task/run/request mismatch).
-- Validates skill output payload against schema.
+- Enforces context and reservation identity integrity before any state write.
+- Validates skill output payload against schema from manifest persistence contract.
 - Writes canonical task/artifact/track/run state.
 - Clears consumed reservation.
 - Does not auto-reserve a follow-up run.
@@ -113,6 +114,12 @@ After successful persist:
 3. Run `prepare` again.
 
 Do not continue a turn through hidden reservation state.
+
+## Codex Native Skills
+
+- Source packages are Codex-native under `buddyswitch/skills/**`.
+- Runtime packages are materialized under instance `.agents/skills/**`.
+- Codex owns native skill discovery and instruction loading from runtime `.agents/skills`.
 
 ## Canonical State Paths
 

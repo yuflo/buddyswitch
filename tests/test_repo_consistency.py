@@ -39,19 +39,6 @@ ARTIFACT_SKILL_DOCS = (
     ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "SKILL.md",
 )
-SKILL_TOMLS = (
-    ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "skill.toml",
-    ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "skill.toml",
-    ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery" / "skill.toml",
-    ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy" / "skill.toml",
-    ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "skill.toml",
-    ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "skill.toml",
-    ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "skill.toml",
-    ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "skill.toml",
-    ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "skill.toml",
-    ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "skill.toml",
-    ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "skill.toml",
-)
 MARKET_SCHEMA_PATHS = (
     ROOT / "framework" / "schemas" / "market" / "research-scan.json",
     ROOT / "framework" / "schemas" / "market" / "pmf-recon.json",
@@ -221,34 +208,37 @@ def _tracked_repo_files(paths: tuple[str, ...]) -> list[Path]:
     return [ROOT / relative_path for relative_path in result.stdout.splitlines() if relative_path]
 
 
+def _manifest_skill_package_roots() -> list[Path]:
+    manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+    roots: list[Path] = []
+    for skill in manifest.get("skills", []):
+        if not isinstance(skill, dict):
+            continue
+        raw_path = skill.get("path")
+        if not isinstance(raw_path, str) or not raw_path:
+            continue
+        roots.append(ROOT / raw_path)
+    return roots
+
+
 class RepoConsistencyTests(unittest.TestCase):
     def test_legacy_agents_skills_tree_is_removed(self) -> None:
         self.assertFalse((ROOT / ".agents").exists())
 
-    def test_canonical_paths_do_not_activate_legacy_agents_skills(self) -> None:
-        forbidden = (
-            "repo-local skills under `.agents/skills/`",
-            "relevant repo-local skills in `.agents/skills/`",
-            "`.agents/skills/**/SKILL.md`",
+    def test_runtime_agents_skills_are_documented_as_instance_only(self) -> None:
+        self.assertFalse((ROOT / ".agents").exists())
+        active_docs = (
+            ROOT / "README.md",
+            ROOT / "AGENTS.md",
+            ROOT / "framework" / "docs" / "turn-runtime-spec.md",
+            ROOT / "framework" / "docs" / "skill-architecture-best-practices.md",
+            ROOT / "framework" / "docs" / "browser-cockpit.md",
+            *ACTIVE_BUDDY_PROMPT_DOCS,
         )
-        checked_files: list[Path] = []
-
-        for base in CANONICAL_PATHS:
-            if base.is_file():
-                paths = [base]
-            else:
-                paths = [
-                    path
-                    for path in base.rglob("*")
-                    if path.is_file() and path.suffix in TEXT_SUFFIXES and "__pycache__" not in path.parts
-                ]
-            for path in paths:
-                checked_files.append(path)
-                text = path.read_text(encoding="utf-8")
-                for needle in forbidden:
-                    self.assertNotIn(needle, text, msg=f"Found legacy native-skill activation in {path.relative_to(ROOT)}")
-
-        self.assertTrue(checked_files)
+        for path in active_docs:
+            text = path.read_text(encoding="utf-8")
+            if ".agents/skills" in text:
+                self.assertIn("instance", text.lower(), msg=f"{path.relative_to(ROOT)} must describe instance-scoped runtime skills")
 
     def test_active_docs_use_canonical_not_strict_switch_wording(self) -> None:
         self.assertFalse(LEGACY_ROUTER_PROMPT.exists())
@@ -602,13 +592,15 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertFalse(LEGACY_RUNTIME_AGENTS.exists())
         for path in ACTIVE_BUDDY_PROMPT_DOCS:
             text = path.read_text(encoding="utf-8").lower()
-            self.assertIn("prepare_context", text)
+            self.assertIn(".agents/skills", text)
+            self.assertIn("codex cli", text)
             self.assertIn("request_text", text)
             self.assertIn("scripts/turn_runtime.py persist", text)
             self.assertIn("## receipt contract", text)
             self.assertIn("## summary contract", text)
             self.assertNotIn("selected_skill_packet", text)
             self.assertNotIn("prepare-execution", text)
+            self.assertNotIn("prepare_context.skills", text)
             self.assertNotIn("receipt.recommended_switch", text)
             self.assertNotIn("reference_switches", text)
 
@@ -682,14 +674,15 @@ class RepoConsistencyTests(unittest.TestCase):
 
         self.assertTrue(checked_files, msg="expected tracked docs/config example files to be scanned")
 
-    def test_switch_spec_keeps_multi_skill_choice_on_prepare_context_skills(self) -> None:
+    def test_switch_spec_documents_context_only_prepare_shape(self) -> None:
         text = (ROOT / "framework" / "docs" / "turn-runtime-spec.md").read_text(encoding="utf-8")
 
-        self.assertIn("- `skills`", text)
-        self.assertIn("inputs_by_skill", text)
-        self.assertIn("Rejects missing, array, or out-of-context skill ids.", text)
-        self.assertNotIn("artifact_selection_by_skill[chosen_skill_id]", text)
-        self.assertNotIn("run_instructions_by_skill[chosen_skill_id]", text)
+        self.assertIn("track_artifact_index", text)
+        self.assertIn("persist", text)
+        self.assertIn("skill_id", text)
+        self.assertNotIn("- `skills`", text)
+        self.assertNotIn("inputs_by_skill", text)
+        self.assertNotIn("run_instructions_by_skill", text)
 
     def test_switch_spec_describes_multi_skill_choice_without_selection_maps(self) -> None:
         text = (ROOT / "framework" / "docs" / "turn-runtime-spec.md").read_text(encoding="utf-8")
@@ -734,76 +727,40 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("## track/object handling", text, msg=f"track/object handling should be shared in {path.relative_to(ROOT)}")
                 self.assertNotIn("## output path", text, msg=f"output path should be shared in {path.relative_to(ROOT)}")
 
-    def test_skill_toml_descriptions_use_activation_style(self) -> None:
-        disallowed_summary_tokens = (
-            "workflow",
-            "steps",
-            "template",
-            "persist",
-            "execution summary",
-            "artifact.summary",
-        )
-        for path in SKILL_TOMLS:
-            with self.subTest(skill_toml=str(path.relative_to(ROOT))):
-                if not path.exists():
-                    # Existence failures are owned by the dedicated package/file existence tests.
-                    continue
-                text = path.read_text(encoding="utf-8").splitlines()
-                description_lines = [line for line in text if line.startswith("description = ")]
-                self.assertEqual(1, len(description_lines), msg=f"expected one description in {path.relative_to(ROOT)}")
-                self.assertTrue(
-                    description_lines[0].startswith('description = "Use when '),
-                    msg=f"description must use activation style in {path.relative_to(ROOT)}",
-                )
-                lowered = description_lines[0].lower()
-                for token in disallowed_summary_tokens:
-                    self.assertNotIn(
-                        token,
-                        lowered,
-                        msg=f"description should not summarize workflow details in {path.relative_to(ROOT)}",
-                    )
+    def test_skill_packages_are_codex_native(self) -> None:
+        for package_root in _manifest_skill_package_roots():
+            with self.subTest(package=str(package_root.relative_to(ROOT))):
+                skill_md = package_root / "SKILL.md"
+                self.assertTrue(skill_md.exists(), msg=f"missing SKILL.md in {package_root}")
+                text = skill_md.read_text(encoding="utf-8")
+                self.assertTrue(text.startswith("---\n"), msg=f"missing YAML frontmatter in {skill_md.relative_to(ROOT)}")
+                frontmatter = text.split("---", 2)[1]
+                self.assertIn("\nname:", frontmatter)
+                self.assertIn("\ndescription:", frontmatter)
+                self.assertFalse((package_root / "skill.toml").exists(), msg=f"dual metadata not allowed in {package_root}")
 
-    def test_skill_toml_output_schemas_exist_and_are_parseable_json(self) -> None:
-        for path in SKILL_TOMLS:
-            with self.subTest(skill_toml=str(path.relative_to(ROOT))):
-                if not path.exists():
-                    # Existence failures are owned by the dedicated package/file existence tests.
-                    continue
-                schema_path = None
-                for line in path.read_text(encoding="utf-8").splitlines():
-                    if line.startswith("output_schema = "):
-                        schema_path = line.split("=", 1)[1].strip().strip('"')
-                        break
-                self.assertIsNotNone(schema_path, msg=f"missing output_schema in {path.relative_to(ROOT)}")
-                resolved_schema = ROOT / schema_path
-                self.assertTrue(
-                    resolved_schema.exists(),
-                    msg=f"missing output schema for {path.relative_to(ROOT)}: {schema_path}",
-                )
-                with resolved_schema.open("r", encoding="utf-8") as handle:
-                    parsed_schema = json.load(handle)
-                self.assertIsInstance(
-                    parsed_schema,
-                    dict,
-                    msg=f"output schema must be a JSON object in {resolved_schema.relative_to(ROOT)}",
-                )
+    def test_manifest_persistence_fields_exist_for_all_skills(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        for skill in manifest.get("skills", []):
+            if not isinstance(skill, dict):
+                continue
+            with self.subTest(skill=skill.get("id")):
+                persistence = skill.get("persistence")
+                self.assertIsInstance(persistence, dict)
+                assert isinstance(persistence, dict)
+                self.assertIn("produces_artifact", persistence)
+                self.assertIn("output_schema", persistence)
+                self.assertIn("output_slot", persistence)
+                schema_path = ROOT / persistence["output_schema"]
+                self.assertTrue(schema_path.exists(), msg=f"missing schema: {schema_path.relative_to(ROOT)}")
+                with schema_path.open("r", encoding="utf-8") as handle:
+                    self.assertIsInstance(json.load(handle), dict)
 
-    def test_pm_skill_metadata_uses_explicit_market_inputs(self) -> None:
-        path = ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "skill.toml"
-        expected_slots = [
-            "market-scan",
-            "pmf-report",
-            "customer-discovery",
-            "positioning-brief",
-            "channel-plan",
-            "launch-prep",
-            "requirements",
-            "track",
-        ]
-
-        parsed = env_manifest._load_toml(path)  # type: ignore[attr-defined]
-        self.assertEqual(parsed["input_slots"], expected_slots)
-        self.assertEqual(parsed["consumes"], expected_slots)
+    def test_pm_write_prd_manifest_persistence_uses_expected_output_slot(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        skills = {skill["id"]: skill for skill in manifest.get("skills", []) if isinstance(skill, dict)}
+        self.assertEqual(skills["write-prd"]["persistence"]["output_slot"], "prd")
+        self.assertEqual(skills["track-manager"]["persistence"]["output_slot"], None)
 
     def test_market_schemas_share_canonical_evidence_and_traceability_fields(self) -> None:
         for path in MARKET_SCHEMA_PATHS:
@@ -818,45 +775,18 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("conclusion", traceability_required)
                 self.assertNotIn("claim", traceability_required)
 
-    def test_market_skills_share_market_cockpit_execution_metadata(self) -> None:
-        manifest = env_manifest.load_manifest()
-        market_skills = {
-            skill["id"]: skill["runtime"]
-            for skill in manifest.get("skills", [])
-            if isinstance(skill, dict)
-            and isinstance(skill.get("runtime"), dict)
-            and skill["runtime"].get("buddy") == "market"
-        }
-        for path in SKILL_TOMLS[:6]:
-            with self.subTest(skill_toml=str(path.relative_to(ROOT))):
-                parsed = market_skills.get(path.parent.name, {})
-                host_execution = parsed.get("host_execution", {}) if isinstance(parsed, dict) else {}
-                for key, value in BROWSER_COCKPIT_METADATA.items():
-                    self.assertEqual(host_execution.get(key), value, msg=f"{path.relative_to(ROOT)} missing {key}={value}")
-                self.assertEqual(
-                    parsed.get("required_tools"),
-                    BROWSER_COCKPIT_REQUIRED_TOOLS,
-                    msg=f"{path.relative_to(ROOT)} missing required_tools={BROWSER_COCKPIT_REQUIRED_TOOLS}",
-                )
-
-    def test_market_skill_metadata_uses_instance_cockpit_tokens(self) -> None:
-        for path in SKILL_TOMLS[:6]:
-            with self.subTest(skill_toml=str(path.relative_to(ROOT))):
-                parsed = env_manifest._load_toml(path)  # type: ignore[attr-defined]
-                self.assertEqual(parsed["browser_profile"], "instance-browser")
-                self.assertEqual(parsed["session_continuity"], "instance-cockpit")
-                self.assertNotEqual(parsed["browser_profile"], "shared-browser")
-                self.assertNotEqual(parsed["session_continuity"], "shared-cockpit")
-
-    def test_market_skills_share_market_tool_scope_profile(self) -> None:
-        for path in SKILL_TOMLS[:6]:
-            with self.subTest(skill_toml=str(path.relative_to(ROOT))):
-                parsed = env_manifest._load_toml(path)  # type: ignore[attr-defined]
-                self.assertEqual(
-                    parsed.get("tool_scope_profile"),
-                    EXPECTED_MARKET_TOOL_SCOPE_PROFILE,
-                    msg=f"{path.relative_to(ROOT)} missing tool_scope_profile={EXPECTED_MARKET_TOOL_SCOPE_PROFILE}",
-                )
+    def test_market_skill_membership_and_persistence_contracts_are_manifest_driven(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        buddies = {buddy["id"]: buddy for buddy in manifest.get("buddies", []) if isinstance(buddy, dict)}
+        skills = {skill["id"]: skill for skill in manifest.get("skills", []) if isinstance(skill, dict)}
+        market_skill_ids = buddies["market"]["skills"]
+        self.assertGreaterEqual(len(market_skill_ids), 6)
+        for skill_id in market_skill_ids:
+            with self.subTest(skill=skill_id):
+                persistence = skills[skill_id]["persistence"]
+                self.assertTrue(persistence["produces_artifact"])
+                self.assertIsInstance(persistence["output_slot"], str)
+                self.assertTrue((ROOT / persistence["output_schema"]).exists())
 
     def test_market_skill_docs_reference_shared_cockpit_doc(self) -> None:
         for path in ARTIFACT_SKILL_DOCS[:6]:
@@ -998,18 +928,17 @@ class RepoConsistencyTests(unittest.TestCase):
         ).lower()
         self.assertNotIn("suggested next switch", chat_return_section)
 
-    def test_market_cockpit_doc_defines_prepare_context_execution_boundary(self) -> None:
+    def test_market_cockpit_doc_defines_native_skill_boundary(self) -> None:
         cockpit_doc = (ROOT / "framework" / "docs" / "browser-cockpit.md").read_text(
             encoding="utf-8"
         ).lower()
-        self.assertIn("prepare_context.skills[*].host_execution", cockpit_doc)
-        self.assertIn("prepare_context.skills[*].tool_scope", cockpit_doc)
-        self.assertIn("does not imply that top-level `prepare_context.inputs` is already populated", cockpit_doc)
-        self.assertIn("host stays the only executor", cockpit_doc)
-        self.assertIn("these six skills stay separate", cockpit_doc)
-        self.assertIn("not a second source of truth", cockpit_doc)
+        self.assertIn(".agents/skills", cockpit_doc)
+        self.assertIn("codex", cockpit_doc)
+        self.assertIn("native", cockpit_doc)
+        self.assertIn("prepare", cockpit_doc)
         self.assertNotIn("selected_skill_packet", cockpit_doc)
         self.assertNotIn("prepare-execution", cockpit_doc)
+        self.assertNotIn("prepare_context.skills", cockpit_doc)
 
     def test_switch_spec_documents_prepare_context_loop(self) -> None:
         switch_spec = (ROOT / "framework" / "docs" / "turn-runtime-spec.md").read_text(encoding="utf-8").lower()
@@ -1020,14 +949,14 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("prepare-execution", switch_spec)
         self.assertNotIn("selected_skill_packet", switch_spec)
 
-    def test_switch_spec_defers_market_execution_boundary_to_skill_metadata(self) -> None:
+    def test_switch_spec_defers_skill_execution_to_codex_native_discovery(self) -> None:
         cockpit_doc = (ROOT / "framework" / "docs" / "browser-cockpit.md").read_text(encoding="utf-8").lower()
-        self.assertIn("prepare_context.skills[*].host_execution", cockpit_doc)
-        self.assertIn("prepare_context.skills[*].tool_scope", cockpit_doc)
+        self.assertIn(".agents/skills", cockpit_doc)
         self.assertIn("browser-native", cockpit_doc)
+        self.assertNotIn("prepare_context.skills", cockpit_doc)
         self.assertNotIn("selected_skill_packet.execution_steps", cockpit_doc)
 
-    def test_top_level_docs_define_prepare_context_flow(self) -> None:
+    def test_top_level_docs_define_prepare_and_persist_flow_without_custom_skill_packet(self) -> None:
         self.assertFalse(LEGACY_ROUTER_PROMPT.exists())
         combined = "\n".join(
             path.read_text(encoding="utf-8")
@@ -1039,12 +968,14 @@ class RepoConsistencyTests(unittest.TestCase):
             )
         ).lower()
 
-        self.assertIn("prepare_context", combined)
+        self.assertIn(".agents/skills", combined)
+        self.assertIn("prepare", combined)
         self.assertIn("persist-skill-result", combined)
         self.assertIn("refreshed_context", combined)
         self.assertIn("buddyswitch does not open browser tools itself", (ROOT / "framework" / "docs" / "browser-cockpit.md").read_text(encoding="utf-8").lower())
         self.assertNotIn("prepare-execution", combined)
         self.assertNotIn("selected_skill_packet", combined)
+        self.assertNotIn("prepare_context.skills", combined)
 
     def test_runtime_docs_state_resolve_and_persist_require_runtime_workspace(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
@@ -1068,15 +999,15 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("runtime workspace", combined)
         self.assertNotIn("${buddyswitch_shared_root}/project/workspace/projects/app", combined)
 
-    def test_host_docs_treat_inputs_as_conditional_selected_bundle(self) -> None:
+    def test_host_docs_remove_custom_prepare_inputs_by_skill_bundle(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
         buddy_prompts = "\n".join(path.read_text(encoding="utf-8").lower() for path in ACTIVE_BUDDY_PROMPT_DOCS)
         switch_spec = (ROOT / "framework" / "docs" / "turn-runtime-spec.md").read_text(encoding="utf-8").lower()
 
         self.assertIn("request_text", readme)
         self.assertIn("prepare-turn-context", readme)
-        self.assertIn("inputs_by_skill", switch_spec)
-        self.assertNotIn("top-level `inputs` may be empty", switch_spec)
+        self.assertNotIn("inputs_by_skill", switch_spec)
+        self.assertNotIn("prepare_context.skills", switch_spec)
         self.assertNotIn("resolve_context.inputs[", buddy_prompts)
 
     def test_docs_place_persist_follow_up_fields_inside_receipt(self) -> None:
@@ -1171,7 +1102,9 @@ class RepoConsistencyTests(unittest.TestCase):
             path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy_id / "AGENTS.md"
             with self.subTest(buddy=buddy_id):
                 _, lower = self._assert_buddy_prompt_base_contract(buddy_id, path)
-                self.assertIn("prepare_context", lower)
+                self.assertIn(".agents/skills", lower)
+                self.assertIn("codex cli", lower)
+                self.assertIn("native skill", lower)
                 self.assertIn("runs/raw/", lower)
                 self.assertIn("projects/app", lower)
                 self.assertIn("## receipt contract", lower)
@@ -1195,10 +1128,10 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn(f"switch {buddy_id}", lower)
                 self.assertNotIn("receipt -> commands -> summary", lower)
                 required_runtime_tokens = (
-                    "prepare_context",
-                    "selected-skill preflight",
-                    "host_execution",
-                    "tool_scope",
+                    ".agents/skills",
+                    "codex cli",
+                    "native skill",
+                    "skill_id",
                     "runs/raw/",
                     "projects/app",
                     "## receipt contract",
@@ -1206,6 +1139,9 @@ class RepoConsistencyTests(unittest.TestCase):
                 )
                 for token in required_runtime_tokens:
                     self.assertIn(token, lower)
+                self.assertNotIn("choose exactly one skill_id from prepare_context.skills", lower)
+                self.assertNotIn("read and execute the selected buddyswitch skill.md", lower)
+                self.assertNotIn("instruction_path", lower)
                 self.assertNotIn("projects/app/.runtime/", lower)
 
     def test_runtime_prompt_does_not_present_switch_as_product_ui(self) -> None:
@@ -1303,83 +1239,34 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("receipt.recommended_switch", switch_spec)
         self.assertNotIn("commands order", switch_spec)
 
-    def test_runtime_host_prompt_defines_selected_skill_preflight_mitigation(self) -> None:
+    def test_runtime_host_prompt_defines_codex_native_skill_loop(self) -> None:
         self.assertFalse(LEGACY_RUNTIME_AGENTS.exists())
         text = "\n".join(path.read_text(encoding="utf-8").lower() for path in ACTIVE_BUDDY_PROMPT_DOCS)
 
         required_semantics = (
-            "selected skill",
-            "preflight",
-            "host_execution",
-            "tool_scope",
-            "required_tools",
-            "required_env",
-            "browser-native",
-            "explicit user approval",
-            "advisory",
+            ".agents/skills",
+            "codex cli",
+            "native skill",
+            "persist",
+            "skill_id",
         )
-        positions: dict[str, int] = {}
         for token in required_semantics:
-            position = text.find(token)
-            self.assertNotEqual(position, -1, msg=f"missing selected-skill preflight runtime semantic: {token}")
-            positions[token] = position
+            self.assertIn(token, text, msg=f"missing runtime semantic: {token}")
+        self.assertNotIn("choose exactly one skill_id from prepare_context.skills", text)
+        self.assertNotIn("read and execute the selected buddyswitch skill.md", text)
+        self.assertNotIn("instruction_path", text)
+        self.assertNotIn("run_instructions_by_skill", text)
 
-        grouped_tokens = (
-            "selected skill",
-            "preflight",
-            "host_execution",
-            "tool_scope",
-            "required_tools",
-            "required_env",
-            "browser-native",
-            "explicit user approval",
-            "advisory",
-        )
-        grouped_positions = [positions[token] for token in grouped_tokens]
-        self.assertLess(
-            max(grouped_positions) - min(grouped_positions),
-            1800,
-            msg="selected-skill preflight runtime semantics should stay grouped in the host preflight area",
-        )
-        self.assertNotIn("for market runs", text)
-        self.assertNotIn("hard gate", text)
-        self.assertNotIn("enforced", text)
-        self.assertNotIn("prevented", text)
-        self.assertNotIn("before any external action", text)
-        self.assertNotIn("required tools must be present before continuing", text)
-
-    def test_router_prompt_keeps_selected_skill_preflight_reduced_parity(self) -> None:
+    def test_browser_cockpit_doc_references_native_runtime_skill_materialization(self) -> None:
         self.assertFalse(LEGACY_ROUTER_PROMPT.exists())
         text = (ROOT / "framework" / "docs" / "browser-cockpit.md").read_text(encoding="utf-8").lower()
 
-        required_semantics = (
-            "selected skill",
-            "host_execution",
-            "tool_scope",
-            "chrome-devtools-cockpit",
-            "browser-native",
-            "user-approved",
-            "mandatory takeover",
-        )
-        positions: dict[str, int] = {}
-        for token in required_semantics:
-            position = text.find(token)
-            self.assertNotEqual(position, -1, msg=f"missing selected-skill preflight router reduced semantic: {token}")
-            positions[token] = position
-
-        grouped_positions = [positions[token] for token in required_semantics]
-        self.assertLess(
-            max(grouped_positions) - min(grouped_positions),
-            3200,
-            msg="router selected-skill preflight reduced semantics should stay grouped in host responsibility guidance",
-        )
+        self.assertIn(".agents/skills", text)
+        self.assertIn("chrome-devtools-cockpit", text)
+        self.assertIn("browser-native", text)
         self.assertIn("mandatory takeover", text)
-        self.assertNotIn("for market runs", text)
-        self.assertNotIn(
-            "do not reinterpret missing executor availability, login takeover, and genuine browser-native blocking as the same path",
-            text,
-        )
-        self.assertNotIn("external tool invocation or evidence capture", text)
+        self.assertNotIn("prepare_context.skills", text)
+        self.assertNotIn("selected_skill_packet", text)
 
     def test_router_doc_lists_task_objects_as_canonical_state(self) -> None:
         self.assertFalse(LEGACY_ROUTER_PROMPT.exists())
@@ -1415,49 +1302,16 @@ class RepoConsistencyTests(unittest.TestCase):
                             msg=f"missing schema-derived token '{token}' in {path.relative_to(ROOT)}",
                         )
 
-    def test_skill_packages_include_skill_toml_and_instruction_markdown(self) -> None:
-        expected_packages = (
-            ROOT / "buddyswitch" / "skills" / "market" / "research-scan",
-            ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon",
-            ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery",
-            ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy",
-            ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery",
-            ROOT / "buddyswitch" / "skills" / "market" / "launch-prep",
-            ROOT / "buddyswitch" / "skills" / "pm" / "write-prd",
-            ROOT / "buddyswitch" / "skills" / "pm" / "track-manager",
-            ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype",
-            ROOT / "buddyswitch" / "skills" / "dev" / "implement-task",
-            ROOT / "buddyswitch" / "skills" / "test" / "smoke-test",
-        )
-        for package_root in expected_packages:
-            with self.subTest(package=str(package_root.relative_to(ROOT))):
-                self.assertTrue((package_root / "skill.toml").exists(), msg=f"missing skill.toml in {package_root}")
-                self.assertTrue((package_root / "SKILL.md").exists(), msg=f"missing SKILL.md in {package_root}")
-
-    def test_skill_instructions_are_markdown_only_without_frontmatter_metadata(self) -> None:
-        expected_packages = (
-            ROOT / "buddyswitch" / "skills" / "market" / "research-scan",
-            ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon",
-            ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery",
-            ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy",
-            ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery",
-            ROOT / "buddyswitch" / "skills" / "market" / "launch-prep",
-            ROOT / "buddyswitch" / "skills" / "pm" / "write-prd",
-            ROOT / "buddyswitch" / "skills" / "pm" / "track-manager",
-            ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype",
-            ROOT / "buddyswitch" / "skills" / "dev" / "implement-task",
-            ROOT / "buddyswitch" / "skills" / "test" / "smoke-test",
-        )
-        for package_root in expected_packages:
+    def test_skill_instructions_use_yaml_frontmatter_metadata(self) -> None:
+        for package_root in _manifest_skill_package_roots():
             with self.subTest(package=str(package_root.relative_to(ROOT))):
                 skill_doc = package_root / "SKILL.md"
-                if not skill_doc.exists():
-                    # Existence failures are owned by the dedicated package/file existence tests.
-                    continue
                 lines = skill_doc.read_text(encoding="utf-8").splitlines()
                 self.assertTrue(lines, msg=f"empty SKILL.md in {package_root}")
-                self.assertNotEqual(lines[0].strip(), "---", msg=f"frontmatter not allowed in {skill_doc.relative_to(ROOT)}")
-                self.assertTrue(lines[0].startswith("# "), msg=f"SKILL.md must start with heading in {skill_doc.relative_to(ROOT)}")
+                self.assertEqual(lines[0].strip(), "---", msg=f"frontmatter required in {skill_doc.relative_to(ROOT)}")
+                header_block = "\n".join(lines[:20])
+                self.assertIn("name:", header_block)
+                self.assertIn("description:", header_block)
 
     def test_template_references_are_materialized_in_assets(self) -> None:
         expected_assets = (
@@ -1479,7 +1333,7 @@ class RepoConsistencyTests(unittest.TestCase):
 
     def test_shape_prototype_package_files_exist(self) -> None:
         self.assertTrue((ROOT / "framework" / "schemas" / "design" / "shape-prototype.json").exists())
-        self.assertTrue((ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "skill.toml").exists())
+        self.assertFalse((ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "skill.toml").exists())
         self.assertTrue((ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists())
 
     def test_active_docs_use_slot_revision_and_package_contract_language(self) -> None:
@@ -1530,7 +1384,8 @@ class RepoConsistencyTests(unittest.TestCase):
         prepare_context = loaded_contracts["prepare-turn-context"]
         self.assertIn("response_key_order", prepare_context)
         self.assertIn("context_revision", prepare_context["response_key_order"])
-        self.assertIn("skills", prepare_context["response_key_order"])
+        self.assertIn("track_artifact_index", prepare_context["response_key_order"])
+        self.assertNotIn("skills", prepare_context["response_key_order"])
 
         persist_skill_result = loaded_contracts["persist-skill-result"]
         self.assertIn("response_key_order", persist_skill_result)

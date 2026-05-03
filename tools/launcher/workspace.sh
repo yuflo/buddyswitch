@@ -427,6 +427,20 @@ buddyswitch_workspace_install_runtime_agents() {
   cp "${template_path}" "${workspace_dir}/AGENTS.md"
 }
 
+buddyswitch_workspace_install_runtime_skills() {
+  local buddy_id repo_root
+
+  buddy_id="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
+  if [[ -z "${buddy_id}" ]]; then
+    return 0
+  fi
+
+  repo_root="$(buddyswitch_workspace_repo_root)"
+  python3 "${repo_root}/scripts/runtime_skills.py" install \
+    --buddy "${buddy_id}" \
+    --workspace "${BUDDYSWITCH_WORKSPACE_DIR}"
+}
+
 buddyswitch_workspace_install_local_excludes() {
   local workspace_dir exclude_path
   local marker
@@ -452,6 +466,7 @@ buddyswitch/objects/tracks/**
 buddyswitch/objects/tasks/**
 buddyswitch/objects/artifacts/**
 runs/raw/**
+.agents/skills/**
 EOF
 }
 
@@ -531,6 +546,7 @@ buddyswitch_workspace_prepare_execution_worktree() {
   buddyswitch_workspace_ensure_execution_worktree
   buddyswitch_workspace_ensure_state_skeleton
   buddyswitch_workspace_install_runtime_agents
+  buddyswitch_workspace_install_runtime_skills
   buddyswitch_workspace_install_local_excludes
   buddyswitch_workspace_install_guardrail_hooks
 }
@@ -540,6 +556,7 @@ buddyswitch_workspace_sync_execution_worktree() {
   buddyswitch_workspace_force_rebuild_execution_worktree
   buddyswitch_workspace_ensure_state_skeleton
   buddyswitch_workspace_install_runtime_agents
+  buddyswitch_workspace_install_runtime_skills
   buddyswitch_workspace_install_local_excludes
   buddyswitch_workspace_install_guardrail_hooks
 }

@@ -8,17 +8,11 @@ If work should move to another buddy, open that buddy's locked instance.
 
 ## Canonical Loop
 
-1. Prepare with `scripts/turn_runtime.py prepare "<ordinary request>"`.
-2. Choose exactly one `skill_id` from `prepare_context.skills`.
-3. Read and execute the selected BuddySwitch `SKILL.md`.
-4. Persist with `scripts/turn_runtime.py persist` (`persist-skill-result`).
+1. Prepare context with `scripts/turn_runtime.py prepare "<ordinary request>"`.
+2. Let Codex CLI use the native skills exposed in `.agents/skills`.
+3. Execute the selected native skill in this host session.
+4. Persist with `scripts/turn_runtime.py persist` (`persist-skill-result`), reporting the Codex skill name as `skill_id`.
 5. If another turn is needed, derive a new `request_text` from `receipt.next_state`, then run `prepare` again.
-
-## Selected-Skill Preflight
-
-- Treat the selected skill's `host_execution` and `tool_scope` as preflight instructions.
-- `required_tools` and `required_env` remain advisory readiness metadata for the host session.
-- Browser-native execution metadata stays fail-closed unless explicit user approval widens tool scope.
 
 ## Buddy Lock
 

@@ -11,8 +11,7 @@
     "current_track_id",
     "task_context",
     "track_context",
-    "skills",
-    "inputs_by_skill",
+    "track_artifact_index",
     "run_envelope",
     "warnings"
   ]

@@ -1,3 +1,8 @@
+---
+name: launch-prep
+description: Use when the task is preparing a first launch, validation page, or feedback loop before public release.
+---
+
 # launch-prep
 
 ## Execution Order

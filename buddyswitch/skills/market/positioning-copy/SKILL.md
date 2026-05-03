@@ -1,3 +1,8 @@
+---
+name: positioning-copy
+description: Use when the task is sharpening external positioning, value framing, or founder-facing market copy from validated market evidence.
+---
+
 # positioning-copy
 
 ## Execution Order

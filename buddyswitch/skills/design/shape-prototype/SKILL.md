@@ -1,3 +1,8 @@
+---
+name: shape-prototype
+description: Use when the task is shaping a visible UI/UX prototype and producing a design handoff artifact.
+---
+
 # shape-prototype
 
 ## Purpose

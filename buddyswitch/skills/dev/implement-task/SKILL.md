@@ -1,3 +1,8 @@
+---
+name: implement-task
+description: Use when the task is implementing scoped product changes, bug fixes, or refactors in project code.
+---
+
 # implement-task
 
 ## Purpose

@@ -7,46 +7,78 @@ label = "BuddySwitch Env"
 [[skills]]
 id = "research-scan"
 path = "buddyswitch/skills/market/research-scan"
+produces_artifact = true
+output_slot = "market-scan"
+output_schema = "framework/schemas/market/research-scan.json"
 
 [[skills]]
 id = "pmf-recon"
 path = "buddyswitch/skills/market/pmf-recon"
+produces_artifact = true
+output_slot = "pmf-report"
+output_schema = "framework/schemas/market/pmf-recon.json"
 
 [[skills]]
 id = "customer-discovery"
 path = "buddyswitch/skills/market/customer-discovery"
+produces_artifact = true
+output_slot = "customer-discovery"
+output_schema = "framework/schemas/market/customer-discovery.json"
 
 [[skills]]
 id = "positioning-copy"
 path = "buddyswitch/skills/market/positioning-copy"
+produces_artifact = true
+output_slot = "positioning-brief"
+output_schema = "framework/schemas/market/positioning-copy.json"
 
 [[skills]]
 id = "channel-discovery"
 path = "buddyswitch/skills/market/channel-discovery"
+produces_artifact = true
+output_slot = "channel-plan"
+output_schema = "framework/schemas/market/channel-discovery.json"
 
 [[skills]]
 id = "launch-prep"
 path = "buddyswitch/skills/market/launch-prep"
+produces_artifact = true
+output_slot = "launch-prep"
+output_schema = "framework/schemas/market/launch-prep.json"
 
 [[skills]]
 id = "write-prd"
 path = "buddyswitch/skills/pm/write-prd"
+produces_artifact = true
+output_slot = "prd"
+output_schema = "framework/schemas/pm/write-prd.json"
 
 [[skills]]
 id = "track-manager"
 path = "buddyswitch/skills/pm/track-manager"
+produces_artifact = false
+output_schema = "framework/schemas/pm/track-manager.json"
 
 [[skills]]
 id = "shape-prototype"
 path = "buddyswitch/skills/design/shape-prototype"
+produces_artifact = true
+output_slot = "design-handoff"
+output_schema = "framework/schemas/design/shape-prototype.json"
 
 [[skills]]
 id = "implement-task"
 path = "buddyswitch/skills/dev/implement-task"
+produces_artifact = true
+output_slot = "implementation-report"
+output_schema = "framework/schemas/dev/implement-task.json"
 
 [[skills]]
 id = "smoke-test"
 path = "buddyswitch/skills/test/smoke-test"
+produces_artifact = true
+output_slot = "smoke-test"
+output_schema = "framework/schemas/test/smoke-test.json"
 
 [[buddies]]
 id = "market"

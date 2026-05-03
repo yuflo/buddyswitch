@@ -1,3 +1,8 @@
+---
+name: smoke-test
+description: Use when the task is running smoke checks, regression verification, or readiness testing for a change.
+---
+
 # smoke-test
 
 ## Purpose

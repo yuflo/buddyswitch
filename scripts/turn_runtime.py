@@ -19,12 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from env_manifest import (
-    ADVISORY_RUNTIME_METADATA_POLICY,
-    BROWSER_COCKPIT_HOST_EXECUTION,
     DEFAULT_MANIFEST,
     ManifestError,
-    buddy_authority_profile,
-    buddy_skill_docs,
     load_manifest,
     require_buddy,
 )
@@ -50,9 +46,6 @@ from env_store import (
     update_track,
 )
 from output_schema import OutputSchemaError, load_output_schema, validate_output_payload
-from artifact_selection import select_artifacts_for_run
-
-
 ROOT = env_store.ROOT
 
 
@@ -447,120 +440,6 @@ def _build_next_state(
     }
 
 
-def _build_skill_card(skill: dict[str, Any]) -> dict[str, Any]:
-    runtime = skill["runtime"]
-    guidance = runtime.get("guidance", {})
-    required_tools = runtime.get("required_tools", [])
-    required_env = runtime.get("required_env", [])
-    host_execution = dict(runtime.get("host_execution", {}))
-    tool_scope = runtime.get("tool_scope")
-    output_slot = runtime.get("output_slot")
-    input_slots = runtime.get("input_slots")
-    if not isinstance(input_slots, list):
-        input_slots = runtime.get("consumes", [])
-    card = {
-        "id": skill["id"],
-        "path": skill["path"],
-        "instruction_path": runtime.get("instruction_path", skill["path"]),
-        "description": skill["description"],
-        "objects": skill["objects"],
-        "produces_artifact": bool(runtime.get("produces_artifact", True)),
-        "input_slots": input_slots,
-        "output_schema": runtime["output_schema"],
-        "version": runtime.get("version"),
-        "side_effect_level": runtime.get("side_effect_level"),
-        "required_tools": required_tools,
-        "required_env": required_env,
-        "host_execution": host_execution,
-        "tool_scope": dict(tool_scope or {}),
-        "runtime_requirements": {
-            "required_tools": required_tools,
-            "required_env": required_env,
-            "policy": ADVISORY_RUNTIME_METADATA_POLICY,
-            "note": "These fields inform the host session and do not reject prepare candidates.",
-        },
-        "produces": runtime.get("produces", []),
-        "consumes": runtime.get("consumes", []),
-        "purpose": guidance.get("purpose", []),
-        "use_when": guidance.get("use_when", []),
-        "do_not_use_when": guidance.get("do_not_use_when", []),
-        "inputs": guidance.get("inputs", []),
-        "outputs": guidance.get("outputs", []),
-        "verification": guidance.get("verification", []),
-        "examples": guidance.get("examples", []),
-        "counterexamples": guidance.get("counterexamples", []),
-        "gotchas": guidance.get("gotchas", []),
-    }
-    if isinstance(output_slot, str) and output_slot.strip():
-        card["output_slot"] = output_slot.strip()
-    return card
-
-
-def _build_run_instructions(
-    implicit_skill_id: str | None,
-    artifact_selection: dict[str, Any] | None,
-    *,
-    selected_skill_id: str | None = None,
-    host_execution: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    selected_inputs: list[dict[str, Any]] = []
-    if isinstance(artifact_selection, dict):
-        raw_inputs = artifact_selection.get("selected_inputs")
-        if isinstance(raw_inputs, list):
-            selected_inputs = [item for item in raw_inputs if isinstance(item, dict)]
-    host_execution = dict(host_execution or {})
-
-    next_actions: list[str]
-    if implicit_skill_id:
-        next_actions = [f"Use implicit_skill_id '{implicit_skill_id}' for this run."]
-    elif selected_skill_id:
-        next_actions = [
-            "Choose one skill_id from skills.",
-            f"If you choose skill_id '{selected_skill_id}', use the selected inputs below for that run.",
-        ]
-    else:
-        next_actions = ["Choose one skill_id from skills."]
-
-    next_actions.append("When track_artifact_index is present, select relevant inputs by slot before running the skill.")
-    if selected_inputs:
-        joined_slots = ", ".join(
-            f"{item.get('slot')}={item.get('artifact_id')}"
-            for item in selected_inputs
-            if isinstance(item.get("slot"), str) and isinstance(item.get("artifact_id"), str)
-        )
-        next_actions.append(f"Read selected inputs by slot: {joined_slots}.")
-    next_actions.extend(
-        [
-            "After choosing skill_id, read skills[*].instruction_path for the selected skill.",
-            "Follow the selected skill instructions in the current host turn.",
-            "Produce a structured result payload matching the selected skill's output_schema.",
-            "Call persist when you want BuddySwitch to write task/artifact/track state and run audit metadata.",
-        ]
-    )
-
-    artifact_read_commands = []
-    seen_artifact_ids: set[str] = set()
-    for item in selected_inputs:
-        artifact_id = item.get("artifact_id")
-        if not isinstance(artifact_id, str) or not artifact_id or artifact_id in seen_artifact_ids:
-            continue
-        seen_artifact_ids.add(artifact_id)
-        artifact_read_commands.append(f"python3 scripts/env_artifacts.py get {artifact_id}")
-    return {
-        "host": "codex",
-        "selection_rule": "Choose exactly one skill_id from skills. Multi-skill buddies are never auto-selected by the runtime.",
-        "execution_rule": "The host Codex session runs the selected skill workflow and produces a structured result that matches the selected skill's output_schema.",
-        "persistence_rule": "Call persist with the resolved payload, selected skill_id, and structured result when the run should become BuddySwitch state.",
-        "resolve_notes": [
-            "prepare parses the invocation, derives candidates and context, and does not write BuddySwitch state."
-        ],
-        "host_execution": host_execution,
-        "selected_inputs": selected_inputs,
-        "artifact_read_commands": artifact_read_commands,
-        "next_actions": next_actions,
-    }
-
-
 def _resolve_execution_skill(
     *,
     buddy_id: str,
@@ -568,17 +447,13 @@ def _resolve_execution_skill(
     manifest_path: Path,
 ) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
-    require_buddy(manifest, buddy_id)
-    selected_skill = next(
-        (
-            skill
-            for skill in buddy_skill_docs(manifest, buddy_id)
-            if skill["id"] == skill_id
-        ),
-        None,
-    )
-    if selected_skill is None:
+    buddy = require_buddy(manifest, buddy_id)
+    allowed_skill_ids = {row for row in buddy.get("skills", []) if isinstance(row, str)}
+    if skill_id not in allowed_skill_ids:
         raise ValueError(f"skill_id '{skill_id}' is not available for buddy '{buddy_id}' in the manifest")
+    selected_skill = next((skill for skill in manifest.get("skills", []) if skill.get("id") == skill_id), None)
+    if selected_skill is None:
+        raise ValueError(f"skill '{skill_id}' is missing from manifest skills list")
     return selected_skill
 
 
@@ -622,12 +497,12 @@ def _validate_context_revision(context: dict[str, Any]) -> dict[str, Any]:
 
 
 def _validate_result_against_skill(skill: dict[str, Any], result: dict[str, Any]) -> None:
-    runtime = skill.get("runtime")
-    if not isinstance(runtime, dict):
-        raise ValueError("skill.runtime is required")
-    output_schema = runtime.get("output_schema")
+    persistence = skill.get("persistence")
+    if not isinstance(persistence, dict):
+        raise ValueError("skill.persistence is required")
+    output_schema = persistence.get("output_schema")
     if not isinstance(output_schema, str) or not output_schema.strip():
-        raise ValueError(f"skill '{skill.get('id', '<unknown>')}' must define runtime.output_schema")
+        raise ValueError(f"skill '{skill.get('id', '<unknown>')}' must define persistence.output_schema")
 
     schema = load_output_schema(output_schema)
     errors = validate_output_payload(result, schema)
@@ -641,42 +516,6 @@ def _assert_run_id_unused(run_id: str) -> None:
         raise ValueError(f"run_id already exists: {normalized_run_id}")
     if (env_store.ROOT / run_content_path(normalized_run_id)).exists():
         raise ValueError(f"run_id already exists: {normalized_run_id}")
-
-
-def _validate_market_host_execution(
-    *,
-    buddy_id: str,
-    host_execution: dict[str, Any],
-) -> None:
-    if buddy_id != "market":
-        return
-    if host_execution == BROWSER_COCKPIT_HOST_EXECUTION:
-        return
-
-    expected_keys = set(BROWSER_COCKPIT_HOST_EXECUTION)
-    actual_keys = set(host_execution)
-    missing_keys = sorted(expected_keys - actual_keys)
-    extra_keys = sorted(actual_keys - expected_keys)
-    mismatched_fields = sorted(
-        key
-        for key in expected_keys & actual_keys
-        if host_execution.get(key) != BROWSER_COCKPIT_HOST_EXECUTION[key]
-    )
-    details: list[str] = []
-    if missing_keys:
-        details.append(f"missing keys: {', '.join(missing_keys)}")
-    if extra_keys:
-        details.append(f"extra keys: {', '.join(extra_keys)}")
-    if mismatched_fields:
-        details.append(
-            "mismatched values: "
-            + ", ".join(f"{key}={host_execution.get(key)!r}" for key in mismatched_fields)
-        )
-    detail_text = "; ".join(details) if details else "unexpected market host_execution contract"
-    raise ValueError(
-        "Market host_execution must remain fail-closed to Chrome MCP/browser-native discovery "
-        f"with no silent degrade. {detail_text}"
-    )
 
 
 def _track_object_path(track_id: str) -> str:
@@ -838,64 +677,6 @@ def _build_track_context(track_id: str | None) -> dict[str, Any] | None:
         },
         "tasks": rows,
     }
-
-
-def _build_artifact_selection_context(
-    *,
-    demand: str,
-    required_slots: list[str],
-    task_id: str | None,
-    track_artifact_index: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    if track_artifact_index is None:
-        return None
-    return select_artifacts_for_run(
-        current_buddy="",
-        demand=demand,
-        required_slots=required_slots,
-        track_artifact_index=track_artifact_index,
-        current_task_id=task_id,
-    )
-
-
-def _skill_required_slots(skill: dict[str, Any]) -> list[str]:
-    runtime = skill["runtime"]
-    raw_slots = runtime.get("input_slots")
-    if not isinstance(raw_slots, list):
-        raw_slots = runtime.get("consumes", [])
-    return [slot for slot in raw_slots if isinstance(slot, str) and slot]
-
-
-def _build_selection_contexts_by_skill(
-    *,
-    demand: str,
-    skills: list[dict[str, Any]],
-    task_id: str,
-    track_artifact_index: dict[str, Any] | None,
-    implicit_skill_id: str | None,
-) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-    artifact_selection_by_skill: dict[str, dict[str, Any]] = {}
-    run_instructions_by_skill: dict[str, dict[str, Any]] = {}
-
-    for skill in skills:
-        required_slots = _skill_required_slots(skill)
-        skill_id = skill["id"]
-        selection = select_artifacts_for_run(
-            current_buddy="",
-            demand=demand,
-            required_slots=required_slots,
-            track_artifact_index=track_artifact_index,
-            current_task_id=task_id,
-        )
-        artifact_selection_by_skill[skill_id] = selection
-        run_instructions_by_skill[skill_id] = _build_run_instructions(
-            implicit_skill_id if skill_id == implicit_skill_id else None,
-            selection,
-            selected_skill_id=skill_id if skill_id != implicit_skill_id else None,
-            host_execution=skill["runtime"].get("host_execution", {}),
-        )
-
-    return artifact_selection_by_skill, run_instructions_by_skill
 
 
 def _derive_context_revision(task: dict[str, Any], sequence: int) -> str:
@@ -1115,13 +896,9 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
             f"Task '{existing_task['id']}' is bound to track '{existing_task['track_id']}', cannot switch to '{explicit_track_id}'."
         )
 
-    eligible_skills = buddy_skill_docs(manifest, active_buddy)
-    if not eligible_skills:
+    buddy_skill_ids = [row for row in buddy.get("skills", []) if isinstance(row, str)]
+    if not buddy_skill_ids:
         raise ValueError(f"Buddy '{active_buddy}' currently has no registered skills.")
-
-    skill_cards: list[dict[str, Any]] = []
-    for skill in eligible_skills:
-        skill_cards.append(_build_skill_card(skill))
 
     effective_track_id = explicit_track_id or (existing_task.get("track_id") if existing_task else None)
     if existing_task:
@@ -1161,17 +938,8 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
             effective_track_id = resolved_task.get("track_id")
         task_context = _build_task_context(resolved_task)
 
-    skill_ids = [skill["id"] for skill in eligible_skills]
-    implicit_skill_id = skill_ids[0] if len(skill_ids) == 1 else None
     track_context = _build_track_context(effective_track_id)
     track_artifact_index = build_track_artifact_index(effective_track_id)
-    artifact_selection_by_skill, _ = _build_selection_contexts_by_skill(
-        demand=demand,
-        skills=eligible_skills,
-        task_id=resolved_task["id"],
-        track_artifact_index=track_artifact_index,
-        implicit_skill_id=implicit_skill_id,
-    )
 
     sequence = _derive_context_sequence(resolved_task)
     context_revision = _derive_context_revision(resolved_task, sequence)
@@ -1208,8 +976,7 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
         "current_track_id": current_track_id,
         "task_context": task_context,
         "track_context": track_context,
-        "skills": skill_cards,
-        "inputs_by_skill": artifact_selection_by_skill,
+        "track_artifact_index": track_artifact_index,
         "run_envelope": {
             "run_id": run_id,
             "status": "reserved",
@@ -1467,7 +1234,10 @@ def _persist_artifact_skill(
     if not isinstance(request_text, str) or not request_text.strip():
         raise ValueError("request_text is required")
     skill_id = skill["id"]
-    output_slot = skill["runtime"].get("output_slot")
+    persistence = skill.get("persistence")
+    if not isinstance(persistence, dict):
+        raise ValueError(f"skill '{skill_id}' must define persistence")
+    output_slot = persistence.get("output_slot")
     if not isinstance(output_slot, str) or not output_slot:
         raise ValueError(f"skill '{skill_id}' must define a non-empty output_slot")
     output_slot = output_slot.strip()
@@ -1585,16 +1355,11 @@ def _persist_skill_result(
     raw_current_track_id = context.get("current_track_id")
     current_track_id = raw_current_track_id.strip() if isinstance(raw_current_track_id, str) and raw_current_track_id.strip() else None
 
-    skills_payload = context.get("skills")
-    if not isinstance(skills_payload, list):
-        raise ValueError("context.skills is required")
-    skill_ids = {
-        item.get("id").strip()
-        for item in skills_payload
-        if isinstance(item, dict) and isinstance(item.get("id"), str) and item.get("id").strip()
-    }
-    if selected_skill_id not in skill_ids:
-        raise ValueError(f"selected skill_id '{selected_skill_id}' must be one of context.skills ids")
+    manifest = load_manifest(manifest_path)
+    buddy = require_buddy(manifest, active_buddy)
+    allowed_skill_ids = {row for row in buddy.get("skills", []) if isinstance(row, str)}
+    if selected_skill_id not in allowed_skill_ids:
+        raise ValueError(f"selected skill_id '{selected_skill_id}' is not allowed for buddy '{active_buddy}'")
 
     run_envelope = context.get("run_envelope")
     if not isinstance(run_envelope, dict):
@@ -1724,20 +1489,10 @@ def _derive_cli_persist_skill_id(
     context: dict[str, Any],
     requested_skill_id: str | None,
 ) -> str:
+    _ = context
     if isinstance(requested_skill_id, str) and requested_skill_id.strip():
         return requested_skill_id.strip()
-
-    skills = context.get("skills")
-    if not isinstance(skills, list) or len(skills) != 1:
-        raise ValueError("skill_id is required unless prepare context exposes exactly one available skill")
-
-    only_skill = skills[0]
-    if not isinstance(only_skill, dict):
-        raise ValueError("prepare context skills[0] must be an object")
-    skill_id = only_skill.get("id")
-    if not isinstance(skill_id, str) or not skill_id.strip():
-        raise ValueError("prepare context skills[0].id is required")
-    return skill_id.strip()
+    raise ValueError("skill_id is required")
 
 
 def _validate_product_persist_context_binding(context: dict[str, Any], product_session: dict[str, Any]) -> None:
@@ -1839,7 +1594,7 @@ def build_parser() -> argparse.ArgumentParser:
     persist_cmd.add_argument("--result", required=True, help="Structured result JSON file, or '-' for stdin")
     persist_cmd.add_argument(
         "--skill-id",
-        help="Chosen skill id. Optional only when the prepared context exposes exactly one available skill.",
+        help="Chosen skill id. Required.",
     )
     persist_cmd.set_defaults(func=_cmd_persist)
 

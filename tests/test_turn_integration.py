@@ -20,6 +20,16 @@ if str(SCRIPTS) not in sys.path:
 import env_store  # noqa: E402
 import runtime_store.projections as workspace_projections  # noqa: E402
 import workspace_data  # noqa: E402
+
+
+FORBIDDEN_PREPARE_CONCEPTS = (
+    "selected_skill",
+    "skill_candidates",
+    "skill_instructions",
+    "run_instructions_by_skill",
+    "selected_skill_packet",
+    "instruction_path",
+)
 from tests.test_turn_runtime import _load_turn_runtime  # noqa: E402
 
 
@@ -34,6 +44,22 @@ def _relative_to_runtime_or_repo(path: Path) -> str:
         except ValueError:
             continue
     return candidate.as_posix()
+
+
+def _contains_concept_recursive(payload: object, concept: str) -> bool:
+    concept_lower = concept.lower()
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if isinstance(key, str) and concept_lower in key.lower():
+                return True
+            if _contains_concept_recursive(value, concept):
+                return True
+        return False
+    if isinstance(payload, list):
+        return any(_contains_concept_recursive(item, concept) for item in payload)
+    if isinstance(payload, str):
+        return concept_lower in payload.lower()
+    return False
 
 
 class TurnRuntimeIntegrationTests(unittest.TestCase):
@@ -152,18 +178,32 @@ class TurnRuntimeIntegrationTests(unittest.TestCase):
                 manifest_path=turn_runtime.DEFAULT_MANIFEST,
             )
 
-    @staticmethod
-    def _skill_ids(context: dict[str, object]) -> list[str]:
-        skills = context.get("skills")
-        if not isinstance(skills, list):
-            return []
-        ids: list[str] = []
-        for card in skills:
-            if isinstance(card, dict):
-                skill_id = card.get("id")
-                if isinstance(skill_id, str) and skill_id:
-                    ids.append(skill_id)
-        return ids
+    def _assert_prepare_has_context_only_shape(self, context: dict[str, object]) -> None:
+        self.assertEqual(
+            list(context.keys()),
+            [
+                "ok",
+                "context_revision",
+                "instance_id",
+                "active_buddy",
+                "request_text",
+                "current_task_id",
+                "current_track_id",
+                "task_context",
+                "track_context",
+                "track_artifact_index",
+                "run_envelope",
+                "warnings",
+            ],
+        )
+        serialized = json.dumps(context, ensure_ascii=True)
+        self.assertNotIn("skills", serialized)
+        self.assertNotIn("inputs_by_skill", serialized)
+        for forbidden in FORBIDDEN_PREPARE_CONCEPTS:
+            self.assertFalse(
+                _contains_concept_recursive(context, forbidden),
+                msg=f"prepare context leaked forbidden concept: {forbidden}",
+            )
 
     def test_complete_turn_persists_single_skill_result(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-it-01", buddy="pm")
@@ -171,7 +211,7 @@ class TurnRuntimeIntegrationTests(unittest.TestCase):
 
         context = self._prepare("Draft the MVP PRD for onboarding rewrite", env=env)
         self.assertTrue(context["ok"])
-        self.assertIn("write-prd", self._skill_ids(context))
+        self._assert_prepare_has_context_only_shape(context)
 
         persisted = self._persist(context, skill_id="write-prd", env=env)
         self.assertTrue(persisted["ok"])
@@ -195,6 +235,7 @@ class TurnRuntimeIntegrationTests(unittest.TestCase):
 
         context = self._prepare("Help users switch plans without losing draft data", env=env)
         self.assertTrue(context["ok"])
+        self._assert_prepare_has_context_only_shape(context)
         self.assertEqual(context["request_text"], "Help users switch plans without losing draft data")
 
         persisted = self._persist(context, skill_id="write-prd", env=env)
@@ -215,6 +256,7 @@ class TurnRuntimeIntegrationTests(unittest.TestCase):
 
         ordinary_payload = self._prepare("Draft onboarding PRD", env=env)
         self.assertTrue(ordinary_payload["ok"])
+        self._assert_prepare_has_context_only_shape(ordinary_payload)
 
     def test_product_prepare_and_persist_do_not_import_debug_parser_or_router_modules(self) -> None:
         import builtins
@@ -238,17 +280,17 @@ class TurnRuntimeIntegrationTests(unittest.TestCase):
         with patch("builtins.__import__", side_effect=guarded_import):
             context = self._prepare("Draft onboarding PRD", env=env)
             self.assertTrue(context["ok"])
+            self._assert_prepare_has_context_only_shape(context)
             persisted = self._persist(context, skill_id="write-prd", env=env)
             self.assertTrue(persisted["ok"])
 
-    def test_multi_skill_prepare_requires_exactly_one_selected_skill_for_persist(self) -> None:
+    def test_multi_skill_prepare_still_requires_explicit_allowed_skill_id_for_persist(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-it-05", buddy="pm")
         env = self._product_env(instance_json, buddy="pm", instance_id="inst-it-05", shared_root=self.runtime_root)
 
         context = self._prepare("Draft onboarding PRD", env=env)
         self.assertTrue(context["ok"])
-        skill_ids = self._skill_ids(context)
-        self.assertGreaterEqual(len(skill_ids), 2)
+        self._assert_prepare_has_context_only_shape(context)
 
         try:
             invalid = self._persist(context, skill_id="", env=env)
@@ -257,6 +299,14 @@ class TurnRuntimeIntegrationTests(unittest.TestCase):
         else:
             invalid_ok = bool(invalid.get("ok"))
         self.assertFalse(invalid_ok)
+
+        try:
+            wrong_buddy = self._persist(context, skill_id="implement-task", env=env)
+        except Exception:
+            wrong_buddy_ok = False
+        else:
+            wrong_buddy_ok = bool(wrong_buddy.get("ok"))
+        self.assertFalse(wrong_buddy_ok)
 
         persisted = self._persist(context, skill_id="write-prd", env=env)
         self.assertTrue(persisted["ok"])
@@ -267,6 +317,7 @@ class TurnRuntimeIntegrationTests(unittest.TestCase):
 
         context = self._prepare("Draft onboarding PRD", env=env)
         self.assertTrue(context["ok"])
+        self._assert_prepare_has_context_only_shape(context)
         persisted = self._persist(context, skill_id="write-prd", env=env)
         self.assertTrue(persisted["ok"])
 

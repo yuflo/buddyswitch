@@ -1,3 +1,8 @@
+---
+name: write-prd
+description: Use when the task is drafting a PRD, defining MVP scope, or turning validated requirements into product requirements.
+---
+
 # write-prd
 
 ## Purpose

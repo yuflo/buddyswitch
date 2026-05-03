@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Load and validate the BuddySwitch env manifest and skill runtime metadata.
+"""Load and validate the BuddySwitch env manifest.
 
-`required_tools` and `required_env` are advisory runtime metadata for the host
-session. Buddy `permissions` describe object authority for routing context and
-manual/debug mutation APIs; they are not a second runtime permission engine.
+Manifest skill entries define buddy membership and persistence contract only.
+Codex-native skill metadata is validated from package `SKILL.md` frontmatter.
 """
 
 from __future__ import annotations
@@ -12,12 +11,13 @@ import argparse
 import json
 import re
 import sys
+from pathlib import Path
+from typing import Any
+
 try:
     import tomllib  # type: ignore[attr-defined]
 except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
     tomllib = None  # type: ignore[assignment]
-from pathlib import Path
-from typing import Any
 
 from output_schema import OutputSchemaError, normalize_schema_path
 
@@ -25,30 +25,11 @@ from output_schema import OutputSchemaError, normalize_schema_path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 _BUDDY_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+_FRONTMATTER_OPEN = "---"
+_FRONTMATTER_CLOSE = "---"
 ADVISORY_RUNTIME_METADATA_POLICY = "advisory"
 DEBUG_API_PERMISSION_SCOPE = "manual_debug_apis"
-GUIDANCE_HEADINGS = {
-    "purpose": "purpose",
-    "use when": "use_when",
-    "do not use when": "do_not_use_when",
-    "inputs": "inputs",
-    "outputs": "outputs",
-    "verification": "verification",
-    "examples": "examples",
-    "counterexamples": "counterexamples",
-    "gotchas": "gotchas",
-}
-HOST_EXECUTION_FIELDS = (
-    "execution_mode",
-    "browser_mode",
-    "browser_profile",
-    "browser_executor",
-    "discovery_mode",
-    "login_policy",
-    "fallback_policy",
-    "session_continuity",
-    "evidence_capture_level",
-)
+# Retained for compatibility with older turn-runtime imports.
 BROWSER_COCKPIT_HOST_EXECUTION = {
     "execution_mode": "browser-cockpit-native",
     "browser_mode": "headed-only",
@@ -59,16 +40,6 @@ BROWSER_COCKPIT_HOST_EXECUTION = {
     "fallback_policy": "no-silent-degrade",
     "session_continuity": "instance-cockpit",
     "evidence_capture_level": "medium",
-}
-TOOL_SCOPE_PROFILES = {
-    "market-browser-native": {
-        "profile": "market-browser-native",
-        "mode": "allowlist",
-        "allowed_tool_servers": ["chrome-devtools-cockpit"],
-        "downgrade_policy": "user-approved-one-off",
-        "temporary_allowed_tool_servers": ["web"],
-        "downgrade_reason": "browser-native-blocked",
-    }
 }
 
 
@@ -179,7 +150,6 @@ def _load_toml(path: Path) -> dict[str, Any]:
 
     lines = path.read_text(encoding="utf-8").splitlines()
     manifest: dict[str, Any] = {}
-    # Allow root-level key/value entries before any [section], e.g. `schema_version = 1`.
     current: dict[str, Any] | None = manifest
     pointer = 0
 
@@ -247,36 +217,6 @@ def _require_string(node: dict[str, Any], key: str, label: str) -> str:
     return value.strip()
 
 
-def _optional_string(node: dict[str, Any], key: str, label: str) -> str | None:
-    value = node.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise ManifestError(f"{label}.{key} must be a non-empty string when provided")
-    return value.strip()
-
-
-def _validate_market_host_execution(
-    *,
-    metadata_path: Path,
-    metadata_buddy: str,
-    host_execution: dict[str, str],
-) -> None:
-    if metadata_buddy.strip() != "market":
-        return
-
-    for key, expected_value in BROWSER_COCKPIT_HOST_EXECUTION.items():
-        actual_value = host_execution.get(key)
-        if actual_value is None:
-            raise ManifestError(
-                f"{metadata_path.relative_to(ROOT)}:{key} is required for market skills using the browser cockpit"
-            )
-        if actual_value != expected_value:
-            raise ManifestError(
-                f"{metadata_path.relative_to(ROOT)}:{key} must be '{expected_value}' for market skills using the browser cockpit"
-            )
-
-
 def _require_string_list(node: dict[str, Any], key: str, label: str, *, allow_empty: bool = False) -> list[str]:
     value = node.get(key)
     if not isinstance(value, list) or (not allow_empty and not value):
@@ -300,221 +240,113 @@ def _validate_permission(permission: str, label: str) -> None:
         raise ManifestError(f"{label} permission '{permission}' has empty action")
 
 
-def _normalize_section_lines(lines: list[str]) -> list[str]:
-    cleaned: list[str] = []
-    for raw in lines:
+def _unwrap_quoted_scalar(value: str) -> str:
+    if len(value) >= 2 and ((value[0] == '"' and value[-1] == '"') or (value[0] == "'" and value[-1] == "'")):
+        return value[1:-1]
+    return value
+
+
+def _parse_skill_frontmatter(skill_md: Path) -> dict[str, str]:
+    text = skill_md.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != _FRONTMATTER_OPEN:
+        raise ManifestError(f"{skill_md.relative_to(ROOT)} must start with YAML frontmatter")
+
+    close_index = None
+    for index in range(1, len(lines)):
+        if lines[index].strip() == _FRONTMATTER_CLOSE:
+            close_index = index
+            break
+    if close_index is None:
+        raise ManifestError(f"{skill_md.relative_to(ROOT)} frontmatter must end with closing '---'")
+
+    parsed: dict[str, str] = {}
+    for raw in lines[1:close_index]:
         line = raw.strip()
-        if not line:
+        if not line or line.startswith("#"):
             continue
-        if line.startswith("- "):
-            cleaned.append(line[2:].strip())
-            continue
-        numbered = re.match(r"^\d+\.\s+(.*)$", line)
-        if numbered:
-            cleaned.append(numbered.group(1).strip())
-            continue
-        cleaned.append(line)
-    return cleaned
+        if ":" not in line:
+            raise ManifestError(f"{skill_md.relative_to(ROOT)} frontmatter line must use key: value syntax: '{raw}'")
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = _unwrap_quoted_scalar(value.strip())
+        if not key:
+            raise ManifestError(f"{skill_md.relative_to(ROOT)} frontmatter key must not be empty")
+        parsed[key] = value
+    return parsed
 
 
-def _parse_skill_guidance(path: Path, body_lines: list[str]) -> dict[str, list[str]]:
-    sections: dict[str, list[str]] = {value: [] for value in GUIDANCE_HEADINGS.values()}
-    current_key: str | None = None
-    buffer: list[str] = []
-
-    def flush() -> None:
-        nonlocal buffer
-        if current_key is None:
-            buffer = []
-            return
-        sections[current_key] = _normalize_section_lines(buffer)
-        buffer = []
-
-    for line in body_lines:
-        stripped = line.strip()
-        heading = re.match(r"^##\s+(.+?)\s*$", stripped)
-        if heading:
-            flush()
-            current_key = GUIDANCE_HEADINGS.get(heading.group(1).strip().lower())
-            continue
-        if current_key is not None:
-            buffer.append(line)
-
-    flush()
-
-    missing = [label for label, key in GUIDANCE_HEADINGS.items() if not sections[key]]
-    if missing:
-        raise ManifestError(
-            f"{path.relative_to(ROOT)} is missing required guidance section(s): {', '.join(missing)}"
-        )
-    return sections
+def _resolve_skill_package_root(skill_path: str, label: str) -> Path:
+    path_obj = Path(skill_path)
+    if path_obj.is_absolute():
+        raise ManifestError(f"{label}.path must be repo-relative, got absolute path: {skill_path}")
+    resolved = (ROOT / path_obj).resolve(strict=False)
+    try:
+        resolved.relative_to(ROOT)
+    except ValueError as exc:
+        raise ManifestError(f"{label}.path must stay within repository root: {skill_path}") from exc
+    return resolved
 
 
-def _normalize_string_list(value: Any, *, label: str) -> list[str]:
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise ManifestError(f"{label} must be a list")
-    cleaned: list[str] = []
-    for item in value:
-        if not isinstance(item, str) or not item.strip():
-            raise ManifestError(f"{label} must contain non-empty strings")
-        cleaned.append(item.strip())
-    return cleaned
-
-
-def _load_skill_package(package_root: Path, skill_id: str) -> dict[str, Any]:
+def _validate_skill_package(package_root: Path, skill_id: str) -> None:
     if not package_root.exists() or not package_root.is_dir():
         raise ManifestError(f"Skill package not found: {package_root.relative_to(ROOT)}")
 
-    metadata_path = package_root / "skill.toml"
-    instruction_path = package_root / "SKILL.md"
-    if not metadata_path.exists():
-        raise ManifestError(f"{metadata_path.relative_to(ROOT)} not found")
-    if not instruction_path.exists():
-        raise ManifestError(f"{instruction_path.relative_to(ROOT)} not found")
+    skill_toml = package_root / "skill.toml"
+    if skill_toml.exists():
+        raise ManifestError(f"{skill_toml.relative_to(ROOT)} is not allowed; use SKILL.md frontmatter only")
 
-    metadata = _load_toml(metadata_path)
-    if not isinstance(metadata, dict):
-        raise ManifestError(f"{metadata_path.relative_to(ROOT)} must contain a TOML object")
-    metadata_label = str(metadata_path.relative_to(ROOT))
+    skill_md = package_root / "SKILL.md"
+    if not skill_md.exists() or not skill_md.is_file():
+        raise ManifestError(f"{skill_md.relative_to(ROOT)} not found")
 
-    required = ("id", "buddy", "description", "objects", "produces_artifact", "input_slots", "output_schema")
-    missing = [key for key in required if key not in metadata]
-    if missing:
+    parsed = _parse_skill_frontmatter(skill_md)
+    name = parsed.get("name", "").strip()
+    if not name:
+        raise ManifestError(f"{skill_md.relative_to(ROOT)} frontmatter must include non-empty name")
+    if name != skill_id:
         raise ManifestError(
-            f"{metadata_path.relative_to(ROOT)} is missing required key(s): {', '.join(missing)}"
+            f"{skill_md.relative_to(ROOT)} frontmatter name '{name}' must match manifest skill id '{skill_id}'"
         )
+    description = parsed.get("description", "").strip()
+    if not description:
+        raise ManifestError(f"{skill_md.relative_to(ROOT)} frontmatter must include non-empty description")
 
-    metadata_id = metadata.get("id")
-    if not isinstance(metadata_id, str) or metadata_id.strip() != skill_id:
-        raise ManifestError(
-            f"{metadata_path.relative_to(ROOT)}:id must match manifest skill id '{skill_id}'"
-        )
-    metadata_buddy = metadata.get("buddy")
-    if not isinstance(metadata_buddy, str) or not metadata_buddy.strip():
-        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:buddy must be a non-empty string")
-    description = metadata.get("description")
-    if not isinstance(description, str) or not description.strip():
-        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:description must be a non-empty string")
-    objects = _normalize_string_list(
-        metadata.get("objects", []),
-        label=f"{metadata_path.relative_to(ROOT)}:objects",
-    )
-    if not objects:
-        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:objects must be a non-empty list")
 
-    produces_artifact = metadata.get("produces_artifact")
+def _parse_skill_persistence(skill: dict[str, Any], label: str, skill_id: str) -> dict[str, Any]:
+    produces_artifact = skill.get("produces_artifact")
     if not isinstance(produces_artifact, bool):
-        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:produces_artifact must be true or false")
+        raise ManifestError(f"{label}.produces_artifact must be true or false")
 
-    output_slot_raw = metadata.get("output_slot")
+    output_schema_raw = skill.get("output_schema")
+    if not isinstance(output_schema_raw, str) or not output_schema_raw.strip():
+        raise ManifestError(f"{label}.output_schema must be a non-empty string")
+    try:
+        output_schema = normalize_schema_path(output_schema_raw.strip())
+    except OutputSchemaError as exc:
+        raise ManifestError(f"{label}.output_schema invalid: {exc}") from exc
+    if not (ROOT / output_schema).exists():
+        raise ManifestError(f"{label}.output_schema file not found: {output_schema}")
+
+    output_slot_raw = skill.get("output_slot")
     if produces_artifact:
         if not isinstance(output_slot_raw, str) or not output_slot_raw.strip():
-            raise ManifestError(
-                f"{metadata_path.relative_to(ROOT)} requires output_slot when produces_artifact=true"
-            )
+            raise ManifestError(f"{label}.output_slot is required when produces_artifact=true")
         output_slot = output_slot_raw.strip()
     else:
-        if output_slot_raw is not None:
+        if output_slot_raw not in {None, ""}:
+            raise ManifestError(f"{label}.output_slot must be omitted when produces_artifact=false")
+        if skill_id != "track-manager":
             raise ManifestError(
-                f"{metadata_path.relative_to(ROOT)} must omit output_slot when produces_artifact=false"
+                f"{label}.produces_artifact=false is not allowed for skill '{skill_id}'; "
+                "only track-manager currently supports non-artifact persistence"
             )
         output_slot = None
 
-    input_slots = _normalize_string_list(metadata.get("input_slots"), label=f"{metadata_path.relative_to(ROOT)}:input_slots")
-
-    output_schema = metadata.get("output_schema")
-    if not isinstance(output_schema, str) or not output_schema.strip():
-        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:output_schema must be a non-empty string")
-    try:
-        normalized_schema = normalize_schema_path(output_schema.strip())
-    except OutputSchemaError as exc:
-        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:output_schema invalid: {exc}") from exc
-    if not (ROOT / normalized_schema).exists():
-        raise ManifestError(f"{metadata_path.relative_to(ROOT)}:output_schema file not found: {normalized_schema}")
-
-    side_effect_level = metadata.get("side_effect_level")
-    if side_effect_level is not None and (not isinstance(side_effect_level, str) or not side_effect_level.strip()):
-        raise ManifestError(
-            f"{metadata_path.relative_to(ROOT)}:side_effect_level must be a non-empty string when provided"
-        )
-
-    required_tools = _normalize_string_list(
-        metadata.get("required_tools", []),
-        label=f"{metadata_label}:required_tools",
-    )
-    required_env = _normalize_string_list(
-        metadata.get("required_env", []),
-        label=f"{metadata_label}:required_env",
-    )
-    produces = _normalize_string_list(
-        metadata.get("produces", []),
-        label=f"{metadata_path.relative_to(ROOT)}:produces",
-    )
-    consumes = _normalize_string_list(
-        metadata.get("consumes", []),
-        label=f"{metadata_path.relative_to(ROOT)}:consumes",
-    )
-    allowed_task_kinds = _normalize_string_list(
-        metadata.get("allowed_task_kinds", []),
-        label=f"{metadata_label}:allowed_task_kinds",
-    )
-    host_execution = {
-        key: value
-        for key in HOST_EXECUTION_FIELDS
-        if (value := _optional_string(metadata, key, metadata_label)) is not None
-    }
-    tool_scope_profile = _optional_string(metadata, "tool_scope_profile", metadata_label)
-    tool_scope = None
-    if tool_scope_profile is not None:
-        if tool_scope_profile not in TOOL_SCOPE_PROFILES:
-            raise ManifestError(
-                f"{metadata_path.relative_to(ROOT)}:tool_scope_profile '{tool_scope_profile}' is unknown"
-            )
-        tool_scope = dict(TOOL_SCOPE_PROFILES[tool_scope_profile])
-    _validate_market_host_execution(
-        metadata_path=metadata_path,
-        metadata_buddy=metadata_buddy,
-        host_execution=host_execution,
-    )
-
-    instruction_lines = instruction_path.read_text(encoding="utf-8").splitlines()
-    for line in instruction_lines:
-        if not line.strip():
-            continue
-        if line.strip() == "---":
-            raise ManifestError(
-                f"{instruction_path.relative_to(ROOT)} must not contain frontmatter; move metadata to skill.toml"
-            )
-        break
-
-    guidance = _parse_skill_guidance(
-        instruction_path,
-        instruction_lines,
-    )
-
     return {
-        "name": skill_id,
-        "buddy": metadata_buddy.strip(),
-        "description": description.strip(),
-        "objects": objects,
         "produces_artifact": produces_artifact,
         "output_slot": output_slot,
-        "input_slots": input_slots,
-        "output_schema": normalized_schema,
-        "version": None,
-        "side_effect_level": side_effect_level.strip() if isinstance(side_effect_level, str) else None,
-        "required_tools": required_tools,
-        "required_env": required_env,
-        "host_execution": host_execution,
-        "tool_scope_profile": tool_scope_profile,
-        "tool_scope": tool_scope,
-        "produces": produces,
-        "consumes": consumes,
-        "allowed_task_kinds": allowed_task_kinds,
-        "instruction_path": instruction_path.relative_to(ROOT).as_posix(),
-        "guidance": guidance,
+        "output_schema": output_schema,
     }
 
 
@@ -534,90 +366,67 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
     _require_string(env_node, "id", "env")
     _require_string(env_node, "label", "env")
 
-    adapters = manifest.get("adapters", [])
-    if adapters is None:
-        adapters = []
-    if not isinstance(adapters, list):
-        raise ManifestError("adapters must be a list when provided")
-    manifest["adapters"] = adapters
-    for index, adapter in enumerate(adapters):
-        label = f"adapters[{index}]"
-        if not isinstance(adapter, dict):
-            raise ManifestError(f"{label} must be an object")
-        _require_string(adapter, "id", label)
-        _require_string(adapter, "path", label)
-        _require_string(adapter, "description", label)
-
     skills = manifest.get("skills")
     if not isinstance(skills, list) or not skills:
         raise ManifestError("skills must be a non-empty list")
+
     skill_ids: set[str] = set()
-    lookup: dict[str, dict[str, Any]] = {}
+    skill_lookup: dict[str, dict[str, Any]] = {}
     for index, skill in enumerate(skills):
         label = f"skills[{index}]"
         if not isinstance(skill, dict):
             raise ManifestError(f"{label} must be an object")
+
         skill_id = _require_string(skill, "id", label)
         if skill_id in skill_ids:
             raise ManifestError(f"duplicate skill id: {skill_id}")
         skill_ids.add(skill_id)
-        skill["path"] = _require_string(skill, "path", label)
-        skill_path = ROOT / skill["path"]
-        if not skill_path.is_dir():
-            raise ManifestError(f"{label}.path must point to a skill package directory: {skill['path']}")
-        runtime = _load_skill_package(skill_path, skill_id)
-        skill["runtime"] = runtime
-        lookup[skill_id] = skill
+
+        skill_path = _require_string(skill, "path", label)
+        package_root = _resolve_skill_package_root(skill_path, label)
+        _validate_skill_package(package_root, skill_id)
+
+        persistence = _parse_skill_persistence(skill, label, skill_id)
+        skill["path"] = skill_path
+        skill["persistence"] = persistence
+        skill_lookup[skill_id] = skill
 
     buddies = manifest.get("buddies")
     if not isinstance(buddies, list) or not buddies:
         raise ManifestError("buddies must be a non-empty list")
 
     buddy_ids: set[str] = set()
-    buddy_skill_membership: dict[str, set[str]] = {}
     for index, buddy in enumerate(buddies):
         label = f"buddies[{index}]"
         if not isinstance(buddy, dict):
             raise ManifestError(f"{label} must be an object")
+
         buddy_id = _require_string(buddy, "id", label)
         if not _BUDDY_ID_RE.match(buddy_id):
             raise ManifestError(f"{label}.id must match /^[a-z][a-z0-9-]*$/")
         if buddy_id in buddy_ids:
             raise ManifestError(f"duplicate buddy id: {buddy_id}")
         buddy_ids.add(buddy_id)
+
         _require_string(buddy, "label", label)
         _require_string(buddy, "scope", label)
         declared_skills = _require_string_list(buddy, "skills", label, allow_empty=True)
         permissions = _require_string_list(buddy, "permissions", label)
         for permission in permissions:
             _validate_permission(permission, label)
-        buddy_skill_membership[buddy_id] = set(declared_skills)
-        for skill_id in declared_skills:
-            if skill_id not in lookup:
-                raise ManifestError(f"{label}.skills contains unknown skill '{skill_id}'")
-
-    for skill_id, skill in lookup.items():
-        runtime_buddy = skill["runtime"].get("buddy")
-        if runtime_buddy is None:
-            continue
-        if not isinstance(runtime_buddy, str) or not runtime_buddy.strip():
-            raise ManifestError(f"skills[{skill_id}].runtime buddy must be a non-empty string")
-        if runtime_buddy not in buddy_ids:
-            raise ManifestError(f"skills[{skill_id}].runtime buddy '{runtime_buddy}' is unknown")
-        if skill_id not in buddy_skill_membership.get(runtime_buddy, set()):
-            raise ManifestError(
-                f"skills[{skill_id}].runtime buddy '{runtime_buddy}' must be declared in buddies[{runtime_buddy}].skills"
-            )
+        for declared_skill in declared_skills:
+            if declared_skill not in skill_lookup:
+                raise ManifestError(f"{label}.skills contains unknown skill '{declared_skill}'")
 
     return manifest
 
 
 def buddies_by_id(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {buddy["id"]: buddy for buddy in manifest.get("buddies", [])}
+    return {buddy["id"]: buddy for buddy in manifest.get("buddies", []) if isinstance(buddy, dict)}
 
 
 def skills_by_id(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {skill["id"]: skill for skill in manifest.get("skills", [])}
+    return {skill["id"]: skill for skill in manifest.get("skills", []) if isinstance(skill, dict)}
 
 
 def get_buddy(manifest: dict[str, Any], buddy_id: str) -> dict[str, Any] | None:
@@ -644,8 +453,9 @@ def buddy_authority_profile(manifest: dict[str, Any], buddy_id: str) -> dict[str
         "object_permissions": list(buddy.get("permissions", [])),
         "permission_scope": DEBUG_API_PERMISSION_SCOPE,
         "runtime_note": (
-            "turn runtime uses buddy->skills as selection authority and leaves "
-            "object permission enforcement to manual/debug mutation APIs."
+            "buddy->skills controls which runtime packages are materialized under .agents/skills, "
+            "and persist accepts only skill_id values from that active membership. "
+            "object permission enforcement remains in manual/debug mutation APIs."
         ),
     }
 
@@ -660,10 +470,7 @@ def buddy_skill_docs(manifest: dict[str, Any], buddy_id: str) -> list[dict[str, 
             {
                 "id": skill["id"],
                 "path": skill["path"],
-                "description": skill["runtime"]["description"],
-                "objects": skill["runtime"]["objects"],
-                "runtime": dict(skill.get("runtime", {})),
-                "guidance": dict(skill.get("runtime", {}).get("guidance", {})),
+                "persistence": dict(skill.get("persistence", {})),
             }
         )
     return docs

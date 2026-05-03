@@ -1,3 +1,8 @@
+---
+name: track-manager
+description: Use when the task is managing track lifecycle operations such as create, update, advance, or archive.
+---
+
 # track-manager
 
 ## Purpose

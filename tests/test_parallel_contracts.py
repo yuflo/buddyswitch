@@ -41,8 +41,7 @@ EXPECTED_PREPARE_TURN_CONTEXT_CONTRACT = {
         "current_track_id",
         "task_context",
         "track_context",
-        "skills",
-        "inputs_by_skill",
+        "track_artifact_index",
         "run_envelope",
         "warnings",
     ],
@@ -82,12 +81,18 @@ def _load_json(path: Path) -> dict[str, object]:
 
 
 def _contains_key_recursive(payload: object, forbidden_key: str) -> bool:
+    forbidden_lower = forbidden_key.lower()
     if isinstance(payload, dict):
-        if forbidden_key in payload:
-            return True
-        return any(_contains_key_recursive(value, forbidden_key) for value in payload.values())
+        for key, value in payload.items():
+            if isinstance(key, str) and forbidden_lower in key.lower():
+                return True
+            if _contains_key_recursive(value, forbidden_key):
+                return True
+        return False
     if isinstance(payload, list):
         return any(_contains_key_recursive(item, forbidden_key) for item in payload)
+    if isinstance(payload, str):
+        return forbidden_lower in payload.lower()
     return False
 
 
@@ -253,7 +258,17 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         self.assertNotIn("switch", payload)
         self.assertNotIn("inputs", payload)
         self.assertNotIn("artifact_selection_by_skill", payload)
-        self.assertFalse(_contains_key_recursive(payload, "selected_skill_packet"))
+        self.assertNotIn("skills", payload)
+        self.assertNotIn("inputs_by_skill", payload)
+        for forbidden in (
+            "selected_skill",
+            "skill_candidates",
+            "skill_instructions",
+            "run_instructions_by_skill",
+            "selected_skill_packet",
+            "instruction_path",
+        ):
+            self.assertFalse(_contains_key_recursive(payload, forbidden), msg=f"forbidden prepare concept leaked: {forbidden}")
 
     def test_contract_matches_real_persist_skill_result_surface(self) -> None:
         contract = _load_json(PERSIST_SKILL_RESULT_CONTRACT)

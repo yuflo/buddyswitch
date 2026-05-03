@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -25,6 +26,14 @@ import workspace_data  # noqa: E402
 
 
 RUNTIME_WORKSPACE_HEADER = "# BuddySwitch Runtime Workspace\n"
+FORBIDDEN_PREPARE_CONCEPTS = (
+    "selected_skill",
+    "skill_candidates",
+    "skill_instructions",
+    "run_instructions_by_skill",
+    "selected_skill_packet",
+    "instruction_path",
+)
 
 
 def _load_turn_runtime():
@@ -44,6 +53,22 @@ def _relative_to_runtime_or_repo(path: Path) -> str:
         except ValueError:
             continue
     return candidate.as_posix()
+
+
+def _contains_concept_recursive(payload: object, concept: str) -> bool:
+    concept_lower = concept.lower()
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if isinstance(key, str) and concept_lower in key.lower():
+                return True
+            if _contains_concept_recursive(value, concept):
+                return True
+        return False
+    if isinstance(payload, list):
+        return any(_contains_concept_recursive(item, concept) for item in payload)
+    if isinstance(payload, str):
+        return concept_lower in payload.lower()
+    return False
 
 
 class TurnRuntimeWorkspaceTestMixin:
@@ -164,30 +189,51 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
                 manifest_path=turn_runtime.DEFAULT_MANIFEST,
             )
 
-    def _runtime_state_counts(self) -> dict[str, int]:
-        return {
-            "tasks": len(list(self._runtime_path("buddyswitch/objects/tasks").glob("*.json"))),
-            "tracks": len(list(self._runtime_path("buddyswitch/objects/tracks").glob("*.json"))),
-            "artifacts": len(list(self._runtime_path("buddyswitch/objects/artifacts").glob("*.json"))),
-            "runs": len(list(self._runtime_path("buddyswitch/content/runs").glob("run-*.json"))),
-            "reservations": len(list(self._runtime_path("buddyswitch/content/runs/reserved").glob("*.json"))),
-        }
+    def _runtime_state_snapshot(self) -> dict[str, bytes]:
+        snapshot: dict[str, bytes] = {}
+        for relative_dir in (
+            "buddyswitch/objects/tasks",
+            "buddyswitch/objects/tracks",
+            "buddyswitch/objects/artifacts",
+            "buddyswitch/content/runs",
+            "buddyswitch/content/runs/reserved",
+        ):
+            directory = self._runtime_path(relative_dir)
+            if not directory.exists():
+                continue
+            for path in sorted(directory.rglob("*")):
+                if path.is_file():
+                    snapshot[path.relative_to(self.runtime_root).as_posix()] = path.read_bytes()
+        return snapshot
 
-    @staticmethod
-    def _skill_ids(context: dict[str, object]) -> list[str]:
-        skills = context.get("skills")
-        if not isinstance(skills, list):
-            return []
-        result: list[str] = []
-        for card in skills:
-            if isinstance(card, dict):
-                skill_id = card.get("id")
-                if isinstance(skill_id, str) and skill_id:
-                    result.append(skill_id)
-        return result
+    def _assert_prepare_has_context_only_shape(self, context: dict[str, object]) -> None:
+        expected_key_order = [
+            "ok",
+            "context_revision",
+            "instance_id",
+            "active_buddy",
+            "request_text",
+            "current_task_id",
+            "current_track_id",
+            "task_context",
+            "track_context",
+            "track_artifact_index",
+            "run_envelope",
+            "warnings",
+        ]
+        self.assertEqual(list(context.keys()), expected_key_order)
+        self.assertNotIn("skills", context)
+        self.assertNotIn("inputs_by_skill", context)
+        self.assertNotIn("run_instructions_by_skill", context)
+        self.assertNotIn("selected_skill_packet", context)
+        for forbidden in FORBIDDEN_PREPARE_CONCEPTS:
+            self.assertFalse(
+                _contains_concept_recursive(context, forbidden),
+                msg=f"prepare context leaked forbidden concept: {forbidden}",
+            )
 
     def _assert_prepare_rejected_without_writes(self, request_text: str, *, env: dict[str, str], instance_json: Path) -> None:
-        counts_before = self._runtime_state_counts()
+        snapshot_before = self._runtime_state_snapshot()
         instance_before = instance_json.read_text(encoding="utf-8")
 
         payload = self._prepare(request_text, env=env)
@@ -198,7 +244,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         if isinstance(error_payload, dict):
             self.assertIn("ordinary request", json.dumps(error_payload).lower())
 
-        self.assertEqual(self._runtime_state_counts(), counts_before)
+        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
         self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
 
     def _assert_persist_rejected_without_writes(
@@ -208,7 +254,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         skill_id: object,
         env: dict[str, str],
     ) -> None:
-        counts_before = self._runtime_state_counts()
+        snapshot_before = self._runtime_state_snapshot()
         try:
             payload = self._persist(context, skill_id=skill_id, env=env)
         except Exception:
@@ -216,7 +262,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         else:
             rejected = not bool(payload.get("ok"))
         self.assertTrue(rejected, msg="persist input should be rejected")
-        self.assertEqual(self._runtime_state_counts(), counts_before)
+        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
 
     def test_prepare_turn_context_accepts_ordinary_request_and_creates_reserved_run(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-01", buddy="pm")
@@ -225,6 +271,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         payload = self._prepare("Draft the MVP PRD for onboarding rewrite", env=env)
 
         self.assertTrue(payload["ok"])
+        self._assert_prepare_has_context_only_shape(payload)
         self.assertEqual(payload["active_buddy"], "pm")
         self.assertEqual(payload["request_text"], "Draft the MVP PRD for onboarding rewrite")
         self.assertIsInstance(payload.get("current_task_id"), str)
@@ -257,6 +304,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         payload = self._prepare("Continue the onboarding PRD", env=env)
 
         self.assertTrue(payload["ok"])
+        self._assert_prepare_has_context_only_shape(payload)
         self.assertEqual(payload["current_task_id"], existing_task_id)
         self.assertEqual(payload["current_track_id"], existing_track_id)
         self.assertEqual(len(list(self._runtime_path("buddyswitch/objects/tasks").glob("*.json"))), 1)
@@ -268,6 +316,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         context = self._prepare("Ask dev later to implement this after PRD approval", env=env)
 
         self.assertTrue(context["ok"])
+        self._assert_prepare_has_context_only_shape(context)
         self.assertEqual(context["active_buddy"], "pm")
         self.assertFalse(list(self._runtime_path("buddyswitch/objects/tasks").glob("task-dev-*.json")))
 
@@ -292,6 +341,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         payload = self._prepare("Help users switch plans without losing draft data", env=env)
 
         self.assertTrue(payload["ok"])
+        self._assert_prepare_has_context_only_shape(payload)
         self.assertEqual(payload["request_text"], "Help users switch plans without losing draft data")
         self.assertTrue(any(self._runtime_path("buddyswitch/content/runs/reserved").glob("*.json")))
 
@@ -306,22 +356,23 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         payload = self._prepare("Draft onboarding PRD", env=env)
 
         self.assertTrue(payload["ok"])
+        self._assert_prepare_has_context_only_shape(payload)
         self.assertTrue(hasattr(turn_runtime, "prepare_turn_context"))
 
-    def test_persist_accepts_exactly_one_skill_from_current_context(self) -> None:
+    def test_persist_validates_skill_id_from_active_buddy_manifest_membership(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-07", buddy="pm")
         env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-07", shared_root=self.runtime_root)
 
         context = self._prepare("Draft onboarding PRD", env=env)
         self.assertTrue(context["ok"])
-        skill_ids = self._skill_ids(context)
-        self.assertTrue(skill_ids)
+        self._assert_prepare_has_context_only_shape(context)
 
         self._assert_persist_rejected_without_writes(context, skill_id="", env=env)
-        self._assert_persist_rejected_without_writes(context, skill_id=[skill_ids[0]], env=env)
-        self._assert_persist_rejected_without_writes(context, skill_id="not-in-context", env=env)
+        self._assert_persist_rejected_without_writes(context, skill_id=["write-prd"], env=env)
+        self._assert_persist_rejected_without_writes(context, skill_id="implement-task", env=env)
+        self._assert_persist_rejected_without_writes(context, skill_id="not-in-manifest", env=env)
 
-        payload = self._persist(context, skill_id=skill_ids[0], env=env)
+        payload = self._persist(context, skill_id="write-prd", env=env)
         self.assertTrue(payload["ok"])
 
     def test_persist_rejects_tampered_context_identity_without_writes(self) -> None:
@@ -329,8 +380,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-08", shared_root=self.runtime_root)
         context = self._prepare("Draft onboarding PRD", env=env)
         self.assertTrue(context["ok"])
-        skill_ids = self._skill_ids(context)
-        self.assertTrue(skill_ids)
+        self._assert_prepare_has_context_only_shape(context)
 
         tamper_cases = []
 
@@ -354,15 +404,14 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
 
         for tampered in tamper_cases:
             with self.subTest(tamper=tampered.get("request_text", "case")):
-                self._assert_persist_rejected_without_writes(tampered, skill_id=skill_ids[0], env=env)
+                self._assert_persist_rejected_without_writes(tampered, skill_id="write-prd", env=env)
 
     def test_successful_persist_returns_structured_receipt_contract(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-09", buddy="pm")
         env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-09", shared_root=self.runtime_root)
         context = self._prepare("Draft onboarding PRD", env=env)
         self.assertTrue(context["ok"])
-        skill_ids = self._skill_ids(context)
-        self.assertIn("write-prd", skill_ids)
+        self._assert_prepare_has_context_only_shape(context)
 
         payload = self._persist(context, skill_id="write-prd", env=env)
 
@@ -453,12 +502,12 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         context = self._prepare("Draft onboarding PRD", env=env)
         self.assertTrue(context["ok"])
 
-        counts_before = self._runtime_state_counts()
+        snapshot_before = self._runtime_state_snapshot()
         invalid_result = self._pm_result_payload()
         invalid_result["task_id"] = "task-should-not-be-accepted"
         with self.assertRaises(ValueError):
             self._persist(context, skill_id="write-prd", result=invalid_result, env=env)
-        self.assertEqual(self._runtime_state_counts(), counts_before)
+        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
 
         valid_result = self._pm_result_payload()
         payload = self._persist(context, skill_id="write-prd", result=valid_result, env=env)
@@ -502,6 +551,18 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
 
         source_run_path = ROOT / receipt["receipt_paths"]["run"]
         self.assertFalse(source_run_path.exists())
+
+    def test_persist_cli_help_requires_explicit_skill_id(self) -> None:
+        completed = subprocess.run(
+            ["python3", str(ROOT / "scripts" / "turn_runtime.py"), "persist", "--help"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertIn("Chosen skill id. Required.", completed.stdout)
+        self.assertNotIn("Optional only when the prepared context exposes exactly one available skill", completed.stdout)
 
 
 if __name__ == "__main__":

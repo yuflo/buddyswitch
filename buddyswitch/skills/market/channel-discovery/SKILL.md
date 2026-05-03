@@ -1,3 +1,8 @@
+---
+name: channel-discovery
+description: Use when the task is choosing the first believable user-acquisition channel or planning a small-channel experiment for an early product.
+---
+
 # channel-discovery
 
 ## Execution Order

@@ -1,3 +1,8 @@
+---
+name: pmf-recon
+description: Use when the task is testing whether a product idea has credible demand, narrowing the sharpest ICP, or deciding whether the market is worth pursuing.
+---
+
 # pmf-recon
 
 ## Execution Order

@@ -1,3 +1,8 @@
+---
+name: customer-discovery
+description: Use when the task is preparing customer interviews, structuring problem discovery, or turning early user conversations into usable demand signals.
+---
+
 # customer-discovery
 
 ## Execution Order
