@@ -23,14 +23,14 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 
 CONTRACTS_DIR = ROOT / "framework" / "contracts"
-RESOLVE_CONTEXT_CONTRACT = CONTRACTS_DIR / "resolve-context.json"
+PREPARE_TURN_CONTEXT_CONTRACT = CONTRACTS_DIR / "prepare-turn-context.json"
 PERSIST_SKILL_RESULT_CONTRACT = CONTRACTS_DIR / "persist-skill-result.json"
 SELECTED_SKILL_PACKET_CONTRACT = CONTRACTS_DIR / "selected-skill-packet.json"
 WORKSPACE_PROJECTION_CONTRACT = CONTRACTS_DIR / "workspace-projection.json"
 
-EXPECTED_RESOLVE_CONTEXT_CONTRACT = {
-    "contract_id": "resolve-context",
-    "contract_version": "2026-05-02",
+EXPECTED_PREPARE_TURN_CONTEXT_CONTRACT = {
+    "contract_id": "prepare-turn-context",
+    "contract_version": "2026-05-03",
     "response_key_order": [
         "ok",
         "context_revision",
@@ -50,11 +50,29 @@ EXPECTED_RESOLVE_CONTEXT_CONTRACT = {
 
 EXPECTED_PERSIST_SKILL_RESULT_CONTRACT = {
     "contract_id": "persist-skill-result",
-    "contract_version": "2026-05-02",
+    "contract_version": "2026-05-03",
     "response_key_order": [
         "ok",
         "receipt",
         "refreshed_context",
+    ],
+    "receipt_required_keys": [
+        "ok",
+        "skill_id",
+        "task_id",
+        "task_title",
+        "artifact_ids",
+        "run_id",
+        "next_state",
+        "receipt_paths",
+        "related_run_ids",
+    ],
+    "receipt_optional_keys": [
+        "artifact_id",
+        "track_id",
+        "track_title",
+        "track_action",
+        "warnings",
     ],
 }
 
@@ -212,8 +230,8 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
             },
         }
 
-    def test_contract_matches_real_resolve_context_surface(self) -> None:
-        contract = _load_json(RESOLVE_CONTEXT_CONTRACT)
+    def test_contract_matches_real_prepare_turn_context_surface(self) -> None:
+        contract = _load_json(PREPARE_TURN_CONTEXT_CONTRACT)
         request_text = "Implement the approved onboarding improvements in projects/app"
         instance_json = self._write_instance_json(instance_id="inst-contract-01", buddy="dev")
         env = self._product_env(
@@ -225,7 +243,7 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
 
         payload = self._prepare(request_text, env=env)
 
-        self.assertEqual(contract, EXPECTED_RESOLVE_CONTEXT_CONTRACT)
+        self.assertEqual(contract, EXPECTED_PREPARE_TURN_CONTEXT_CONTRACT)
         self.assertTrue(payload["ok"])
         self.assertEqual(list(payload.keys()), contract["response_key_order"])
         self.assertEqual(payload["request_text"], request_text)
@@ -261,17 +279,75 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         self.assertEqual(contract, EXPECTED_PERSIST_SKILL_RESULT_CONTRACT)
         self.assertTrue(persisted["ok"])
         self.assertEqual(list(persisted.keys()), contract["response_key_order"])
-        self.assertEqual(persisted["receipt"]["run_id"], context["run_envelope"]["run_id"])
-        self.assertIn("next_state", persisted["receipt"])
-        self.assertIn("receipt_paths", persisted["receipt"])
-        self.assertNotIn("reference_switches", persisted["receipt"])
-        self.assertNotIn("recommended_switch", persisted["receipt"])
+        receipt = persisted["receipt"]
+        self.assertIsInstance(receipt, dict)
+        if isinstance(receipt, dict):
+            for key in contract["receipt_required_keys"]:
+                self.assertIn(key, receipt)
+            self.assertEqual(receipt["run_id"], context["run_envelope"]["run_id"])
+            self.assertIsInstance(receipt["task_id"], str)
+            self.assertTrue(receipt["task_id"])
+            self.assertIsInstance(receipt["task_title"], str)
+            self.assertTrue(receipt["task_title"])
+            self.assertIsInstance(receipt["artifact_id"], str)
+            self.assertIn(receipt["artifact_id"], receipt["artifact_ids"])
+            self.assertIsInstance(receipt["receipt_paths"], dict)
+            if isinstance(receipt["receipt_paths"], dict):
+                for rel_path in receipt["receipt_paths"].values():
+                    if isinstance(rel_path, str):
+                        self.assertTrue(self._runtime_path(rel_path).exists())
+                    elif isinstance(rel_path, list):
+                        for item in rel_path:
+                            if isinstance(item, str):
+                                self.assertTrue(self._runtime_path(item).exists())
+            self.assertEqual(receipt["next_state"]["task_id"], receipt["task_id"])
+            self.assertNotIn("reference_switches", receipt)
+            self.assertNotIn("recommended_switch", receipt)
         self.assertNotIn("skill_id", persisted)
         self.assertNotIn("task_id", persisted)
         self.assertNotIn("artifact_id", persisted)
         self.assertNotIn("run_id", persisted)
         self.assertNotIn("paths", persisted)
         self.assertNotIn("writes", persisted)
+
+    def test_track_manager_persist_returns_receipt_without_artifact_id(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-contract-02-track", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-contract-02-track",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Create onboarding delivery track", env=env)
+        persisted = self._persist(
+            context,
+            skill_id="track-manager",
+            result={
+                "execution_summary": "Created track for onboarding delivery.",
+                "working_notes": ["Initialized track lifecycle."],
+                "deliverables_or_changed_files": [],
+                "track_operation": {
+                    "action": "create",
+                    "track_id": "track-onboarding-delivery",
+                    "title": "Onboarding Delivery",
+                    "status": "active",
+                    "current_buddy": "pm",
+                    "next_buddy": "design",
+                    "summary": "Cross-functional onboarding execution track.",
+                },
+            },
+            env=env,
+        )
+
+        self.assertTrue(persisted["ok"])
+        receipt = persisted["receipt"]
+        self.assertIsInstance(receipt, dict)
+        if isinstance(receipt, dict):
+            self.assertEqual(receipt.get("track_action"), "create")
+            self.assertEqual(receipt.get("artifact_ids"), [])
+            self.assertNotIn("artifact_id", receipt)
+            self.assertIsInstance(receipt.get("track_id"), str)
+            self.assertIsInstance(receipt.get("track_title"), str)
 
     def test_persist_contract_does_not_leave_hidden_follow_up_reservation(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-contract-03", buddy="dev")

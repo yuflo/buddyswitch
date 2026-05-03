@@ -46,6 +46,7 @@ Terminal final output must follow `Receipt -> Summary`:
 - `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`)
 - `Receipt` may include an optional next-step state or handoff note (non-command wording)
 - `Summary` keeps 1-2 lines, with up to 4 open questions
+- Runtime commit boundary is `persist-skill-result`.
 
 ## Execution Summary Rule
 

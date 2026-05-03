@@ -36,7 +36,7 @@ python3 scripts/turn_runtime.py persist \
 
 ## Prepare Contract
 
-`prepare` returns `ok=false` on validation errors, otherwise returns contract shape from `framework/contracts/resolve-context.json`:
+`prepare` returns `ok=false` on validation errors, otherwise returns contract shape from `framework/contracts/prepare-turn-context.json`:
 
 - `ok`
 - `context_revision`
@@ -62,11 +62,38 @@ Behavior:
 ## Persist Contract
 
 `persist` validates and commits exactly one selected skill output.
-Response shape is frozen by `framework/contracts/persist-skill-result.json`:
+Top-level response shape is frozen by `framework/contracts/persist-skill-result.json`:
 
 - `ok`
 - `receipt`
 - `refreshed_context`
+
+## Receipt Contract
+
+`receipt` is the canonical runtime metadata source for terminal rendering and follow-up turn composition.
+
+Required `receipt` keys:
+
+- `ok`
+- `skill_id`
+- `task_id`
+- `task_title`
+- `artifact_ids`
+- `run_id`
+- `next_state`
+- `receipt_paths`
+- `related_run_ids`
+
+Optional `receipt` keys:
+
+- `artifact_id`
+- `track_id`
+- `track_title`
+- `track_action`
+- `warnings`
+
+Terminal output must render user-facing IDs and titles from `receipt`, not from debug path strings.
+Legacy command-style follow-up keys must not be present in `receipt`.
 
 Behavior:
 
@@ -97,6 +124,6 @@ Do not continue a turn through hidden reservation state.
 
 ## Contracts
 
-- `framework/contracts/resolve-context.json`
+- `framework/contracts/prepare-turn-context.json`
 - `framework/contracts/persist-skill-result.json`
 - `framework/contracts/workspace-projection.json`

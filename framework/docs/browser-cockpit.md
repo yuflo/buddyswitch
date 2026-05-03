@@ -4,14 +4,14 @@
 
 Define the execution contract for market research skills inside a buddy-locked instance without changing BuddySwitch object authority or skill boundaries.
 
-`resolve_context` exposes the selected skill metadata that makes `browser-native` behavior explicit to the host.
+`prepare_context` exposes the selected skill metadata that makes `browser-native` behavior explicit to the host.
 BuddySwitch does not open browser tools itself; it remains the control layer while the host stays the only executor.
 
 ## Per-Run Contract
 
 - The host chooses exactly one `market` `skill_id` for the run.
-- The host reads market execution metadata from `resolve_context.skills[*].host_execution` for that selected skill.
-- The host applies `resolve_context.skills[*].tool_scope` before any market research begins.
+- The host reads market execution metadata from `prepare_context.skills[*].host_execution` for that selected skill.
+- The host applies `prepare_context.skills[*].tool_scope` before any market research begins.
 - The host executes the selected skill locally while treating the resolved browser rules as binding browser constraints for that chosen run.
 - This cockpit contract applies to one selected skill at a time; it does not turn BuddySwitch into a multi-skill workflow engine.
 
@@ -57,10 +57,10 @@ All six market skills must carry identical host execution metadata in `skill.tom
 - If `browser-native` access is genuinely blocked, only one explicit `user-approved` one-off downgrade is allowed and must be recorded with evidence impact.
 
 4. Ordered host execution
-- `resolve_context.skills[*].host_execution` carries the host-facing Chrome MCP contract (`chrome-devtools-cockpit`, `browser-native`, mandatory takeover, and no-silent-degrade).
-- `resolve_context.skills[*].tool_scope` carries the allowed tool-server scope for the run.
+- `prepare_context.skills[*].host_execution` carries the host-facing Chrome MCP contract (`chrome-devtools-cockpit`, `browser-native`, mandatory takeover, and no-silent-degrade).
+- `prepare_context.skills[*].tool_scope` carries the allowed tool-server scope for the run.
 - For `market-browser-native`, discovery starts with `chrome-devtools-cockpit`; browser-external search is outside the default scope unless an explicit `user-approved` one-off downgrade is granted.
-- The selected skill metadata is the host-facing browser contract for the chosen run; it does not imply that top-level `resolve_context.inputs` is already populated before skill choice in a multi-skill resolve.
+- The selected skill metadata is the host-facing browser contract for the chosen run; it does not imply that top-level `prepare_context.inputs` is already populated before skill choice in a multi-skill prepare.
 - The host may not replace that resolved contract with manual reconstruction or ad hoc market-specific shortcuts.
 
 ## Cockpit Bootstrap

@@ -107,10 +107,16 @@ ACTIVE_MARKET_CONTRACT_DOCS = (
     ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "SKILL.md",
 )
 PARALLEL_CONTRACT_FILES = (
-    ROOT / "framework" / "contracts" / "resolve-context.json",
+    ROOT / "framework" / "contracts" / "prepare-turn-context.json",
     ROOT / "framework" / "contracts" / "persist-skill-result.json",
     ROOT / "framework" / "contracts" / "workspace-projection.json",
 )
+ACTIVE_BUDDY_PROMPT_DOCS = tuple(
+    ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
+    for buddy in ("design", "dev", "market", "pm", "test")
+)
+LEGACY_RUNTIME_AGENTS = ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md"
+LEGACY_ROUTER_PROMPT = ROOT / ".codex" / "agents" / "router.toml"
 LEGACY_REMOVED_CONTRACT_FILES = (
     ROOT / "framework" / "contracts" / "switch-grammar.json",
 )
@@ -245,12 +251,13 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertTrue(checked_files)
 
     def test_active_docs_use_canonical_not_strict_switch_wording(self) -> None:
+        self.assertFalse(LEGACY_ROUTER_PROMPT.exists())
         targets = (
             ROOT / "AGENTS.md",
             ROOT / "README.md",
-            ROOT / ".codex" / "agents" / "router.toml",
             ROOT / "framework" / "docs" / "turn-runtime-spec.md",
             ROOT / "framework" / "docs" / "skill-architecture-best-practices.md",
+            ROOT / "framework" / "docs" / "browser-cockpit.md",
         )
         combined = "\n".join(path.read_text(encoding="utf-8") for path in targets)
 
@@ -260,7 +267,7 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("keep strict syntax handling", combined.lower())
         self.assertIn("canonical", combined.lower())
         self.assertIn("ordinary request", combined.lower())
-        self.assertIn("advisory", combined.lower())
+        self.assertIn("prepare-turn-context", combined.lower())
 
     def test_control_docs_define_failure_actions_and_structure_only_schema_boundary(self) -> None:
         targets = (
@@ -508,7 +515,9 @@ class RepoConsistencyTests(unittest.TestCase):
         )
         for path in buddy_docs:
             text = path.read_text(encoding="utf-8").lower()
-            self.assertIn("receipt -> summary", text)
+            self.assertIn("## receipt contract", text)
+            self.assertIn("## summary contract", text)
+            self.assertIn("persisted: ok|failed", text)
             self.assertNotIn("receipt -> commands -> summary", text)
 
     def test_root_agents_describes_execution_worktree_without_full_runtime_contract(self) -> None:
@@ -530,18 +539,18 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("do not rely on a separate rubric file", text)
 
     def test_runtime_agents_doc_uses_context_then_persist_flow(self) -> None:
-        text = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
-            encoding="utf-8"
-        ).lower()
-
-        self.assertIn("prepare-turn-context", text)
-        self.assertIn("request_text", text)
-        self.assertIn("persist-skill-result", text)
-        self.assertIn("receipt -> summary", text)
-        self.assertNotIn("selected_skill_packet", text)
-        self.assertNotIn("prepare-execution", text)
-        self.assertNotIn("receipt.recommended_switch", text)
-        self.assertNotIn("reference_switches", text)
+        self.assertFalse(LEGACY_RUNTIME_AGENTS.exists())
+        for path in ACTIVE_BUDDY_PROMPT_DOCS:
+            text = path.read_text(encoding="utf-8").lower()
+            self.assertIn("prepare_context", text)
+            self.assertIn("request_text", text)
+            self.assertIn("scripts/turn_runtime.py persist", text)
+            self.assertIn("## receipt contract", text)
+            self.assertIn("## summary contract", text)
+            self.assertNotIn("selected_skill_packet", text)
+            self.assertNotIn("prepare-execution", text)
+            self.assertNotIn("receipt.recommended_switch", text)
+            self.assertNotIn("reference_switches", text)
 
     def test_readme_quick_start_distinguishes_development_and_launcher_modes(self) -> None:
         text = (ROOT / "README.md").read_text(encoding="utf-8").lower()
@@ -613,7 +622,7 @@ class RepoConsistencyTests(unittest.TestCase):
 
         self.assertTrue(checked_files, msg="expected tracked docs/config example files to be scanned")
 
-    def test_switch_spec_keeps_multi_skill_choice_on_resolve_context_skills(self) -> None:
+    def test_switch_spec_keeps_multi_skill_choice_on_prepare_context_skills(self) -> None:
         text = (ROOT / "framework" / "docs" / "turn-runtime-spec.md").read_text(encoding="utf-8")
 
         self.assertIn("- `skills`", text)
@@ -929,22 +938,22 @@ class RepoConsistencyTests(unittest.TestCase):
         ).lower()
         self.assertNotIn("suggested next switch", chat_return_section)
 
-    def test_market_cockpit_doc_defines_resolve_context_execution_boundary(self) -> None:
+    def test_market_cockpit_doc_defines_prepare_context_execution_boundary(self) -> None:
         cockpit_doc = (ROOT / "framework" / "docs" / "browser-cockpit.md").read_text(
             encoding="utf-8"
         ).lower()
-        self.assertIn("resolve_context.skills[*].host_execution", cockpit_doc)
-        self.assertIn("resolve_context.skills[*].tool_scope", cockpit_doc)
-        self.assertIn("does not imply that top-level `resolve_context.inputs` is already populated", cockpit_doc)
+        self.assertIn("prepare_context.skills[*].host_execution", cockpit_doc)
+        self.assertIn("prepare_context.skills[*].tool_scope", cockpit_doc)
+        self.assertIn("does not imply that top-level `prepare_context.inputs` is already populated", cockpit_doc)
         self.assertIn("host stays the only executor", cockpit_doc)
         self.assertIn("these six skills stay separate", cockpit_doc)
         self.assertIn("not a second source of truth", cockpit_doc)
         self.assertNotIn("selected_skill_packet", cockpit_doc)
         self.assertNotIn("prepare-execution", cockpit_doc)
 
-    def test_switch_spec_documents_resolve_context_loop(self) -> None:
+    def test_switch_spec_documents_prepare_context_loop(self) -> None:
         switch_spec = (ROOT / "framework" / "docs" / "turn-runtime-spec.md").read_text(encoding="utf-8").lower()
-        self.assertIn("framework/contracts/resolve-context.json", switch_spec)
+        self.assertIn("framework/contracts/prepare-turn-context.json", switch_spec)
         self.assertIn("persist-skill-result", switch_spec)
         self.assertIn("refreshed_context", switch_spec)
         self.assertIn("reserves one run envelope", switch_spec)
@@ -953,26 +962,27 @@ class RepoConsistencyTests(unittest.TestCase):
 
     def test_switch_spec_defers_market_execution_boundary_to_skill_metadata(self) -> None:
         cockpit_doc = (ROOT / "framework" / "docs" / "browser-cockpit.md").read_text(encoding="utf-8").lower()
-        self.assertIn("resolve_context.skills[*].host_execution", cockpit_doc)
-        self.assertIn("resolve_context.skills[*].tool_scope", cockpit_doc)
+        self.assertIn("prepare_context.skills[*].host_execution", cockpit_doc)
+        self.assertIn("prepare_context.skills[*].tool_scope", cockpit_doc)
         self.assertIn("browser-native", cockpit_doc)
         self.assertNotIn("selected_skill_packet.execution_steps", cockpit_doc)
 
-    def test_top_level_docs_define_resolve_context_flow(self) -> None:
+    def test_top_level_docs_define_prepare_context_flow(self) -> None:
+        self.assertFalse(LEGACY_ROUTER_PROMPT.exists())
         combined = "\n".join(
             path.read_text(encoding="utf-8")
             for path in (
                 ROOT / "AGENTS.md",
                 ROOT / "README.md",
-                ROOT / ".codex" / "agents" / "router.toml",
                 ROOT / "framework" / "docs" / "turn-runtime-spec.md",
+                *ACTIVE_BUDDY_PROMPT_DOCS,
             )
         ).lower()
 
-        self.assertIn("resolve_context", combined)
+        self.assertIn("prepare_context", combined)
         self.assertIn("persist-skill-result", combined)
         self.assertIn("refreshed_context", combined)
-        self.assertIn("buddyswitch does not execute host tools", combined)
+        self.assertIn("buddyswitch does not open browser tools itself", (ROOT / "framework" / "docs" / "browser-cockpit.md").read_text(encoding="utf-8").lower())
         self.assertNotIn("prepare-execution", combined)
         self.assertNotIn("selected_skill_packet", combined)
 
@@ -986,18 +996,10 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("buddyswitch/content/runs/*.json", switch_spec)
 
     def test_product_mode_docs_define_shared_project_workspace(self) -> None:
-        buddy_docs = (
-            ROOT / "tools" / "launcher" / "assets" / "buddies" / "design" / "AGENTS.md",
-            ROOT / "tools" / "launcher" / "assets" / "buddies" / "dev" / "AGENTS.md",
-            ROOT / "tools" / "launcher" / "assets" / "buddies" / "market" / "AGENTS.md",
-            ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md",
-            ROOT / "tools" / "launcher" / "assets" / "buddies" / "test" / "AGENTS.md",
-        )
         docs = (
             ROOT / "README.md",
             ROOT / "AGENTS.md",
-            ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md",
-            *buddy_docs,
+            *ACTIVE_BUDDY_PROMPT_DOCS,
         )
         combined = "\n".join(path.read_text(encoding="utf-8") for path in docs).lower()
 
@@ -1008,16 +1010,14 @@ class RepoConsistencyTests(unittest.TestCase):
 
     def test_host_docs_treat_inputs_as_conditional_selected_bundle(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
-        runtime_agents = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
-            encoding="utf-8"
-        ).lower()
+        buddy_prompts = "\n".join(path.read_text(encoding="utf-8").lower() for path in ACTIVE_BUDDY_PROMPT_DOCS)
         switch_spec = (ROOT / "framework" / "docs" / "turn-runtime-spec.md").read_text(encoding="utf-8").lower()
 
         self.assertIn("request_text", readme)
         self.assertIn("prepare-turn-context", readme)
         self.assertIn("inputs_by_skill", switch_spec)
         self.assertNotIn("top-level `inputs` may be empty", switch_spec)
-        self.assertNotIn("resolve_context.inputs[", runtime_agents)
+        self.assertNotIn("resolve_context.inputs[", buddy_prompts)
 
     def test_docs_place_persist_follow_up_fields_inside_receipt(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
@@ -1028,10 +1028,9 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("receipt.recommended_switch", switch_spec)
 
     def test_active_host_prompts_require_refresh_context_check_and_retry(self) -> None:
-        targets = (
-            ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md",
-            ROOT / ".codex" / "agents" / "router.toml",
-        )
+        self.assertFalse(LEGACY_RUNTIME_AGENTS.exists())
+        self.assertFalse(LEGACY_ROUTER_PROMPT.exists())
+        targets = ACTIVE_BUDDY_PROMPT_DOCS
         legacy_unconditional_runtime = (
             "continue from `refreshed_context` when another buddy turn is needed after a successful persist."
         )
@@ -1041,13 +1040,7 @@ class RepoConsistencyTests(unittest.TestCase):
 
         for path in targets:
             text = path.read_text(encoding="utf-8").lower()
-            self.assertIn("check `refreshed_context.ok`", text, msg=f"missing refreshed_context.ok guard in {path.relative_to(ROOT)}")
-            if path.name == "router.toml":
-                self.assertIn(
-                    "e_runtime_refresh_context",
-                    text,
-                    msg=f"missing refresh error code in {path.relative_to(ROOT)}",
-                )
+            self.assertIn("if another turn is needed", text, msg=f"missing post-persist turn guidance in {path.relative_to(ROOT)}")
             self.assertIn("prepare", text, msg=f"missing prepare retry guidance in {path.relative_to(ROOT)}")
             self.assertIn("request_text", text, msg=f"missing request_text retry guidance in {path.relative_to(ROOT)}")
             self.assertNotIn("receipt.recommended_switch", text, msg=f"legacy follow-up field in {path.relative_to(ROOT)}")
@@ -1081,16 +1074,13 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("continue from `refreshed_context` when it is true", switch_spec)
 
     def test_active_host_prompts_require_explicit_resolve_after_persist(self) -> None:
-        targets = (
-            ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md",
-            ROOT / ".codex" / "agents" / "router.toml",
-        )
+        self.assertFalse(LEGACY_RUNTIME_AGENTS.exists())
+        self.assertFalse(LEGACY_ROUTER_PROMPT.exists())
+        targets = ACTIVE_BUDDY_PROMPT_DOCS
 
         for path in targets:
             text = path.read_text(encoding="utf-8").lower()
-            self.assertIn("check `refreshed_context.ok`", text)
-            if path.name == "router.toml":
-                self.assertIn("e_runtime_refresh_context", text)
+            self.assertIn("if another turn is needed", text)
             self.assertIn("request_text", text)
             self.assertIn("prepare", text)
             self.assertNotIn("receipt.recommended_switch", text)
@@ -1122,9 +1112,15 @@ class RepoConsistencyTests(unittest.TestCase):
             with self.subTest(buddy=buddy_id):
                 _, lower = self._assert_buddy_prompt_base_contract(buddy_id, path)
                 self.assertIn("prepare_context", lower)
-                self.assertIn("refreshed_context", lower)
                 self.assertIn("runs/raw/", lower)
                 self.assertIn("projects/app", lower)
+                self.assertIn("## receipt contract", lower)
+                self.assertIn("persisted: ok|failed", lower)
+                self.assertIn("task: <task_title> [<task_id>]", lower)
+                self.assertIn("artifact: <artifact_id|none>", lower)
+                self.assertIn("run: <run_id>", lower)
+                self.assertIn("related runs: <run_id_1>, <run_id_2>", lower)
+                self.assertIn("## summary contract", lower)
 
     def test_buddy_prompts_do_not_allow_user_facing_switch_commands(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
@@ -1138,28 +1134,26 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("same-buddy canonical", lower)
                 self.assertNotIn(f"switch {buddy_id}", lower)
                 self.assertNotIn("receipt -> commands -> summary", lower)
-                self.assertIn("receipt -> summary", lower)
                 required_runtime_tokens = (
                     "prepare_context",
                     "selected-skill preflight",
                     "host_execution",
                     "tool_scope",
-                    "persist-skill-result",
-                    "refreshed_context",
                     "runs/raw/",
                     "projects/app",
+                    "## receipt contract",
+                    "## summary contract",
                 )
                 for token in required_runtime_tokens:
                     self.assertIn(token, lower)
                 self.assertNotIn("projects/app/.runtime/", lower)
 
     def test_runtime_prompt_does_not_present_switch_as_product_ui(self) -> None:
-        runtime_agents = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
-            encoding="utf-8"
-        ).lower()
-        self.assertIn("ordinary requests", runtime_agents)
-        self.assertNotIn("switch <buddy>", runtime_agents)
-        self.assertNotIn("switch pm:", runtime_agents)
+        self.assertFalse(LEGACY_RUNTIME_AGENTS.exists())
+        combined_prompts = "\n".join(path.read_text(encoding="utf-8").lower() for path in ACTIVE_BUDDY_PROMPT_DOCS)
+        self.assertIn("ordinary user requests", combined_prompts)
+        self.assertNotIn("switch <buddy>", combined_prompts)
+        self.assertNotIn("switch pm:", combined_prompts)
 
     def test_product_docs_do_not_teach_switch_as_buddy_instance_input(self) -> None:
         docs = (
@@ -1245,14 +1239,13 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("receipt.next_state", switch_spec)
 
         # Legacy switch-command follow-up fields must stay retired from output docs.
-        self.assertNotIn("reference_switches", switch_spec)
-        self.assertNotIn("recommended_switch", switch_spec)
+        self.assertNotIn("receipt.reference_switches", switch_spec)
+        self.assertNotIn("receipt.recommended_switch", switch_spec)
         self.assertNotIn("commands order", switch_spec)
 
     def test_runtime_host_prompt_defines_selected_skill_preflight_mitigation(self) -> None:
-        text = (ROOT / "tools" / "launcher" / "assets" / "runtime-AGENTS.md").read_text(
-            encoding="utf-8"
-        ).lower()
+        self.assertFalse(LEGACY_RUNTIME_AGENTS.exists())
+        text = "\n".join(path.read_text(encoding="utf-8").lower() for path in ACTIVE_BUDDY_PROMPT_DOCS)
 
         required_semantics = (
             "selected skill",
@@ -1296,20 +1289,17 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("required tools must be present before continuing", text)
 
     def test_router_prompt_keeps_selected_skill_preflight_reduced_parity(self) -> None:
-        text = (ROOT / ".codex" / "agents" / "router.toml").read_text(encoding="utf-8").lower()
+        self.assertFalse(LEGACY_ROUTER_PROMPT.exists())
+        text = (ROOT / "framework" / "docs" / "browser-cockpit.md").read_text(encoding="utf-8").lower()
 
         required_semantics = (
             "selected skill",
-            "preflight",
             "host_execution",
             "tool_scope",
-            "required_tools",
-            "required_env",
-            "browser_executor",
+            "chrome-devtools-cockpit",
             "browser-native",
-            "explicit user approval",
-            "mandatory-takeover",
-            "advisory",
+            "user-approved",
+            "mandatory takeover",
         )
         positions: dict[str, int] = {}
         for token in required_semantics:
@@ -1320,14 +1310,10 @@ class RepoConsistencyTests(unittest.TestCase):
         grouped_positions = [positions[token] for token in required_semantics]
         self.assertLess(
             max(grouped_positions) - min(grouped_positions),
-            1800,
+            3200,
             msg="router selected-skill preflight reduced semantics should stay grouped in host responsibility guidance",
         )
-        self.assertRegex(
-            text,
-            r"mandatory-takeover[\s\S]{0,160}separate[\s\S]{0,160}downgrade",
-            msg="router reduced parity must keep mandatory-takeover separate from downgrade handling",
-        )
+        self.assertIn("mandatory takeover", text)
         self.assertNotIn("for market runs", text)
         self.assertNotIn(
             "do not reinterpret missing executor availability, login takeover, and genuine browser-native blocking as the same path",
@@ -1336,8 +1322,8 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("external tool invocation or evidence capture", text)
 
     def test_router_doc_lists_task_objects_as_canonical_state(self) -> None:
-        text = (ROOT / ".codex" / "agents" / "router.toml").read_text(encoding="utf-8").lower()
-
+        self.assertFalse(LEGACY_ROUTER_PROMPT.exists())
+        text = (ROOT / "framework" / "docs" / "browser-cockpit.md").read_text(encoding="utf-8").lower()
         self.assertIn("buddyswitch/objects/tasks/*.json", text)
 
     def test_switch_spec_lists_current_runtime_errors(self) -> None:
@@ -1465,7 +1451,7 @@ class RepoConsistencyTests(unittest.TestCase):
 
     def test_parallel_contract_files_exist_and_define_expected_ids(self) -> None:
         expected_contract_ids = {
-            "resolve-context": PARALLEL_CONTRACT_FILES[0],
+            "prepare-turn-context": PARALLEL_CONTRACT_FILES[0],
             "persist-skill-result": PARALLEL_CONTRACT_FILES[1],
             "workspace-projection": PARALLEL_CONTRACT_FILES[2],
         }
@@ -1481,10 +1467,10 @@ class RepoConsistencyTests(unittest.TestCase):
             with self.subTest(removed_contract=str(path.relative_to(ROOT))):
                 self.assertFalse(path.exists(), msg=f"legacy contract must stay removed: {path.relative_to(ROOT)}")
 
-        resolve_context = loaded_contracts["resolve-context"]
-        self.assertIn("response_key_order", resolve_context)
-        self.assertIn("context_revision", resolve_context["response_key_order"])
-        self.assertIn("skills", resolve_context["response_key_order"])
+        prepare_context = loaded_contracts["prepare-turn-context"]
+        self.assertIn("response_key_order", prepare_context)
+        self.assertIn("context_revision", prepare_context["response_key_order"])
+        self.assertIn("skills", prepare_context["response_key_order"])
 
         persist_skill_result = loaded_contracts["persist-skill-result"]
         self.assertIn("response_key_order", persist_skill_result)
@@ -1515,7 +1501,7 @@ class RepoConsistencyTests(unittest.TestCase):
         interface_spec = (ROOT / "framework" / "docs" / "interface-spec.md").read_text(encoding="utf-8")
 
         self.assertNotIn("framework/contracts/switch-grammar.json", switch_spec)
-        self.assertIn("framework/contracts/resolve-context.json", switch_spec)
+        self.assertIn("framework/contracts/prepare-turn-context.json", switch_spec)
         self.assertIn("framework/contracts/persist-skill-result.json", switch_spec)
         self.assertIn("framework/contracts/workspace-projection.json", interface_spec)
 

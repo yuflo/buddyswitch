@@ -1,6 +1,6 @@
 {
-  "contract_id": "resolve-context",
-  "contract_version": "2026-05-02",
+  "contract_id": "prepare-turn-context",
+  "contract_version": "2026-05-03",
   "response_key_order": [
     "ok",
     "context_revision",

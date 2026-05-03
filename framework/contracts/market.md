@@ -9,7 +9,7 @@ Market is an outside-in buddy. It produces browser-driven, evidence-based demand
 - Clarify the research question and scope.
 - Select the executable market skill that matches the question: `research-scan`, `pmf-recon`, `customer-discovery`, `positioning-copy`, `channel-discovery`, or `launch-prep`.
 - Run the selected market skill in the instance-bound headed cockpit defined in `framework/docs/browser-cockpit.md`; the same cockpit contract applies across all six market skills inside the active Buddy instance.
-- Honor `resolve_context.skills[*].tool_scope` before any research begins.
+- Honor `prepare_context.skills[*].tool_scope` before any research begins.
 - Use `chrome-devtools-cockpit` as the browser executor and keep discovery `browser-native`.
 - Use browser profile `instance-browser` with `instance-cockpit` session continuity inside the active Buddy instance.
 - Enforce mandatory login takeover for critical sources before continuing evidence capture.
@@ -69,7 +69,7 @@ Skill-specific synthesis fields stay with the relevant executable skill schema. 
 - The default resolved tool-scope profile is `market-browser-native`.
 - The cockpit must run headed (`browser_mode=headed-only`) and use profile `instance-browser` with `session_continuity=instance-cockpit`.
 - The cockpit browser executor is `chrome-devtools-cockpit`.
-- `resolve_context.skills[*].tool_scope` is the host-facing tool boundary for the selected run.
+- `prepare_context.skills[*].tool_scope` is the host-facing tool boundary for the selected run.
 - Discovery mode is `browser-native` and requires real page traversal after in-browser search.
 - Login handling for critical sources is mandatory takeover (`login_policy=mandatory-takeover`).
 - Fallback handling is `fallback_policy=no-silent-degrade`: no silent downgrade to low-density public alternatives.
@@ -138,6 +138,7 @@ Terminal final output must follow `Receipt -> Summary`:
 - `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`)
 - `Receipt` may include an optional next-step state or handoff note (non-command wording)
 - `Summary` keeps 1-2 lines, with up to 4 open questions
+- Runtime commit boundary is `persist-skill-result`.
 
 ## Execution Summary Rule
 

@@ -372,14 +372,98 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         receipt = payload["receipt"]
         self.assertIsInstance(receipt, dict)
         if isinstance(receipt, dict):
-            for key in ("task_id", "run_id", "skill_id", "receipt_paths", "next_state"):
+            for key in (
+                "ok",
+                "skill_id",
+                "task_id",
+                "task_title",
+                "artifact_id",
+                "artifact_ids",
+                "run_id",
+                "next_state",
+                "receipt_paths",
+                "related_run_ids",
+            ):
                 self.assertIn(key, receipt)
+            self.assertEqual(receipt["run_id"], context["run_envelope"]["run_id"])
+            self.assertIn(receipt["artifact_id"], receipt["artifact_ids"])
+            self.assertEqual(receipt["next_state"]["task_id"], receipt["task_id"])
+            self.assertNotIn("recommended_switch", receipt)
+            self.assertNotIn("reference_switches", receipt)
             receipt_paths = receipt.get("receipt_paths")
             self.assertIsInstance(receipt_paths, dict)
             if isinstance(receipt_paths, dict):
                 for rel_path in receipt_paths.values():
                     if isinstance(rel_path, str):
                         self.assertTrue(self._runtime_path(rel_path).exists())
+                    elif isinstance(rel_path, list):
+                        for item in rel_path:
+                            if isinstance(item, str):
+                                self.assertTrue(self._runtime_path(item).exists())
+
+    def test_track_manager_persist_receipt_uses_empty_artifact_ids(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-09-track", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-09-track",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Create onboarding delivery track", env=env)
+        self.assertTrue(context["ok"])
+
+        payload = self._persist(
+            context,
+            skill_id="track-manager",
+            result={
+                "execution_summary": "Created onboarding track.",
+                "working_notes": ["Initialized track manager flow."],
+                "deliverables_or_changed_files": [],
+                "track_operation": {
+                    "action": "create",
+                    "track_id": "track-onboarding-delivery",
+                    "title": "Onboarding Delivery",
+                    "status": "active",
+                    "current_buddy": "pm",
+                    "next_buddy": "design",
+                    "summary": "Cross-functional onboarding delivery flow.",
+                },
+            },
+            env=env,
+        )
+
+        self.assertTrue(payload["ok"])
+        receipt = payload["receipt"]
+        self.assertIsInstance(receipt, dict)
+        if isinstance(receipt, dict):
+            self.assertEqual(receipt.get("track_action"), "create")
+            self.assertEqual(receipt.get("artifact_ids"), [])
+            self.assertNotIn("artifact_id", receipt)
+            self.assertIsInstance(receipt.get("track_id"), str)
+            self.assertIsInstance(receipt.get("track_title"), str)
+
+    def test_persist_rejects_top_level_runtime_metadata_in_skill_payload(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-09-boundary", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-09-boundary",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Draft onboarding PRD", env=env)
+        self.assertTrue(context["ok"])
+
+        counts_before = self._runtime_state_counts()
+        invalid_result = self._pm_result_payload()
+        invalid_result["task_id"] = "task-should-not-be-accepted"
+        with self.assertRaises(ValueError):
+            self._persist(context, skill_id="write-prd", result=invalid_result, env=env)
+        self.assertEqual(self._runtime_state_counts(), counts_before)
+
+        valid_result = self._pm_result_payload()
+        payload = self._persist(context, skill_id="write-prd", result=valid_result, env=env)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["receipt"]["task_id"], context["current_task_id"])
 
     def test_workspace_projection_uses_structured_state_after_persist(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-10", buddy="pm")
