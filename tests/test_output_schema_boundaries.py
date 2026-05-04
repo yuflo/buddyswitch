@@ -48,14 +48,11 @@ RUNTIME_METADATA_FIELDS = {
 BUDDY_ARTIFACT_REQUIRED_FIELDS = {
     "pm": {
         "summary",
-        "problem",
-        "user_value",
-        "requirements",
-        "scope",
         "decisions",
         "risks",
         "open_questions",
         "suggested_next_step",
+        "specialized_sections",
     },
     "dev": {
         "task_summary",
@@ -104,14 +101,18 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
         artifact_content_by_buddy: dict[str, dict[str, object]] = {
             "pm": {
                 "summary": "PRD summary",
-                "problem": "Users cannot complete onboarding quickly.",
-                "user_value": "Faster onboarding completion.",
-                "requirements": ["Define scope", "Capture acceptance criteria"],
-                "scope": {"in_scope": ["Onboarding copy"], "out_of_scope": ["Billing refactor"]},
                 "decisions": ["Ship guided flow first."],
                 "risks": ["Copy may still be unclear."],
                 "open_questions": ["Need localization in v1?"],
                 "suggested_next_step": "Hand off to design for flow draft.",
+                "specialized_sections": {
+                    "prd": {
+                        "problem": "Users cannot complete onboarding quickly.",
+                        "user_value": "Faster onboarding completion.",
+                        "requirements": ["Define scope", "Capture acceptance criteria"],
+                        "scope": {"in_scope": ["Onboarding copy"], "out_of_scope": ["Billing refactor"]},
+                    }
+                },
             },
             "dev": {
                 "task_summary": "Implemented onboarding banner behavior.",
@@ -303,6 +304,30 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
                 artifact_content["specialized_sections"] = specialized_sections
                 payload["artifact_content"] = artifact_content
                 self.assertEqual(output_schema.validate_output_payload(payload, schema), [])
+
+    def test_only_pm_schema_accepts_track_operation_state_effect(self) -> None:
+        pm_schema = self._load_buddy_schema("pm")
+        pm_payload = self._sample_payload_for_buddy("pm")
+        pm_payload["state_effects"] = {
+            "track_operation": {
+                "action": "advance",
+                "track_id": "track-onboarding",
+                "next_buddy": "dev",
+            }
+        }
+        self.assertEqual(output_schema.validate_output_payload(pm_payload, pm_schema), [])
+
+        for buddy_id in ("dev", "test", "market", "design"):
+            with self.subTest(buddy=buddy_id):
+                schema = self._load_buddy_schema(buddy_id)
+                payload = self._sample_payload_for_buddy(buddy_id)
+                payload["state_effects"] = {
+                    "track_operation": {
+                        "action": "advance",
+                    }
+                }
+                errors = output_schema.validate_output_payload(payload, schema)
+                self.assertIn("$: unsupported property 'state_effects'", errors)
 
 
 if __name__ == "__main__":

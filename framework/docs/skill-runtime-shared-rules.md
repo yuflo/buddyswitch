@@ -21,6 +21,8 @@ These rules apply to artifact-producing BuddySwitch skills that persist durable 
 - Follow `framework/docs/track-registry.md` for track context, but do not mutate track lifecycle fields directly unless the skill explicitly owns track management.
 - Artifact-producing skills may read tracks and create or update artifact objects through the resolved task.
 - Do not store direct track references inside artifact output unless the skill contract explicitly requires them.
+- PM lifecycle mutations must use `state_effects.track_operation` in PM result payloads.
+- Retired top-level `track_operation` payloads are rejected.
 
 ## Durable Output Paths
 

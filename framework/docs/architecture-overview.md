@@ -62,3 +62,5 @@ Other buddies:
 - `design`: `shape-prototype`
 - `dev`: `implement-task`
 - `test`: `smoke-test`
+
+PM track lifecycle mutations are expressed as PM result payload `state_effects.track_operation` and persisted through the same artifact flow as other skills.

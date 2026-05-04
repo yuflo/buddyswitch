@@ -151,17 +151,21 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
             "deliverables_or_changed_files": [],
             "artifact_content": {
                 "summary": "Captured onboarding PRD updates.",
-                "problem": "Users need clearer onboarding scope.",
-                "user_value": "Faster onboarding completion with clearer guidance.",
-                "requirements": ["Define launch acceptance criteria", "Capture follow-up questions"],
-                "scope": {
-                    "in_scope": ["Onboarding flow scope and acceptance criteria"],
-                    "out_of_scope": ["Implement delivery code"],
-                },
                 "decisions": ["Ship guided onboarding flow before broader redesign."],
                 "risks": ["Unknown migration edge cases"],
                 "open_questions": ["Need follow-up QA pass?"],
                 "suggested_next_step": "Hand off to design for a flow draft.",
+                "specialized_sections": {
+                    "prd": {
+                        "problem": "Users need clearer onboarding scope.",
+                        "user_value": "Faster onboarding completion with clearer guidance.",
+                        "requirements": ["Define launch acceptance criteria", "Capture follow-up questions"],
+                        "scope": {
+                            "in_scope": ["Onboarding flow scope and acceptance criteria"],
+                            "out_of_scope": ["Implement delivery code"],
+                        },
+                    }
+                },
             },
         }
 
@@ -238,6 +242,51 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
                         "channel_plan": ["Founder forums", "Founder Slack groups"],
                     }
                 },
+            },
+        }
+
+    @staticmethod
+    def _track_manager_result_payload(
+        *,
+        action: str,
+        track_id: str | None = None,
+        title: str | None = None,
+        status: str | None = None,
+        current_buddy: str | None = None,
+        next_buddy: str | None = None,
+        summary: str | None = None,
+        execution_summary: str = "Applied track lifecycle operation.",
+    ) -> dict[str, object]:
+        operation: dict[str, object] = {"action": action}
+        if track_id is not None:
+            operation["track_id"] = track_id
+        if title is not None:
+            operation["title"] = title
+        if status is not None:
+            operation["status"] = status
+        if current_buddy is not None:
+            operation["current_buddy"] = current_buddy
+        if next_buddy is not None:
+            operation["next_buddy"] = next_buddy
+        if summary is not None:
+            operation["summary"] = summary
+
+        return {
+            "execution_summary": execution_summary,
+            "working_notes": ["Track lifecycle operation persisted through PM result payload."],
+            "deliverables_or_changed_files": [],
+            "artifact_content": {
+                "summary": execution_summary,
+                "decisions": [f"Track operation '{action}' was requested explicitly."],
+                "risks": [],
+                "open_questions": [],
+                "suggested_next_step": "Continue with the next routed task.",
+                "specialized_sections": {
+                    "track_operation": operation,
+                },
+            },
+            "state_effects": {
+                "track_operation": operation,
             },
         }
 
@@ -736,7 +785,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
                 manifest_path=manifest_path,
             )
 
-    def test_track_manager_persist_receipt_uses_empty_artifact_ids(self) -> None:
+    def test_track_manager_persist_receipt_includes_artifact_and_track_metadata(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-09-track", buddy="pm")
         env = self._product_env(
             instance_json,
@@ -750,20 +799,16 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         payload = self._persist(
             context,
             skill_id="track-manager",
-            result={
-                "execution_summary": "Created onboarding track.",
-                "working_notes": ["Initialized track manager flow."],
-                "deliverables_or_changed_files": [],
-                "track_operation": {
-                    "action": "create",
-                    "track_id": "track-onboarding-delivery",
-                    "title": "Onboarding Delivery",
-                    "status": "active",
-                    "current_buddy": "pm",
-                    "next_buddy": "design",
-                    "summary": "Cross-functional onboarding delivery flow.",
-                },
-            },
+            result=self._track_manager_result_payload(
+                action="create",
+                track_id="track-onboarding-delivery",
+                title="Onboarding Delivery",
+                status="active",
+                current_buddy="pm",
+                next_buddy="design",
+                summary="Cross-functional onboarding delivery flow.",
+                execution_summary="Created onboarding track.",
+            ),
             env=env,
         )
 
@@ -772,8 +817,9 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertIsInstance(receipt, dict)
         if isinstance(receipt, dict):
             self.assertEqual(receipt.get("track_action"), "create")
-            self.assertEqual(receipt.get("artifact_ids"), [])
-            self.assertNotIn("artifact_id", receipt)
+            self.assertIsInstance(receipt.get("artifact_id"), str)
+            self.assertTrue(receipt.get("artifact_id"))
+            self.assertIn(receipt["artifact_id"], receipt.get("artifact_ids", []))
             self.assertIsInstance(receipt.get("track_id"), str)
             self.assertIsInstance(receipt.get("track_title"), str)
 
@@ -825,7 +871,109 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
         self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
 
-    def test_track_manager_update_or_advance_operation_still_succeeds(self) -> None:
+    def test_persist_rejects_retired_top_level_track_operation_before_durable_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-09-retired-track-payload", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-09-retired-track-payload",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Create onboarding delivery track", env=env)
+        self.assertTrue(context["ok"])
+
+        snapshot_before = self._runtime_state_snapshot()
+        instance_before = instance_json.read_text(encoding="utf-8")
+        invalid_payload = self._pm_result_payload()
+        invalid_payload["track_operation"] = {"action": "create", "track_id": "track-legacy"}
+        with self.assertRaises(ValueError):
+            self._persist(context, skill_id="track-manager", result=invalid_payload, env=env)
+        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
+        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
+
+    def test_track_manager_update_operation_updates_track_fields_and_artifact_revision(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-track-update", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-track-update",
+            shared_root=self.runtime_root,
+        )
+
+        create_context = self._prepare("Create onboarding delivery track", env=env)
+        self.assertTrue(create_context["ok"])
+        create_payload = self._persist(
+            create_context,
+            skill_id="track-manager",
+            result=self._track_manager_result_payload(
+                action="create",
+                track_id="track-onboarding-update",
+                title="Onboarding Update",
+                status="active",
+                current_buddy="pm",
+                next_buddy="design",
+                summary="Initial cross-functional flow.",
+                execution_summary="Created onboarding update track.",
+            ),
+            env=env,
+        )
+        self.assertTrue(create_payload["ok"])
+        create_receipt = create_payload["receipt"]
+        created_track_id = create_receipt["track_id"]
+        create_artifact_id = create_receipt["artifact_id"]
+        self.assertIsInstance(created_track_id, str)
+        self.assertIsInstance(create_artifact_id, str)
+        instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
+        instance_payload["current_task_id"] = create_receipt["task_id"]
+        instance_payload["current_track_id"] = created_track_id
+        instance_json.write_text(json.dumps(instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+        update_context = self._prepare("Update onboarding delivery track", env=env)
+        self.assertTrue(update_context["ok"])
+        self.assertEqual(update_context["current_task_id"], create_receipt["task_id"])
+        self.assertEqual(update_context["current_track_id"], created_track_id)
+        update_payload = self._persist(
+            update_context,
+            skill_id="track-manager",
+            result=self._track_manager_result_payload(
+                action="update",
+                track_id=created_track_id,
+                title="Onboarding Execution Updated",
+                status="blocked",
+                summary="Blocked pending policy review.",
+                execution_summary="Updated onboarding track fields.",
+            ),
+            env=env,
+        )
+
+        self.assertTrue(update_payload["ok"])
+        receipt = update_payload["receipt"]
+        self.assertEqual(receipt["track_action"], "update")
+        self.assertIsInstance(receipt.get("artifact_id"), str)
+        self.assertIn(receipt.get("artifact_id"), receipt.get("artifact_ids", []))
+        update_artifact_id = receipt["artifact_id"]
+
+        track_object = self._load_runtime_json(receipt["receipt_paths"]["track"])
+        self.assertEqual(track_object["id"], created_track_id)
+        self.assertEqual(track_object["title"], "Onboarding Execution Updated")
+        self.assertEqual(track_object["status"], "blocked")
+        self.assertEqual(track_object["summary"], "Blocked pending policy review.")
+
+        task_object = self._load_runtime_json(receipt["receipt_paths"]["task"])
+        slot_state = task_object["artifact_slots"]["track-operation"]
+        self.assertEqual(slot_state["current_artifact_id"], update_artifact_id)
+        self.assertEqual(slot_state["revision_count"], 2)
+
+        updated_artifact = self._load_runtime_json(receipt["receipt_paths"]["artifacts"][0])
+        self.assertEqual(updated_artifact["slot"], "track-operation")
+        self.assertEqual(updated_artifact["revision"], 2)
+        self.assertEqual(updated_artifact["supersedes_artifact_id"], create_artifact_id)
+        self.assertTrue(updated_artifact["is_current"])
+
+        created_artifact = self._load_runtime_json(create_receipt["receipt_paths"]["artifacts"][0])
+        self.assertFalse(created_artifact["is_current"])
+
+    def test_track_manager_advance_operation_still_succeeds(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-track-advance", buddy="pm")
         env = self._product_env(
             instance_json,
@@ -839,20 +987,16 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         create_payload = self._persist(
             create_context,
             skill_id="track-manager",
-            result={
-                "execution_summary": "Created onboarding track.",
-                "working_notes": ["Initialized track manager flow."],
-                "deliverables_or_changed_files": [],
-                "track_operation": {
-                    "action": "create",
-                    "track_id": "track-onboarding-advance",
-                    "title": "Onboarding Advance",
-                    "status": "active",
-                    "current_buddy": "pm",
-                    "next_buddy": "design",
-                    "summary": "Initial cross-functional flow.",
-                },
-            },
+            result=self._track_manager_result_payload(
+                action="create",
+                track_id="track-onboarding-advance",
+                title="Onboarding Advance",
+                status="active",
+                current_buddy="pm",
+                next_buddy="design",
+                summary="Initial cross-functional flow.",
+                execution_summary="Created onboarding track.",
+            ),
             env=env,
         )
         self.assertTrue(create_payload["ok"])
@@ -864,30 +1008,86 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         advance_payload = self._persist(
             advance_context,
             skill_id="track-manager",
-            result={
-                "execution_summary": "Advanced onboarding track to dev.",
-                "working_notes": ["Transitioned next buddy after PM scope lock."],
-                "deliverables_or_changed_files": [],
-                "track_operation": {
-                    "action": "advance",
-                    "track_id": created_track_id,
-                    "current_buddy": "pm",
-                    "next_buddy": "dev",
-                    "status": "active",
-                    "summary": "Ready for implementation planning.",
-                },
-            },
+            result=self._track_manager_result_payload(
+                action="advance",
+                track_id=created_track_id,
+                current_buddy="pm",
+                next_buddy="dev",
+                status="active",
+                summary="Ready for implementation planning.",
+                execution_summary="Advanced onboarding track to dev.",
+            ),
             env=env,
         )
 
         self.assertTrue(advance_payload["ok"])
         receipt = advance_payload["receipt"]
         self.assertEqual(receipt["track_action"], "advance")
-        self.assertEqual(receipt["artifact_ids"], [])
-        self.assertNotIn("artifact_id", receipt)
+        self.assertIsInstance(receipt.get("artifact_id"), str)
+        self.assertTrue(receipt.get("artifact_ids"))
         track_object = self._load_runtime_json(receipt["receipt_paths"]["track"])
         self.assertEqual(track_object["id"], created_track_id)
         self.assertEqual(track_object["next_buddy"], "dev")
+
+    def test_track_manager_archive_operation_sets_track_archived_mode(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-track-archive", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-track-archive",
+            shared_root=self.runtime_root,
+        )
+
+        create_context = self._prepare("Create onboarding delivery track", env=env)
+        self.assertTrue(create_context["ok"])
+        create_payload = self._persist(
+            create_context,
+            skill_id="track-manager",
+            result=self._track_manager_result_payload(
+                action="create",
+                track_id="track-onboarding-archive",
+                title="Onboarding Archive",
+                status="active",
+                current_buddy="pm",
+                next_buddy="design",
+                summary="Ready to archive after closeout.",
+                execution_summary="Created onboarding archive track.",
+            ),
+            env=env,
+        )
+        self.assertTrue(create_payload["ok"])
+        created_track_id = create_payload["receipt"]["track_id"]
+        self.assertIsInstance(created_track_id, str)
+        instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
+        instance_payload["current_task_id"] = create_payload["receipt"]["task_id"]
+        instance_payload["current_track_id"] = created_track_id
+        instance_json.write_text(json.dumps(instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+        archive_context = self._prepare("Archive onboarding delivery track", env=env)
+        self.assertTrue(archive_context["ok"])
+        self.assertEqual(archive_context["current_task_id"], create_payload["receipt"]["task_id"])
+        self.assertEqual(archive_context["current_track_id"], created_track_id)
+        archive_payload = self._persist(
+            archive_context,
+            skill_id="track-manager",
+            result=self._track_manager_result_payload(
+                action="archive",
+                track_id=created_track_id,
+                execution_summary="Archived onboarding track.",
+            ),
+            env=env,
+        )
+
+        self.assertTrue(archive_payload["ok"])
+        receipt = archive_payload["receipt"]
+        self.assertEqual(receipt["track_action"], "archive")
+        self.assertIsInstance(receipt.get("artifact_id"), str)
+        self.assertIn(receipt.get("artifact_id"), receipt.get("artifact_ids", []))
+        self.assertEqual(receipt["next_state"]["mode"], "track_archived")
+
+        track_object = self._load_runtime_json(receipt["receipt_paths"]["track"])
+        self.assertEqual(track_object["id"], created_track_id)
+        self.assertEqual(track_object["status"], "archived")
 
     def test_workspace_projection_uses_structured_state_after_persist(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-10", buddy="pm")

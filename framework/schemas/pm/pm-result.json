@@ -20,38 +20,14 @@
       "type": "object",
       "required": [
         "summary",
-        "problem",
-        "user_value",
-        "requirements",
-        "scope",
         "decisions",
         "risks",
         "open_questions",
-        "suggested_next_step"
+        "suggested_next_step",
+        "specialized_sections"
       ],
       "properties": {
         "summary": {"type": "string"},
-        "problem": {"type": "string"},
-        "user_value": {"type": "string"},
-        "requirements": {
-          "type": "array",
-          "items": {"type": "string"}
-        },
-        "scope": {
-          "type": "object",
-          "required": ["in_scope", "out_of_scope"],
-          "properties": {
-            "in_scope": {
-              "type": "array",
-              "items": {"type": "string"}
-            },
-            "out_of_scope": {
-              "type": "array",
-              "items": {"type": "string"}
-            }
-          },
-          "additionalProperties": false
-        },
         "decisions": {
           "type": "array",
           "items": {"type": "string"}
@@ -64,7 +40,36 @@
           "type": "array",
           "items": {"type": "string"}
         },
-        "suggested_next_step": {"type": "string"}
+        "suggested_next_step": {"type": "string"},
+        "specialized_sections": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "state_effects": {
+      "type": "object",
+      "properties": {
+        "track_operation": {
+          "type": "object",
+          "required": ["action"],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": ["create", "update", "advance", "archive"]
+            },
+            "track_id": {"type": ["string", "null"]},
+            "title": {"type": ["string", "null"]},
+            "status": {
+              "type": ["string", "null"],
+              "enum": ["active", "blocked", "done", "archived", null]
+            },
+            "current_buddy": {"type": ["string", "null"]},
+            "next_buddy": {"type": ["string", "null"]},
+            "summary": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     }

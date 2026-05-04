@@ -781,6 +781,7 @@ exec "$real_git" "$@"
             runtime_skills = workspace_dir / ".agents" / "skills"
             self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "track-manager" / "SKILL.md").exists())
+            self.assertTrue((runtime_skills / "track-manager" / "assets" / "track-operation-template.md").exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
 
     def test_start_execution_worktree_uses_design_buddy_prompt_contract(self) -> None:
@@ -1126,6 +1127,7 @@ exec "$real_git" "$@"
             self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "track-manager" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "write-prd" / "assets" / "prd-template.md").exists())
+            self.assertTrue((runtime_skills / "track-manager" / "assets" / "track-operation-template.md").exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
             exclude_path = subprocess.check_output(
                 ["git", "-C", str(workspace_dir), "rev-parse", "--git-path", "info/exclude"],
@@ -2012,6 +2014,7 @@ exec "$real_git" "$@"
             self.assertFalse((runtime_skills / "stale-skill").exists())
             self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "track-manager" / "SKILL.md").exists())
+            self.assertTrue((runtime_skills / "track-manager" / "assets" / "track-operation-template.md").exists())
             source_write_prd = ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "SKILL.md"
             self.assertEqual(
                 (runtime_skills / "write-prd" / "SKILL.md").read_bytes(),

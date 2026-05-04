@@ -65,9 +65,10 @@ Artifacts participate in track flow through `artifact.task_id -> task.track_id`.
 
 ## Permission Model
 
-- `pm` `track-manager` controls track lifecycle operations (`create`, `update`, `advance`, `archive`).
+- `pm` controls track lifecycle operations (`create`, `update`, `advance`, `archive`) through PM skill outputs using `state_effects.track_operation`.
 - Non-PM buddies do not directly mutate track lifecycle fields.
 - Track inspection should come from prepared task/track context and workspace projection.
+- Retired top-level `track_operation` payloads are not accepted by runtime persist.
 
 ## Auto-Register Rule
 

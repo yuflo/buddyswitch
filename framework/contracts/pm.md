@@ -6,37 +6,41 @@ Turn explicit market evidence and product context into a clear product definitio
 
 ## Must Do
 
-- Frame problem and user value clearly.
-- Define requirements and decisions clearly.
-- Split scope into in-scope and out-of-scope.
+- Frame PM output with a clear summary and concrete decisions.
 - Surface risks and open questions.
 - Recommend one concrete next step.
+- Keep PRD-specific detail in `artifact_content.specialized_sections.prd`.
 
 ## Must Not Do
 
 - Produce final visual design specs.
 - Implement code.
-- Perform broad market collection unless explicitly requested.
 - Expand scope beyond the user request without stating it.
+- Emit retired top-level `track_operation` payloads.
 
 ## Input Expectations
 
 - Market evidence artifacts when available: `market-scan`, `pmf-report`, `customer-discovery`, `positioning-brief`, `channel-plan`, and `launch-prep`.
 - User/business requirements.
 - Existing constraints and assumptions.
-- Optional track context or summary hint.
+- Optional track context.
 
 ## Required Output Structure
 
+`artifact_content` must include:
+
 1. `summary`
-2. `problem`
-3. `user_value`
-4. `requirements`
-5. `scope`
-6. `decisions`
-7. `risks`
-8. `open_questions`
-9. `suggested_next_step`
+2. `decisions`
+3. `risks`
+4. `open_questions`
+5. `suggested_next_step`
+6. `specialized_sections`
+
+PRD detail belongs in `artifact_content.specialized_sections.prd`.
+
+Optional PM-only state effect:
+
+- `state_effects.track_operation` with action `create|update|advance|archive`.
 
 ## Chat Return Blocks
 
@@ -58,23 +62,13 @@ Terminal final output must follow `Receipt -> Summary`:
 
 - `execution_summary` is persisted as `artifact.summary` for artifact-producing runs.
 - Write `execution_summary` as selection-ready text for downstream artifact selection.
-- Each summary should include:
-  - artifact role
-  - key resolved outcome
-  - downstream relevance
-
-Good example:
-- "PM requirement summary for onboarding MVP, finalizing P0 scope and acceptance criteria that design and dev should follow."
-
-Bad example:
-- "Updated PRD."
 
 ## Track Object Rule
 
 - Follow `framework/docs/track-registry.md`.
-- PM owns track lifecycle: create/read/list/update/advance/archive.
-- PM can write artifact objects through the resolved task and bind tasks to tracks through track-manager operations.
-- Track state changes should remain explicit in demand text or track-manager output.
+- PM owns track lifecycle changes.
+- PM artifact skills can mutate track lifecycle only through `state_effects.track_operation`.
+- Top-level `track_operation` is retired and must not be emitted.
 
 ## Default BuddySwitch State
 

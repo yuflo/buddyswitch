@@ -35,6 +35,7 @@ ARTIFACT_SKILL_DOCS = (
     ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "SKILL.md",
+    ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "SKILL.md",
@@ -57,6 +58,7 @@ ARTIFACT_SKILL_TO_BUDDY_RESULT_SCHEMA = {
     "channel-discovery": "framework/schemas/market/market-result.json",
     "launch-prep": "framework/schemas/market/market-result.json",
     "write-prd": "framework/schemas/pm/pm-result.json",
+    "track-manager": "framework/schemas/pm/pm-result.json",
     "shape-prototype": "framework/schemas/design/design-result.json",
     "implement-task": "framework/schemas/dev/dev-result.json",
     "smoke-test": "framework/schemas/test/test-result.json",
@@ -69,6 +71,7 @@ ARTIFACT_SKILL_TO_OUTPUT_SLOT = {
     "channel-discovery": "channel-plan",
     "launch-prep": "launch-prep",
     "write-prd": "prd",
+    "track-manager": "track-operation",
     "shape-prototype": "design-handoff",
     "implement-task": "implementation-report",
     "smoke-test": "smoke-test",
@@ -114,6 +117,7 @@ COMMON_RESULT_ENVELOPE_KEYS = (
 )
 ARTIFACT_TEMPLATE_SCHEMAS = {
     ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "assets" / "prd-template.md": ROOT / "framework" / "schemas" / "pm" / "pm-result.json",
+    ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "assets" / "track-operation-template.md": ROOT / "framework" / "schemas" / "pm" / "pm-result.json",
     ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "assets" / "implementation-report-template.md": ROOT / "framework" / "schemas" / "dev" / "dev-result.json",
     ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "assets" / "test-report-template.md": ROOT / "framework" / "schemas" / "test" / "test-result.json",
     ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "assets" / "design-handoff-template.md": ROOT / "framework" / "schemas" / "design" / "design-result.json",
@@ -812,7 +816,7 @@ class RepoConsistencyTests(unittest.TestCase):
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         skills = {skill["id"]: skill for skill in manifest.get("skills", []) if isinstance(skill, dict)}
         self.assertEqual(skills["write-prd"]["persistence"]["output_slot"], "prd")
-        self.assertEqual(skills["track-manager"]["persistence"]["output_slot"], None)
+        self.assertEqual(skills["track-manager"]["persistence"]["output_slot"], "track-operation")
 
     def test_artifact_skill_output_slots_remain_product_specific(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
@@ -838,9 +842,18 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertTrue(persistence["produces_artifact"])
                 self.assertEqual(persistence["output_schema"], expected_schema)
 
+    def test_track_manager_is_artifact_skill_without_runtime_special_case(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        skills = {skill["id"]: skill for skill in manifest.get("skills", []) if isinstance(skill, dict)}
         track_manager = skills["track-manager"]["persistence"]
-        self.assertFalse(track_manager["produces_artifact"])
-        self.assertEqual(track_manager["output_schema"], "framework/schemas/pm/track-manager.json")
+        self.assertTrue(track_manager["produces_artifact"])
+        self.assertEqual(track_manager["output_slot"], "track-operation")
+        self.assertEqual(track_manager["output_schema"], "framework/schemas/pm/pm-result.json")
+        self.assertFalse((ROOT / "framework" / "schemas" / "pm" / "track-manager.json").exists())
+
+        runtime_text = (ROOT / "scripts" / "turn_runtime.py").read_text(encoding="utf-8")
+        self.assertNotIn("_persist_track_manager(", runtime_text)
+        self.assertNotIn('selected_skill_id == "track-manager"', runtime_text)
 
     def test_legacy_artifact_skill_specific_schemas_are_not_active_in_manifest(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
@@ -1479,6 +1492,7 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "assets" / "channel-plan-template.md",
             ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "assets" / "launch-prep-template.md",
             ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "assets" / "prd-template.md",
+            ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "assets" / "track-operation-template.md",
             ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "assets" / "design-handoff-template.md",
             ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "assets" / "implementation-report-template.md",
             ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "assets" / "test-report-template.md",

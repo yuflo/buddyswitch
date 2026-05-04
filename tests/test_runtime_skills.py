@@ -198,6 +198,11 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                 skill_id="track-manager",
                 description="Manage tracks",
             )
+            (track_manager / "assets").mkdir(parents=True, exist_ok=True)
+            (track_manager / "assets" / "track-operation-template.md").write_text(
+                "template-track-operation\n",
+                encoding="utf-8",
+            )
             shape_prototype = self._write_skill_package(
                 skills_root,
                 skill_id="shape-prototype",
@@ -216,9 +221,9 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "track-manager",
                         "path": track_manager.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "false",
-                        "output_slot": "",
-                        "output_schema": "framework/schemas/pm/track-manager.json",
+                        "produces_artifact": "true",
+                        "output_slot": "track-operation",
+                        "output_schema": "framework/schemas/pm/pm-result.json",
                     },
                     {
                         "id": "shape-prototype",
@@ -240,6 +245,7 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "track-manager" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "write-prd" / "assets" / "write-prd.md").exists())
+            self.assertTrue((runtime_skills / "track-manager" / "assets" / "track-operation-template.md").exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
 
     def test_install_replaces_stale_directories_when_switching_buddies(self) -> None:
@@ -262,9 +268,9 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "track-manager",
                         "path": track_manager.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "false",
-                        "output_slot": "",
-                        "output_schema": "framework/schemas/pm/track-manager.json",
+                        "produces_artifact": "true",
+                        "output_slot": "track-operation",
+                        "output_schema": "framework/schemas/pm/pm-result.json",
                     },
                     {
                         "id": "shape-prototype",

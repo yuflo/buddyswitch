@@ -329,19 +329,11 @@ def _parse_skill_persistence(skill: dict[str, Any], label: str, skill_id: str) -
         raise ManifestError(f"{label}.output_schema file not found: {output_schema}")
 
     output_slot_raw = skill.get("output_slot")
-    if produces_artifact:
-        if not isinstance(output_slot_raw, str) or not output_slot_raw.strip():
-            raise ManifestError(f"{label}.output_slot is required when produces_artifact=true")
-        output_slot = output_slot_raw.strip()
-    else:
-        if output_slot_raw not in {None, ""}:
-            raise ManifestError(f"{label}.output_slot must be omitted when produces_artifact=false")
-        if skill_id != "track-manager":
-            raise ManifestError(
-                f"{label}.produces_artifact=false is not allowed for skill '{skill_id}'; "
-                "only track-manager currently supports non-artifact persistence"
-            )
-        output_slot = None
+    if not produces_artifact:
+        raise ManifestError("produces_artifact=false is not supported")
+    if not isinstance(output_slot_raw, str) or not output_slot_raw.strip():
+        raise ManifestError(f"{label}.output_slot is required when produces_artifact=true")
+    output_slot = output_slot_raw.strip()
 
     return {
         "produces_artifact": produces_artifact,

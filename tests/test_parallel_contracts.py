@@ -241,6 +241,28 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
             },
         }
 
+    def _track_manager_result(self, *, action: str, **fields: object) -> dict[str, object]:
+        operation: dict[str, object] = {"action": action}
+        operation.update({key: value for key, value in fields.items() if value is not None})
+        return {
+            "execution_summary": "Created track for onboarding delivery.",
+            "working_notes": ["Initialized track lifecycle."],
+            "deliverables_or_changed_files": [],
+            "artifact_content": {
+                "summary": "Track lifecycle update recorded.",
+                "decisions": [f"Applied track action '{action}'."],
+                "risks": [],
+                "open_questions": [],
+                "suggested_next_step": "Continue with next buddy action.",
+                "specialized_sections": {
+                    "track_operation": operation,
+                },
+            },
+            "state_effects": {
+                "track_operation": operation,
+            },
+        }
+
     def test_contract_matches_real_prepare_turn_context_surface(self) -> None:
         contract = _load_json(PREPARE_TURN_CONTEXT_CONTRACT)
         request_text = "Implement the approved onboarding improvements in projects/app"
@@ -331,7 +353,7 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         self.assertNotIn("paths", persisted)
         self.assertNotIn("writes", persisted)
 
-    def test_track_manager_persist_returns_receipt_without_artifact_id(self) -> None:
+    def test_track_manager_persist_returns_receipt_with_artifact_and_track_action(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-contract-02-track", buddy="pm")
         env = self._product_env(
             instance_json,
@@ -343,20 +365,15 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         persisted = self._persist(
             context,
             skill_id="track-manager",
-            result={
-                "execution_summary": "Created track for onboarding delivery.",
-                "working_notes": ["Initialized track lifecycle."],
-                "deliverables_or_changed_files": [],
-                "track_operation": {
-                    "action": "create",
-                    "track_id": "track-onboarding-delivery",
-                    "title": "Onboarding Delivery",
-                    "status": "active",
-                    "current_buddy": "pm",
-                    "next_buddy": "design",
-                    "summary": "Cross-functional onboarding execution track.",
-                },
-            },
+            result=self._track_manager_result(
+                action="create",
+                track_id="track-onboarding-delivery",
+                title="Onboarding Delivery",
+                status="active",
+                current_buddy="pm",
+                next_buddy="design",
+                summary="Cross-functional onboarding execution track.",
+            ),
             env=env,
         )
 
@@ -365,8 +382,8 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         self.assertIsInstance(receipt, dict)
         if isinstance(receipt, dict):
             self.assertEqual(receipt.get("track_action"), "create")
-            self.assertEqual(receipt.get("artifact_ids"), [])
-            self.assertNotIn("artifact_id", receipt)
+            self.assertIsInstance(receipt.get("artifact_id"), str)
+            self.assertIn(receipt.get("artifact_id"), receipt.get("artifact_ids", []))
             self.assertIsInstance(receipt.get("track_id"), str)
             self.assertIsInstance(receipt.get("track_title"), str)
 

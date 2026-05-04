@@ -56,8 +56,9 @@ output_schema = "framework/schemas/pm/pm-result.json"
 [[skills]]
 id = "track-manager"
 path = "buddyswitch/skills/pm/track-manager"
-produces_artifact = false
-output_schema = "framework/schemas/pm/track-manager.json"
+produces_artifact = true
+output_slot = "track-operation"
+output_schema = "framework/schemas/pm/pm-result.json"
 
 [[skills]]
 id = "shape-prototype"

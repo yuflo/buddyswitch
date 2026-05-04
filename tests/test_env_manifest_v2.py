@@ -263,7 +263,7 @@ class EnvManifestV2Tests(unittest.TestCase):
             with self.assertRaisesRegex(env_manifest.ManifestError, "produces_artifact"):
                 env_manifest.load_manifest(missing_bool_manifest)
 
-    def test_load_manifest_rejects_non_track_manager_non_artifact_persistence(self) -> None:
+    def test_load_manifest_rejects_non_artifact_persistence(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             temp_root = Path(temp_dir)
             package_root = self._write_skill_package(
@@ -283,43 +283,12 @@ class EnvManifestV2Tests(unittest.TestCase):
                 skill_id="demo-skill",
                 skill_path=package_root,
                 produces_artifact="false",
-                output_schema="framework/schemas/pm/track-manager.json",
+                output_schema="framework/schemas/pm/pm-result.json",
                 output_slot_line="",
             )
 
-            with self.assertRaisesRegex(env_manifest.ManifestError, "only track-manager currently supports non-artifact persistence"):
+            with self.assertRaisesRegex(env_manifest.ManifestError, "produces_artifact=false is not supported"):
                 env_manifest.load_manifest(manifest_path)
-
-    def test_load_manifest_allows_track_manager_non_artifact_without_output_slot(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            temp_root = Path(temp_dir)
-            package_root = self._write_skill_package(
-                temp_root,
-                skill_id="track-manager",
-                body="""\
-                ---
-                name: track-manager
-                description: Use when managing track metadata.
-                ---
-
-                # track-manager
-                """,
-            )
-            manifest_path = self._write_manifest(
-                temp_root,
-                skill_id="track-manager",
-                skill_path=package_root,
-                produces_artifact="false",
-                output_schema="framework/schemas/pm/track-manager.json",
-                output_slot_line="",
-            )
-
-            loaded = env_manifest.load_manifest(manifest_path)
-
-        persistence = loaded["skills"][0]["persistence"]
-        self.assertFalse(persistence["produces_artifact"])
-        self.assertIsNone(persistence["output_slot"])
-        self.assertEqual(persistence["output_schema"], "framework/schemas/pm/track-manager.json")
 
     def test_live_manifest_exposes_persistence_contracts(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
@@ -327,15 +296,16 @@ class EnvManifestV2Tests(unittest.TestCase):
 
         self.assertEqual(skills["write-prd"]["persistence"]["output_slot"], "prd")
         self.assertTrue(skills["write-prd"]["persistence"]["produces_artifact"])
-        self.assertEqual(skills["track-manager"]["persistence"]["output_slot"], None)
-        self.assertFalse(skills["track-manager"]["persistence"]["produces_artifact"])
+        self.assertEqual(skills["track-manager"]["persistence"]["output_slot"], "track-operation")
+        self.assertTrue(skills["track-manager"]["persistence"]["produces_artifact"])
 
-    def test_live_manifest_maps_artifact_skills_to_buddy_level_schemas_with_track_manager_exception(self) -> None:
+    def test_live_manifest_maps_artifact_skills_to_buddy_level_schemas(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         skills = {skill["id"]: skill for skill in manifest["skills"]}
 
         expected_artifact_schema_by_skill = {
             "write-prd": "framework/schemas/pm/pm-result.json",
+            "track-manager": "framework/schemas/pm/pm-result.json",
             "implement-task": "framework/schemas/dev/dev-result.json",
             "smoke-test": "framework/schemas/test/test-result.json",
             "shape-prototype": "framework/schemas/design/design-result.json",
@@ -352,11 +322,6 @@ class EnvManifestV2Tests(unittest.TestCase):
                 self.assertTrue(persistence["produces_artifact"])
                 self.assertIsInstance(persistence["output_slot"], str)
                 self.assertEqual(persistence["output_schema"], expected_schema)
-
-        track_manager = skills["track-manager"]["persistence"]
-        self.assertFalse(track_manager["produces_artifact"])
-        self.assertIsNone(track_manager["output_slot"])
-        self.assertEqual(track_manager["output_schema"], "framework/schemas/pm/track-manager.json")
 
     def test_buddy_authority_profile_uses_membership_and_persist_wording(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")

@@ -33,6 +33,9 @@ Artifact-producing buddies validate against buddy-level schemas:
 - `framework/schemas/market/market-result.json`
 - `framework/schemas/design/design-result.json`
 
+PM schema optionally supports `state_effects.track_operation` for explicit PM lifecycle mutations.
+Retired top-level `track_operation` payloads are rejected before durable writes.
+
 ## CLI Contract
 
 Prepare:
@@ -117,6 +120,7 @@ Behavior:
 - Rejects tampered context identity (buddy/task/run/request mismatch).
 - Enforces context and reservation identity integrity before any state write.
 - Validates skill output payload against schema from manifest persistence contract.
+- Validates PM-only `state_effects.track_operation` and applies it before normal artifact/run receipt writes.
 - Writes canonical task/artifact/track/run state.
 - Clears consumed reservation.
 - Does not auto-reserve a follow-up run.
