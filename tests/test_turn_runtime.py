@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from copy import deepcopy
 from pathlib import Path
@@ -149,26 +150,109 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
             "working_notes": ["Focused on scope and acceptance criteria."],
             "deliverables_or_changed_files": [],
             "artifact_content": {
+                "summary": "Captured onboarding PRD updates.",
                 "problem": "Users need clearer onboarding scope.",
-                "goals": ["Clarify outcomes", "Preserve current flows"],
-                "non_goals": ["Implement delivery code"],
-                "users_and_scenarios": ["PM iterates on onboarding PRD"],
-                "scope_p0_p1": {
-                    "p0": ["Define launch acceptance criteria"],
-                    "p1": ["Capture follow-up questions"],
+                "user_value": "Faster onboarding completion with clearer guidance.",
+                "requirements": ["Define launch acceptance criteria", "Capture follow-up questions"],
+                "scope": {
+                    "in_scope": ["Onboarding flow scope and acceptance criteria"],
+                    "out_of_scope": ["Implement delivery code"],
                 },
-                "acceptance_criteria": ["PRD payload validates and persists"],
+                "decisions": ["Ship guided onboarding flow before broader redesign."],
                 "risks": ["Unknown migration edge cases"],
                 "open_questions": ["Need follow-up QA pass?"],
+                "suggested_next_step": "Hand off to design for a flow draft.",
             },
         }
 
-    def _prepare(self, request_text: str, *, env: dict[str, str]) -> dict[str, object]:
+    @staticmethod
+    def _dev_result_payload() -> dict[str, object]:
+        return {
+            "execution_summary": "Implemented onboarding banner behavior.",
+            "working_notes": ["Scoped changes to app shell only."],
+            "deliverables_or_changed_files": ["projects/app/main.js"],
+            "artifact_content": {
+                "task_summary": "Implemented onboarding banner behavior.",
+                "changed_files": ["projects/app/main.js"],
+                "implementation_notes": ["Kept feature flag boundaries unchanged."],
+                "verification": {
+                    "checks_run": ["npm test"],
+                    "passed": ["unit tests passed"],
+                    "failed": [],
+                    "blocked": [],
+                },
+                "risks": ["Manual browser smoke not run."],
+                "follow_ups": ["Run manual smoke in product mode."],
+            },
+        }
+
+    @staticmethod
+    def _test_result_payload() -> dict[str, object]:
+        return {
+            "execution_summary": "Executed smoke checks for onboarding.",
+            "working_notes": ["Coverage focused on critical path only."],
+            "deliverables_or_changed_files": ["runs/raw/smoke-log.txt"],
+            "artifact_content": {
+                "test_scope": "Onboarding critical path smoke checks.",
+                "checks_run": ["npm test -- smoke"],
+                "passed_items": ["Main onboarding route renders"],
+                "failed_items": [],
+                "blocked_items": [],
+                "reproduction_notes": [],
+                "readiness": "ready",
+            },
+        }
+
+    @staticmethod
+    def _design_result_payload() -> dict[str, object]:
+        return {
+            "execution_summary": "Prepared onboarding design handoff summary.",
+            "working_notes": ["Kept flow proposal aligned to PM scope."],
+            "deliverables_or_changed_files": ["runs/raw/design-preview.png"],
+            "artifact_content": {
+                "design_goal": "Clarify onboarding guidance steps.",
+                "flow_or_screen_summary": "Single guided step with progressive disclosure.",
+                "interaction_notes": ["CTA keeps users in context."],
+                "assets_or_preview_refs": ["runs/raw/design-preview.png"],
+                "handoff_notes": ["Include loading/empty states."],
+                "open_questions": ["Need localization before prototype sign-off?"],
+            },
+        }
+
+    @staticmethod
+    def _market_result_payload() -> dict[str, object]:
+        return {
+            "execution_summary": "Completed founder market research scan.",
+            "working_notes": ["Captured strongest pains and caveats."],
+            "deliverables_or_changed_files": ["runs/raw/research-notes.md"],
+            "artifact_content": {
+                "research_question": "Do founders need faster validation loops?",
+                "evidence": ["Founder interview excerpts indicate repeated validation delays."],
+                "insights": ["Speed and confidence are both required."],
+                "assumptions": ["Early-stage B2B SaaS focus remains stable."],
+                "risks": ["Sample size remains limited."],
+                "conclusion": "Demand appears real but still needs deeper validation.",
+                "recommended_next_step": "Run targeted follow-up interviews.",
+                "specialized_sections": {
+                    "research_scan": {
+                        "channel_plan": ["Founder forums", "Founder Slack groups"],
+                    }
+                },
+            },
+        }
+
+    def _prepare(
+        self,
+        request_text: str,
+        *,
+        env: dict[str, str],
+        manifest_path: Path | None = None,
+    ) -> dict[str, object]:
         turn_runtime = _load_turn_runtime()
         with patch.dict(os.environ, env, clear=True):
             return turn_runtime.prepare_turn_context(
                 request_text,
-                manifest_path=turn_runtime.DEFAULT_MANIFEST,
+                manifest_path=manifest_path or turn_runtime.DEFAULT_MANIFEST,
             )
 
     def _persist(
@@ -178,6 +262,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         skill_id: object,
         result: dict[str, object] | None = None,
         env: dict[str, str],
+        manifest_path: Path | None = None,
     ) -> dict[str, object]:
         turn_runtime = _load_turn_runtime()
         payload = result or self._pm_result_payload()
@@ -186,7 +271,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
                 context,
                 skill_id=skill_id,
                 result=payload,
-                manifest_path=turn_runtime.DEFAULT_MANIFEST,
+                manifest_path=manifest_path or turn_runtime.DEFAULT_MANIFEST,
             )
 
     def _runtime_state_snapshot(self) -> dict[str, bytes]:
@@ -205,6 +290,57 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
                 if path.is_file():
                     snapshot[path.relative_to(self.runtime_root).as_posix()] = path.read_bytes()
         return snapshot
+
+    def _load_runtime_json(self, relative_path: str) -> dict[str, object]:
+        payload = json.loads(self._runtime_path(relative_path).read_text(encoding="utf-8"))
+        self.assertIsInstance(payload, dict)
+        return payload
+
+    def _write_test_manifest_with_community_dev_skill(self, root: Path) -> Path:
+        manifest_path = root / "manifest.toml"
+        fixture_skill = (ROOT / "tests" / "fixtures" / "community-skills" / "dev-summary").relative_to(ROOT).as_posix()
+        write_prd_skill = (ROOT / "buddyswitch" / "skills" / "pm" / "write-prd").relative_to(ROOT).as_posix()
+        manifest_path.write_text(
+            textwrap.dedent(
+                f"""\
+                schema_version = 1
+
+                [env]
+                id = "test"
+                label = "Test Env"
+
+                [[skills]]
+                id = "write-prd"
+                path = "{write_prd_skill}"
+                produces_artifact = true
+                output_slot = "prd"
+                output_schema = "framework/schemas/pm/pm-result.json"
+
+                [[skills]]
+                id = "dev-summary"
+                path = "{fixture_skill}"
+                produces_artifact = true
+                output_slot = "implementation-report"
+                output_schema = "framework/schemas/dev/dev-result.json"
+
+                [[buddies]]
+                id = "pm"
+                label = "PM"
+                scope = "PM scope"
+                skills = ["write-prd"]
+                permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
+
+                [[buddies]]
+                id = "dev"
+                label = "DEV"
+                scope = "Dev scope"
+                skills = ["dev-summary"]
+                permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
+                """
+            ),
+            encoding="utf-8",
+        )
+        return manifest_path
 
     def _assert_prepare_has_context_only_shape(self, context: dict[str, object]) -> None:
         expected_key_order = [
@@ -253,16 +389,26 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         *,
         skill_id: object,
         env: dict[str, str],
+        manifest_path: Path | None = None,
     ) -> None:
         snapshot_before = self._runtime_state_snapshot()
+        instance_json_path: Path | None = None
+        instance_before: str | None = None
+        raw_instance_json = env.get("BUDDYSWITCH_INSTANCE_JSON")
+        if isinstance(raw_instance_json, str) and raw_instance_json.strip():
+            instance_json_path = Path(raw_instance_json.strip())
+            if instance_json_path.exists():
+                instance_before = instance_json_path.read_text(encoding="utf-8")
         try:
-            payload = self._persist(context, skill_id=skill_id, env=env)
+            payload = self._persist(context, skill_id=skill_id, env=env, manifest_path=manifest_path)
         except Exception:
             rejected = True
         else:
             rejected = not bool(payload.get("ok"))
         self.assertTrue(rejected, msg="persist input should be rejected")
         self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
+        if instance_json_path is not None and instance_before is not None:
+            self.assertEqual(instance_json_path.read_text(encoding="utf-8"), instance_before)
 
     def test_prepare_turn_context_accepts_ordinary_request_and_creates_reserved_run(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-01", buddy="pm")
@@ -450,6 +596,146 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
                             if isinstance(item, str):
                                 self.assertTrue(self._runtime_path(item).exists())
 
+    def test_artifact_buddy_persist_keeps_native_skill_identity_across_receipt_artifact_and_run(self) -> None:
+        cases = (
+            ("pm", "write-prd", self._pm_result_payload()),
+            ("dev", "implement-task", self._dev_result_payload()),
+            ("test", "smoke-test", self._test_result_payload()),
+            ("design", "shape-prototype", self._design_result_payload()),
+            ("market", "research-scan", self._market_result_payload()),
+        )
+        for buddy, skill_id, result_payload in cases:
+            with self.subTest(buddy=buddy, skill=skill_id):
+                instance_id = f"inst-ut-native-{buddy}"
+                instance_json = self._write_instance_json(instance_id=instance_id, buddy=buddy)
+                env = self._product_env(
+                    instance_json,
+                    buddy=buddy,
+                    instance_id=instance_id,
+                    shared_root=self.runtime_root,
+                )
+                context = self._prepare(f"Execute {skill_id} in {buddy} flow", env=env)
+                self.assertTrue(context["ok"])
+
+                payload = self._persist(context, skill_id=skill_id, result=result_payload, env=env)
+                self.assertTrue(payload["ok"])
+
+                receipt = payload["receipt"]
+                self.assertIsInstance(receipt, dict)
+                assert isinstance(receipt, dict)
+                self.assertEqual(receipt["skill_id"], skill_id)
+
+                artifact_paths = receipt["receipt_paths"]["artifacts"]
+                self.assertIsInstance(artifact_paths, list)
+                assert isinstance(artifact_paths, list)
+                self.assertEqual(len(artifact_paths), 1)
+                artifact_object = self._load_runtime_json(artifact_paths[0])
+                self.assertEqual(artifact_object["skill_id"], skill_id)
+                self.assertEqual(artifact_object["summary"], result_payload["execution_summary"])
+                self.assertEqual(artifact_object["content"], result_payload["artifact_content"])
+
+                run_audit = self._load_runtime_json(receipt["receipt_paths"]["run"])
+                self.assertEqual(run_audit["skill_id"], skill_id)
+                self.assertEqual(run_audit["execution_summary"], result_payload["execution_summary"])
+                self.assertEqual(run_audit["working_notes"], result_payload["working_notes"])
+                self.assertEqual(
+                    run_audit["deliverables_or_changed_files"],
+                    result_payload["deliverables_or_changed_files"],
+                )
+
+    def test_persist_rejects_missing_required_buddy_field_without_partial_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-dev-invalid", buddy="dev")
+        env = self._product_env(
+            instance_json,
+            buddy="dev",
+            instance_id="inst-ut-dev-invalid",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Implement onboarding behavior", env=env)
+        self.assertTrue(context["ok"])
+
+        invalid_result = self._dev_result_payload()
+        invalid_result["artifact_content"].pop("verification")
+        snapshot_before = self._runtime_state_snapshot()
+        instance_before = instance_json.read_text(encoding="utf-8")
+        with self.assertRaises(ValueError):
+            self._persist(context, skill_id="implement-task", result=invalid_result, env=env)
+        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
+        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
+
+    def test_community_skill_direct_buddy_result_persists_with_native_skill_id(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            manifest_path = self._write_test_manifest_with_community_dev_skill(Path(temp_dir))
+
+            dev_instance_json = self._write_instance_json(instance_id="inst-ut-community-dev", buddy="dev")
+            dev_env = self._product_env(
+                dev_instance_json,
+                buddy="dev",
+                instance_id="inst-ut-community-dev",
+                shared_root=self.runtime_root,
+            )
+            context = self._prepare(
+                "Summarize checkout banner implementation",
+                env=dev_env,
+                manifest_path=manifest_path,
+            )
+            self.assertTrue(context["ok"])
+
+            direct_dev_result = {
+                "execution_summary": "Summarized checkout banner implementation.",
+                "working_notes": ["Kept changes scoped to projects/app."],
+                "deliverables_or_changed_files": ["projects/app/main.js"],
+                "artifact_content": {
+                    "task_summary": "Summarized checkout banner implementation.",
+                    "changed_files": ["projects/app/main.js"],
+                    "implementation_notes": ["Confirmed implementation details from changed files."],
+                    "verification": {
+                        "checks_run": ["npm test"],
+                        "passed": ["Unit tests passed"],
+                        "failed": [],
+                        "blocked": ["Manual browser smoke not run"],
+                    },
+                    "risks": ["Manual browser smoke not run"],
+                    "follow_ups": ["Run browser smoke test before release."],
+                },
+            }
+
+            payload = self._persist(
+                context,
+                skill_id="dev-summary",
+                result=direct_dev_result,
+                env=dev_env,
+                manifest_path=manifest_path,
+            )
+            self.assertTrue(payload["ok"])
+            receipt = payload["receipt"]
+            self.assertIsInstance(receipt, dict)
+            assert isinstance(receipt, dict)
+            self.assertEqual(receipt["skill_id"], "dev-summary")
+
+            artifact_object = self._load_runtime_json(receipt["receipt_paths"]["artifacts"][0])
+            self.assertEqual(artifact_object["skill_id"], "dev-summary")
+            self.assertEqual(artifact_object["content"], direct_dev_result["artifact_content"])
+
+            run_audit = self._load_runtime_json(receipt["receipt_paths"]["run"])
+            self.assertEqual(run_audit["skill_id"], "dev-summary")
+
+            pm_instance_json = self._write_instance_json(instance_id="inst-ut-community-pm", buddy="pm")
+            pm_env = self._product_env(
+                pm_instance_json,
+                buddy="pm",
+                instance_id="inst-ut-community-pm",
+                shared_root=self.runtime_root,
+            )
+            pm_context = self._prepare("Draft onboarding PRD", env=pm_env, manifest_path=manifest_path)
+            self.assertTrue(pm_context["ok"])
+            self._assert_persist_rejected_without_writes(
+                pm_context,
+                skill_id="dev-summary",
+                env=pm_env,
+                manifest_path=manifest_path,
+            )
+
     def test_track_manager_persist_receipt_uses_empty_artifact_ids(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-09-track", buddy="pm")
         env = self._product_env(
@@ -503,16 +789,105 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertTrue(context["ok"])
 
         snapshot_before = self._runtime_state_snapshot()
+        instance_before = instance_json.read_text(encoding="utf-8")
         invalid_result = self._pm_result_payload()
         invalid_result["task_id"] = "task-should-not-be-accepted"
         with self.assertRaises(ValueError):
             self._persist(context, skill_id="write-prd", result=invalid_result, env=env)
         self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
+        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
 
         valid_result = self._pm_result_payload()
         payload = self._persist(context, skill_id="write-prd", result=valid_result, env=env)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["receipt"]["task_id"], context["current_task_id"])
+
+    def test_persist_rejects_wrong_buddy_result_schema_without_partial_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-09-wrong-schema", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-09-wrong-schema",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Draft onboarding PRD", env=env)
+        self.assertTrue(context["ok"])
+
+        snapshot_before = self._runtime_state_snapshot()
+        instance_before = instance_json.read_text(encoding="utf-8")
+        with self.assertRaises(ValueError):
+            self._persist(
+                context,
+                skill_id="write-prd",
+                result=self._market_result_payload(),
+                env=env,
+            )
+        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
+        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
+
+    def test_track_manager_update_or_advance_operation_still_succeeds(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-track-advance", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-track-advance",
+            shared_root=self.runtime_root,
+        )
+
+        create_context = self._prepare("Create onboarding delivery track", env=env)
+        self.assertTrue(create_context["ok"])
+        create_payload = self._persist(
+            create_context,
+            skill_id="track-manager",
+            result={
+                "execution_summary": "Created onboarding track.",
+                "working_notes": ["Initialized track manager flow."],
+                "deliverables_or_changed_files": [],
+                "track_operation": {
+                    "action": "create",
+                    "track_id": "track-onboarding-advance",
+                    "title": "Onboarding Advance",
+                    "status": "active",
+                    "current_buddy": "pm",
+                    "next_buddy": "design",
+                    "summary": "Initial cross-functional flow.",
+                },
+            },
+            env=env,
+        )
+        self.assertTrue(create_payload["ok"])
+        created_track_id = create_payload["receipt"]["track_id"]
+        self.assertIsInstance(created_track_id, str)
+
+        advance_context = self._prepare("Advance onboarding delivery track", env=env)
+        self.assertTrue(advance_context["ok"])
+        advance_payload = self._persist(
+            advance_context,
+            skill_id="track-manager",
+            result={
+                "execution_summary": "Advanced onboarding track to dev.",
+                "working_notes": ["Transitioned next buddy after PM scope lock."],
+                "deliverables_or_changed_files": [],
+                "track_operation": {
+                    "action": "advance",
+                    "track_id": created_track_id,
+                    "current_buddy": "pm",
+                    "next_buddy": "dev",
+                    "status": "active",
+                    "summary": "Ready for implementation planning.",
+                },
+            },
+            env=env,
+        )
+
+        self.assertTrue(advance_payload["ok"])
+        receipt = advance_payload["receipt"]
+        self.assertEqual(receipt["track_action"], "advance")
+        self.assertEqual(receipt["artifact_ids"], [])
+        self.assertNotIn("artifact_id", receipt)
+        track_object = self._load_runtime_json(receipt["receipt_paths"]["track"])
+        self.assertEqual(track_object["id"], created_track_id)
+        self.assertEqual(track_object["next_buddy"], "dev")
 
     def test_workspace_projection_uses_structured_state_after_persist(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-10", buddy="pm")

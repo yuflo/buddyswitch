@@ -24,7 +24,7 @@ description: Use when the task is shaping a visible UI/UX prototype and producin
 - Constraints about target screens, CTA flow, navigation, or preview environment.
 
 ## Outputs
-- A design-handoff artifact describing prototype kind, page map, user flow, preview path, handoff notes, and open questions.
+- A design-handoff artifact describing design goal, flow/screen summary, interaction notes, preview refs, handoff notes, and open questions.
 - Preview-oriented runtime outputs under `.sandbox/design/` when needed.
 - A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
 
@@ -45,14 +45,24 @@ description: Use when the task is shaping a visible UI/UX prototype and producin
 ## Shared Runtime Rules
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
+- Emit buddy-level result JSON directly from this native skill and persist it with `persist --skill-id <native skill id>` using the same native `skill_id`.
 
 ## Required Output Fields
 
-- `prototype_kind`
-- `page_map`
-- `primary_user_flow`
-- `preview`
-- `handoff`
+Top-level envelope keys:
+
+- `execution_summary`
+- `working_notes`
+- `deliverables_or_changed_files`
+- `artifact_content`
+
+Buddy-specific fields inside `artifact_content`:
+
+- `design_goal`
+- `flow_or_screen_summary`
+- `interaction_notes`
+- `assets_or_preview_refs`
+- `handoff_notes`
 - `open_questions`
 
 ## Guardrails

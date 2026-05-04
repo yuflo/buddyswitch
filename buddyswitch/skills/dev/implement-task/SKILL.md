@@ -46,14 +46,25 @@ description: Use when the task is implementing scoped product changes, bug fixes
 ## Shared Runtime Rules
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
+- Emit buddy-level result JSON directly from this native skill and persist it with `persist --skill-id <native skill id>` using the same native `skill_id`.
 
 ## Required Output Fields
+
+Top-level envelope keys:
+
+- `execution_summary`
+- `working_notes`
+- `deliverables_or_changed_files`
+- `artifact_content`
+
+Buddy-specific fields inside `artifact_content`:
 
 - `task_summary`
 - `changed_files`
 - `implementation_notes`
-- `verification_runs`
-- `known_limitations`
+- `verification`
+- `risks`
+- `follow_ups`
 
 ## Guardrails
 

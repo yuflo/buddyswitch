@@ -57,22 +57,29 @@ description: Use when the task is preparing a first launch, validation page, or 
 ## Shared Runtime Rules
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
+- Emit buddy-level result JSON directly from this native skill and persist it with `persist --skill-id <native skill id>` using the same native `skill_id`.
 
 ## Required Output Fields
 
+Top-level envelope keys:
+
+- `execution_summary`
+- `working_notes`
+- `deliverables_or_changed_files`
+- `artifact_content`
+
+Buddy-specific fields inside `artifact_content`:
+
 - `research_question`
-- `launch_goal`
-- `target_audience`
-- `selected_channel`
-- `launch_assets`
-- `instrumentation_plan`
-- `feedback_collection_plan`
-- `success_signals`
-- `failure_signals`
 - `evidence`
-- `source_traceability`
-- `risks_and_unknowns`
+- `insights`
+- `assumptions`
+- `risks`
 - `conclusion`
+- `recommended_next_step`
+- `specialized_sections`
+
+Use `specialized_sections` for skill-specific detail (for example interview guides, channel scoring tables, launch asset plans, or source traceability maps).
 
 ## Guardrails
 

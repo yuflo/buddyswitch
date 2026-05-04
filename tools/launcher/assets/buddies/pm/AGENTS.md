@@ -11,8 +11,9 @@ If work should move to another buddy, open that buddy's locked instance.
 1. Prepare context with `scripts/turn_runtime.py prepare "<ordinary request>"`.
 2. Let Codex CLI use the native skills exposed in `.agents/skills`.
 3. Execute the selected native skill in this host session.
-4. Persist with `scripts/turn_runtime.py persist` (`persist-skill-result`), reporting the Codex skill name as `skill_id`.
-5. If another turn is needed, derive a new `request_text` from `receipt.next_state`, then run `prepare` again.
+4. Emit buddy-level result JSON directly from the selected native skill.
+5. Persist with `scripts/turn_runtime.py persist` (`persist-skill-result`), reporting the Codex skill name as `skill_id`.
+6. If another turn is needed, derive a new `request_text` from `receipt.next_state`, then run `prepare` again.
 
 ## Buddy Lock
 

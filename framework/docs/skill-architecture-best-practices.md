@@ -6,6 +6,7 @@ BuddySwitch is a deterministic control layer around host execution.
 
 - Codex discovers and executes native skills from `.agents/skills`.
 - BuddySwitch prepares context and persists validated state.
+- Native artifact-producing skills emit buddy-level result JSON directly before persist.
 - Source skill packages live under `buddyswitch/skills/**`.
 
 ## Package Contract
@@ -34,6 +35,7 @@ BuddySwitch-specific persistence contract lives in `buddyswitch/manifest.toml` p
 - `prepare-turn-context` returns context/state/run envelope only.
 - `prepare` does not return skill candidates, instruction paths, or custom skill packets.
 - `persist-skill-result` records the Codex `skill_id` and validates membership from active buddy manifest skills.
+- `persist-skill-result` keeps native `skill_id` identity in receipt, artifact, and run audit metadata.
 - `persist-skill-result` validates payload schema from manifest persistence contract.
 
 ## Output Discipline

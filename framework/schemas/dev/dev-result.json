@@ -1,0 +1,75 @@
+{
+  "type": "object",
+  "required": [
+    "execution_summary",
+    "working_notes",
+    "deliverables_or_changed_files",
+    "artifact_content"
+  ],
+  "properties": {
+    "execution_summary": {"type": "string"},
+    "working_notes": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "deliverables_or_changed_files": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "artifact_content": {
+      "type": "object",
+      "required": [
+        "task_summary",
+        "changed_files",
+        "implementation_notes",
+        "verification",
+        "risks",
+        "follow_ups"
+      ],
+      "properties": {
+        "task_summary": {"type": "string"},
+        "changed_files": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "implementation_notes": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "verification": {
+          "type": "object",
+          "required": ["checks_run", "passed", "failed", "blocked"],
+          "properties": {
+            "checks_run": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "passed": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "failed": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "blocked": {
+              "type": "array",
+              "items": {"type": "string"}
+            }
+          },
+          "additionalProperties": false
+        },
+        "risks": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "follow_ups": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

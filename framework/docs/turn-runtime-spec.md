@@ -17,6 +17,22 @@ Define the active runtime contract for launcher-managed buddy instances.
   - `prepare_turn_context(text, manifest_path=DEFAULT_MANIFEST)`
   - `persist_skill_result(context, *, skill_id, result, manifest_path=DEFAULT_MANIFEST)`
 
+## Native Output Flow
+
+Canonical artifact flow:
+
+1. Codex runs native skill from runtime `.agents/skills/<skill-id>`.
+2. The selected native skill emits buddy-level result JSON directly.
+3. Persist with `scripts/turn_runtime.py persist --skill-id <native-skill-id>`.
+
+Artifact-producing buddies validate against buddy-level schemas:
+
+- `framework/schemas/pm/pm-result.json`
+- `framework/schemas/dev/dev-result.json`
+- `framework/schemas/test/test-result.json`
+- `framework/schemas/market/market-result.json`
+- `framework/schemas/design/design-result.json`
+
 ## CLI Contract
 
 Prepare:

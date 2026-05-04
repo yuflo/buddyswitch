@@ -1,0 +1,59 @@
+{
+  "type": "object",
+  "required": [
+    "execution_summary",
+    "working_notes",
+    "deliverables_or_changed_files",
+    "artifact_content"
+  ],
+  "properties": {
+    "execution_summary": {"type": "string"},
+    "working_notes": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "deliverables_or_changed_files": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "artifact_content": {
+      "type": "object",
+      "required": [
+        "research_question",
+        "evidence",
+        "insights",
+        "assumptions",
+        "risks",
+        "conclusion",
+        "recommended_next_step",
+        "specialized_sections"
+      ],
+      "properties": {
+        "research_question": {"type": "string"},
+        "evidence": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "insights": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "risks": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "conclusion": {"type": "string"},
+        "recommended_next_step": {"type": "string"},
+        "specialized_sections": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

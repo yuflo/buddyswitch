@@ -46,15 +46,26 @@ description: Use when the task is running smoke checks, regression verification,
 ## Shared Runtime Rules
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
+- Emit buddy-level result JSON directly from this native skill and persist it with `persist --skill-id <native skill id>` using the same native `skill_id`.
 
 ## Required Output Fields
 
+Top-level envelope keys:
+
+- `execution_summary`
+- `working_notes`
+- `deliverables_or_changed_files`
+- `artifact_content`
+
+Buddy-specific fields inside `artifact_content`:
+
 - `test_scope`
+- `checks_run`
 - `passed_items`
 - `failed_items`
 - `blocked_items`
-- `reproduction_steps`
-- `overall_readiness_summary`
+- `reproduction_notes`
+- `readiness`
 
 ## Guardrails
 

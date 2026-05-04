@@ -88,25 +88,29 @@ description: Use when the task is testing whether a product idea has credible de
 ## Shared Runtime Rules
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
+- Emit buddy-level result JSON directly from this native skill and persist it with `persist --skill-id <native skill id>` using the same native `skill_id`.
 
 ## Required Output Fields
 
+Top-level envelope keys:
+
+- `execution_summary`
+- `working_notes`
+- `deliverables_or_changed_files`
+- `artifact_content`
+
+Buddy-specific fields inside `artifact_content`:
+
 - `research_question`
-- `research_strategy`
-- `channel_plan`
-- `iteration_log`
 - `evidence`
-- `source_traceability`
-- `assumptions_used`
-- `candidate_icps`
-- `strongest_pain_signals`
-- `existing_alternatives`
-- `why_current_solutions_fall_short`
-- `pmf_confidence`
-- `recommended_next_step`
-- `suggested_interview_angles`
-- `risks_and_unknowns`
+- `insights`
+- `assumptions`
+- `risks`
 - `conclusion`
+- `recommended_next_step`
+- `specialized_sections`
+
+Use `specialized_sections` for skill-specific detail (for example interview guides, channel scoring tables, launch asset plans, or source traceability maps).
 
 ## Guardrails
 

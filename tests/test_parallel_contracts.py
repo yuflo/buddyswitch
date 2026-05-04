@@ -230,8 +230,14 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
                 "task_summary": "Implemented onboarding improvements.",
                 "changed_files": ["projects/app/src/example.ts"],
                 "implementation_notes": ["Updated CTA behavior.", "Kept state transitions unchanged."],
-                "verification_runs": [{"command": "npm test", "result": "passed", "notes": "Targeted unit coverage."}],
-                "known_limitations": ["No production build was executed in this test."],
+                "verification": {
+                    "checks_run": ["npm test"],
+                    "passed": ["Targeted unit coverage."],
+                    "failed": [],
+                    "blocked": [],
+                },
+                "risks": ["No production build was executed in this test."],
+                "follow_ups": [],
             },
         }
 
@@ -412,6 +418,7 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         artifact_dir = self._runtime_path("buddyswitch/objects/artifacts")
         before_runs = {path.name for path in run_dir.glob("run-*.json")}
         before_artifacts = {path.name for path in artifact_dir.glob("art-*.json")}
+        instance_before = instance_json.read_text(encoding="utf-8")
 
         with self.assertRaisesRegex((TypeError, ValueError), "single skill_id"):
             self._persist(
@@ -451,6 +458,7 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
 
         self.assertEqual({path.name for path in run_dir.glob("run-*.json")}, before_runs)
         self.assertEqual({path.name for path in artifact_dir.glob("art-*.json")}, before_artifacts)
+        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
 
 
 class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):

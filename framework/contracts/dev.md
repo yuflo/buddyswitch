@@ -31,8 +31,9 @@ Implement approved work in project code and report exactly what changed and how 
 1. `task_summary`
 2. `changed_files`
 3. `implementation_notes`
-4. `verification_runs`
-5. `known_limitations`
+4. `verification`
+5. `risks`
+6. `follow_ups`
 
 ## Chat Return Blocks
 
@@ -41,6 +42,8 @@ Every run should return:
 2. working notes
 3. deliverables or changed files
 4. next-step state or handoff note (optional)
+
+Native Dev skill output must emit buddy-level result JSON directly and persist with `persist --skill-id <native-skill-id>` using the same native `skill_id`.
 
 Terminal final output must follow `Receipt -> Summary`:
 - `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`)

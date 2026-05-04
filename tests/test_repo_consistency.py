@@ -40,13 +40,51 @@ ARTIFACT_SKILL_DOCS = (
     ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "SKILL.md",
 )
 MARKET_SCHEMA_PATHS = (
-    ROOT / "framework" / "schemas" / "market" / "research-scan.json",
-    ROOT / "framework" / "schemas" / "market" / "pmf-recon.json",
-    ROOT / "framework" / "schemas" / "market" / "customer-discovery.json",
-    ROOT / "framework" / "schemas" / "market" / "positioning-copy.json",
-    ROOT / "framework" / "schemas" / "market" / "channel-discovery.json",
-    ROOT / "framework" / "schemas" / "market" / "launch-prep.json",
+    ROOT / "framework" / "schemas" / "market" / "market-result.json",
 )
+BUDDY_RESULT_SCHEMA_PATHS = {
+    "pm": ROOT / "framework" / "schemas" / "pm" / "pm-result.json",
+    "dev": ROOT / "framework" / "schemas" / "dev" / "dev-result.json",
+    "test": ROOT / "framework" / "schemas" / "test" / "test-result.json",
+    "market": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+    "design": ROOT / "framework" / "schemas" / "design" / "design-result.json",
+}
+ARTIFACT_SKILL_TO_BUDDY_RESULT_SCHEMA = {
+    "research-scan": "framework/schemas/market/market-result.json",
+    "pmf-recon": "framework/schemas/market/market-result.json",
+    "customer-discovery": "framework/schemas/market/market-result.json",
+    "positioning-copy": "framework/schemas/market/market-result.json",
+    "channel-discovery": "framework/schemas/market/market-result.json",
+    "launch-prep": "framework/schemas/market/market-result.json",
+    "write-prd": "framework/schemas/pm/pm-result.json",
+    "shape-prototype": "framework/schemas/design/design-result.json",
+    "implement-task": "framework/schemas/dev/dev-result.json",
+    "smoke-test": "framework/schemas/test/test-result.json",
+}
+ARTIFACT_SKILL_TO_OUTPUT_SLOT = {
+    "research-scan": "market-scan",
+    "pmf-recon": "pmf-report",
+    "customer-discovery": "customer-discovery",
+    "positioning-copy": "positioning-brief",
+    "channel-discovery": "channel-plan",
+    "launch-prep": "launch-prep",
+    "write-prd": "prd",
+    "shape-prototype": "design-handoff",
+    "implement-task": "implementation-report",
+    "smoke-test": "smoke-test",
+}
+LEGACY_ARTIFACT_SCHEMA_PATHS = {
+    "framework/schemas/pm/" + "write-prd" + ".json",
+    "framework/schemas/dev/" + "implement-task" + ".json",
+    "framework/schemas/test/" + "smoke-test" + ".json",
+    "framework/schemas/design/" + "shape-prototype" + ".json",
+    "framework/schemas/market/" + "research-scan" + ".json",
+    "framework/schemas/market/" + "pmf-recon" + ".json",
+    "framework/schemas/market/" + "customer-discovery" + ".json",
+    "framework/schemas/market/" + "positioning-copy" + ".json",
+    "framework/schemas/market/" + "channel-discovery" + ".json",
+    "framework/schemas/market/" + "launch-prep" + ".json",
+}
 BROWSER_COCKPIT_METADATA = {
     "execution_mode": "browser-cockpit-native",
     "browser_mode": "headed-only",
@@ -60,27 +98,41 @@ BROWSER_COCKPIT_METADATA = {
 }
 BROWSER_COCKPIT_REQUIRED_TOOLS = ["chrome-devtools-cockpit"]
 EXPECTED_MARKET_TOOL_SCOPE_PROFILE = "market-browser-native"
-MARKET_EVIDENCE_FIELDS = (
-    "source_id",
-    "url",
-    "source_type",
-    "accessed_at",
-    "claim_excerpt",
-    "page_title",
-    "auth_state",
-    "query_or_filter_used",
-)
-OPTIONAL_MARKET_EVIDENCE_FIELDS = (
-    "interaction_steps_summary",
-    "screenshot_ref_or_snapshot_ref",
-)
 NEW_MARKET_TEMPLATE_SCHEMAS = {
-    ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "assets" / "research-report-template.md": ROOT / "framework" / "schemas" / "market" / "research-scan.json",
-    ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "assets" / "pmf-report-template.md": ROOT / "framework" / "schemas" / "market" / "pmf-recon.json",
-    ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery" / "assets" / "interview-brief-template.md": ROOT / "framework" / "schemas" / "market" / "customer-discovery.json",
-    ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy" / "assets" / "positioning-brief-template.md": ROOT / "framework" / "schemas" / "market" / "positioning-copy.json",
-    ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "assets" / "channel-plan-template.md": ROOT / "framework" / "schemas" / "market" / "channel-discovery.json",
-    ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "assets" / "launch-prep-template.md": ROOT / "framework" / "schemas" / "market" / "launch-prep.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "assets" / "research-report-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "assets" / "pmf-report-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery" / "assets" / "interview-brief-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy" / "assets" / "positioning-brief-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "assets" / "channel-plan-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "assets" / "launch-prep-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+}
+COMMON_RESULT_ENVELOPE_KEYS = (
+    "execution_summary",
+    "working_notes",
+    "deliverables_or_changed_files",
+    "artifact_content",
+)
+ARTIFACT_TEMPLATE_SCHEMAS = {
+    ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "assets" / "prd-template.md": ROOT / "framework" / "schemas" / "pm" / "pm-result.json",
+    ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "assets" / "implementation-report-template.md": ROOT / "framework" / "schemas" / "dev" / "dev-result.json",
+    ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "assets" / "test-report-template.md": ROOT / "framework" / "schemas" / "test" / "test-result.json",
+    ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "assets" / "design-handoff-template.md": ROOT / "framework" / "schemas" / "design" / "design-result.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "assets" / "research-report-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "assets" / "pmf-report-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "assets" / "evidence-log-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery" / "assets" / "interview-brief-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy" / "assets" / "positioning-brief-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "assets" / "channel-plan-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+    ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "assets" / "launch-prep-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+}
+MARKET_TEMPLATE_SPECIALIZED_KEYS = {
+    ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "assets" / "research-report-template.md": "research_scan",
+    ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "assets" / "pmf-report-template.md": "pmf_recon",
+    ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "assets" / "evidence-log-template.md": "pmf_recon",
+    ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery" / "assets" / "interview-brief-template.md": "customer_discovery",
+    ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy" / "assets" / "positioning-brief-template.md": "positioning_copy",
+    ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "assets" / "channel-plan-template.md": "channel_discovery",
+    ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "assets" / "launch-prep-template.md": "launch_prep",
 }
 ACTIVE_MARKET_CONTRACT_DOCS = (
     ROOT / "framework" / "docs" / "browser-cockpit.md",
@@ -762,18 +814,66 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertEqual(skills["write-prd"]["persistence"]["output_slot"], "prd")
         self.assertEqual(skills["track-manager"]["persistence"]["output_slot"], None)
 
+    def test_artifact_skill_output_slots_remain_product_specific(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        skills = {skill["id"]: skill for skill in manifest.get("skills", []) if isinstance(skill, dict)}
+        for skill_id, expected_slot in ARTIFACT_SKILL_TO_OUTPUT_SLOT.items():
+            with self.subTest(skill=skill_id):
+                self.assertEqual(skills[skill_id]["persistence"]["output_slot"], expected_slot)
+
+    def test_buddy_level_result_schemas_exist_for_all_artifact_buddies(self) -> None:
+        for buddy_id, schema_path in BUDDY_RESULT_SCHEMA_PATHS.items():
+            with self.subTest(buddy=buddy_id):
+                self.assertTrue(schema_path.exists(), msg=f"missing buddy-level schema: {schema_path.relative_to(ROOT)}")
+                loaded = json.loads(schema_path.read_text(encoding="utf-8"))
+                self.assertIsInstance(loaded, dict)
+
+    def test_artifact_skill_manifest_entries_use_buddy_level_result_schemas(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        skills = {skill["id"]: skill for skill in manifest.get("skills", []) if isinstance(skill, dict)}
+
+        for skill_id, expected_schema in ARTIFACT_SKILL_TO_BUDDY_RESULT_SCHEMA.items():
+            with self.subTest(skill=skill_id):
+                persistence = skills[skill_id]["persistence"]
+                self.assertTrue(persistence["produces_artifact"])
+                self.assertEqual(persistence["output_schema"], expected_schema)
+
+        track_manager = skills["track-manager"]["persistence"]
+        self.assertFalse(track_manager["produces_artifact"])
+        self.assertEqual(track_manager["output_schema"], "framework/schemas/pm/track-manager.json")
+
+    def test_legacy_artifact_skill_specific_schemas_are_not_active_in_manifest(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        for skill in manifest.get("skills", []):
+            if not isinstance(skill, dict):
+                continue
+            persistence = skill.get("persistence")
+            if not isinstance(persistence, dict):
+                continue
+            output_schema = persistence.get("output_schema")
+            if not isinstance(output_schema, str):
+                continue
+            self.assertNotIn(
+                output_schema,
+                LEGACY_ARTIFACT_SCHEMA_PATHS,
+                msg=f"skill '{skill.get('id')}' still references legacy schema '{output_schema}'",
+            )
+
     def test_market_schemas_share_canonical_evidence_and_traceability_fields(self) -> None:
         for path in MARKET_SCHEMA_PATHS:
             with self.subTest(schema=str(path.relative_to(ROOT))):
                 schema = json.loads(path.read_text(encoding="utf-8"))
                 artifact_content = schema["properties"]["artifact_content"]
-                evidence_required = artifact_content["properties"]["evidence"]["items"]["required"]
-                traceability_required = artifact_content["properties"]["source_traceability"]["items"]["required"]
-
-                self.assertIn("claim_excerpt", evidence_required)
-                self.assertNotIn("summary", evidence_required)
-                self.assertIn("conclusion", traceability_required)
-                self.assertNotIn("claim", traceability_required)
+                required = set(artifact_content["required"])
+                self.assertIn("research_question", required)
+                self.assertIn("evidence", required)
+                self.assertIn("insights", required)
+                self.assertIn("assumptions", required)
+                self.assertIn("risks", required)
+                self.assertIn("conclusion", required)
+                self.assertIn("recommended_next_step", required)
+                self.assertIn("specialized_sections", required)
+                self.assertNotIn("source_traceability", required)
 
     def test_market_skill_membership_and_persistence_contracts_are_manifest_driven(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
@@ -838,14 +938,12 @@ class RepoConsistencyTests(unittest.TestCase):
         for path in MARKET_SCHEMA_PATHS:
             with self.subTest(schema=str(path.relative_to(ROOT))):
                 schema = json.loads(path.read_text(encoding="utf-8"))
-                evidence_item = schema["properties"]["artifact_content"]["properties"]["evidence"]["items"]
-                evidence_required = evidence_item["required"]
-                evidence_properties = evidence_item["properties"]
-                for field_name in MARKET_EVIDENCE_FIELDS:
-                    self.assertIn(field_name, evidence_required, msg=f"{path.relative_to(ROOT)} missing {field_name}")
-                for field_name in OPTIONAL_MARKET_EVIDENCE_FIELDS:
-                    self.assertIn(field_name, evidence_properties, msg=f"{path.relative_to(ROOT)} missing optional property {field_name}")
-                    self.assertNotIn(field_name, evidence_required, msg=f"{path.relative_to(ROOT)} should not require {field_name}")
+                artifact_content = schema["properties"]["artifact_content"]
+                evidence = artifact_content["properties"]["evidence"]
+                self.assertEqual(evidence["type"], "array")
+                self.assertEqual(evidence["items"]["type"], "string")
+                specialized_sections = artifact_content["properties"]["specialized_sections"]
+                self.assertEqual(specialized_sections["type"], "object")
 
     def test_market_contract_separates_skill_ids_from_output_slots_and_common_fields(self) -> None:
         contract_path = ROOT / "framework" / "contracts" / "market.md"
@@ -877,22 +975,32 @@ class RepoConsistencyTests(unittest.TestCase):
             self.assertIn(slot_name, slot_section)
 
         output_section = _markdown_section(text, "Required Output Structure")
-        for common_field in ("research_question", "evidence", "source_traceability", "conclusion"):
+        for common_field in (
+            "research_question",
+            "evidence",
+            "insights",
+            "assumptions",
+            "risks",
+            "conclusion",
+            "recommended_next_step",
+            "specialized_sections",
+        ):
             self.assertIn(common_field, output_section)
-        for non_common_field in ("research_strategy", "channel_plan", "iteration_log"):
-            self.assertNotIn(non_common_field, output_section)
+        top_level_lines = [line.strip() for line in output_section.splitlines() if re.match(r"^\\d+\\.\\s+`", line.strip())]
+        for non_common_field in ("source_traceability", "research_strategy", "channel_plan", "iteration_log"):
+            self.assertTrue(
+                all(f"`{non_common_field}`" not in line for line in top_level_lines),
+                msg=f"{non_common_field} must stay in specialized_sections, not top-level required fields",
+            )
 
-    def test_market_contract_lists_medium_strength_evidence_fields(self) -> None:
+    def test_market_contract_describes_specialized_sections_extension(self) -> None:
         contract_path = ROOT / "framework" / "contracts" / "market.md"
         evidence_section = _markdown_section(
             contract_path.read_text(encoding="utf-8"),
-            "Evidence And Traceability Requirements",
+            "Required Output Structure",
         )
-        for field_name in MARKET_EVIDENCE_FIELDS:
-            self.assertIn(field_name, evidence_section)
-        self.assertIn("may also include", evidence_section)
-        for field_name in OPTIONAL_MARKET_EVIDENCE_FIELDS:
-            self.assertIn(field_name, evidence_section)
+        self.assertIn("specialized_sections", evidence_section)
+        self.assertIn("object", evidence_section.lower())
 
     def test_market_contract_describes_instance_bound_cockpit_without_implying_multi_skill_runs(self) -> None:
         contract_text = (ROOT / "framework" / "contracts" / "market.md").read_text(encoding="utf-8").lower()
@@ -1090,6 +1198,10 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn(f"locked to the `{buddy_id}` buddy", lower)
         self.assertIn("scripts/turn_runtime.py prepare", text)
         self.assertIn("scripts/turn_runtime.py persist", text)
+        self.assertIn("buddy-level result json", lower)
+        self.assertIn("emit", lower)
+        self.assertIn("directly", lower)
+        self.assertNotIn("scripts/result_bridge.py", text)
         self.assertIn(f"ordinary user requests belong to `{buddy_id}`", lower)
         return text, lower
 
@@ -1105,6 +1217,8 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn(".agents/skills", lower)
                 self.assertIn("codex cli", lower)
                 self.assertIn("native skill", lower)
+                self.assertIn("buddy-level result json", lower)
+                self.assertIn("emit buddy-level result json directly", lower)
                 self.assertIn("runs/raw/", lower)
                 self.assertIn("projects/app", lower)
                 self.assertIn("## receipt contract", lower)
@@ -1132,6 +1246,7 @@ class RepoConsistencyTests(unittest.TestCase):
                     "codex cli",
                     "native skill",
                     "skill_id",
+                    "emit buddy-level result json directly",
                     "runs/raw/",
                     "projects/app",
                     "## receipt contract",
@@ -1143,6 +1258,7 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("read and execute the selected buddyswitch skill.md", lower)
                 self.assertNotIn("instruction_path", lower)
                 self.assertNotIn("projects/app/.runtime/", lower)
+                self.assertNotIn("result_bridge.py", lower)
 
     def test_runtime_prompt_does_not_present_switch_as_product_ui(self) -> None:
         self.assertFalse(LEGACY_RUNTIME_AGENTS.exists())
@@ -1247,15 +1363,46 @@ class RepoConsistencyTests(unittest.TestCase):
             ".agents/skills",
             "codex cli",
             "native skill",
+            "emit buddy-level result json directly",
+            "buddy-level result json",
             "persist",
             "skill_id",
         )
         for token in required_semantics:
             self.assertIn(token, text, msg=f"missing runtime semantic: {token}")
+        self.assertNotIn("scripts/result_bridge.py", text)
         self.assertNotIn("choose exactly one skill_id from prepare_context.skills", text)
         self.assertNotIn("read and execute the selected buddyswitch skill.md", text)
         self.assertNotIn("instruction_path", text)
         self.assertNotIn("run_instructions_by_skill", text)
+
+    def test_bridge_module_and_bridge_only_tests_are_removed_from_active_runtime_surface(self) -> None:
+        self.assertFalse((ROOT / "scripts" / "result_bridge.py").exists())
+        self.assertFalse((ROOT / "tests" / "test_result_bridge.py").exists())
+
+        active_targets = (
+            ROOT / "README.md",
+            ROOT / "framework" / "docs",
+            ROOT / "framework" / "contracts",
+            ROOT / "tools" / "launcher" / "assets",
+            ROOT / "buddyswitch" / "skills",
+            ROOT / "scripts",
+        )
+        for target in active_targets:
+            if target.is_file():
+                paths = [target]
+            else:
+                paths = [path for path in target.rglob("*") if path.is_file() and "__pycache__" not in path.parts]
+            for path in paths:
+                try:
+                    text = path.read_text(encoding="utf-8").lower()
+                except UnicodeDecodeError:
+                    continue
+                with self.subTest(path=str(path.relative_to(ROOT))):
+                    self.assertNotIn("scripts/result_bridge.py", text)
+                    self.assertNotIn("result_bridge.py", text)
+                    self.assertNotIn("bridge it with", text)
+                    self.assertNotIn("native output ->", text)
 
     def test_browser_cockpit_doc_references_native_runtime_skill_materialization(self) -> None:
         self.assertFalse(LEGACY_ROUTER_PROMPT.exists())
@@ -1279,28 +1426,37 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("`persist` validates and commits exactly one selected skill output", switch_spec)
         self.assertNotIn("E_RUNTIME_PREPARE_EXECUTION", switch_spec)
 
-    def test_new_market_templates_expose_schema_derived_contract_fields(self) -> None:
-        for path, schema_path in NEW_MARKET_TEMPLATE_SCHEMAS.items():
+    def test_artifact_skill_templates_emit_full_buddy_level_result_envelope(self) -> None:
+        for path, schema_path in ARTIFACT_TEMPLATE_SCHEMAS.items():
             with self.subTest(template=str(path.relative_to(ROOT))):
-                text = path.read_text(encoding="utf-8").lower()
-                schema = json.loads(schema_path.read_text(encoding="utf-8"))
-                artifact_content = schema["properties"]["artifact_content"]
-                required_fields = artifact_content["required"]
-                props = artifact_content["properties"]
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                self.assertIsInstance(payload, dict)
 
+                for key in COMMON_RESULT_ENVELOPE_KEYS:
+                    self.assertIn(key, payload, msg=f"missing envelope key '{key}' in {path.relative_to(ROOT)}")
+
+                artifact_content = payload["artifact_content"]
+                self.assertIsInstance(artifact_content, dict)
+
+                schema = json.loads(schema_path.read_text(encoding="utf-8"))
+                schema_artifact_content = schema["properties"]["artifact_content"]
+                required_fields = schema_artifact_content["required"]
                 for field_name in required_fields:
                     self.assertIn(
-                        _schema_heading(field_name).lower(),
-                        text,
-                        msg=f"missing section for '{field_name}' in {path.relative_to(ROOT)}",
+                        field_name,
+                        artifact_content,
+                        msg=f"missing artifact_content field '{field_name}' in {path.relative_to(ROOT)}",
                     )
-                    field_schema = props[field_name]
-                    for token in _required_template_tokens(field_schema):
-                        self.assertIn(
-                            token.lower(),
-                            text,
-                            msg=f"missing schema-derived token '{token}' in {path.relative_to(ROOT)}",
-                        )
+
+                if path in MARKET_TEMPLATE_SPECIALIZED_KEYS:
+                    specialized_sections = artifact_content.get("specialized_sections")
+                    self.assertIsInstance(specialized_sections, dict)
+                    expected_key = MARKET_TEMPLATE_SPECIALIZED_KEYS[path]
+                    self.assertIn(
+                        expected_key,
+                        specialized_sections,
+                        msg=f"missing specialized section '{expected_key}' in {path.relative_to(ROOT)}",
+                    )
 
     def test_skill_instructions_use_yaml_frontmatter_metadata(self) -> None:
         for package_root in _manifest_skill_package_roots():
@@ -1332,7 +1488,7 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertTrue(path.exists(), msg=f"missing template asset: {path.relative_to(ROOT)}")
 
     def test_shape_prototype_package_files_exist(self) -> None:
-        self.assertTrue((ROOT / "framework" / "schemas" / "design" / "shape-prototype.json").exists())
+        self.assertTrue((ROOT / "framework" / "schemas" / "design" / "design-result.json").exists())
         self.assertFalse((ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "skill.toml").exists())
         self.assertTrue((ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists())
 

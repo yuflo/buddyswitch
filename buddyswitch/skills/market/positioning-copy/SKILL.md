@@ -57,21 +57,29 @@ description: Use when the task is sharpening external positioning, value framing
 ## Shared Runtime Rules
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
+- Emit buddy-level result JSON directly from this native skill and persist it with `persist --skill-id <native skill id>` using the same native `skill_id`.
 
 ## Required Output Fields
 
+Top-level envelope keys:
+
+- `execution_summary`
+- `working_notes`
+- `deliverables_or_changed_files`
+- `artifact_content`
+
+Buddy-specific fields inside `artifact_content`:
+
 - `research_question`
-- `target_audience`
-- `status_quo_and_alternatives`
-- `differentiated_capabilities`
-- `value_claims`
-- `positioning_statement`
-- `message_house`
-- `homepage_angles`
 - `evidence`
-- `source_traceability`
-- `risks_and_unknowns`
+- `insights`
+- `assumptions`
+- `risks`
 - `conclusion`
+- `recommended_next_step`
+- `specialized_sections`
+
+Use `specialized_sections` for skill-specific detail (for example interview guides, channel scoring tables, launch asset plans, or source traceability maps).
 
 ## Guardrails
 

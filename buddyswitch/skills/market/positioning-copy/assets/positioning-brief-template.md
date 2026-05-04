@@ -1,71 +1,57 @@
-# Positioning Brief Template
-
-```markdown
-# Positioning Brief
-
-## Research Question
-research_question:
-
-## Target Audience
-- primary:
-- context:
-- trigger:
-
-## Status Quo And Alternatives
-1.
-- option:
-- type:
-- why_it_persists:
-- limitations:
-  - 
-
-## Differentiated Capabilities
-- 
-- 
-
-
-## Value Claims
-1.
-- claim:
-- audience_value:
-- evidence_basis:
-  - src-1
-
-## Positioning Statement
-positioning_statement:
-
-## Message House
-- core_message:
-- supporting_points:
-  - 
-
-## Homepage Angles
-1. 
- - angle:
- - headline_direction:
- - why_it_might_work:
-
-## Evidence
-1.
-- source_id:
-- url:
-- source_type:
-- accessed_at:
-- claim_excerpt:
-- page_title:
-- auth_state: public / logged_in / paywalled / unknown
-- query_or_filter_used:
-
-## Source Traceability
-1.
-- conclusion:
-- source_ids:
-  - src-1
-
-## Risks And Unknowns
-- 
-
-
-## Conclusion
-conclusion:
-```
+{
+  "execution_summary": "Positioning brief summary for founder-facing messaging.",
+  "working_notes": [
+    "Capture evidence boundaries and copy caveats."
+  ],
+  "deliverables_or_changed_files": [
+    "runs/raw/positioning-brief.md"
+  ],
+  "artifact_content": {
+    "research_question": "State the messaging or positioning question.",
+    "evidence": [
+      "Evidence statement supporting positioning"
+    ],
+    "insights": [
+      "Positioning insight"
+    ],
+    "assumptions": [
+      "Assumption requiring further validation"
+    ],
+    "risks": [
+      "Risk of over-claiming or weak evidence"
+    ],
+    "conclusion": "Positioning conclusion grounded in evidence.",
+    "recommended_next_step": "One concrete messaging experiment step.",
+    "specialized_sections": {
+      "positioning_copy": {
+        "target_audience": {
+          "primary": "Primary audience",
+          "context": "Context where pain occurs"
+        },
+        "status_quo_and_alternatives": [
+          {
+            "option": "Current alternative",
+            "why_it_persists": "Why users keep using it"
+          }
+        ],
+        "differentiated_capabilities": [
+          "Capability that differentiates the product"
+        ],
+        "value_claims": [
+          {
+            "claim": "Evidence-grounded value claim"
+          }
+        ],
+        "positioning_statement": "One-sentence positioning statement.",
+        "message_house": {
+          "core_message": "Core message to preserve across copy surfaces"
+        },
+        "homepage_angles": [
+          {
+            "angle": "Homepage angle to test"
+          }
+        ]
+      }
+    }
+  }
+}

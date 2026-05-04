@@ -1,75 +1,64 @@
-# Launch Prep Template
-
-```markdown
-# Launch Preparation Brief
-
-## Research Question
-research_question:
-
-## Launch Goal
-- primary_goal:
-- timebox:
-- secondary_goal:
-
-## Target Audience
-- primary:
-- why_now:
-- reach_notes:
-
-## Selected Channel
-- channel:
-- reason:
-- constraints:
-  - 
-
-## Launch Assets
-1.
-- asset:
-- purpose:
-- owner:
-- notes:
-
-## Instrumentation Plan
-- signals_to_track:
-  - 
-- capture_method:
-- review_cadence:
-
-## Feedback Collection Plan
-- collection_methods:
-  - 
-- follow_up_path:
-- response_owner:
-
-## Success Signals
-- 
-
-
-## Failure Signals
-- 
-
-
-## Evidence
-1.
-- source_id:
-- url:
-- source_type:
-- accessed_at:
-- claim_excerpt:
-- page_title:
-- auth_state: public / logged_in / paywalled / unknown
-- query_or_filter_used:
-
-## Source Traceability
-1.
-- conclusion:
-- source_ids:
-  - src-1
-
-## Risks And Unknowns
-- 
-
-
-## Conclusion
-conclusion:
-```
+{
+  "execution_summary": "Launch-prep summary for first launch validation.",
+  "working_notes": [
+    "Capture readiness caveats and dependency risks."
+  ],
+  "deliverables_or_changed_files": [
+    "runs/raw/launch-prep.md"
+  ],
+  "artifact_content": {
+    "research_question": "State the launch preparation question.",
+    "evidence": [
+      "Evidence statement supporting launch choices"
+    ],
+    "insights": [
+      "Launch readiness insight"
+    ],
+    "assumptions": [
+      "Assumption behind launch plan"
+    ],
+    "risks": [
+      "Launch risk"
+    ],
+    "conclusion": "Launch preparation conclusion.",
+    "recommended_next_step": "One concrete launch-prep next step.",
+    "specialized_sections": {
+      "launch_prep": {
+        "launch_goal": {
+          "primary_goal": "Primary launch goal",
+          "timebox": "Launch timebox"
+        },
+        "target_audience": {
+          "primary": "Primary launch audience",
+          "why_now": "Why this audience now"
+        },
+        "selected_channel": {
+          "channel": "Launch channel",
+          "reason": "Why this channel fits"
+        },
+        "launch_assets": [
+          {
+            "asset": "Launch asset",
+            "purpose": "Purpose of this asset"
+          }
+        ],
+        "instrumentation_plan": {
+          "signals_to_track": [
+            "Signal to track"
+          ]
+        },
+        "feedback_collection_plan": {
+          "collection_methods": [
+            "Feedback collection method"
+          ]
+        },
+        "success_signals": [
+          "Success signal"
+        ],
+        "failure_signals": [
+          "Failure signal"
+        ]
+      }
+    }
+  }
+}

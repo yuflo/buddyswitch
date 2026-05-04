@@ -1,54 +1,49 @@
-# Research Report Template
-
-```markdown
-# Research Report
-
-## Research Question
-research_question:
-
-## Research Strategy
-- complexity_tier: quick / standard / deep
-- rationale:
-- collection_mode:
-- inclusion_notes:
-  -
-
-## Channel Plan
--
--
-
-## Iteration Log
-1.
-- round:
-- query_planning:
-- candidate_discovery:
-- browser_evidence_capture:
-- round_synthesis:
-- query_refinement:
-
-## Evidence
-1.
-- source_id:
-- url:
-- source_type:
-- accessed_at:
-- claim_excerpt:
-- page_title:
-- auth_state: public / logged_in / paywalled / unknown
-- query_or_filter_used:
-
-## Source Traceability
-1.
-- conclusion:
-- source_ids:
-  - src-1
-
-## Patterns And Insights
--
-
-## Risks And Caveats
--
-
-## Conclusion
-conclusion:
-```
+{
+  "execution_summary": "Market research-scan summary grounded in captured evidence.",
+  "working_notes": [
+    "Record caveats, blocked sources, and confidence notes."
+  ],
+  "deliverables_or_changed_files": [
+    "runs/raw/research-notes.md"
+  ],
+  "artifact_content": {
+    "research_question": "State the market question or hypothesis.",
+    "evidence": [
+      "Evidence statement mapped to browsed sources"
+    ],
+    "insights": [
+      "Synthesis insight derived from evidence"
+    ],
+    "assumptions": [
+      "Assumption still requiring validation"
+    ],
+    "risks": [
+      "Research confidence risk or limitation"
+    ],
+    "conclusion": "Conclusion traceable to collected evidence.",
+    "recommended_next_step": "One concrete next research or product step.",
+    "specialized_sections": {
+      "research_scan": {
+        "research_strategy": {
+          "complexity_tier": "quick",
+          "rationale": "Why this tier was selected.",
+          "collection_mode": "browser-native"
+        },
+        "channel_plan": [
+          "Channel planned for evidence capture"
+        ],
+        "iteration_log": [
+          "Round summary"
+        ],
+        "source_traceability": [
+          {
+            "conclusion": "Conclusion statement",
+            "source_ids": [
+              "src-1"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

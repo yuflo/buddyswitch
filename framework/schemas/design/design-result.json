@@ -1,0 +1,53 @@
+{
+  "type": "object",
+  "required": [
+    "execution_summary",
+    "working_notes",
+    "deliverables_or_changed_files",
+    "artifact_content"
+  ],
+  "properties": {
+    "execution_summary": {"type": "string"},
+    "working_notes": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "deliverables_or_changed_files": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "artifact_content": {
+      "type": "object",
+      "required": [
+        "design_goal",
+        "flow_or_screen_summary",
+        "interaction_notes",
+        "assets_or_preview_refs",
+        "handoff_notes",
+        "open_questions"
+      ],
+      "properties": {
+        "design_goal": {"type": "string"},
+        "flow_or_screen_summary": {"type": "string"},
+        "interaction_notes": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "assets_or_preview_refs": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "handoff_notes": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1105,6 +1105,8 @@ exec "$real_git" "$@"
                 ".agents/skills",
                 "codex cli",
                 "native skill",
+                "emit buddy-level result json directly",
+                "buddy-level result json",
                 "skill_id",
                 "persist-skill-result",
                 "## receipt contract",
@@ -1116,6 +1118,7 @@ exec "$real_git" "$@"
                 "related runs: <run_id_1>, <run_id_2>",
             ):
                 self.assertIn(token, copied_agents)
+            self.assertNotIn("scripts/result_bridge.py", copied_agents)
             self.assertNotIn("choose exactly one skill_id from prepare_context.skills", copied_agents)
             self.assertNotIn("read and execute the selected buddyswitch skill.md", copied_agents)
             self.assertNotIn("instruction_path", copied_agents)

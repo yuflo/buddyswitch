@@ -2,6 +2,12 @@
 
 These rules apply to artifact-producing BuddySwitch skills that persist durable runtime output.
 
+## Direct Emission Rule
+
+- Native artifact-producing skills emit buddy-level result JSON directly.
+- Call `persist --skill-id <native-skill-id>` with that direct result payload.
+- Keep the same native `skill_id` in the persist call; runtime preserves it in receipt, artifact, and run audit metadata.
+
 ## Execution Summary Persistence
 
 - Write `execution_summary` into `artifact.summary`.

@@ -27,7 +27,7 @@ description: Use when the task is drafting a PRD, defining MVP scope, or turning
 ## Outputs
 - A PRD artifact object in `buddyswitch/objects/artifacts/`.
 - A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
-- Structured sections covering problem, goals, scenarios, scope, acceptance criteria, risks, and open questions.
+- Structured sections aligned to `pm-result` fields.
 
 ## Steps
 
@@ -47,6 +47,7 @@ description: Use when the task is drafting a PRD, defining MVP scope, or turning
 ## Shared Runtime Rules
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
+- Emit buddy-level result JSON directly from this native skill and persist it with `persist --skill-id <native skill id>` using the same native `skill_id`.
 
 ## PM Track Handling
 
@@ -56,14 +57,24 @@ description: Use when the task is drafting a PRD, defining MVP scope, or turning
 
 ## Required Output Fields
 
+Top-level envelope keys:
+
+- `execution_summary`
+- `working_notes`
+- `deliverables_or_changed_files`
+- `artifact_content`
+
+Buddy-specific fields inside `artifact_content`:
+
+- `summary`
 - `problem`
-- `goals`
-- `non_goals`
-- `users_and_scenarios`
-- `scope_p0_p1`
-- `acceptance_criteria`
+- `user_value`
+- `requirements`
+- `scope`
+- `decisions`
 - `risks`
 - `open_questions`
+- `suggested_next_step`
 
 ## Guardrails
 

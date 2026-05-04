@@ -42,17 +42,25 @@ Market is an outside-in buddy. It produces browser-driven, evidence-based demand
 
 ## Required Output Structure
 
-The selected market skill schema defines the exact synthesis fields.
-Common cross-market artifact content requirements are:
+All artifact-producing market skills persist through one buddy-level schema (`market-result`).
+Common required artifact content fields are:
 
 1. `research_question`
 2. `evidence`
-3. `source_traceability`
-4. `conclusion`
+3. `insights`
+4. `assumptions`
+5. `risks`
+6. `conclusion`
+7. `recommended_next_step`
+8. `specialized_sections`
 
-Skill-specific synthesis fields stay with the relevant executable skill schema. Typical examples include:
-- `research-scan`: `patterns_and_insights`, `risks_and_caveats`
-- `pmf-recon`: `assumptions_used`, `candidate_icps`, `strongest_pain_signals`, `existing_alternatives`, `pmf_confidence`, `recommended_next_step`
+Skill-specific details belong under `specialized_sections` as an object. Typical examples:
+- `research-scan`: `research_strategy`, `channel_plan`, `iteration_log`, `source_traceability`
+- `pmf-recon`: `candidate_icps`, `pmf_confidence`, `suggested_interview_angles`
+- `customer-discovery`: `interview_guide`, `hypotheses_to_test`
+- `positioning-copy`: `message_house`, `homepage_angles`
+- `channel-discovery`: `channel_scores`, `experiment_plan`
+- `launch-prep`: `launch_assets`, `instrumentation_plan`, `feedback_collection_plan`
 
 ## Executable Skill Collection
 
@@ -86,22 +94,11 @@ Skill-specific synthesis fields stay with the relevant executable skill schema. 
 - `channel-plan`
 - `launch-prep`
 
-## Evidence And Traceability Requirements
+## Evidence And Specialized Sections Guidance
 
-- Each key conclusion must map to source IDs in `source_traceability`.
-- Each source entry in `evidence` must include:
-  - `source_id`
-  - `url`
-  - `source_type` (for example: official, x, reddit, news, community)
-  - `accessed_at`
-  - `claim_excerpt`
-  - `page_title`
-  - `auth_state`
-  - `query_or_filter_used`
-- For later phases or richer evidence capture, source entries may also include:
-  - `interaction_steps_summary`
-  - `screenshot_ref_or_snapshot_ref`
-- Some skill schemas also require additional evidence keys (for example `segment` and `pain_category` in `pmf-recon`).
+- Keep `evidence` as concise evidence statements suitable for cross-skill persistence.
+- Store verbose source metadata and traceability maps under `specialized_sections` when needed.
+- Do not place runtime receipt IDs or run metadata in result payload fields.
 
 ## Iteration And Access Handling
 
@@ -131,6 +128,8 @@ Every run should return:
 1. execution summary
 2. working notes
 3. deliverables or changed files
+
+Native Market skill output must emit buddy-level result JSON directly and persist with `persist --skill-id <native-skill-id>` using the same native `skill_id`.
 
 Follow-up state or handoff notes come from BuddySwitch receipt rendering, not from the market structured result payload.
 

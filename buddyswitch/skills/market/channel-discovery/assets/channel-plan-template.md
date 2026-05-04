@@ -1,80 +1,62 @@
-# Channel Plan Template
-
-```markdown
-# Channel Discovery Plan
-
-## Research Question
-research_question:
-
-## Candidate Channels
-1. 
- - channel:
- - why_it_is_plausible:
- - constraints:
-   - 
-
-## Selection Criteria
-- 
-- 
-
-## Channel Scores
-1.
-- channel:
-- scores:
-  - reachability:
-  - credibility:
-  - speed:
-  - cost:
-  - signal_quality:
-- summary:
-
-## Recommended Primary Channel
-- channel:
-- why:
-- preconditions:
-  - 
-
-## Recommended Secondary Channel
-- channel:
-- why:
-- preconditions:
-  - 
-
-## Experiment Plan
-- goal:
-- offer:
-- audience:
-- steps:
-  - 
-- timebox:
-- success_signal:
-
-## Kill Signals
-- 
-- 
-
-
-## Evidence
-1.
-- source_id:
-- url:
-- source_type:
-- accessed_at:
-- claim_excerpt:
-- page_title:
-- auth_state: public / logged_in / paywalled / unknown
-- query_or_filter_used:
-
-## Source Traceability
-1.
-- conclusion:
-- source_ids:
-  - src-1
-
-## Risks And Unknowns
-- 
-
-
-## Conclusion
-conclusion:
-```
+{
+  "execution_summary": "Channel discovery summary with recommended first experiment.",
+  "working_notes": [
+    "Capture reachability constraints and confidence level."
+  ],
+  "deliverables_or_changed_files": [
+    "runs/raw/channel-plan.md"
+  ],
+  "artifact_content": {
+    "research_question": "State the channel selection question.",
+    "evidence": [
+      "Evidence statement informing channel choice"
+    ],
+    "insights": [
+      "Channel selection insight"
+    ],
+    "assumptions": [
+      "Assumption behind channel ranking"
+    ],
+    "risks": [
+      "Risk in channel confidence"
+    ],
+    "conclusion": "Channel decision conclusion.",
+    "recommended_next_step": "One concrete channel experiment next step.",
+    "specialized_sections": {
+      "channel_discovery": {
+        "candidate_channels": [
+          {
+            "channel": "Candidate channel",
+            "why_it_is_plausible": "Why it is plausible now"
+          }
+        ],
+        "selection_criteria": [
+          "Criterion used for ranking"
+        ],
+        "channel_scores": [
+          {
+            "channel": "Candidate channel",
+            "summary": "Score rationale"
+          }
+        ],
+        "recommended_primary_channel": {
+          "channel": "Primary channel",
+          "why": "Why this is primary"
+        },
+        "recommended_secondary_channel": {
+          "channel": "Secondary channel",
+          "why": "Why this is secondary"
+        },
+        "experiment_plan": {
+          "goal": "Experiment goal",
+          "steps": [
+            "Step 1"
+          ]
+        },
+        "kill_signals": [
+          "Signal that invalidates this channel"
+        ]
+      }
+    }
+  }
+}

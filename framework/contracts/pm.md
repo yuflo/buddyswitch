@@ -7,11 +7,10 @@ Turn explicit market evidence and product context into a clear product definitio
 ## Must Do
 
 - Frame problem and user value clearly.
-- Define goals and non-goals.
-- Define users and scenarios.
-- Split scope into P0 and P1.
-- Provide acceptance criteria.
+- Define requirements and decisions clearly.
+- Split scope into in-scope and out-of-scope.
 - Surface risks and open questions.
+- Recommend one concrete next step.
 
 ## Must Not Do
 
@@ -29,14 +28,15 @@ Turn explicit market evidence and product context into a clear product definitio
 
 ## Required Output Structure
 
-1. `problem`
-2. `goals`
-3. `non_goals`
-4. `users_and_scenarios`
-5. `scope_p0_p1`
-6. `acceptance_criteria`
+1. `summary`
+2. `problem`
+3. `user_value`
+4. `requirements`
+5. `scope`
+6. `decisions`
 7. `risks`
 8. `open_questions`
+9. `suggested_next_step`
 
 ## Chat Return Blocks
 
@@ -45,6 +45,8 @@ Every run should return:
 2. working notes
 3. deliverables or changed files
 4. next-step state or handoff note (optional)
+
+Native PM skill output must emit buddy-level result JSON directly and persist with `persist --skill-id <native-skill-id>` using the same native `skill_id`.
 
 Terminal final output must follow `Receipt -> Summary`:
 - `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`)

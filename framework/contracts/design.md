@@ -27,11 +27,11 @@ Shape interaction and visual direction into implementation-ready design artifact
 
 ## Required Output Structure
 
-1. `prototype_kind`
-2. `page_map`
-3. `primary_user_flow`
-4. `preview`
-5. `handoff`
+1. `design_goal`
+2. `flow_or_screen_summary`
+3. `interaction_notes`
+4. `assets_or_preview_refs`
+5. `handoff_notes`
 6. `open_questions`
 
 ## Shape-Prototype Responsibility
@@ -46,6 +46,8 @@ Every run should return:
 1. execution summary
 2. working notes
 3. deliverables or changed files
+
+Native Design skill output must emit buddy-level result JSON directly and persist with `persist --skill-id <native-skill-id>` using the same native `skill_id`.
 
 Terminal final output must follow `Receipt -> Summary`:
 - `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`)

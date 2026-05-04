@@ -27,7 +27,8 @@ Draft the MVP PRD for onboarding rewrite
 
 1. `prepare-turn-context`
 2. Codex CLI discovers native runtime skills from `.agents/skills` and runs exactly one selected skill
-3. `persist-skill-result`
+3. The selected native skill emits buddy-level result JSON directly
+4. `persist-skill-result` with the same native `skill_id`
 
 Runtime CLI:
 

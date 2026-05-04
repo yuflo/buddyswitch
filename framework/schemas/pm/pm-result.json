@@ -1,0 +1,73 @@
+{
+  "type": "object",
+  "required": [
+    "execution_summary",
+    "working_notes",
+    "deliverables_or_changed_files",
+    "artifact_content"
+  ],
+  "properties": {
+    "execution_summary": {"type": "string"},
+    "working_notes": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "deliverables_or_changed_files": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "artifact_content": {
+      "type": "object",
+      "required": [
+        "summary",
+        "problem",
+        "user_value",
+        "requirements",
+        "scope",
+        "decisions",
+        "risks",
+        "open_questions",
+        "suggested_next_step"
+      ],
+      "properties": {
+        "summary": {"type": "string"},
+        "problem": {"type": "string"},
+        "user_value": {"type": "string"},
+        "requirements": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "scope": {
+          "type": "object",
+          "required": ["in_scope", "out_of_scope"],
+          "properties": {
+            "in_scope": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "out_of_scope": {
+              "type": "array",
+              "items": {"type": "string"}
+            }
+          },
+          "additionalProperties": false
+        },
+        "decisions": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "risks": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "suggested_next_step": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

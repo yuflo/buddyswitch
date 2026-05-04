@@ -29,11 +29,12 @@ Validate implemented behavior and produce clear pass/fail/blocked outcomes with 
 ## Required Output Structure
 
 1. `test_scope`
-2. `passed_items`
-3. `failed_items`
-4. `blocked_items`
-5. `reproduction_steps`
-6. `overall_readiness_summary`
+2. `checks_run`
+3. `passed_items`
+4. `failed_items`
+5. `blocked_items`
+6. `reproduction_notes`
+7. `readiness`
 
 ## Chat Return Blocks
 
@@ -42,6 +43,8 @@ Every run should return:
 2. working notes
 3. deliverables or changed files
 4. next-step state or handoff note (optional)
+
+Native Test skill output must emit buddy-level result JSON directly and persist with `persist --skill-id <native-skill-id>` using the same native `skill_id`.
 
 Terminal final output must follow `Receipt -> Summary`:
 - `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`)
