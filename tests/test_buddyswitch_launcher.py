@@ -50,6 +50,23 @@ while True:
 
 
 class BuddySwitchLauncherTests(unittest.TestCase):
+    _RELATIVE_SENTINELS = (
+        "cross-buddy-sentinel.txt",
+        "relative-path-sentinel.txt",
+        "shared-product-sentinel.txt",
+    )
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._cleanup_repo_relative_sentinels()
+        self.addCleanup(self._cleanup_repo_relative_sentinels)
+
+    @classmethod
+    def _cleanup_repo_relative_sentinels(cls) -> None:
+        project_app = ROOT / "projects" / "app"
+        for name in cls._RELATIVE_SENTINELS:
+            (project_app / name).unlink(missing_ok=True)
+
     @staticmethod
     def _legacy_runtime_lock_path(shared_root: Path) -> Path:
         return Path(f"{shared_root}.lock")
@@ -955,6 +972,13 @@ exec "$real_git" "$@"
                     target_dir = runtime_skills / skill_id
                     self._assert_directory_file_bytes_equal(source=source_dir, target=target_dir)
 
+                if buddy_id == "dev":
+                    self.assertTrue((runtime_skills / "implement-task" / "SKILL.md").exists())
+                    self.assertTrue((runtime_skills / "skill-creator-importer" / "SKILL.md").exists())
+                    self.assertTrue(
+                        (runtime_skills / "skill-creator-importer" / "assets" / "skill-import-report-template.md").exists()
+                    )
+
     def test_start_writes_launcher_marker_before_workspace_bootstrap(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -1518,9 +1542,16 @@ exec "$real_git" "$@"
                 str(shared_project_app.resolve()),
             )
 
+            pm_relative_probe = pm_payload["relative_probe"]
             dev_relative_probe = dev_payload["relative_probe"]
+            self.assertIsNotNone(pm_relative_probe)
             self.assertIsNotNone(dev_relative_probe)
+            assert pm_relative_probe is not None
             assert dev_relative_probe is not None
+            self.assertEqual(
+                pm_relative_probe["write"]["resolved"],
+                str((shared_project_app / "cross-buddy-sentinel.txt").resolve()),
+            )
             read_probe = dev_relative_probe["read"]
             self.assertTrue(read_probe["exists"])
             self.assertEqual(read_probe["content"], "shared-via-relative-path")

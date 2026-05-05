@@ -306,6 +306,7 @@ class EnvManifestV2Tests(unittest.TestCase):
             "write-prd": "framework/schemas/pm/pm-result.json",
             "track-manager": "framework/schemas/pm/pm-result.json",
             "implement-task": "framework/schemas/dev/dev-result.json",
+            "skill-creator-importer": "framework/schemas/dev/dev-result.json",
             "smoke-test": "framework/schemas/test/test-result.json",
             "shape-prototype": "framework/schemas/design/design-result.json",
             "research-scan": "framework/schemas/market/market-result.json",

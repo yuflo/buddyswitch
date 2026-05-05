@@ -75,6 +75,13 @@ output_slot = "implementation-report"
 output_schema = "framework/schemas/dev/dev-result.json"
 
 [[skills]]
+id = "skill-creator-importer"
+path = "buddyswitch/skills/dev/skill-creator-importer"
+produces_artifact = true
+output_slot = "skill-import-report"
+output_schema = "framework/schemas/dev/dev-result.json"
+
+[[skills]]
 id = "smoke-test"
 path = "buddyswitch/skills/test/smoke-test"
 produces_artifact = true
@@ -126,7 +133,7 @@ permissions = ["track.read", "task.read", "task.create", "task.update", "task.ar
 id = "dev"
 label = "Dev"
 scope = "Implement approved scope in project code."
-skills = ["implement-task"]
+skills = ["implement-task", "skill-creator-importer"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
 [[buddies]]

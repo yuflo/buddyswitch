@@ -38,6 +38,7 @@ ARTIFACT_SKILL_DOCS = (
     ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "SKILL.md",
+    ROOT / "buddyswitch" / "skills" / "dev" / "skill-creator-importer" / "SKILL.md",
     ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "SKILL.md",
 )
 MARKET_SCHEMA_PATHS = (
@@ -61,6 +62,7 @@ ARTIFACT_SKILL_TO_BUDDY_RESULT_SCHEMA = {
     "track-manager": "framework/schemas/pm/pm-result.json",
     "shape-prototype": "framework/schemas/design/design-result.json",
     "implement-task": "framework/schemas/dev/dev-result.json",
+    "skill-creator-importer": "framework/schemas/dev/dev-result.json",
     "smoke-test": "framework/schemas/test/test-result.json",
 }
 ARTIFACT_SKILL_TO_OUTPUT_SLOT = {
@@ -74,6 +76,7 @@ ARTIFACT_SKILL_TO_OUTPUT_SLOT = {
     "track-manager": "track-operation",
     "shape-prototype": "design-handoff",
     "implement-task": "implementation-report",
+    "skill-creator-importer": "skill-import-report",
     "smoke-test": "smoke-test",
 }
 LEGACY_ARTIFACT_SCHEMA_PATHS = {
@@ -119,6 +122,7 @@ ARTIFACT_TEMPLATE_SCHEMAS = {
     ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "assets" / "prd-template.md": ROOT / "framework" / "schemas" / "pm" / "pm-result.json",
     ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "assets" / "track-operation-template.md": ROOT / "framework" / "schemas" / "pm" / "pm-result.json",
     ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "assets" / "implementation-report-template.md": ROOT / "framework" / "schemas" / "dev" / "dev-result.json",
+    ROOT / "buddyswitch" / "skills" / "dev" / "skill-creator-importer" / "assets" / "skill-import-report-template.md": ROOT / "framework" / "schemas" / "dev" / "dev-result.json",
     ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "assets" / "test-report-template.md": ROOT / "framework" / "schemas" / "test" / "test-result.json",
     ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "assets" / "design-handoff-template.md": ROOT / "framework" / "schemas" / "design" / "design-result.json",
     ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "assets" / "research-report-template.md": ROOT / "framework" / "schemas" / "market" / "market-result.json",
@@ -1483,6 +1487,7 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "assets" / "track-operation-template.md",
             ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "assets" / "design-handoff-template.md",
             ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "assets" / "implementation-report-template.md",
+            ROOT / "buddyswitch" / "skills" / "dev" / "skill-creator-importer" / "assets" / "skill-import-report-template.md",
             ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "assets" / "test-report-template.md",
         )
         for path in expected_assets:
@@ -1619,6 +1624,40 @@ class RepoConsistencyTests(unittest.TestCase):
 
         if "object_path" not in track_fields:
             self.assertNotIn("track.object_path", console_text)
+
+    def test_skill_creator_importer_does_not_reintroduce_retired_runtime_paths(self) -> None:
+        targets = (
+            ROOT / "scripts" / "skill_creator_importer.py",
+            ROOT / "buddyswitch" / "skills" / "dev" / "skill-creator-importer" / "SKILL.md",
+            ROOT / "docs" / "memo" / "2026-05-03-buddyswitch-skill-creator-importer-memo.md",
+        )
+        forbidden_tokens = (
+            "result_bridge",
+            "selected_skill_packet",
+            "prepare_context.skills",
+            "runtime interception",
+            "compatibility wrapper",
+            "fallback converter",
+        )
+        for path in targets:
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                for token in forbidden_tokens:
+                    self.assertNotIn(token, text)
+
+    def test_skill_creator_importer_memo_uses_current_forward_only_boundary_terms(self) -> None:
+        text = (ROOT / "docs" / "memo" / "2026-05-03-buddyswitch-skill-creator-importer-memo.md").read_text(
+            encoding="utf-8"
+        ).lower()
+        self.assertIn("repo-registered codex-native skill package", text)
+        self.assertIn("persist guidance", text)
+        self.assertIn("runtime package validation gates, which are already closed", text)
+        self.assertIn("already-running codex sessions are not hot-reloaded", text)
+        self.assertNotIn("buddyswitch-compatible", text)
+        self.assertNotIn("runtime interception", text)
+
+    def test_first_party_skills_do_not_contain_skill_toml(self) -> None:
+        self.assertEqual(list((ROOT / "buddyswitch" / "skills").rglob("skill.toml")), [])
 
 
 if __name__ == "__main__":

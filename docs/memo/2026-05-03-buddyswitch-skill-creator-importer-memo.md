@@ -18,7 +18,7 @@ The creator skill should:
 
 1. Accept an external/community Codex skill as input.
 2. Accept a target BuddySwitch buddy/template: `pm`, `dev`, `test`, `market`, or `design`.
-3. Generate a BuddySwitch-compatible skill package under the repo.
+3. Generate a repo-registered Codex-native skill package with BuddySwitch persist guidance under the repo.
 4. Register that generated skill in `buddyswitch/manifest.toml`.
 5. Make the skill available to newly created buddy instances for the selected buddy.
 
@@ -45,7 +45,7 @@ Therefore a generated skill becomes available to an instance only if it exists i
 
 ## Target Creator Behavior
 
-The creator skill should transform an external skill into a repo-native BuddySwitch skill package:
+The creator skill should copy an external Codex-native skill package into the BuddySwitch repo and add BuddySwitch persist closing rules:
 
 ```text
 external/community SKILL.md
@@ -96,17 +96,14 @@ This task does not include:
 - parsing Codex CLI transcripts or final responses;
 - replacing Task 1 buddy-level result templates;
 - replacing Task 2 `track-manager` despecialization;
-- solving all package-format gatekeeping concerns recorded in `2026-05-03-community-skill-package-validation-memo.md`.
+- reopening runtime package validation gates, which are already closed by the 2026-05-05 runtime gate trimming boundary;
+- adapting arbitrary community output through a runtime bridge, wrapper, transcript parser, or legacy conversion path.
 
 ## Instance Synchronization Boundary
 
 Existing instances are out of scope.
 
-Under the current launcher behavior:
-
-- already-created instances do not automatically receive newly registered skills;
-- a newly registered skill appears in runtime `.agents/skills` only when a new instance workspace is prepared or an explicit future sync/rebuild mechanism is run;
-- for now, the expected product path is to create a new buddy instance after importing/registering the skill.
+An imported skill appears in runtime `.agents/skills` after an instance workspace is created or explicitly refreshed by the existing launcher open/sync/start materialization path. Already-running Codex sessions are not hot-reloaded by this task.
 
 This separation is intentional for this task. Creator output changes repo state; instance synchronization is a separate lifecycle concern.
 
@@ -114,7 +111,7 @@ This separation is intentional for this task. Creator output changes repo state;
 
 This task is complete when:
 
-- A non-BuddySwitch Codex skill can be converted into a generated package under `buddyswitch/skills/<buddy>/<skill-id>/`.
+- A non-BuddySwitch Codex skill can be copied into a generated package under `buddyswitch/skills/<buddy>/<skill-id>/`.
 - The generated package contains a valid `SKILL.md` with the original workflow preserved and BuddySwitch persist closing rules added.
 - `buddyswitch/manifest.toml` registers the generated skill and attaches it to the selected buddy.
 - A newly created buddy instance for that buddy materializes the generated skill into `.agents/skills/<skill-id>`.
@@ -122,13 +119,11 @@ This task is complete when:
 
 ## Working Conclusion
 
-The creator skill is a lower-cost alternative to automatic runtime transcript capture.
-
-It shifts compatibility work from runtime interception to import-time adaptation:
+The creator skill is a direct import-and-registration path for external Codex-native skills.
 
 ```text
 do not parse Codex sessions after the fact
-instead generate a BuddySwitch-ready skill before instance creation
+instead generate a repo-registered Codex-native skill with BuddySwitch persist guidance before instance creation
 ```
 
 The intended result is clear: external Codex skills become repo-registered BuddySwitch skills that future buddy instances can copy and execute effectively.

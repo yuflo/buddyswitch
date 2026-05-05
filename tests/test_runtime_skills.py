@@ -22,6 +22,7 @@ if str(SCRIPTS) not in sys.path:
 
 from env_manifest import load_manifest  # noqa: E402
 import runtime_skills  # noqa: E402
+import skill_creator_importer  # noqa: E402
 
 
 class RuntimeSkillsInstallerTests(unittest.TestCase):
@@ -736,6 +737,157 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             installed_skill = workspace / ".agents" / "skills" / "dev-summary"
             self.assertTrue((installed_skill / "SKILL.md").exists())
             self._assert_directory_bytes_equal(source=fixture_package, target=installed_skill)
+
+    def test_imported_skill_package_materializes_after_registration(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            temp_root = Path(temp_dir)
+            repo_root = temp_root / "repo"
+            (repo_root / "buddyswitch").mkdir(parents=True, exist_ok=True)
+
+            implement_task_package = repo_root / "buddyswitch" / "skills" / "dev" / "implement-task"
+            implement_task_package.mkdir(parents=True, exist_ok=True)
+            (implement_task_package / "SKILL.md").write_text(
+                textwrap.dedent(
+                    """\
+                    ---
+                    name: implement-task
+                    description: Built-in dev skill.
+                    ---
+
+                    # implement-task
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            manifest = self._write_manifest(
+                repo_root / "buddyswitch",
+                skills=[
+                    {
+                        "id": "implement-task",
+                        "path": "buddyswitch/skills/dev/implement-task",
+                        "produces_artifact": "true",
+                        "output_slot": "implementation-report",
+                        "output_schema": "framework/schemas/dev/dev-result.json",
+                    }
+                ],
+                buddies={"dev": ["implement-task"]},
+            )
+
+            source_package = temp_root / "community-dev-summary"
+            source_package.mkdir(parents=True, exist_ok=True)
+            (source_package / "SKILL.md").write_text(
+                textwrap.dedent(
+                    """\
+                    ---
+                    name: dev-summary
+                    description: Use when summarizing code changes for handoff.
+                    ---
+
+                    # dev-summary
+
+                    Summarize code changes, verification evidence, and handoff risks.
+                    """
+                ),
+                encoding="utf-8",
+            )
+            (source_package / "assets").mkdir(parents=True, exist_ok=True)
+            (source_package / "assets" / "example-output.md").write_text("example output\n", encoding="utf-8")
+
+            skill_creator_importer.import_skill(
+                source=source_package,
+                buddy_id="dev",
+                skill_id="dev-summary",
+                repo_root=repo_root,
+            )
+
+            workspace = temp_root / "workspace"
+            workspace.mkdir(parents=True, exist_ok=True)
+            with unittest.mock.patch.object(runtime_skills, "ROOT", repo_root):
+                installed = runtime_skills.install_runtime_skills(
+                    manifest_path=manifest,
+                    buddy_id="dev",
+                    workspace=workspace,
+                )
+
+            self.assertEqual(sorted(installed), ["dev-summary", "implement-task"])
+            installed_skill = workspace / ".agents" / "skills" / "dev-summary"
+            self.assertTrue((installed_skill / "SKILL.md").exists())
+            self.assertTrue((installed_skill / "assets" / "example-output.md").exists())
+            skill_text = (installed_skill / "SKILL.md").read_text(encoding="utf-8")
+            self.assertIn("BuddySwitch Runtime Closing Rules", skill_text)
+
+    def test_imported_skill_materializes_only_for_selected_buddy(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            temp_root = Path(temp_dir)
+            repo_root = temp_root / "repo"
+            (repo_root / "buddyswitch").mkdir(parents=True, exist_ok=True)
+
+            pm_package = repo_root / "buddyswitch" / "skills" / "pm" / "write-prd"
+            pm_package.mkdir(parents=True, exist_ok=True)
+            (pm_package / "SKILL.md").write_text(
+                textwrap.dedent(
+                    """\
+                    ---
+                    name: write-prd
+                    description: Built-in PM skill.
+                    ---
+
+                    # write-prd
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            manifest = self._write_manifest(
+                repo_root / "buddyswitch",
+                skills=[
+                    {
+                        "id": "write-prd",
+                        "path": "buddyswitch/skills/pm/write-prd",
+                        "produces_artifact": "true",
+                        "output_slot": "prd",
+                        "output_schema": "framework/schemas/pm/pm-result.json",
+                    }
+                ],
+                buddies={"pm": ["write-prd"], "dev": []},
+            )
+
+            source_package = temp_root / "community-dev-summary"
+            source_package.mkdir(parents=True, exist_ok=True)
+            (source_package / "SKILL.md").write_text(
+                textwrap.dedent(
+                    """\
+                    ---
+                    name: dev-summary
+                    description: Use when summarizing code changes for handoff.
+                    ---
+
+                    # dev-summary
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            skill_creator_importer.import_skill(
+                source=source_package,
+                buddy_id="dev",
+                skill_id="dev-summary",
+                repo_root=repo_root,
+            )
+
+            workspace = temp_root / "workspace"
+            workspace.mkdir(parents=True, exist_ok=True)
+            with unittest.mock.patch.object(runtime_skills, "ROOT", repo_root):
+                installed = runtime_skills.install_runtime_skills(
+                    manifest_path=manifest,
+                    buddy_id="pm",
+                    workspace=workspace,
+                )
+
+            self.assertEqual(installed, ["write-prd"])
+            self.assertTrue((workspace / ".agents" / "skills" / "write-prd" / "SKILL.md").exists())
+            self.assertFalse((workspace / ".agents" / "skills" / "dev-summary").exists())
 
 
 if __name__ == "__main__":

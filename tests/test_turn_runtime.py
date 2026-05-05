@@ -369,7 +369,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
                 id = "dev-summary"
                 path = "{fixture_skill}"
                 produces_artifact = true
-                output_slot = "implementation-report"
+                output_slot = "dev-summary"
                 output_schema = "framework/schemas/dev/dev-result.json"
 
                 [[buddies]]
@@ -384,6 +384,57 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
                 label = "DEV"
                 scope = "Dev scope"
                 skills = ["dev-summary"]
+                permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
+                """
+            ),
+            encoding="utf-8",
+        )
+        return manifest_path
+
+    def _write_test_manifest_with_imported_pm_skill(
+        self,
+        root: Path,
+        *,
+        output_schema: str = "framework/schemas/pm/pm-result.json",
+    ) -> Path:
+        manifest_path = root / "manifest.toml"
+        imported_skill = (ROOT / "tests" / "fixtures" / "community-skills" / "dev-summary").relative_to(ROOT).as_posix()
+        write_prd_skill = (ROOT / "buddyswitch" / "skills" / "pm" / "write-prd").relative_to(ROOT).as_posix()
+        manifest_path.write_text(
+            textwrap.dedent(
+                f"""\
+                schema_version = 1
+
+                [env]
+                id = "test"
+                label = "Test Env"
+
+                [[skills]]
+                id = "write-prd"
+                path = "{write_prd_skill}"
+                produces_artifact = true
+                output_slot = "prd"
+                output_schema = "framework/schemas/pm/pm-result.json"
+
+                [[skills]]
+                id = "pm-notes"
+                path = "{imported_skill}"
+                produces_artifact = true
+                output_slot = "pm-notes"
+                output_schema = "{output_schema}"
+
+                [[buddies]]
+                id = "pm"
+                label = "PM"
+                scope = "PM scope"
+                skills = ["write-prd", "pm-notes"]
+                permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
+
+                [[buddies]]
+                id = "dev"
+                label = "DEV"
+                scope = "Dev scope"
+                skills = []
                 permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
                 """
             ),
@@ -1255,6 +1306,193 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(artifact_object["content"], minimum_result["artifact_content"])
         run_audit = self._load_runtime_json(receipt["receipt_paths"]["run"])
         self.assertEqual(run_audit["execution_summary"], minimum_result["execution_summary"])
+
+    def test_imported_skill_id_persists_minimum_result_for_target_buddy(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            manifest_path = self._write_test_manifest_with_community_dev_skill(Path(temp_dir))
+            instance_json = self._write_instance_json(instance_id="inst-ut-imported-minimum", buddy="dev")
+            env = self._product_env(
+                instance_json,
+                buddy="dev",
+                instance_id="inst-ut-imported-minimum",
+                shared_root=self.runtime_root,
+            )
+            context = self._prepare(
+                "Summarize imported skill output",
+                env=env,
+                manifest_path=manifest_path,
+            )
+            self.assertTrue(context["ok"])
+
+            minimum_result = {
+                "execution_summary": "Saved imported skill summary.",
+                "working_notes": [],
+                "deliverables_or_changed_files": [],
+                "artifact_content": {
+                    "summary": "Saved imported skill summary.",
+                    "freeform": {
+                        "imported_skill": "dev-summary",
+                    },
+                },
+            }
+
+            payload = self._persist(
+                context,
+                skill_id="dev-summary",
+                result=minimum_result,
+                env=env,
+                manifest_path=manifest_path,
+            )
+            self.assertTrue(payload["ok"])
+            receipt = payload["receipt"]
+            self.assertIsInstance(receipt, dict)
+            assert isinstance(receipt, dict)
+            self.assertEqual(receipt["skill_id"], "dev-summary")
+            artifact_object = self._load_runtime_json(receipt["receipt_paths"]["artifacts"][0])
+            self.assertEqual(artifact_object["skill_id"], "dev-summary")
+            run_audit = self._load_runtime_json(receipt["receipt_paths"]["run"])
+            self.assertEqual(run_audit["skill_id"], "dev-summary")
+
+    def test_imported_skill_id_rejects_wrong_buddy_without_writes(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            manifest_path = self._write_test_manifest_with_community_dev_skill(Path(temp_dir))
+            instance_json = self._write_instance_json(instance_id="inst-ut-imported-wrong-buddy", buddy="pm")
+            env = self._product_env(
+                instance_json,
+                buddy="pm",
+                instance_id="inst-ut-imported-wrong-buddy",
+                shared_root=self.runtime_root,
+            )
+            context = self._prepare(
+                "Draft onboarding PRD",
+                env=env,
+                manifest_path=manifest_path,
+            )
+            self.assertTrue(context["ok"])
+            self._assert_persist_rejected_without_writes(
+                context,
+                skill_id="dev-summary",
+                env=env,
+                manifest_path=manifest_path,
+            )
+
+    def test_imported_pm_skill_id_persists_minimum_result_for_target_buddy(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            manifest_path = self._write_test_manifest_with_imported_pm_skill(Path(temp_dir))
+            instance_json = self._write_instance_json(instance_id="inst-ut-imported-pm-minimum", buddy="pm")
+            env = self._product_env(
+                instance_json,
+                buddy="pm",
+                instance_id="inst-ut-imported-pm-minimum",
+                shared_root=self.runtime_root,
+            )
+            context = self._prepare(
+                "Summarize imported PM notes",
+                env=env,
+                manifest_path=manifest_path,
+            )
+            self.assertTrue(context["ok"])
+
+            minimum_result = {
+                "execution_summary": "Saved imported PM notes.",
+                "working_notes": [],
+                "deliverables_or_changed_files": [],
+                "artifact_content": {
+                    "summary": "Saved imported PM notes.",
+                    "freeform": {
+                        "imported_skill": "pm-notes",
+                    },
+                },
+            }
+            payload = self._persist(
+                context,
+                skill_id="pm-notes",
+                result=minimum_result,
+                env=env,
+                manifest_path=manifest_path,
+            )
+            self.assertTrue(payload["ok"])
+            receipt = payload["receipt"]
+            self.assertIsInstance(receipt, dict)
+            assert isinstance(receipt, dict)
+            self.assertEqual(receipt["skill_id"], "pm-notes")
+            artifact_object = self._load_runtime_json(receipt["receipt_paths"]["artifacts"][0])
+            self.assertEqual(artifact_object["skill_id"], "pm-notes")
+            run_audit = self._load_runtime_json(receipt["receipt_paths"]["run"])
+            self.assertEqual(run_audit["skill_id"], "pm-notes")
+
+    def test_imported_pm_skill_rejects_invalid_minimum_result_without_writes(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            manifest_path = self._write_test_manifest_with_imported_pm_skill(Path(temp_dir))
+            instance_json = self._write_instance_json(instance_id="inst-ut-imported-pm-invalid", buddy="pm")
+            env = self._product_env(
+                instance_json,
+                buddy="pm",
+                instance_id="inst-ut-imported-pm-invalid",
+                shared_root=self.runtime_root,
+            )
+            context = self._prepare(
+                "Summarize imported PM notes",
+                env=env,
+                manifest_path=manifest_path,
+            )
+            self.assertTrue(context["ok"])
+            invalid_result = {
+                "execution_summary": "",
+                "working_notes": "not a list",
+                "artifact_content": "not an object",
+            }
+            self._assert_persist_rejected_without_writes(
+                context,
+                skill_id="pm-notes",
+                result=invalid_result,
+                env=env,
+                manifest_path=manifest_path,
+            )
+
+    def test_imported_pm_skill_accepts_missing_output_schema_file_when_result_is_write_safe(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            manifest_path = self._write_test_manifest_with_imported_pm_skill(
+                Path(temp_dir),
+                output_schema="framework/schemas/pm/missing-imported-schema.json",
+            )
+            instance_json = self._write_instance_json(instance_id="inst-ut-imported-pm-missing-schema", buddy="pm")
+            env = self._product_env(
+                instance_json,
+                buddy="pm",
+                instance_id="inst-ut-imported-pm-missing-schema",
+                shared_root=self.runtime_root,
+            )
+            context = self._prepare(
+                "Summarize imported PM notes",
+                env=env,
+                manifest_path=manifest_path,
+            )
+            self.assertTrue(context["ok"])
+            minimum_result = {
+                "execution_summary": "Saved imported PM notes.",
+                "working_notes": [],
+                "deliverables_or_changed_files": [],
+                "artifact_content": {
+                    "summary": "Saved imported PM notes.",
+                    "freeform": {
+                        "imported_skill": "pm-notes",
+                    },
+                },
+            }
+            payload = self._persist(
+                context,
+                skill_id="pm-notes",
+                result=minimum_result,
+                env=env,
+                manifest_path=manifest_path,
+            )
+
+        self.assertTrue(payload["ok"])
+        receipt = payload["receipt"]
+        self.assertIsInstance(receipt, dict)
+        assert isinstance(receipt, dict)
+        self.assertEqual(receipt["skill_id"], "pm-notes")
 
     def test_community_skill_direct_buddy_result_persists_with_native_skill_id(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
