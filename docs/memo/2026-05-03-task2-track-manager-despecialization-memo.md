@@ -2,12 +2,13 @@
 
 Date: 2026-05-03
 Worktree: `dev0210`
+Status: Historical design memo; runtime validation boundaries are now defined by 2026-05-05 gate trimming docs.
 
 ## Purpose
 
 Record the agreed scope for Task 2: make `track-manager` a normal PM buddy skill instead of a hard-coded special persistence path.
 
-Task 2 should happen after Task 1 establishes buddy-level result schemas and bridge behavior.
+Task 2 should happen after Task 1 establishes buddy-level result schemas and direct emission runtime flow.
 
 ## User Goal
 
@@ -161,4 +162,4 @@ Task 2 is complete when:
 
 `track-manager` should not remain a special non-artifact runtime path.
 
-It should become a normal PM buddy skill whose result may include a validated track state effect. This keeps BuddySwitch aligned with the buddy-level bridge model while preserving explicit PM control over track lifecycle.
+It should become a normal PM buddy skill whose result may include a validated track state effect. This keeps BuddySwitch aligned with the buddy-level direct emission model while preserving explicit PM control over track lifecycle.

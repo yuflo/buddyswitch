@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""V2 manifest and Codex-native skill package tests."""
+"""V2 manifest loading and persistence contract tests."""
 
 from __future__ import annotations
 
@@ -18,226 +18,233 @@ if str(SCRIPTS) not in sys.path:
 import env_manifest  # noqa: E402
 
 
-class EnvManifestV2Tests(unittest.TestCase):
-    def _write_skill_package(
-        self,
-        root: Path,
-        *,
-        skill_id: str,
-        body: str,
-        with_skill_toml: bool = False,
-    ) -> Path:
-        package_root = root / skill_id
-        package_root.mkdir(parents=True, exist_ok=True)
-        (package_root / "SKILL.md").write_text(textwrap.dedent(body), encoding="utf-8")
-        if with_skill_toml:
-            (package_root / "skill.toml").write_text('id = "legacy"\n', encoding="utf-8")
-        return package_root
+DEFAULT_PERMISSIONS = [
+    "task.read",
+    "task.create",
+    "task.update",
+    "artifact.read",
+    "artifact.create",
+    "artifact.update",
+]
 
+
+class EnvManifestV2Tests(unittest.TestCase):
     def _write_manifest(
         self,
         root: Path,
         *,
-        skill_id: str,
-        skill_path: Path,
-        produces_artifact: str = "true",
-        output_schema: str = "framework/schemas/pm/pm-result.json",
-        output_slot_line: str = 'output_slot = "prd"\n',
-        buddy_id: str = "pm",
+        skills: list[dict[str, object]],
+        buddies: dict[str, list[str]],
+        permissions_by_buddy: dict[str, list[str]] | None = None,
     ) -> Path:
+        skill_blocks: list[str] = []
+        for row in skills:
+            produces = row.get("produces_artifact", True)
+            if isinstance(produces, bool):
+                produces_value = "true" if produces else "false"
+            else:
+                produces_value = str(produces)
+            output_slot = row.get("output_slot")
+            output_slot_line = f'output_slot = "{output_slot}"\n' if output_slot is not None else ""
+            skill_blocks.append(
+                textwrap.dedent(
+                    f"""\
+                    [[skills]]
+                    id = "{row['id']}"
+                    path = "{row['path']}"
+                    produces_artifact = {produces_value}
+                    {output_slot_line}output_schema = "{row.get('output_schema', 'framework/schemas/pm/pm-result.json')}"
+                    """
+                )
+            )
+
+        buddy_blocks: list[str] = []
+        for buddy_id, skill_ids in buddies.items():
+            permissions = permissions_by_buddy.get(buddy_id, DEFAULT_PERMISSIONS) if permissions_by_buddy else DEFAULT_PERMISSIONS
+            skills_line = ", ".join(f'"{skill_id}"' for skill_id in skill_ids)
+            permissions_line = ", ".join(f'"{permission}"' for permission in permissions)
+            buddy_blocks.append(
+                textwrap.dedent(
+                    f"""\
+                    [[buddies]]
+                    id = "{buddy_id}"
+                    label = "{buddy_id.upper()}"
+                    scope = "{buddy_id} scope"
+                    skills = [{skills_line}]
+                    permissions = [{permissions_line}]
+                    """
+                )
+            )
+
         manifest_path = root / "manifest.toml"
         manifest_path.write_text(
-            textwrap.dedent(
-                f"""\
-                schema_version = 1
-
-                [env]
-                id = "demo"
-                label = "Demo"
-
-                [[skills]]
-                id = "{skill_id}"
-                path = "{skill_path.relative_to(ROOT).as_posix()}"
-                produces_artifact = {produces_artifact}
-                {output_slot_line}output_schema = "{output_schema}"
-
-                [[buddies]]
-                id = "{buddy_id}"
-                label = "PM"
-                scope = "Owns scope."
-                skills = ["{skill_id}"]
-                permissions = ["task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
-                """
-            ),
+            "schema_version = 1\n\n[env]\nid = \"demo\"\nlabel = \"Demo\"\n\n"
+            + "\n".join(skill_blocks)
+            + "\n"
+            + "\n".join(buddy_blocks)
+            + "\n",
             encoding="utf-8",
         )
         return manifest_path
 
-    def test_load_manifest_accepts_codex_native_skill_package(self) -> None:
+    def test_load_manifest_does_not_validate_skill_package_contents(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             temp_root = Path(temp_dir)
-            package_root = self._write_skill_package(
-                temp_root,
-                skill_id="demo-skill",
-                body="""\
-                ---
-                name: demo-skill
-                description: Use when demo work needs a native Codex skill.
-                ---
-
-                # demo-skill
-                """,
-            )
+            package_root = temp_root / "skills" / "community-skill"
+            package_root.mkdir(parents=True)
+            (package_root / "README.md").write_text("community package\n", encoding="utf-8")
+            (package_root / "skill.toml").write_text('name = "legacy"\n', encoding="utf-8")
+            (package_root / "SKILL.md").write_text("# no frontmatter\n", encoding="utf-8")
             manifest_path = self._write_manifest(
                 temp_root,
-                skill_id="demo-skill",
-                skill_path=package_root,
+                skills=[
+                    {
+                        "id": "community-skill",
+                        "path": package_root.relative_to(ROOT).as_posix(),
+                        "produces_artifact": True,
+                        "output_slot": "community-output",
+                        "output_schema": "framework/schemas/dev/dev-result.json",
+                    }
+                ],
+                buddies={"dev": ["community-skill"]},
             )
 
             loaded = env_manifest.load_manifest(manifest_path)
 
-        skill = loaded["skills"][0]
-        self.assertEqual(skill["id"], "demo-skill")
-        self.assertNotIn("description", skill)
-        self.assertNotIn("runtime", skill)
-        persistence = skill.get("persistence")
-        self.assertIsInstance(persistence, dict)
-        assert isinstance(persistence, dict)
-        self.assertTrue(persistence["produces_artifact"])
-        self.assertEqual(persistence["output_slot"], "prd")
-        self.assertEqual(persistence["output_schema"], "framework/schemas/pm/pm-result.json")
+        self.assertEqual(loaded["skills"][0]["id"], "community-skill")
+        self.assertEqual(loaded["skills"][0]["path"], package_root.relative_to(ROOT).as_posix())
 
-    def test_load_manifest_rejects_skill_package_without_frontmatter(self) -> None:
+    def test_load_manifest_does_not_require_skill_source_directory_for_non_materialization_paths(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             temp_root = Path(temp_dir)
-            package_root = self._write_skill_package(
+            manifest_path = self._write_manifest(
                 temp_root,
-                skill_id="demo-skill",
-                body="# demo-skill\n",
+                skills=[
+                    {
+                        "id": "missing-source-skill",
+                        "path": "does/not/exist",
+                        "produces_artifact": True,
+                        "output_slot": "missing-source",
+                        "output_schema": "framework/schemas/dev/dev-result.json",
+                    }
+                ],
+                buddies={"dev": ["missing-source-skill"]},
             )
-            manifest_path = self._write_manifest(temp_root, skill_id="demo-skill", skill_path=package_root)
-
-            with self.assertRaisesRegex(env_manifest.ManifestError, "frontmatter"):
-                env_manifest.load_manifest(manifest_path)
-
-    def test_load_manifest_rejects_dual_metadata_skill_toml(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            temp_root = Path(temp_dir)
-            package_root = self._write_skill_package(
-                temp_root,
-                skill_id="demo-skill",
-                with_skill_toml=True,
-                body="""\
-                ---
-                name: demo-skill
-                description: Native metadata.
-                ---
-
-                # demo-skill
-                """,
-            )
-            manifest_path = self._write_manifest(temp_root, skill_id="demo-skill", skill_path=package_root)
-
-            with self.assertRaisesRegex(env_manifest.ManifestError, "skill.toml"):
-                env_manifest.load_manifest(manifest_path)
-
-    def test_load_manifest_rejects_frontmatter_name_mismatch(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            temp_root = Path(temp_dir)
-            package_root = self._write_skill_package(
-                temp_root,
-                skill_id="demo-skill",
-                body="""\
-                ---
-                name: wrong-name
-                description: Native metadata.
-                ---
-
-                # demo-skill
-                """,
-            )
-            manifest_path = self._write_manifest(temp_root, skill_id="demo-skill", skill_path=package_root)
-
-            with self.assertRaisesRegex(env_manifest.ManifestError, "must match manifest skill id"):
-                env_manifest.load_manifest(manifest_path)
-
-    def test_load_manifest_requires_frontmatter_description(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            temp_root = Path(temp_dir)
-            package_root = self._write_skill_package(
-                temp_root,
-                skill_id="demo-skill",
-                body="""\
-                ---
-                name: demo-skill
-                ---
-
-                # demo-skill
-                """,
-            )
-            manifest_path = self._write_manifest(temp_root, skill_id="demo-skill", skill_path=package_root)
-
-            with self.assertRaisesRegex(env_manifest.ManifestError, "description"):
-                env_manifest.load_manifest(manifest_path)
-
-    def test_load_manifest_supports_quoted_frontmatter_description_with_colon(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            temp_root = Path(temp_dir)
-            package_root = self._write_skill_package(
-                temp_root,
-                skill_id="demo-skill",
-                body="""\
-                ---
-                name: "demo-skill"
-                description: "Use when demo: scoped native flow."
-                ---
-
-                # demo-skill
-                """,
-            )
-            manifest_path = self._write_manifest(temp_root, skill_id="demo-skill", skill_path=package_root)
 
             loaded = env_manifest.load_manifest(manifest_path)
 
-        self.assertEqual(loaded["skills"][0]["id"], "demo-skill")
+        self.assertEqual(loaded["skills"][0]["path"], "does/not/exist")
+
+    def test_load_manifest_does_not_require_output_schema_file_for_prepare_paths(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest_path = self._write_manifest(
+                temp_root,
+                skills=[
+                    {
+                        "id": "schema-later",
+                        "path": "buddyswitch/skills/dev/implement-task",
+                        "produces_artifact": True,
+                        "output_slot": "implementation-report",
+                        "output_schema": "framework/schemas/dev/not-runtime-gated.json",
+                    }
+                ],
+                buddies={"dev": ["schema-later"]},
+            )
+
+            loaded = env_manifest.load_manifest(manifest_path)
+
+        self.assertEqual(
+            loaded["skills"][0]["persistence"]["output_schema"],
+            "framework/schemas/dev/not-runtime-gated.json",
+        )
+
+    def test_load_manifest_rejects_duplicate_skill_ids(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest_path = self._write_manifest(
+                temp_root,
+                skills=[
+                    {
+                        "id": "duplicate",
+                        "path": "buddyswitch/skills/pm/write-prd",
+                        "produces_artifact": True,
+                        "output_slot": "one",
+                    },
+                    {
+                        "id": "duplicate",
+                        "path": "buddyswitch/skills/pm/track-manager",
+                        "produces_artifact": True,
+                        "output_slot": "two",
+                    },
+                ],
+                buddies={"pm": ["duplicate"]},
+            )
+
+            with self.assertRaisesRegex(env_manifest.ManifestError, "duplicate skill id"):
+                env_manifest.load_manifest(manifest_path)
+
+    def test_load_manifest_rejects_unknown_buddy_skill_reference(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest_path = self._write_manifest(
+                temp_root,
+                skills=[
+                    {
+                        "id": "declared",
+                        "path": "buddyswitch/skills/pm/write-prd",
+                        "produces_artifact": True,
+                        "output_slot": "prd",
+                    }
+                ],
+                buddies={"pm": ["not-declared"]},
+            )
+
+            with self.assertRaisesRegex(env_manifest.ManifestError, "unknown skill"):
+                env_manifest.load_manifest(manifest_path)
+
+    def test_load_manifest_rejects_invalid_permission_object(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest_path = self._write_manifest(
+                temp_root,
+                skills=[
+                    {
+                        "id": "write-prd",
+                        "path": "buddyswitch/skills/pm/write-prd",
+                        "produces_artifact": True,
+                        "output_slot": "prd",
+                    }
+                ],
+                buddies={"pm": ["write-prd"]},
+                permissions_by_buddy={"pm": ["project.read"]},
+            )
+
+            with self.assertRaisesRegex(env_manifest.ManifestError, "unsupported object"):
+                env_manifest.load_manifest(manifest_path)
 
     def test_load_manifest_requires_persistence_fields(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             temp_root = Path(temp_dir)
-            package_root = self._write_skill_package(
+            missing_slot_manifest = self._write_manifest(
                 temp_root,
-                skill_id="demo-skill",
-                body="""\
-                ---
-                name: demo-skill
-                description: Use when demo work needs native skill support.
-                ---
-
-                # demo-skill
-                """,
-            )
-            manifest_path = self._write_manifest(
-                temp_root,
-                skill_id="demo-skill",
-                skill_path=package_root,
-                output_slot_line="",
+                skills=[
+                    {
+                        "id": "demo-skill",
+                        "path": "buddyswitch/skills/pm/write-prd",
+                        "produces_artifact": True,
+                        "output_slot": None,
+                    }
+                ],
+                buddies={"pm": ["demo-skill"]},
             )
             with self.assertRaisesRegex(env_manifest.ManifestError, "output_slot"):
-                env_manifest.load_manifest(manifest_path)
-
-            missing_schema_manifest = self._write_manifest(
-                temp_root,
-                skill_id="demo-skill",
-                skill_path=package_root,
-                output_schema="framework/schemas/pm/does-not-exist.json",
-            )
-            with self.assertRaisesRegex(env_manifest.ManifestError, "output_schema"):
-                env_manifest.load_manifest(missing_schema_manifest)
+                env_manifest.load_manifest(missing_slot_manifest)
 
             missing_bool_manifest = temp_root / "manifest-bad-bool.toml"
             missing_bool_manifest.write_text(
                 textwrap.dedent(
-                    f"""\
+                    """\
                     schema_version = 1
 
                     [env]
@@ -246,7 +253,7 @@ class EnvManifestV2Tests(unittest.TestCase):
 
                     [[skills]]
                     id = "demo-skill"
-                    path = "{package_root.relative_to(ROOT).as_posix()}"
+                    path = "buddyswitch/skills/pm/write-prd"
                     output_slot = "prd"
                     output_schema = "framework/schemas/pm/pm-result.json"
 
@@ -266,25 +273,17 @@ class EnvManifestV2Tests(unittest.TestCase):
     def test_load_manifest_rejects_non_artifact_persistence(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             temp_root = Path(temp_dir)
-            package_root = self._write_skill_package(
-                temp_root,
-                skill_id="demo-skill",
-                body="""\
-                ---
-                name: demo-skill
-                description: Use when demo work needs native skill support.
-                ---
-
-                # demo-skill
-                """,
-            )
             manifest_path = self._write_manifest(
                 temp_root,
-                skill_id="demo-skill",
-                skill_path=package_root,
-                produces_artifact="false",
-                output_schema="framework/schemas/pm/pm-result.json",
-                output_slot_line="",
+                skills=[
+                    {
+                        "id": "demo-skill",
+                        "path": "buddyswitch/skills/pm/write-prd",
+                        "produces_artifact": False,
+                        "output_slot": None,
+                    }
+                ],
+                buddies={"pm": ["demo-skill"]},
             )
 
             with self.assertRaisesRegex(env_manifest.ManifestError, "produces_artifact=false is not supported"):
@@ -299,7 +298,7 @@ class EnvManifestV2Tests(unittest.TestCase):
         self.assertEqual(skills["track-manager"]["persistence"]["output_slot"], "track-operation")
         self.assertTrue(skills["track-manager"]["persistence"]["produces_artifact"])
 
-    def test_live_manifest_maps_artifact_skills_to_buddy_level_schemas(self) -> None:
+    def test_live_manifest_maps_artifact_skills_to_buddy_level_schema_metadata(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         skills = {skill["id"]: skill for skill in manifest["skills"]}
 

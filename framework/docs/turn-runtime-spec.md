@@ -17,23 +17,23 @@ Define the active runtime contract for launcher-managed buddy instances.
   - `prepare_turn_context(text, manifest_path=DEFAULT_MANIFEST)`
   - `persist_skill_result(context, *, skill_id, result, manifest_path=DEFAULT_MANIFEST)`
 
+## Three Runtime Gates
+
+1. Materialization validates copy boundaries only.
+2. `prepare` validates turn context and reservation safety only.
+3. `persist` validates write safety only.
+
+Codex CLI owns skill package acceptance after runtime materialization into `.agents/skills/<skill-id>`.
+
 ## Native Output Flow
 
-Canonical artifact flow:
-
-1. Codex runs native skill from runtime `.agents/skills/<skill-id>`.
+1. Codex runs a native skill from runtime `.agents/skills/<skill-id>`.
 2. The selected native skill emits buddy-level result JSON directly.
 3. Persist with `scripts/turn_runtime.py persist --skill-id <native-skill-id>`.
 
-Artifact-producing buddies validate against buddy-level schemas:
+Buddy-level schemas remain development contracts under `framework/schemas/**`; runtime `persist` does not require full schema completeness unless a field is needed for safe writes.
 
-- `framework/schemas/pm/pm-result.json`
-- `framework/schemas/dev/dev-result.json`
-- `framework/schemas/test/test-result.json`
-- `framework/schemas/market/market-result.json`
-- `framework/schemas/design/design-result.json`
-
-PM schema optionally supports `state_effects.track_operation` for explicit PM lifecycle mutations.
+PM payloads may include `state_effects.track_operation` for explicit lifecycle operations.
 Retired top-level `track_operation` payloads are rejected before durable writes.
 
 ## CLI Contract
@@ -73,9 +73,10 @@ python3 scripts/turn_runtime.py persist \
 Behavior:
 
 - Uses locked buddy from instance metadata.
-- Resolves/reuses active task and optional track binding.
+- Resolves or reuses active task and optional track binding.
 - Reserves one run envelope for the turn.
-- Does not return custom skill selection or instruction-loading fields.
+- Validates context safety, not skill package readiness.
+- Does not gate on `SKILL.md`, package source readiness, or output schema file existence.
 
 ## Persist Contract
 
@@ -85,6 +86,15 @@ Top-level response shape is frozen by `framework/contracts/persist-skill-result.
 - `ok`
 - `receipt`
 - `refreshed_context`
+
+`persist` write-safety checks include:
+
+- context and reservation identity integrity;
+- selected `skill_id` membership in active buddy manifest skills;
+- selected skill non-empty `output_slot` for artifact slot/id derivation;
+- minimum payload shape (`execution_summary` non-empty string, `artifact_content` object, list-shaped optional note fields);
+- PM-only `state_effects.track_operation` validation.
+- does not auto-reserve a follow-up run.
 
 ## Receipt Contract
 
@@ -110,20 +120,7 @@ Optional `receipt` keys:
 - `track_action`
 - `warnings`
 
-Terminal output must render user-facing IDs and titles from `receipt`, not from debug path strings.
-Legacy command-style follow-up keys must not be present in `receipt`.
-
-Behavior:
-
-- Rejects missing/empty/non-string skill ids.
-- Rejects skill ids outside active buddy membership in manifest.
-- Rejects tampered context identity (buddy/task/run/request mismatch).
-- Enforces context and reservation identity integrity before any state write.
-- Validates skill output payload against schema from manifest persistence contract.
-- Validates PM-only `state_effects.track_operation` and applies it before normal artifact/run receipt writes.
-- Writes canonical task/artifact/track/run state.
-- Clears consumed reservation.
-- Does not auto-reserve a follow-up run.
+Terminal output must render user-facing IDs and titles from `receipt`, not debug path strings.
 
 ## Follow-up Turn Rule
 
@@ -134,12 +131,6 @@ After successful persist:
 3. Run `prepare` again.
 
 Do not continue a turn through hidden reservation state.
-
-## Codex Native Skills
-
-- Source packages are Codex-native under `buddyswitch/skills/**`.
-- Runtime packages are materialized under instance `.agents/skills/**`.
-- Codex owns native skill discovery and instruction loading from runtime `.agents/skills`.
 
 ## Canonical State Paths
 

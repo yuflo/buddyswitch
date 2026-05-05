@@ -391,6 +391,60 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         )
         return manifest_path
 
+    def _write_prepare_boundary_manifest(
+        self,
+        root: Path,
+        *,
+        dev_skill_path: str = "missing/community/source",
+        dev_output_schema: str = "framework/schemas/dev/missing-runtime-gate.json",
+        dev_skills: list[str] | None = None,
+        pm_output_schema: str = "framework/schemas/pm/pm-result.json",
+    ) -> Path:
+        manifest_path = root / "manifest.toml"
+        dev_skill_membership = dev_skills if dev_skills is not None else ["community-dev"]
+        dev_skills_list = ", ".join(f"\"{skill_id}\"" for skill_id in dev_skill_membership)
+        manifest_path.write_text(
+            textwrap.dedent(
+                f"""\
+                schema_version = 1
+
+                [env]
+                id = "test"
+                label = "Test Env"
+
+                [[skills]]
+                id = "community-dev"
+                path = "{dev_skill_path}"
+                produces_artifact = true
+                output_slot = "implementation-report"
+                output_schema = "{dev_output_schema}"
+
+                [[buddies]]
+                id = "pm"
+                label = "PM"
+                scope = "PM scope"
+                skills = ["write-prd"]
+                permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
+
+                [[skills]]
+                id = "write-prd"
+                path = "buddyswitch/skills/pm/write-prd"
+                produces_artifact = true
+                output_slot = "prd"
+                output_schema = "{pm_output_schema}"
+
+                [[buddies]]
+                id = "dev"
+                label = "DEV"
+                scope = "Dev scope"
+                skills = [{dev_skills_list}]
+                permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
+                """
+            ),
+            encoding="utf-8",
+        )
+        return manifest_path
+
     def _assert_prepare_has_context_only_shape(self, context: dict[str, object]) -> None:
         expected_key_order = [
             "ok",
@@ -438,6 +492,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         *,
         skill_id: object,
         env: dict[str, str],
+        result: dict[str, object] | None = None,
         manifest_path: Path | None = None,
     ) -> None:
         snapshot_before = self._runtime_state_snapshot()
@@ -449,7 +504,13 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
             if instance_json_path.exists():
                 instance_before = instance_json_path.read_text(encoding="utf-8")
         try:
-            payload = self._persist(context, skill_id=skill_id, env=env, manifest_path=manifest_path)
+            payload = self._persist(
+                context,
+                skill_id=skill_id,
+                result=result,
+                env=env,
+                manifest_path=manifest_path,
+            )
         except Exception:
             rejected = True
         else:
@@ -554,6 +615,236 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         self._assert_prepare_has_context_only_shape(payload)
         self.assertTrue(hasattr(turn_runtime, "prepare_turn_context"))
 
+    def test_prepare_succeeds_when_skill_source_and_schema_are_not_ready(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            manifest_path = self._write_prepare_boundary_manifest(Path(temp_dir))
+            instance_json = self._write_instance_json(instance_id="inst-ut-prepare-boundary", buddy="dev")
+            env = self._product_env(
+                instance_json,
+                buddy="dev",
+                instance_id="inst-ut-prepare-boundary",
+                shared_root=self.runtime_root,
+            )
+
+            payload = self._prepare(
+                "Summarize checkout banner implementation",
+                env=env,
+                manifest_path=manifest_path,
+            )
+
+        self.assertTrue(payload["ok"])
+        self._assert_prepare_has_context_only_shape(payload)
+        run_envelope = payload.get("run_envelope")
+        self.assertIsInstance(run_envelope, dict)
+        if isinstance(run_envelope, dict):
+            self.assertEqual(run_envelope.get("status"), "reserved")
+        self.assertIsInstance(payload.get("current_task_id"), str)
+
+    def test_prepare_succeeds_when_active_buddy_has_no_registered_skills(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            manifest_path = self._write_prepare_boundary_manifest(Path(temp_dir), dev_skills=[])
+            instance_json = self._write_instance_json(instance_id="inst-ut-prepare-empty-skills", buddy="dev")
+            env = self._product_env(
+                instance_json,
+                buddy="dev",
+                instance_id="inst-ut-prepare-empty-skills",
+                shared_root=self.runtime_root,
+            )
+
+            payload = self._prepare(
+                "Keep implementing onboarding task context",
+                env=env,
+                manifest_path=manifest_path,
+            )
+
+        self.assertTrue(payload["ok"])
+        self._assert_prepare_has_context_only_shape(payload)
+        run_envelope = payload.get("run_envelope")
+        self.assertIsInstance(run_envelope, dict)
+        if isinstance(run_envelope, dict):
+            self.assertEqual(run_envelope.get("status"), "reserved")
+
+    def test_prepare_succeeds_with_existing_malformed_skill_package_contents(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            temp_root = Path(temp_dir)
+            package_root = temp_root / "skills" / "community-dev"
+            package_root.mkdir(parents=True, exist_ok=True)
+            (package_root / "SKILL.md").write_text("# Community Dev Skill\nNo frontmatter.\n", encoding="utf-8")
+            (package_root / "skill.toml").write_text('name = "legacy-metadata"\n', encoding="utf-8")
+            manifest_path = self._write_prepare_boundary_manifest(
+                temp_root,
+                dev_skill_path=package_root.relative_to(ROOT).as_posix(),
+            )
+            instance_json = self._write_instance_json(instance_id="inst-ut-prepare-malformed-skill", buddy="dev")
+            env = self._product_env(
+                instance_json,
+                buddy="dev",
+                instance_id="inst-ut-prepare-malformed-skill",
+                shared_root=self.runtime_root,
+            )
+
+            payload = self._prepare(
+                "Keep implementing onboarding task context",
+                env=env,
+                manifest_path=manifest_path,
+            )
+
+        self.assertTrue(payload["ok"])
+        self._assert_prepare_has_context_only_shape(payload)
+
+    def test_prepare_rejects_empty_request_without_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-prepare-empty-input", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-prepare-empty-input",
+            shared_root=self.runtime_root,
+        )
+        snapshot_before = self._runtime_state_snapshot()
+        instance_before = instance_json.read_text(encoding="utf-8")
+
+        payload = self._prepare("   ", env=env)
+
+        self.assertFalse(payload.get("ok"))
+        error_payload = payload.get("error")
+        self.assertIsInstance(error_payload, dict)
+        if isinstance(error_payload, dict):
+            self.assertEqual(error_payload.get("code"), "E_EMPTY_INPUT")
+        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
+        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
+
+    def test_prepare_rejects_partial_product_identity_env_without_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-prepare-partial-env", buddy="pm")
+        env = {
+            "BUDDYSWITCH_INSTANCE_ID": "inst-ut-prepare-partial-env",
+            "BUDDYSWITCH_INSTANCE_JSON": str(instance_json),
+            "BUDDYSWITCH_SHARED_ROOT": str(self.runtime_root),
+        }
+        snapshot_before = self._runtime_state_snapshot()
+        instance_before = instance_json.read_text(encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            self._prepare("Draft onboarding PRD", env=env)
+
+        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
+        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
+
+    def test_prepare_rejects_missing_product_identity_env_without_writes(self) -> None:
+        snapshot_before = self._runtime_state_snapshot()
+
+        payload = self._prepare("Draft onboarding PRD", env={})
+
+        self.assertFalse(payload.get("ok"))
+        error_payload = payload.get("error")
+        self.assertIsInstance(error_payload, dict)
+        if isinstance(error_payload, dict):
+            self.assertEqual(error_payload.get("code"), "E_PRODUCT_MODE_REQUIRED")
+        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
+
+    def test_prepare_rejects_instance_id_mismatch_without_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-prepare-id-a", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-prepare-id-b",
+            shared_root=self.runtime_root,
+        )
+        snapshot_before = self._runtime_state_snapshot()
+        instance_before = instance_json.read_text(encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            self._prepare("Draft onboarding PRD", env=env)
+
+        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
+        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
+
+    def test_prepare_rejects_existing_task_owned_by_other_buddy_without_writes(self) -> None:
+        env_store.create_task("task-owned-by-dev", "Task Owned By Dev", buddy="dev")
+
+        instance_json = self._write_instance_json(
+            instance_id="inst-ut-prepare-task-buddy-conflict",
+            buddy="pm",
+            current_task_id="task-owned-by-dev",
+        )
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-prepare-task-buddy-conflict",
+            shared_root=self.runtime_root,
+        )
+        snapshot_before = self._runtime_state_snapshot()
+        instance_before = instance_json.read_text(encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            self._prepare("Continue onboarding PRD", env=env)
+
+        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
+        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
+
+    def test_prepare_rejects_track_binding_conflict_before_creating_missing_explicit_track(self) -> None:
+        env_store.create_track("track-binding-a", "Track Binding A", current_buddy="pm")
+        env_store.create_task(
+            "task-binding-conflict-missing-track",
+            "Task Binding Conflict Missing Track",
+            buddy="pm",
+            track_id="track-binding-a",
+        )
+        env_store.register_task_to_track("track-binding-a", "task-binding-conflict-missing-track")
+
+        instance_json = self._write_instance_json(
+            instance_id="inst-ut-prepare-binding-conflict-missing-track",
+            buddy="pm",
+            current_task_id="task-binding-conflict-missing-track",
+            current_track_id="track-binding-new",
+        )
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-prepare-binding-conflict-missing-track",
+            shared_root=self.runtime_root,
+        )
+        snapshot_before = self._runtime_state_snapshot()
+        instance_before = instance_json.read_text(encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            self._prepare("Continue onboarding PRD", env=env)
+
+        self.assertFalse(self._runtime_path("buddyswitch/objects/tracks/track-binding-new.json").exists())
+        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
+        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
+
+    def test_prepare_rejects_task_track_binding_conflict_without_writes(self) -> None:
+        env_store.create_track("track-binding-a", "Track Binding A", current_buddy="pm")
+        env_store.create_track("track-binding-b", "Track Binding B", current_buddy="pm")
+        env_store.create_task(
+            "task-binding-conflict",
+            "Task Binding Conflict",
+            buddy="pm",
+            track_id="track-binding-a",
+        )
+        env_store.register_task_to_track("track-binding-a", "task-binding-conflict")
+
+        instance_json = self._write_instance_json(
+            instance_id="inst-ut-prepare-binding-conflict",
+            buddy="pm",
+            current_task_id="task-binding-conflict",
+            current_track_id="track-binding-b",
+        )
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-prepare-binding-conflict",
+            shared_root=self.runtime_root,
+        )
+        snapshot_before = self._runtime_state_snapshot()
+        instance_before = instance_json.read_text(encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            self._prepare("Continue onboarding PRD", env=env)
+
+        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
+        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
+
     def test_persist_validates_skill_id_from_active_buddy_manifest_membership(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-07", buddy="pm")
         env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-07", shared_root=self.runtime_root)
@@ -600,6 +891,245 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         for tampered in tamper_cases:
             with self.subTest(tamper=tampered.get("request_text", "case")):
                 self._assert_persist_rejected_without_writes(tampered, skill_id="write-prd", env=env)
+
+    def test_persist_rejects_context_payload_not_ok_without_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-persist-context-not-ok", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-persist-context-not-ok",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Draft onboarding PRD", env=env)
+        self.assertTrue(context["ok"])
+
+        invalid_context = deepcopy(context)
+        invalid_context["ok"] = False
+        invalid_context["error"] = {"code": "E_FORCED_TEST", "message": "forced invalid context"}
+        self._assert_persist_rejected_without_writes(invalid_context, skill_id="write-prd", env=env)
+
+    def test_persist_rejects_stale_context_revision_without_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-persist-stale-revision", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-persist-stale-revision",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Draft onboarding PRD", env=env)
+        self.assertTrue(context["ok"])
+
+        stale_context = deepcopy(context)
+        stale_context["context_revision"] = f"{context['context_revision']}-stale"
+        self._assert_persist_rejected_without_writes(stale_context, skill_id="write-prd", env=env)
+
+    def test_persist_rejects_run_reservation_context_revision_mismatch_without_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-persist-reservation-mismatch", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-persist-reservation-mismatch",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Draft onboarding PRD", env=env)
+        self.assertTrue(context["ok"])
+
+        run_envelope = context.get("run_envelope")
+        self.assertIsInstance(run_envelope, dict)
+        assert isinstance(run_envelope, dict)
+        run_id = run_envelope["run_id"]
+        reservation_path = self._runtime_path(f"buddyswitch/content/runs/reserved/{run_id}.json")
+        reservation_payload = json.loads(reservation_path.read_text(encoding="utf-8"))
+        self.assertIsInstance(reservation_payload, dict)
+        assert isinstance(reservation_payload, dict)
+        reservation_payload["context_revision"] = "task-pm-stale:999"
+        reservation_path.write_text(
+            json.dumps(reservation_payload, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        self._assert_persist_rejected_without_writes(context, skill_id="write-prd", env=env)
+
+    def test_persist_rejects_duplicate_run_id_without_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-persist-duplicate-run", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-persist-duplicate-run",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Draft onboarding PRD", env=env)
+        self.assertTrue(context["ok"])
+
+        run_envelope = context.get("run_envelope")
+        self.assertIsInstance(run_envelope, dict)
+        assert isinstance(run_envelope, dict)
+        run_id = run_envelope["run_id"]
+        duplicate_run_path = self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")
+        duplicate_run_path.parent.mkdir(parents=True, exist_ok=True)
+        duplicate_run_path.write_text(
+            json.dumps({"run_id": run_id, "current_task_id": context["current_task_id"]}, ensure_ascii=True, indent=2)
+            + "\n",
+            encoding="utf-8",
+        )
+
+        self._assert_persist_rejected_without_writes(context, skill_id="write-prd", env=env)
+
+    def test_persist_rejects_selected_skill_without_output_slot_without_writes(self) -> None:
+        turn_runtime = _load_turn_runtime()
+        instance_json = self._write_instance_json(instance_id="inst-ut-persist-missing-output-slot", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-persist-missing-output-slot",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Draft onboarding PRD", env=env)
+        self.assertTrue(context["ok"])
+
+        with patch.object(
+            turn_runtime,
+            "_resolve_execution_skill",
+            return_value={
+                "id": "write-prd",
+                "persistence": {
+                    "produces_artifact": True,
+                    "output_schema": "framework/schemas/pm/pm-result.json",
+                },
+            },
+        ):
+            self._assert_persist_rejected_without_writes(context, skill_id="write-prd", env=env)
+
+    def test_persist_rejects_non_pm_track_operation_without_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-persist-non-pm-track-effect", buddy="dev")
+        env = self._product_env(
+            instance_json,
+            buddy="dev",
+            instance_id="inst-ut-persist-non-pm-track-effect",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Implement onboarding behavior", env=env)
+        self.assertTrue(context["ok"])
+
+        invalid_result = self._track_manager_result_payload(
+            action="create",
+            track_id="track-dev-forbidden",
+            current_buddy="pm",
+            next_buddy="test",
+            execution_summary="Attempted non-PM track mutation.",
+        )
+        self._assert_persist_rejected_without_writes(
+            context,
+            skill_id="implement-task",
+            result=invalid_result,
+            env=env,
+        )
+
+    def test_persist_rejects_invalid_track_operation_action_without_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-persist-invalid-track-action", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-persist-invalid-track-action",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Create onboarding delivery track", env=env)
+        self.assertTrue(context["ok"])
+
+        invalid_result = self._track_manager_result_payload(
+            action="reopen",
+            track_id="track-invalid-action",
+            execution_summary="Attempted invalid track action.",
+        )
+        self._assert_persist_rejected_without_writes(
+            context,
+            skill_id="track-manager",
+            result=invalid_result,
+            env=env,
+        )
+
+    def test_persist_rejects_track_operation_track_binding_conflict_without_writes(self) -> None:
+        env_store.create_track("track-binding-main", "Track Binding Main", current_buddy="pm")
+        env_store.create_track("track-binding-other", "Track Binding Other", current_buddy="pm")
+        env_store.create_task(
+            "task-track-binding-main",
+            "Task Track Binding Main",
+            buddy="pm",
+            track_id="track-binding-main",
+        )
+        env_store.register_task_to_track("track-binding-main", "task-track-binding-main")
+
+        instance_json = self._write_instance_json(
+            instance_id="inst-ut-persist-track-binding-conflict",
+            buddy="pm",
+            current_task_id="task-track-binding-main",
+            current_track_id="track-binding-main",
+        )
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-persist-track-binding-conflict",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Update onboarding delivery track", env=env)
+        self.assertTrue(context["ok"])
+        self.assertEqual(context["current_track_id"], "track-binding-main")
+
+        invalid_result = self._track_manager_result_payload(
+            action="update",
+            track_id="track-binding-other",
+            title="Wrong Track",
+            execution_summary="Attempted conflicting track update.",
+        )
+        self._assert_persist_rejected_without_writes(
+            context,
+            skill_id="track-manager",
+            result=invalid_result,
+            env=env,
+        )
+
+    def test_persist_rejects_pm_track_operation_with_invalid_buddy_ids_without_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-persist-invalid-track-buddy", buddy="pm")
+        env = self._product_env(
+            instance_json,
+            buddy="pm",
+            instance_id="inst-ut-persist-invalid-track-buddy",
+            shared_root=self.runtime_root,
+        )
+        context = self._prepare("Create onboarding delivery track", env=env)
+        self.assertTrue(context["ok"])
+
+        invalid_cases = (
+            (
+                "invalid-current-buddy",
+                self._track_manager_result_payload(
+                    action="create",
+                    track_id="track-invalid-current",
+                    current_buddy="pm-unknown",
+                    next_buddy="design",
+                    execution_summary="Attempted invalid current_buddy.",
+                ),
+            ),
+            (
+                "invalid-next-buddy",
+                self._track_manager_result_payload(
+                    action="create",
+                    track_id="track-invalid-next",
+                    current_buddy="pm",
+                    next_buddy="design-unknown",
+                    execution_summary="Attempted invalid next_buddy.",
+                ),
+            ),
+        )
+
+        for label, invalid_result in invalid_cases:
+            with self.subTest(case=label):
+                self._assert_persist_rejected_without_writes(
+                    context,
+                    skill_id="track-manager",
+                    result=invalid_result,
+                    env=env,
+                )
 
     def test_successful_persist_returns_structured_receipt_contract(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-09", buddy="pm")
@@ -692,25 +1222,39 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
                     result_payload["deliverables_or_changed_files"],
                 )
 
-    def test_persist_rejects_missing_required_buddy_field_without_partial_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-dev-invalid", buddy="dev")
+    def test_persist_accepts_minimum_write_safe_result(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-dev-minimum", buddy="dev")
         env = self._product_env(
             instance_json,
             buddy="dev",
-            instance_id="inst-ut-dev-invalid",
+            instance_id="inst-ut-dev-minimum",
             shared_root=self.runtime_root,
         )
         context = self._prepare("Implement onboarding behavior", env=env)
         self.assertTrue(context["ok"])
 
-        invalid_result = self._dev_result_payload()
-        invalid_result["artifact_content"].pop("verification")
-        snapshot_before = self._runtime_state_snapshot()
-        instance_before = instance_json.read_text(encoding="utf-8")
-        with self.assertRaises(ValueError):
-            self._persist(context, skill_id="implement-task", result=invalid_result, env=env)
-        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
+        minimum_result = {
+            "execution_summary": "Saved implementation note.",
+            "working_notes": [],
+            "deliverables_or_changed_files": [],
+            "artifact_content": {
+                "summary": "Saved implementation note.",
+                "freeform": {
+                    "community_output": "This content does not need full buddy schema completeness.",
+                },
+            },
+        }
+
+        payload = self._persist(context, skill_id="implement-task", result=minimum_result, env=env)
+        self.assertTrue(payload["ok"])
+        receipt = payload["receipt"]
+        self.assertIsInstance(receipt, dict)
+        assert isinstance(receipt, dict)
+        artifact_object = self._load_runtime_json(receipt["receipt_paths"]["artifacts"][0])
+        self.assertEqual(artifact_object["summary"], minimum_result["execution_summary"])
+        self.assertEqual(artifact_object["content"], minimum_result["artifact_content"])
+        run_audit = self._load_runtime_json(receipt["receipt_paths"]["run"])
+        self.assertEqual(run_audit["execution_summary"], minimum_result["execution_summary"])
 
     def test_community_skill_direct_buddy_result_persists_with_native_skill_id(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
@@ -823,7 +1367,7 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
             self.assertIsInstance(receipt.get("track_id"), str)
             self.assertIsInstance(receipt.get("track_title"), str)
 
-    def test_persist_rejects_top_level_runtime_metadata_in_skill_payload(self) -> None:
+    def test_persist_ignores_extra_top_level_runtime_metadata_and_keeps_context_authoritative(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-09-boundary", buddy="pm")
         env = self._product_env(
             instance_json,
@@ -834,42 +1378,109 @@ class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase)
         context = self._prepare("Draft onboarding PRD", env=env)
         self.assertTrue(context["ok"])
 
-        snapshot_before = self._runtime_state_snapshot()
-        instance_before = instance_json.read_text(encoding="utf-8")
-        invalid_result = self._pm_result_payload()
-        invalid_result["task_id"] = "task-should-not-be-accepted"
-        with self.assertRaises(ValueError):
-            self._persist(context, skill_id="write-prd", result=invalid_result, env=env)
-        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
-
-        valid_result = self._pm_result_payload()
-        payload = self._persist(context, skill_id="write-prd", result=valid_result, env=env)
+        result_with_extra_runtime_field = self._pm_result_payload()
+        result_with_extra_runtime_field["task_id"] = "task-should-not-be-accepted"
+        payload = self._persist(context, skill_id="write-prd", result=result_with_extra_runtime_field, env=env)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["receipt"]["task_id"], context["current_task_id"])
 
-    def test_persist_rejects_wrong_buddy_result_schema_without_partial_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-09-wrong-schema", buddy="pm")
+    def test_persist_accepts_missing_output_schema_file_when_result_is_write_safe(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            manifest_path = self._write_prepare_boundary_manifest(
+                Path(temp_dir),
+                pm_output_schema="framework/schemas/pm/missing-runtime-gate.json",
+            )
+            instance_json = self._write_instance_json(instance_id="inst-ut-09-missing-schema", buddy="pm")
+            env = self._product_env(
+                instance_json,
+                buddy="pm",
+                instance_id="inst-ut-09-missing-schema",
+                shared_root=self.runtime_root,
+            )
+            context = self._prepare("Draft onboarding PRD", env=env, manifest_path=manifest_path)
+            self.assertTrue(context["ok"])
+
+            minimum_result = {
+                "execution_summary": "Saved PM implementation summary.",
+                "working_notes": [],
+                "deliverables_or_changed_files": [],
+                "artifact_content": {
+                    "summary": "Saved PM implementation summary.",
+                    "freeform": {
+                        "community_output": "Missing output_schema file should not block safe writes.",
+                    },
+                },
+            }
+            payload = self._persist(
+                context,
+                skill_id="write-prd",
+                result=minimum_result,
+                env=env,
+                manifest_path=manifest_path,
+            )
+
+        self.assertTrue(payload["ok"])
+        receipt = payload["receipt"]
+        self.assertIsInstance(receipt, dict)
+        assert isinstance(receipt, dict)
+        artifact_object = self._load_runtime_json(receipt["receipt_paths"]["artifacts"][0])
+        self.assertEqual(artifact_object["content"], minimum_result["artifact_content"])
+
+    def test_persist_rejects_invalid_minimum_write_shape_without_partial_writes(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-ut-09-invalid-min-shape", buddy="pm")
         env = self._product_env(
             instance_json,
             buddy="pm",
-            instance_id="inst-ut-09-wrong-schema",
+            instance_id="inst-ut-09-invalid-min-shape",
             shared_root=self.runtime_root,
         )
         context = self._prepare("Draft onboarding PRD", env=env)
         self.assertTrue(context["ok"])
 
-        snapshot_before = self._runtime_state_snapshot()
-        instance_before = instance_json.read_text(encoding="utf-8")
-        with self.assertRaises(ValueError):
-            self._persist(
-                context,
-                skill_id="write-prd",
-                result=self._market_result_payload(),
-                env=env,
-            )
-        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
+        invalid_payloads = [
+            {
+                "execution_summary": "",
+                "working_notes": [],
+                "deliverables_or_changed_files": [],
+                "artifact_content": {},
+            },
+            {
+                "execution_summary": "Has summary",
+                "working_notes": "not-a-list",
+                "deliverables_or_changed_files": [],
+                "artifact_content": {},
+            },
+            {
+                "execution_summary": "Has summary",
+                "working_notes": [],
+                "deliverables_or_changed_files": "not-a-list",
+                "artifact_content": {},
+            },
+            {
+                "execution_summary": "Has summary",
+                "working_notes": [],
+                "deliverables_or_changed_files": [],
+            },
+            {
+                "execution_summary": "Has summary",
+                "working_notes": [],
+                "deliverables_or_changed_files": [],
+                "artifact_content": "not-an-object",
+            },
+        ]
+        for invalid_payload in invalid_payloads:
+            with self.subTest(payload=invalid_payload):
+                snapshot_before = self._runtime_state_snapshot()
+                instance_before = instance_json.read_text(encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    self._persist(
+                        context,
+                        skill_id="write-prd",
+                        result=invalid_payload,
+                        env=env,
+                    )
+                self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
+                self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
 
     def test_persist_rejects_retired_top_level_track_operation_before_durable_writes(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-ut-09-retired-track-payload", buddy="pm")

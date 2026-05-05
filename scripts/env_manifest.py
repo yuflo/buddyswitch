@@ -2,7 +2,7 @@
 """Load and validate the BuddySwitch env manifest.
 
 Manifest skill entries define buddy membership and persistence contract only.
-Codex-native skill metadata is validated from package `SKILL.md` frontmatter.
+Codex-native package acceptance is owned by Codex after materialization.
 """
 
 from __future__ import annotations
@@ -19,14 +19,9 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
     tomllib = None  # type: ignore[assignment]
 
-from output_schema import OutputSchemaError, normalize_schema_path
-
-
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 _BUDDY_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
-_FRONTMATTER_OPEN = "---"
-_FRONTMATTER_CLOSE = "---"
 ADVISORY_RUNTIME_METADATA_POLICY = "advisory"
 DEBUG_API_PERMISSION_SCOPE = "manual_debug_apis"
 # Retained for compatibility with older turn-runtime imports.
@@ -240,79 +235,6 @@ def _validate_permission(permission: str, label: str) -> None:
         raise ManifestError(f"{label} permission '{permission}' has empty action")
 
 
-def _unwrap_quoted_scalar(value: str) -> str:
-    if len(value) >= 2 and ((value[0] == '"' and value[-1] == '"') or (value[0] == "'" and value[-1] == "'")):
-        return value[1:-1]
-    return value
-
-
-def _parse_skill_frontmatter(skill_md: Path) -> dict[str, str]:
-    text = skill_md.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != _FRONTMATTER_OPEN:
-        raise ManifestError(f"{skill_md.relative_to(ROOT)} must start with YAML frontmatter")
-
-    close_index = None
-    for index in range(1, len(lines)):
-        if lines[index].strip() == _FRONTMATTER_CLOSE:
-            close_index = index
-            break
-    if close_index is None:
-        raise ManifestError(f"{skill_md.relative_to(ROOT)} frontmatter must end with closing '---'")
-
-    parsed: dict[str, str] = {}
-    for raw in lines[1:close_index]:
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if ":" not in line:
-            raise ManifestError(f"{skill_md.relative_to(ROOT)} frontmatter line must use key: value syntax: '{raw}'")
-        key, value = line.split(":", 1)
-        key = key.strip()
-        value = _unwrap_quoted_scalar(value.strip())
-        if not key:
-            raise ManifestError(f"{skill_md.relative_to(ROOT)} frontmatter key must not be empty")
-        parsed[key] = value
-    return parsed
-
-
-def _resolve_skill_package_root(skill_path: str, label: str) -> Path:
-    path_obj = Path(skill_path)
-    if path_obj.is_absolute():
-        raise ManifestError(f"{label}.path must be repo-relative, got absolute path: {skill_path}")
-    resolved = (ROOT / path_obj).resolve(strict=False)
-    try:
-        resolved.relative_to(ROOT)
-    except ValueError as exc:
-        raise ManifestError(f"{label}.path must stay within repository root: {skill_path}") from exc
-    return resolved
-
-
-def _validate_skill_package(package_root: Path, skill_id: str) -> None:
-    if not package_root.exists() or not package_root.is_dir():
-        raise ManifestError(f"Skill package not found: {package_root.relative_to(ROOT)}")
-
-    skill_toml = package_root / "skill.toml"
-    if skill_toml.exists():
-        raise ManifestError(f"{skill_toml.relative_to(ROOT)} is not allowed; use SKILL.md frontmatter only")
-
-    skill_md = package_root / "SKILL.md"
-    if not skill_md.exists() or not skill_md.is_file():
-        raise ManifestError(f"{skill_md.relative_to(ROOT)} not found")
-
-    parsed = _parse_skill_frontmatter(skill_md)
-    name = parsed.get("name", "").strip()
-    if not name:
-        raise ManifestError(f"{skill_md.relative_to(ROOT)} frontmatter must include non-empty name")
-    if name != skill_id:
-        raise ManifestError(
-            f"{skill_md.relative_to(ROOT)} frontmatter name '{name}' must match manifest skill id '{skill_id}'"
-        )
-    description = parsed.get("description", "").strip()
-    if not description:
-        raise ManifestError(f"{skill_md.relative_to(ROOT)} frontmatter must include non-empty description")
-
-
 def _parse_skill_persistence(skill: dict[str, Any], label: str, skill_id: str) -> dict[str, Any]:
     produces_artifact = skill.get("produces_artifact")
     if not isinstance(produces_artifact, bool):
@@ -321,12 +243,7 @@ def _parse_skill_persistence(skill: dict[str, Any], label: str, skill_id: str) -
     output_schema_raw = skill.get("output_schema")
     if not isinstance(output_schema_raw, str) or not output_schema_raw.strip():
         raise ManifestError(f"{label}.output_schema must be a non-empty string")
-    try:
-        output_schema = normalize_schema_path(output_schema_raw.strip())
-    except OutputSchemaError as exc:
-        raise ManifestError(f"{label}.output_schema invalid: {exc}") from exc
-    if not (ROOT / output_schema).exists():
-        raise ManifestError(f"{label}.output_schema file not found: {output_schema}")
+    output_schema = output_schema_raw.strip()
 
     output_slot_raw = skill.get("output_slot")
     if not produces_artifact:
@@ -375,9 +292,6 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         skill_ids.add(skill_id)
 
         skill_path = _require_string(skill, "path", label)
-        package_root = _resolve_skill_package_root(skill_path, label)
-        _validate_skill_package(package_root, skill_id)
-
         persistence = _parse_skill_persistence(skill, label, skill_id)
         skill["path"] = skill_path
         skill["persistence"] = persistence

@@ -1,77 +1,69 @@
-# Community Skill Package Validation Memo
+# Community Skill Runtime Validation Memo
 
 Date: 2026-05-03
 Worktree: `dev0210`
 
 ## Purpose
 
-Record the compatibility boundary for importing community Codex-native skills into BuddySwitch.
+This memo records the runtime validation boundary for community Codex-native skills across three BuddySwitch points:
 
-This memo focuses only on whether a community `SKILL.md` package must be rewritten or shaped differently to work in BuddySwitch. It does not treat manifest registration, buddy membership, or launcher selection as community-skill compatibility problems.
+1. instance startup skill materialization;
+2. product request `prepare`;
+3. result `persist`.
 
-## Confirmed Current Behavior
+The rule is direct: keep only checks that prevent the current chain from running wrong or writing bad state. Remove checks that only prove package style, readiness, or content quality.
 
-BuddySwitch currently materializes skills through this path:
+## Runtime Gates
 
-1. The launcher reads the skill path from `buddyswitch/manifest.toml`.
-2. BuddySwitch validates the skill package.
-3. BuddySwitch copies the package into the runtime instance at `.agents/skills/<skill-id>`.
-4. Codex CLI discovers and executes the skill from `.agents/skills`.
+### Gate 1: Materialization (instance startup)
 
-This means Codex CLI is responsible for native skill execution, but BuddySwitch still performs an admission check before Codex CLI can see the skill.
+BuddySwitch validates only copy boundaries:
 
-## Current Compatibility Risk
+- active buddy and skill ids are declared in manifest;
+- skill id/path/source/workspace/target boundaries are safe;
+- runtime target is `workspace/.agents/skills` and not a symlink write target;
+- package copy preserves opaque content for Codex to evaluate.
 
-The current admission check mixes two different responsibilities:
+BuddySwitch does not validate package file format at this gate.
 
-- Safe materialization: BuddySwitch must ensure source and target paths do not escape the intended workspace boundaries.
-- Skill semantic validation: BuddySwitch currently inspects `SKILL.md` content and metadata before handing it to Codex CLI.
+### Gate 2: Prepare
 
-Only the first responsibility belongs in BuddySwitch.
+`prepare` validates only turn-context and reservation safety:
 
-The second responsibility should belong to Codex CLI because the target state is native Codex skill execution. If BuddySwitch rejects a package because of its own simplified interpretation of `SKILL.md`, then community skill compatibility is constrained by BuddySwitch instead of Codex CLI.
+- product session identity is complete and consistent;
+- active buddy exists;
+- explicit task/track bindings do not conflict;
+- run reservation is created safely.
 
-Current BuddySwitch-specific checks that can become compatibility blockers:
+`prepare` does not validate package/source readiness, `SKILL.md`, or output schema file readiness.
 
-- `SKILL.md` frontmatter is parsed by BuddySwitch's simplified parser.
-- `name` must exactly match the manifest skill id.
-- `description` must be present and non-empty.
-- `skill.toml` is rejected.
-- Symlink package contents are rejected.
-- Skill paths must be repo-relative and stay under the repo root.
+### Gate 3: Persist
 
-The path and workspace-boundary checks are materialization safety checks. The `SKILL.md` semantic checks are the part that should be removed or delegated to Codex CLI.
+`persist` validates only write safety:
 
-## Target Boundary
+- context and reservation identity are current;
+- selected `skill_id` belongs to the active buddy;
+- selected skill has required runtime persistence fields (notably non-empty `output_slot`);
+- result payload has minimum writable shape;
+- PM-only `state_effects.track_operation` safety checks pass.
 
-BuddySwitch should treat a community skill package as an opaque directory for execution purposes.
+`persist` does not treat full schema completeness as a runtime write gate.
 
-BuddySwitch should validate only:
+## Boundary Summary
 
-- the configured source path is allowed;
-- the source path can be copied safely;
-- the runtime target is exactly the intended `.agents/skills` directory;
-- materialization cannot read from or write to unexpected filesystem locations.
+BuddySwitch should not validate community skill package contents. Codex CLI owns package acceptance after packages are materialized into `.agents/skills`.
 
-BuddySwitch should not validate:
+BuddySwitch validates:
 
-- whether `SKILL.md` frontmatter is valid;
-- which frontmatter fields are allowed;
-- whether `name` matches the manifest id;
-- whether a legacy or extra metadata file exists, unless copying it creates a concrete security or isolation risk.
+- materialization path and target boundaries during instance startup;
+- turn context and reservation safety during `prepare`;
+- write safety during `persist`.
 
-Those checks should be left to Codex CLI's native skill loader.
+BuddySwitch does not validate:
 
-## Separate Persist Compatibility Issue
-
-The larger product compatibility issue is still persist output, not package format.
-
-A community skill can be natively executed by Codex CLI but still fail to become a valid BuddySwitch product result if it does not produce the JSON result expected by BuddySwitch persistence.
-
-That issue is separate from package materialization. It should be solved by making BuddySwitch persistence accept or wrap native skill output, not by requiring every community skill to be rewritten around BuddySwitch-specific schemas.
-
-## Working Conclusion
-
-`dev0210` has moved execution to Codex-native skills, but BuddySwitch still has unnecessary package-format gatekeeping before execution.
-
-For the target community-skill experience, BuddySwitch should keep only filesystem safety checks during materialization and should stop applying its own `SKILL.md` compatibility rules.
+- `SKILL.md` frontmatter;
+- `name` / `description` metadata;
+- `skill.toml` presence;
+- package file layout;
+- package content symlinks;
+- full artifact content quality during runtime persistence.

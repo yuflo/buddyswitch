@@ -114,26 +114,6 @@ def _validate_repo_relative_skill_path(raw_path: str) -> Path:
     return resolved
 
 
-def _validate_package_contents(package_root: Path) -> None:
-    skill_md = package_root / "SKILL.md"
-    if not skill_md.exists() or not skill_md.is_file():
-        raise RuntimeSkillsError(f"missing SKILL.md in skill package: {package_root.relative_to(ROOT)}")
-    if (package_root / "skill.toml").exists():
-        raise RuntimeSkillsError(
-            f"dual metadata is not allowed; remove skill.toml: {(package_root / 'skill.toml').relative_to(ROOT)}"
-        )
-    # Leading YAML frontmatter is required by Codex native skill loader.
-    lines = skill_md.read_text(encoding="utf-8").splitlines()
-    if not lines or lines[0].strip() != "---":
-        raise RuntimeSkillsError(f"SKILL.md must start with YAML frontmatter: {skill_md.relative_to(ROOT)}")
-    if not any(line.strip() == "---" for line in lines[1:]):
-        raise RuntimeSkillsError(f"SKILL.md frontmatter must include closing delimiter: {skill_md.relative_to(ROOT)}")
-
-    for path in package_root.rglob("*"):
-        if path.is_symlink():
-            raise RuntimeSkillsError(f"skill package content must not contain symlinks: {path.relative_to(ROOT)}")
-
-
 def _build_install_plan(*, manifest_path: Path, buddy_id: str) -> list[InstallEntry]:
     manifest = load_manifest(manifest_path)
     buddy = require_buddy(manifest, buddy_id)
@@ -149,7 +129,6 @@ def _build_install_plan(*, manifest_path: Path, buddy_id: str) -> list[InstallEn
         if not isinstance(raw_path, str) or not raw_path.strip():
             raise RuntimeSkillsError(f"manifest skill '{skill_id}' must define repo-relative path")
         source = _validate_repo_relative_skill_path(raw_path.strip())
-        _validate_package_contents(source)
         install_entries.append(InstallEntry(skill_id=skill_id, source=source))
 
     if not install_entries:
@@ -169,7 +148,7 @@ def install_runtime_skills(*, manifest_path: Path, buddy_id: str, workspace: Pat
     installed: list[str] = []
     for entry in plan:
         target_dir = skills_dir / entry.skill_id
-        shutil.copytree(entry.source, target_dir)
+        shutil.copytree(entry.source, target_dir, symlinks=True)
         installed.append(entry.skill_id)
     return installed
 

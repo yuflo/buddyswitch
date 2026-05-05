@@ -31,6 +31,7 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
         *,
         skill_id: str,
         description: str,
+        with_skill_md: bool = True,
         with_frontmatter: bool = True,
         with_skill_toml: bool = False,
         with_asset: bool = False,
@@ -38,20 +39,22 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
     ) -> Path:
         package_root = root / "skills" / skill_id
         package_root.mkdir(parents=True, exist_ok=True)
-        if with_frontmatter:
-            text = textwrap.dedent(
-                f"""\
-                ---
-                name: {skill_id}
-                description: {description}
-                ---
+        text = ""
+        if with_skill_md:
+            if with_frontmatter:
+                text = textwrap.dedent(
+                    f"""\
+                    ---
+                    name: {skill_id}
+                    description: {description}
+                    ---
 
-                # {skill_id}
-                """
-            )
-        else:
-            text = f"# {skill_id}\n"
-        (package_root / "SKILL.md").write_text(text, encoding="utf-8")
+                    # {skill_id}
+                    """
+                )
+            else:
+                text = f"# {skill_id}\n"
+            (package_root / "SKILL.md").write_text(text, encoding="utf-8")
 
         if with_skill_toml:
             (package_root / "skill.toml").write_text('id = "legacy"\n', encoding="utf-8")
@@ -62,6 +65,8 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             (assets_dir / f"{skill_id}.md").write_text(f"template-{skill_id}\n", encoding="utf-8")
 
         if symlink_child:
+            if not with_skill_md:
+                raise AssertionError("symlink_child requires with_skill_md=True")
             target = package_root / "SKILL.md"
             os.remove(target)
             (package_root / "linked.md").write_text(text, encoding="utf-8")
@@ -300,56 +305,78 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             self.assertFalse((runtime_skills / "stale-skill").exists())
             self.assertTrue((runtime_skills / "shape-prototype" / "SKILL.md").exists())
 
-    def test_install_fails_before_mutation_when_source_package_is_unsafe(self) -> None:
+    def test_install_materializes_opaque_community_package_contents(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             temp_root = Path(temp_dir)
             skills_root = temp_root / "packages"
-            write_prd = self._write_skill_package(skills_root, skill_id="write-prd", description="Write PRD")
-            manifest_ok = self._write_manifest(
+            community_skill = self._write_skill_package(
+                skills_root,
+                skill_id="community-skill",
+                description="Community package",
+                with_frontmatter=False,
+                with_skill_toml=True,
+            )
+            (community_skill / "notes.txt").write_text("preserve me\n", encoding="utf-8")
+            (community_skill / "linked-notes.txt").symlink_to("notes.txt")
+            manifest = self._write_manifest(
                 temp_root,
                 skills=[
                     {
-                        "id": "write-prd",
-                        "path": write_prd.relative_to(ROOT).as_posix(),
+                        "id": "community-skill",
+                        "path": community_skill.relative_to(ROOT).as_posix(),
                         "produces_artifact": "true",
-                        "output_slot": "prd",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
+                        "output_slot": "community-output",
+                        "output_schema": "framework/schemas/dev/dev-result.json",
                     }
                 ],
-                buddies={"pm": ["write-prd"]},
+                buddies={"dev": ["community-skill"]},
             )
             workspace = temp_root / "workspace"
             workspace.mkdir(parents=True, exist_ok=True)
-            first = self._run_install(manifest=manifest_ok, buddy="pm", workspace=workspace)
-            self.assertEqual(first.returncode, 0, msg=first.stderr)
 
-            before_payload = (workspace / ".agents" / "skills" / "write-prd" / "SKILL.md").read_text(encoding="utf-8")
+            completed = self._run_install(manifest=manifest, buddy="dev", workspace=workspace)
 
-            bad = self._write_skill_package(
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            installed = workspace / ".agents" / "skills" / "community-skill"
+            self.assertTrue((installed / "SKILL.md").exists())
+            self.assertTrue((installed / "skill.toml").exists())
+            self.assertTrue((installed / "linked-notes.txt").is_symlink())
+            self.assertEqual((installed / "linked-notes.txt").readlink(), Path("notes.txt"))
+
+    def test_install_does_not_require_skill_md_for_buddyswitch_materialization(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            temp_root = Path(temp_dir)
+            skills_root = temp_root / "packages"
+            opaque_package = self._write_skill_package(
                 skills_root,
-                skill_id="bad-skill",
-                description="Bad",
-                with_frontmatter=False,
+                skill_id="opaque-dir",
+                description="Opaque package",
+                with_skill_md=False,
             )
-            manifest_bad = self._write_manifest(
+            (opaque_package / "README.md").write_text(
+                "Codex will decide if this package is executable.\n",
+                encoding="utf-8",
+            )
+            manifest = self._write_manifest(
                 temp_root,
                 skills=[
                     {
-                        "id": "bad-skill",
-                        "path": bad.relative_to(ROOT).as_posix(),
+                        "id": "opaque-dir",
+                        "path": opaque_package.relative_to(ROOT).as_posix(),
                         "produces_artifact": "true",
-                        "output_slot": "prd",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
+                        "output_slot": "opaque-output",
+                        "output_schema": "framework/schemas/dev/dev-result.json",
                     }
                 ],
-                buddies={"pm": ["bad-skill"]},
+                buddies={"dev": ["opaque-dir"]},
             )
-            failed = self._run_install(manifest=manifest_bad, buddy="pm", workspace=workspace)
-            self.assertNotEqual(failed.returncode, 0)
-            self.assertIn("frontmatter", failed.stderr.lower())
+            workspace = temp_root / "workspace"
+            workspace.mkdir(parents=True, exist_ok=True)
 
-            after_payload = (workspace / ".agents" / "skills" / "write-prd" / "SKILL.md").read_text(encoding="utf-8")
-            self.assertEqual(before_payload, after_payload)
+            completed = self._run_install(manifest=manifest, buddy="dev", workspace=workspace)
+
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertTrue((workspace / ".agents" / "skills" / "opaque-dir" / "README.md").exists())
 
     def test_install_rejects_unsafe_workspace_and_manifest_paths(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
@@ -447,10 +474,35 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                 manifest=escape_manifest,
                 buddy="pm",
                 workspace=escape_workspace,
-                expected_diagnostic="repository root",
+                expected_diagnostic="must not contain '..'",
             )
             self.assertTrue(sentinel_escape.exists())
             self.assertEqual(sentinel_escape.read_bytes(), sentinel_escape_bytes)
+
+            missing_source_manifest = self._write_manifest(
+                temp_root,
+                skills=[
+                    {
+                        "id": "missing-source",
+                        "path": "missing/source/package",
+                        "produces_artifact": "true",
+                        "output_slot": "missing-source",
+                        "output_schema": "framework/schemas/dev/dev-result.json",
+                    }
+                ],
+                buddies={"pm": ["missing-source"]},
+            )
+            missing_source_workspace = temp_root / "ws-missing-source"
+            missing_source_workspace.mkdir(parents=True, exist_ok=True)
+            sentinel_missing, sentinel_missing_bytes = self._seed_runtime_sentinel(missing_source_workspace)
+            self._assert_install_fails_without_mutation(
+                manifest=missing_source_manifest,
+                buddy="pm",
+                workspace=missing_source_workspace,
+                expected_diagnostic="not found",
+            )
+            self.assertTrue(sentinel_missing.exists())
+            self.assertEqual(sentinel_missing.read_bytes(), sentinel_missing_bytes)
 
     def test_install_runtime_skills_api_rejects_source_checkout_root_workspace(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
@@ -584,38 +636,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             self.assertIn("skill package directory", symlink_pkg_result.stderr.lower())
             self.assertTrue(sentinel_symlink.exists())
             self.assertEqual(sentinel_symlink.read_bytes(), sentinel_symlink_bytes)
-
-            symlink_child_pkg = self._write_skill_package(
-                skills_root,
-                skill_id="linked-child",
-                description="Linked child",
-                symlink_child=True,
-            )
-            symlink_child_manifest = self._write_manifest(
-                temp_root,
-                skills=[
-                    {
-                        "id": "linked-child",
-                        "path": symlink_child_pkg.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "prd",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
-                    }
-                ],
-                buddies={"pm": ["linked-child"]},
-            )
-            symlink_child_workspace = temp_root / "ws-symlink-child"
-            symlink_child_workspace.mkdir(parents=True, exist_ok=True)
-            sentinel_child, sentinel_child_bytes = self._seed_runtime_sentinel(symlink_child_workspace)
-            symlink_child_result = self._assert_install_fails_without_mutation(
-                manifest=symlink_child_manifest,
-                buddy="pm",
-                workspace=symlink_child_workspace,
-                expected_diagnostic="must not contain symlinks",
-            )
-            self.assertIn("skill package content", symlink_child_result.stderr.lower())
-            self.assertTrue(sentinel_child.exists())
-            self.assertEqual(sentinel_child.read_bytes(), sentinel_child_bytes)
 
             real_parent = skills_root / "real-parent"
             parent_link_skill = self._write_skill_package(

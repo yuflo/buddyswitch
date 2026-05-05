@@ -45,7 +45,6 @@ from env_store import (
     slugify,
     update_track,
 )
-from output_schema import OutputSchemaError, load_output_schema, validate_output_payload
 ROOT = env_store.ROOT
 
 
@@ -496,18 +495,17 @@ def _validate_context_revision(context: dict[str, Any]) -> dict[str, Any]:
     return stored_task
 
 
-def _validate_result_against_skill(skill: dict[str, Any], result: dict[str, Any]) -> None:
-    persistence = skill.get("persistence")
-    if not isinstance(persistence, dict):
-        raise ValueError("skill.persistence is required")
-    output_schema = persistence.get("output_schema")
-    if not isinstance(output_schema, str) or not output_schema.strip():
-        raise ValueError(f"skill '{skill.get('id', '<unknown>')}' must define persistence.output_schema")
-
-    schema = load_output_schema(output_schema)
-    errors = validate_output_payload(result, schema)
-    if errors:
-        raise ValueError("result payload failed schema validation: " + "; ".join(errors))
+def _validate_minimum_persist_result(result: dict[str, Any]) -> None:
+    summary = result.get("execution_summary")
+    if not isinstance(summary, str) or not summary.strip():
+        raise ValueError("execution_summary must be a non-empty string")
+    artifact_content = result.get("artifact_content")
+    if not isinstance(artifact_content, dict):
+        raise ValueError("artifact_content must be an object")
+    for key in ("working_notes", "deliverables_or_changed_files"):
+        value = result.get(key)
+        if value is not None and not isinstance(value, list):
+            raise ValueError(f"{key} must be a list when present")
 
 
 def _assert_run_id_unused(run_id: str) -> None:
@@ -880,6 +878,10 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
             raise ValueError(
                 f"Task '{explicit_task_id}' belongs to buddy '{existing_task['buddy']}', not '{active_buddy}'."
             )
+        if explicit_track_id and existing_task.get("track_id") not in {None, explicit_track_id}:
+            raise ValueError(
+                f"Task '{existing_task['id']}' is bound to track '{existing_task['track_id']}', cannot switch to '{explicit_track_id}'."
+            )
 
     if explicit_track_id and get_track(explicit_track_id) is None:
         create_track(
@@ -890,15 +892,6 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
             next_buddy=None,
             summary="",
         )
-
-    if existing_task and explicit_track_id and existing_task.get("track_id") not in {None, explicit_track_id}:
-        raise ValueError(
-            f"Task '{existing_task['id']}' is bound to track '{existing_task['track_id']}', cannot switch to '{explicit_track_id}'."
-        )
-
-    buddy_skill_ids = [row for row in buddy.get("skills", []) if isinstance(row, str)]
-    if not buddy_skill_ids:
-        raise ValueError(f"Buddy '{active_buddy}' currently has no registered skills.")
 
     effective_track_id = explicit_track_id or (existing_task.get("track_id") if existing_task else None)
     if existing_task:
@@ -1121,6 +1114,7 @@ def _validate_track_operation_effect(
     active_buddy: str,
     task: dict[str, Any],
     explicit_track_id: str | None,
+    known_buddy_ids: set[str],
 ) -> dict[str, Any] | None:
     if operation is None:
         return None
@@ -1135,6 +1129,21 @@ def _validate_track_operation_effect(
     for key in ("track_id", "title", "status", "current_buddy", "next_buddy", "summary"):
         if key in operation:
             normalized[key] = operation.get(key)
+
+    for key in ("current_buddy", "next_buddy"):
+        value = normalized.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"state_effects.track_operation.{key} must be a non-empty string when provided")
+        value = value.strip()
+        if value not in known_buddy_ids:
+            valid = ", ".join(sorted(known_buddy_ids))
+            raise ValueError(
+                f"state_effects.track_operation.{key} must reference a manifest buddy id; got '{value}'. "
+                f"Valid: {valid}"
+            )
+        normalized[key] = value
 
     op_track_id = normalized.get("track_id")
     if isinstance(op_track_id, str) and op_track_id.strip():
@@ -1377,6 +1386,7 @@ def _persist_skill_result(
     manifest = load_manifest(manifest_path)
     buddy = require_buddy(manifest, active_buddy)
     allowed_skill_ids = {row for row in buddy.get("skills", []) if isinstance(row, str)}
+    known_buddy_ids = {row.get("id") for row in manifest.get("buddies", []) if isinstance(row, dict) and isinstance(row.get("id"), str)}
     if selected_skill_id not in allowed_skill_ids:
         raise ValueError(f"selected skill_id '{selected_skill_id}' is not allowed for buddy '{active_buddy}'")
 
@@ -1420,12 +1430,13 @@ def _persist_skill_result(
         skill_id=selected_skill_id,
         manifest_path=manifest_path,
     )
-    _validate_result_against_skill(selected_skill, result)
+    _validate_minimum_persist_result(result)
     track_operation = _validate_track_operation_effect(
         operation=_track_operation_from_result(result),
         active_buddy=active_buddy,
         task=stored_task,
         explicit_track_id=current_track_id,
+        known_buddy_ids=known_buddy_ids,
     )
     persist_context = {
         "active_buddy": active_buddy,
@@ -1494,7 +1505,7 @@ def _cmd_prepare(args: argparse.Namespace) -> int:
                     except (OSError, ValueError) as exc:
                         _clear_reservation_from_payload(payload, fail_on_warning=True)
                         raise ValueError(f"instance binding update failed after prepare: {exc}") from exc
-    except (ManifestError, ValueError, OutputSchemaError, OSError) as exc:
+    except (ManifestError, ValueError, OSError) as exc:
         payload = runtime_error("E_RUNTIME_PREPARE", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0 if payload.get("ok") else 1
@@ -1589,7 +1600,7 @@ def _cmd_persist(args: argparse.Namespace) -> int:
                             _write_product_session_binding(product_session, task_id=task_id, track_id=track_id)
                         except (OSError, ValueError) as exc:
                             _mark_committed_binding_update_failed(payload, product_session, exc)
-    except (ManifestError, ValueError, OSError, OutputSchemaError, json.JSONDecodeError) as exc:
+    except (ManifestError, ValueError, OSError, json.JSONDecodeError) as exc:
         payload = runtime_error("E_RUNTIME_PERSIST", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0 if payload.get("ok") else 1

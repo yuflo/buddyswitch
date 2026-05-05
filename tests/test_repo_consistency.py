@@ -783,17 +783,16 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("## track/object handling", text, msg=f"track/object handling should be shared in {path.relative_to(ROOT)}")
                 self.assertNotIn("## output path", text, msg=f"output path should be shared in {path.relative_to(ROOT)}")
 
-    def test_skill_packages_are_codex_native(self) -> None:
-        for package_root in _manifest_skill_package_roots():
-            with self.subTest(package=str(package_root.relative_to(ROOT))):
-                skill_md = package_root / "SKILL.md"
-                self.assertTrue(skill_md.exists(), msg=f"missing SKILL.md in {package_root}")
-                text = skill_md.read_text(encoding="utf-8")
-                self.assertTrue(text.startswith("---\n"), msg=f"missing YAML frontmatter in {skill_md.relative_to(ROOT)}")
-                frontmatter = text.split("---", 2)[1]
-                self.assertIn("\nname:", frontmatter)
-                self.assertIn("\ndescription:", frontmatter)
-                self.assertFalse((package_root / "skill.toml").exists(), msg=f"dual metadata not allowed in {package_root}")
+    def test_manifest_skill_paths_are_declared_for_runtime_materialization(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        for skill in manifest.get("skills", []):
+            if not isinstance(skill, dict):
+                continue
+            with self.subTest(skill=skill.get("id")):
+                path = skill.get("path")
+                self.assertIsInstance(path, str)
+                assert isinstance(path, str)
+                self.assertTrue(path.strip())
 
     def test_manifest_persistence_fields_exist_for_all_skills(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
@@ -1471,17 +1470,6 @@ class RepoConsistencyTests(unittest.TestCase):
                         msg=f"missing specialized section '{expected_key}' in {path.relative_to(ROOT)}",
                     )
 
-    def test_skill_instructions_use_yaml_frontmatter_metadata(self) -> None:
-        for package_root in _manifest_skill_package_roots():
-            with self.subTest(package=str(package_root.relative_to(ROOT))):
-                skill_doc = package_root / "SKILL.md"
-                lines = skill_doc.read_text(encoding="utf-8").splitlines()
-                self.assertTrue(lines, msg=f"empty SKILL.md in {package_root}")
-                self.assertEqual(lines[0].strip(), "---", msg=f"frontmatter required in {skill_doc.relative_to(ROOT)}")
-                header_block = "\n".join(lines[:20])
-                self.assertIn("name:", header_block)
-                self.assertIn("description:", header_block)
-
     def test_template_references_are_materialized_in_assets(self) -> None:
         expected_assets = (
             ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "assets" / "research-report-template.md",
@@ -1503,7 +1491,6 @@ class RepoConsistencyTests(unittest.TestCase):
 
     def test_shape_prototype_package_files_exist(self) -> None:
         self.assertTrue((ROOT / "framework" / "schemas" / "design" / "design-result.json").exists())
-        self.assertFalse((ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "skill.toml").exists())
         self.assertTrue((ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists())
 
     def test_active_docs_use_slot_revision_and_package_contract_language(self) -> None:

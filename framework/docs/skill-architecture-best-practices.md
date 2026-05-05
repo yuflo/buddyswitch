@@ -11,10 +11,9 @@ BuddySwitch is a deterministic control layer around host execution.
 
 ## Package Contract
 
-Each source skill package must include:
-
-- `SKILL.md` with YAML frontmatter (`name`, `description`)
-- no `skill.toml`
+BuddySwitch runtime treats source skill packages as opaque during materialization.
+Codex CLI owns package acceptance after install into runtime `.agents/skills/<skill-id>`.
+Do not treat package file style as a runtime gate.
 
 BuddySwitch-specific persistence contract lives in `buddyswitch/manifest.toml` per `[[skills]]` entry:
 
@@ -34,9 +33,10 @@ BuddySwitch-specific persistence contract lives in `buddyswitch/manifest.toml` p
 
 - `prepare-turn-context` returns context/state/run envelope only.
 - `prepare` does not return skill candidates, instruction paths, or custom skill packets.
+- `prepare` validates context/reservation safety only; it does not gate on package/source/schema readiness.
 - `persist-skill-result` records the Codex `skill_id` and validates membership from active buddy manifest skills.
 - `persist-skill-result` keeps native `skill_id` identity in receipt, artifact, and run audit metadata.
-- `persist-skill-result` validates payload schema from manifest persistence contract.
+- `persist-skill-result` validates write safety minimums (non-empty `execution_summary`, object `artifact_content`, list-shaped optional note fields, and PM track-effect safety). Full schema completeness is guidance unless a field is required for safe writes.
 
 ## Output Discipline
 

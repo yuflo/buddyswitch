@@ -2,6 +2,7 @@
 
 Date: 2026-05-03
 Worktree: `dev0210`
+Status: Historical memo; superseded by 2026-05-05 runtime gate trimming boundary docs for runtime validation behavior.
 
 ## Purpose
 
@@ -55,8 +56,8 @@ external/community SKILL.md
 
 The generated package should preserve the original skill's useful workflow while adding BuddySwitch runtime closing rules such as:
 
-- use the selected buddy-level bridge/template;
-- produce or hand off output in a shape the BuddySwitch bridge can persist;
+- use the selected buddy-level result template;
+- produce output in a shape `persist` can safely write;
 - keep native Codex execution from `.agents/skills`;
 - identify the generated skill by its registered `skill_id`.
 
@@ -72,7 +73,7 @@ Allowed target templates:
 - `market`
 - `design`
 
-After Task 1, these should map to the five buddy-level bridge schemas. The creator should not generate a new skill-specific schema for every imported community skill by default.
+After Task 1, these should map to the five buddy-level result templates. The creator should not generate a new skill-specific schema for every imported community skill by default.
 
 ## Registration Boundary
 
@@ -93,7 +94,7 @@ This task does not include:
 - hot syncing the generated skill into already-created buddy instances;
 - auto-reloading `.agents/skills` inside active instances;
 - parsing Codex CLI transcripts or final responses;
-- replacing Task 1 buddy-level bridge schemas;
+- replacing Task 1 buddy-level result templates;
 - replacing Task 2 `track-manager` despecialization;
 - solving all package-format gatekeeping concerns recorded in `2026-05-03-community-skill-package-validation-memo.md`.
 
@@ -114,10 +115,10 @@ This separation is intentional for this task. Creator output changes repo state;
 This task is complete when:
 
 - A non-BuddySwitch Codex skill can be converted into a generated package under `buddyswitch/skills/<buddy>/<skill-id>/`.
-- The generated package contains a valid `SKILL.md` with the original workflow preserved and BuddySwitch bridge/persist closing rules added.
+- The generated package contains a valid `SKILL.md` with the original workflow preserved and BuddySwitch persist closing rules added.
 - `buddyswitch/manifest.toml` registers the generated skill and attaches it to the selected buddy.
 - A newly created buddy instance for that buddy materializes the generated skill into `.agents/skills/<skill-id>`.
-- The generated skill can be selected and run by Codex CLI in that new instance and can reach the BuddySwitch bridge/persist path expected for the selected template.
+- The generated skill can be selected and run by Codex CLI in that new instance and can reach the BuddySwitch persist path expected for the selected template.
 
 ## Working Conclusion
 
