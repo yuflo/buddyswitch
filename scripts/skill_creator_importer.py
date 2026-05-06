@@ -19,13 +19,6 @@ from env_manifest import DEFAULT_MANIFEST, ManifestError, load_manifest, require
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
-BUDDY_OUTPUT_SCHEMAS = {
-    "pm": "framework/schemas/pm/pm-result.json",
-    "dev": "framework/schemas/dev/dev-result.json",
-    "test": "framework/schemas/test/test-result.json",
-    "market": "framework/schemas/market/market-result.json",
-    "design": "framework/schemas/design/design-result.json",
-}
 
 
 class SkillImportError(ValueError):
@@ -38,8 +31,7 @@ class ImportResult:
     buddy_id: str
     package_path: str
     manifest_path: str
-    output_slot: str
-    output_schema: str
+    artifact_kind: str | None
 
 
 def _normalize_source(source: Path) -> tuple[Path, bool]:
@@ -94,6 +86,17 @@ def _validate_skill_id(skill_id: str) -> str:
     return normalized
 
 
+def _validate_artifact_kind(artifact_kind: str | None) -> str | None:
+    if artifact_kind is None:
+        return None
+    normalized = artifact_kind.strip()
+    if not normalized:
+        raise SkillImportError("artifact kind must be a non-empty string when provided")
+    if not SKILL_ID_RE.match(normalized):
+        raise SkillImportError(f"invalid artifact kind '{artifact_kind}': expected /^[a-z][a-z0-9-]*$/")
+    return normalized
+
+
 def _derive_skill_id(explicit: str | None, skill_text: str, source: Path) -> str:
     if explicit is not None:
         return _validate_skill_id(explicit)
@@ -127,19 +130,14 @@ def _copy_source_package(source: Path, direct_skill_file: bool, staging_dir: Pat
     return staging_dir
 
 
-def _append_buddyswitch_rules(skill_md: Path, *, skill_id: str, buddy_id: str, output_schema: str) -> None:
+def _append_buddyswitch_rules(skill_md: Path, *, buddy_id: str) -> None:
     original = skill_md.read_text(encoding="utf-8")
     addition = (
         "\n\n## BuddySwitch Runtime Closing Rules\n\n"
         f"- Target BuddySwitch buddy: `{buddy_id}`.\n"
-        "- Emit BuddySwitch buddy-level result JSON directly.\n"
-        f"- Persist with `scripts/turn_runtime.py persist --skill-id {skill_id}` using this same native skill id.\n"
-        "- Use top-level keys `execution_summary`, `working_notes`, `deliverables_or_changed_files`, and `artifact_content`.\n"
-        "- Keep `execution_summary` a non-empty string.\n"
-        "- Keep `artifact_content` an object.\n"
-        "- Keep `working_notes` and `deliverables_or_changed_files` as lists when present.\n"
-        f"- Use buddy-level schema guidance from `{output_schema}`; runtime persist requires only the write-safety minimum unless a field is needed for safe writes.\n"
-        "- Do not call a result bridge, transcript parser, adapter layer, or legacy markdown output path.\n"
+        "- This native skill contributes content to the current buddy run.\n"
+        "- Do not call persist from the skill perspective.\n"
+        "- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.\n"
     )
     skill_md.write_text(original.rstrip() + addition, encoding="utf-8")
 
@@ -166,13 +164,10 @@ def _manifest_without_runtime_keys(manifest: dict[str, Any]) -> dict[str, Any]:
     return output
 
 
-def _skill_entry(*, skill_id: str, buddy_id: str, output_schema: str) -> dict[str, Any]:
+def _skill_entry(*, skill_id: str, buddy_id: str) -> dict[str, Any]:
     return {
         "id": skill_id,
         "path": f"buddyswitch/skills/{buddy_id}/{skill_id}",
-        "produces_artifact": True,
-        "output_slot": skill_id,
-        "output_schema": output_schema,
     }
 
 
@@ -224,24 +219,14 @@ def _serialize_manifest(manifest: dict[str, Any]) -> str:
             raise SkillImportError("skills entries must be objects")
         skill_id = skill.get("id")
         skill_path = skill.get("path")
-        produces_artifact = skill.get("produces_artifact")
-        output_slot = skill.get("output_slot")
-        output_schema = skill.get("output_schema")
         if not isinstance(skill_id, str) or not isinstance(skill_path, str):
             raise SkillImportError("skills entries must include string id and path")
-        if not isinstance(produces_artifact, bool):
-            raise SkillImportError("skills entries must include boolean produces_artifact")
-        if not isinstance(output_slot, str) or not isinstance(output_schema, str):
-            raise SkillImportError("skills entries must include output_slot and output_schema")
         lines.extend(
             [
                 "",
                 "[[skills]]",
                 f"id = {_toml_str(skill_id)}",
                 f"path = {_toml_str(skill_path)}",
-                f"produces_artifact = {'true' if produces_artifact else 'false'}",
-                f"output_slot = {_toml_str(output_slot)}",
-                f"output_schema = {_toml_str(output_schema)}",
             ]
         )
 
@@ -252,11 +237,14 @@ def _serialize_manifest(manifest: dict[str, Any]) -> str:
         label = buddy.get("label")
         scope = buddy.get("scope")
         skills_list = buddy.get("skills")
+        artifact_kinds = buddy.get("artifact_kinds")
         permissions = buddy.get("permissions")
         if not isinstance(buddy_id, str) or not isinstance(label, str) or not isinstance(scope, str):
             raise SkillImportError("buddies entries must include id/label/scope strings")
         if not isinstance(skills_list, list) or not all(isinstance(item, str) for item in skills_list):
             raise SkillImportError(f"buddy '{buddy_id}' must include a string skills list")
+        if not isinstance(artifact_kinds, list) or not all(isinstance(item, str) for item in artifact_kinds):
+            raise SkillImportError(f"buddy '{buddy_id}' must include a string artifact_kinds list")
         if not isinstance(permissions, list) or not all(isinstance(item, str) for item in permissions):
             raise SkillImportError(f"buddy '{buddy_id}' must include a string permissions list")
 
@@ -277,6 +265,13 @@ def _serialize_manifest(manifest: dict[str, Any]) -> str:
         else:
             lines.append(f"skills = {skills_rendered}")
 
+        artifact_kinds_rendered = _format_string_list(artifact_kinds, multiline_threshold=3)
+        if "\n" in artifact_kinds_rendered:
+            lines.append("artifact_kinds = " + artifact_kinds_rendered.split("\n", 1)[0])
+            lines.extend(artifact_kinds_rendered.split("\n")[1:])
+        else:
+            lines.append(f"artifact_kinds = {artifact_kinds_rendered}")
+
         permissions_rendered = _format_string_list(permissions, multiline_threshold=3)
         if "\n" in permissions_rendered:
             lines.append("permissions = " + permissions_rendered.split("\n", 1)[0])
@@ -287,7 +282,13 @@ def _serialize_manifest(manifest: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _register_skill(manifest: dict[str, Any], *, skill_id: str, buddy_id: str, output_schema: str) -> dict[str, Any]:
+def _register_skill(
+    manifest: dict[str, Any],
+    *,
+    skill_id: str,
+    buddy_id: str,
+    artifact_kind: str | None,
+) -> dict[str, Any]:
     require_buddy(manifest, buddy_id)
     skills = manifest.get("skills")
     buddies = manifest.get("buddies")
@@ -298,7 +299,7 @@ def _register_skill(manifest: dict[str, Any], *, skill_id: str, buddy_id: str, o
         if isinstance(skill, dict) and skill.get("id") == skill_id:
             raise SkillImportError(f"skill id already exists in manifest: {skill_id}")
 
-    skills.append(_skill_entry(skill_id=skill_id, buddy_id=buddy_id, output_schema=output_schema))
+    skills.append(_skill_entry(skill_id=skill_id, buddy_id=buddy_id))
     for buddy in buddies:
         if not isinstance(buddy, dict):
             continue
@@ -310,6 +311,12 @@ def _register_skill(manifest: dict[str, Any], *, skill_id: str, buddy_id: str, o
             raise SkillImportError(f"buddy '{buddy_id}' skills list is invalid")
         if skill_id not in raw_skills:
             raw_skills.append(skill_id)
+        if artifact_kind is not None:
+            raw_artifact_kinds = buddy.get("artifact_kinds")
+            if not isinstance(raw_artifact_kinds, list):
+                raise SkillImportError(f"buddy '{buddy_id}' artifact_kinds list is invalid")
+            if artifact_kind not in raw_artifact_kinds:
+                raw_artifact_kinds.append(artifact_kind)
         break
     return manifest
 
@@ -326,6 +333,7 @@ def import_skill(
     source: Path,
     buddy_id: str,
     skill_id: str | None = None,
+    artifact_kind: str | None = None,
     repo_root: Path = ROOT,
     manifest_path: Path | None = None,
 ) -> ImportResult:
@@ -342,10 +350,7 @@ def import_skill(
     if not description:
         raise SkillImportError("source SKILL.md must include non-empty frontmatter description")
     derived_skill_id = _derive_skill_id(skill_id, source_skill_text, source_root)
-    output_schema = BUDDY_OUTPUT_SCHEMAS.get(buddy_id)
-    if output_schema is None:
-        valid = ", ".join(sorted(BUDDY_OUTPUT_SCHEMAS))
-        raise SkillImportError(f"unknown buddy '{buddy_id}'. Valid: {valid}")
+    normalized_artifact_kind = _validate_artifact_kind(artifact_kind)
 
     manifest = load_manifest(resolved_manifest)
     require_buddy(manifest, buddy_id)
@@ -372,9 +377,7 @@ def import_skill(
             raise SkillImportError("staged package is missing SKILL.md")
         _append_buddyswitch_rules(
             staged_skill_md,
-            skill_id=derived_skill_id,
             buddy_id=buddy_id,
-            output_schema=output_schema,
         )
 
         manifest_without_runtime = _manifest_without_runtime_keys(manifest)
@@ -382,7 +385,7 @@ def import_skill(
             manifest_without_runtime,
             skill_id=derived_skill_id,
             buddy_id=buddy_id,
-            output_schema=output_schema,
+            artifact_kind=normalized_artifact_kind,
         )
         updated_text = _serialize_manifest(updated_manifest)
 
@@ -428,8 +431,7 @@ def import_skill(
         buddy_id=buddy_id,
         package_path=f"buddyswitch/skills/{buddy_id}/{derived_skill_id}",
         manifest_path=_relative_path_or_absolute(resolved_manifest, repo_root_resolved),
-        output_slot=derived_skill_id,
-        output_schema=output_schema,
+        artifact_kind=normalized_artifact_kind,
     )
 
 
@@ -438,6 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source", type=Path, required=True, help="Source package directory or SKILL.md file")
     parser.add_argument("--buddy", required=True, help="Target buddy id")
     parser.add_argument("--skill-id", help="Optional explicit generated skill id")
+    parser.add_argument("--artifact-kind", help="Optional buddy artifact kind to append for this imported skill")
     parser.add_argument("--manifest", type=Path, help="Manifest path (default: buddyswitch/manifest.toml under repo root)")
     parser.add_argument("--repo-root", type=Path, default=ROOT, help="Repo root containing buddyswitch/manifest.toml")
     return parser
@@ -451,6 +454,7 @@ def main(argv: list[str] | None = None) -> int:
             source=args.source,
             buddy_id=args.buddy,
             skill_id=args.skill_id,
+            artifact_kind=args.artifact_kind,
             repo_root=args.repo_root,
             manifest_path=args.manifest,
         )
@@ -466,8 +470,7 @@ def main(argv: list[str] | None = None) -> int:
                 "buddy_id": result.buddy_id,
                 "package_path": result.package_path,
                 "manifest_path": result.manifest_path,
-                "output_slot": result.output_slot,
-                "output_schema": result.output_schema,
+                "artifact_kind": result.artifact_kind,
             },
             ensure_ascii=True,
             indent=2,

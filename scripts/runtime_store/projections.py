@@ -166,7 +166,7 @@ def build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]
     current_artifacts: dict[str, dict[str, Any]] = {}
     artifact_slots = task.get("artifact_slots", {})
     if isinstance(artifact_slots, dict):
-        for slot, row in artifact_slots.items():
+        for kind, row in artifact_slots.items():
             if not isinstance(row, dict):
                 continue
             artifact_id = row.get("current_artifact_id")
@@ -174,7 +174,7 @@ def build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]
                 continue
             artifact = artifact_map.get(artifact_id)
             if artifact is not None:
-                current_artifacts[slot] = artifact
+                current_artifacts[kind] = artifact
     return {
         **task,
         "object_path": task_object_path(task["id"]),
@@ -282,13 +282,15 @@ def scan_run_audits() -> list[dict[str, Any]]:
                 return None
             return buddy
 
-        buddy = _known_buddy(payload.get("active_buddy"))
+        buddy = _known_buddy(payload.get("buddy_id")) or _known_buddy(payload.get("active_buddy"))
         task_id = (
-            _clean(payload.get("current_task_id"))
+            _clean(payload.get("task_id"))
+            or _clean(payload.get("current_task_id"))
             or _clean(payload.get("resolved_task_id"))
         )
         track_id = (
-            _clean(payload.get("current_track_id"))
+            _clean(payload.get("track_id"))
+            or _clean(payload.get("current_track_id"))
             or _clean(payload.get("effective_track_id"))
         )
         demand = _clean(payload.get("request_text"))
@@ -315,12 +317,14 @@ def scan_run_audits() -> list[dict[str, Any]]:
                 "task_id": task_id,
                 "task_title": payload.get("task_title"),
                 "demand": demand,
-                "skill_id": payload.get("skill_id"),
                 "artifact_ids": payload.get("artifact_ids") or [],
                 "track_id": track_id,
                 "track_title": payload.get("track_title"),
                 "track_action": payload.get("track_action"),
                 "execution_summary": payload.get("execution_summary"),
+                "handoff": payload.get("handoff") if isinstance(payload.get("handoff"), dict) else {},
+                "contributors": payload.get("contributors") if isinstance(payload.get("contributors"), dict) else {},
+                "state_effects": payload.get("state_effects") if isinstance(payload.get("state_effects"), dict) else {},
                 "next_state": next_state,
                 "receipt_paths": receipt_paths,
                 "related_run_ids": payload.get("related_run_ids")

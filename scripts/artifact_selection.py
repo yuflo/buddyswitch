@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from itertools import combinations
 from functools import lru_cache
+from itertools import combinations
 from pathlib import Path
 from typing import Any
 
@@ -63,62 +63,31 @@ def _all_artifacts(task: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def _current_artifacts_by_slot(task: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _current_artifacts_by_kind(task: dict[str, Any]) -> dict[str, dict[str, Any]]:
     current_artifacts: dict[str, dict[str, Any]] = {}
     for artifact in _all_artifacts(task):
-        slot = _as_str(artifact.get("slot"))
-        if not slot or not bool(artifact.get("is_current")) or slot in current_artifacts:
+        kind = _as_str(artifact.get("kind"))
+        if not kind or not bool(artifact.get("is_current")) or kind in current_artifacts:
             continue
-        current_artifacts[slot] = artifact
+        current_artifacts[kind] = artifact
     return current_artifacts
-
-
-def _pick_best_task_bundle(
-    tasks: list[dict[str, Any]],
-    remaining_slots: list[str],
-) -> tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]] | None:
-    best_choice: tuple[tuple[int, str, str, str], dict[str, Any], dict[str, dict[str, Any]], list[str]] | None = None
-    for task in tasks:
-        current_artifacts = _current_artifacts_by_slot(task)
-        covered_slots = [slot for slot in remaining_slots if slot in current_artifacts]
-        if not covered_slots:
-            continue
-        newest_updated_at, newest_artifact_id = max(
-            (
-                _as_str(current_artifacts[slot].get("updated_at")),
-                _as_str(current_artifacts[slot].get("artifact_id")),
-            )
-            for slot in covered_slots
-        )
-        score = (
-            len(covered_slots),
-            newest_updated_at,
-            newest_artifact_id,
-            _as_str(task.get("task_id")),
-        )
-        if best_choice is None or score > best_choice[0]:
-            best_choice = (score, task, current_artifacts, covered_slots)
-    if best_choice is None:
-        return None
-    _, task, current_artifacts, covered_slots = best_choice
-    return task, current_artifacts, covered_slots
 
 
 def _task_bundle_signature(
     task: dict[str, Any],
     current_artifacts: dict[str, dict[str, Any]],
-    required_slots: list[str],
+    required_kinds: list[str],
 ) -> tuple[int, str, str, str]:
-    covered_slots = [slot for slot in required_slots if slot in current_artifacts]
+    covered_kinds = [kind for kind in required_kinds if kind in current_artifacts]
     newest_updated_at, newest_artifact_id = max(
         (
-            _as_str(current_artifacts[slot].get("updated_at")),
-            _as_str(current_artifacts[slot].get("artifact_id")),
+            _as_str(current_artifacts[kind].get("updated_at")),
+            _as_str(current_artifacts[kind].get("artifact_id")),
         )
-        for slot in covered_slots
+        for kind in covered_kinds
     )
     return (
-        len(covered_slots),
+        len(covered_kinds),
         newest_updated_at,
         newest_artifact_id,
         _as_str(task.get("task_id")),
@@ -127,14 +96,14 @@ def _task_bundle_signature(
 
 def _pick_best_task_cover(
     tasks: list[dict[str, Any]],
-    required_slots: list[str],
+    required_kinds: list[str],
 ) -> list[tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]]:
     bundle_rows: list[tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]] = []
     for task in tasks:
-        current_artifacts = _current_artifacts_by_slot(task)
-        covered_slots = [slot for slot in required_slots if slot in current_artifacts]
-        if covered_slots:
-            bundle_rows.append((task, current_artifacts, covered_slots))
+        current_artifacts = _current_artifacts_by_kind(task)
+        covered_kinds = [kind for kind in required_kinds if kind in current_artifacts]
+        if covered_kinds:
+            bundle_rows.append((task, current_artifacts, covered_kinds))
 
     if not bundle_rows:
         return []
@@ -144,14 +113,14 @@ def _pick_best_task_cover(
 
     for combo_size in range(1, len(bundle_rows) + 1):
         for combo in combinations(bundle_rows, combo_size):
-            covered = {slot for _, _, slots in combo for slot in slots}
+            covered = {kind for _, _, kinds in combo for kind in kinds}
             ranked_rows = sorted(
                 combo,
-                key=lambda row: _task_bundle_signature(row[0], row[1], required_slots),
+                key=lambda row: _task_bundle_signature(row[0], row[1], required_kinds),
                 reverse=True,
             )
             row_signatures = tuple(
-                _task_bundle_signature(task, current_artifacts, required_slots)
+                _task_bundle_signature(task, current_artifacts, required_kinds)
                 for task, current_artifacts, _ in ranked_rows
             )
             task_ids = tuple(_as_str(task.get("task_id")) for task, _, _ in ranked_rows)
@@ -172,7 +141,7 @@ def select_artifacts_for_run(
     *,
     current_buddy: str,
     demand: str,
-    required_slots: list[str],
+    required_kinds: list[str],
     track_artifact_index: dict[str, Any] | None,
     current_task_id: str | None = None,
     max_default_items: int | None = None,
@@ -198,38 +167,38 @@ def select_artifacts_for_run(
     selected_inputs: list[dict[str, Any]] = []
     reasons: list[str] = []
     seen_artifact_ids: set[str] = set()
-    required_slots_in_order = [slot for slot in required_slots if isinstance(slot, str) and slot]
-    selected_by_slot: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
-    bundle_rows = _pick_best_task_cover(tasks, required_slots_in_order)
+    required_kinds_in_order = [kind for kind in required_kinds if isinstance(kind, str) and kind]
+    selected_by_kind: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    bundle_rows = _pick_best_task_cover(tasks, required_kinds_in_order)
 
-    for task, current_artifacts, covered_slots in bundle_rows:
-        for slot in covered_slots:
-            artifact = current_artifacts[slot]
+    for task, current_artifacts, covered_kinds in bundle_rows:
+        for kind in covered_kinds:
+            artifact = current_artifacts[kind]
             artifact_id = _as_str(artifact.get("artifact_id"))
-            if not artifact_id or artifact_id in seen_artifact_ids or slot in selected_by_slot:
+            if not artifact_id or artifact_id in seen_artifact_ids or kind in selected_by_kind:
                 continue
             seen_artifact_ids.add(artifact_id)
-            selected_by_slot[slot] = (task, artifact)
+            selected_by_kind[kind] = (task, artifact)
 
-    for slot in required_slots_in_order:
-        picked = selected_by_slot.get(slot)
+    for kind in required_kinds_in_order:
+        picked = selected_by_kind.get(kind)
         if picked is None:
             continue
-        if any(item["slot"] == slot for item in selected_inputs):
+        if any(item["kind"] == kind for item in selected_inputs):
             continue
         task, artifact = picked
         artifact_id = _as_str(artifact.get("artifact_id"))
         selected_inputs.append(
             {
-                "slot": slot,
+                "kind": kind,
                 "artifact_id": artifact_id,
                 "revision": _as_int(artifact.get("revision")),
-                "selection_reason": "current artifact for required upstream slot",
+                "selection_reason": "current artifact for required upstream kind",
                 "task_id": _as_str(task.get("task_id")),
                 "buddy": _as_str(task.get("buddy")),
             }
         )
-        reasons.append(f"Selected current artifact for required slot '{slot}': {artifact_id}")
+        reasons.append(f"Selected current artifact for required kind '{kind}': {artifact_id}")
 
     if len(selected_inputs) > max_items:
         selected_inputs = selected_inputs[:max_items]
@@ -254,7 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--buddy", required=True, help="Current executing buddy id")
     parser.add_argument("--demand", required=True, help="Turn request text")
     parser.add_argument("--index-file", type=Path, required=True, help="Path to track_artifact_index JSON")
-    parser.add_argument("--required-slot", action="append", dest="required_slots", default=[], help="Required input slot")
+    parser.add_argument("--required-kind", action="append", dest="required_kinds", default=[], help="Required input kind")
     parser.add_argument("--current-task-id", help="Current task id when continuing an existing task")
     parser.add_argument("--max-default-items", type=int)
     return parser
@@ -266,7 +235,7 @@ def main() -> int:
     payload = select_artifacts_for_run(
         current_buddy=args.buddy,
         demand=args.demand,
-        required_slots=args.required_slots,
+        required_kinds=args.required_kinds,
         track_artifact_index=_load_json(args.index_file),
         current_task_id=args.current_task_id,
         max_default_items=args.max_default_items,

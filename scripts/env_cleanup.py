@@ -641,7 +641,7 @@ def detach_artifact_from_task(
         relative_dir="buddyswitch/objects/artifacts",
         object_id=artifact_id,
     )
-    slot: str | None = None
+    kind: str | None = None
     if artifact_path is None:
         if artifact_path_reason is not None:
             append_warning(
@@ -654,13 +654,13 @@ def detach_artifact_from_task(
         except (OSError, ValueError, json.JSONDecodeError):
             artifact_payload = None
         if isinstance(artifact_payload, dict):
-            artifact_slot = artifact_payload.get("slot")
-            if isinstance(artifact_slot, str) and artifact_slot:
-                slot = artifact_slot
+            artifact_kind = artifact_payload.get("kind")
+            if isinstance(artifact_kind, str) and artifact_kind:
+                kind = artifact_kind
 
-    if isinstance(artifact_slots, dict) and isinstance(slot, str) and slot:
-        slot_state = artifact_slots.get(slot)
-        deleting_current = isinstance(slot_state, dict) and slot_state.get("current_artifact_id") == artifact_id
+    if isinstance(artifact_slots, dict) and isinstance(kind, str) and kind:
+        kind_state = artifact_slots.get(kind)
+        deleting_current = isinstance(kind_state, dict) and kind_state.get("current_artifact_id") == artifact_id
         if deleting_current:
             candidates: list[tuple[dict[str, Any], Path]] = []
             for candidate_id in filtered:
@@ -684,8 +684,8 @@ def detach_artifact_from_task(
                     continue
                 if not isinstance(candidate, dict):
                     continue
-                candidate_slot = candidate.get("slot")
-                if not isinstance(candidate_slot, str) or candidate_slot != slot:
+                candidate_kind = candidate.get("kind")
+                if not isinstance(candidate_kind, str) or candidate_kind != kind:
                     continue
                 candidates.append((candidate, candidate_path))
             if candidates:
@@ -698,18 +698,22 @@ def detach_artifact_from_task(
                     reverse=True,
                 )
                 promoted, _ = candidates[0]
-                revision_count = slot_state.get("revision_count", promoted.get("revision")) if isinstance(slot_state, dict) else promoted.get("revision")
+                revision_count = (
+                    kind_state.get("revision_count", promoted.get("revision"))
+                    if isinstance(kind_state, dict)
+                    else promoted.get("revision")
+                )
                 if not isinstance(revision_count, int) or revision_count < promoted.get("revision", 0):
                     revision_count = promoted.get("revision", 0)
                 for candidate, candidate_path in candidates:
                     candidate["is_current"] = candidate.get("id") == promoted.get("id")
                     write_json(candidate_path, candidate)
-                artifact_slots[slot] = {
+                artifact_slots[kind] = {
                     "current_artifact_id": promoted["id"],
                     "revision_count": revision_count,
                 }
             else:
-                artifact_slots.pop(slot, None)
+                artifact_slots.pop(kind, None)
     write_json(task_path, payload)
 
 

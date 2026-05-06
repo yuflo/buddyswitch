@@ -38,7 +38,7 @@ Shape interaction and visual direction into implementation-ready design artifact
 
 - `shape-prototype` is the executable design skill for this buddy.
 - It produces business design artifact payloads only.
-- Runtime receipt metadata is written by `persist-skill-result`, not by `shape-prototype` schema fields.
+- Runtime receipt metadata is written by `persist-buddy-run`, not by `shape-prototype` schema fields.
 
 ## Chat Return Blocks
 
@@ -47,12 +47,13 @@ Every run should return:
 2. working notes
 3. deliverables or changed files
 
-Native Design skill output must emit buddy-level result JSON directly and persist with `persist --skill-id <native-skill-id>` using the same native `skill_id`.
+Native Design skill output contributes content to one buddy run commit.
+Persist once per turn with `scripts/turn_runtime.py persist --context <context> --result <result>`.
 
 Terminal final output must follow `Receipt -> Summary`:
-- `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`)
+- `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifacts`, `Run`, optional `Handoff`)
 - `Summary` keeps 1-2 lines, with up to 4 open questions
-- Runtime commit boundary is `persist-skill-result`.
+- Runtime commit boundary is `persist-buddy-run`.
 
 ## Track Object Rule
 

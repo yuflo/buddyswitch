@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Load and validate the BuddySwitch env manifest.
 
-Manifest skill entries define buddy membership and persistence contract only.
+Manifest skill entries define buddy membership and package paths.
+Buddy rows define persistence boundaries (artifact kinds + permissions).
 Codex-native package acceptance is owned by Codex after materialization.
 """
 
@@ -21,7 +22,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-_BUDDY_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+_SAFE_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 ADVISORY_RUNTIME_METADATA_POLICY = "advisory"
 DEBUG_API_PERMISSION_SCOPE = "manual_debug_apis"
 # Retained for compatibility with older turn-runtime imports.
@@ -235,30 +236,6 @@ def _validate_permission(permission: str, label: str) -> None:
         raise ManifestError(f"{label} permission '{permission}' has empty action")
 
 
-def _parse_skill_persistence(skill: dict[str, Any], label: str, skill_id: str) -> dict[str, Any]:
-    produces_artifact = skill.get("produces_artifact")
-    if not isinstance(produces_artifact, bool):
-        raise ManifestError(f"{label}.produces_artifact must be true or false")
-
-    output_schema_raw = skill.get("output_schema")
-    if not isinstance(output_schema_raw, str) or not output_schema_raw.strip():
-        raise ManifestError(f"{label}.output_schema must be a non-empty string")
-    output_schema = output_schema_raw.strip()
-
-    output_slot_raw = skill.get("output_slot")
-    if not produces_artifact:
-        raise ManifestError("produces_artifact=false is not supported")
-    if not isinstance(output_slot_raw, str) or not output_slot_raw.strip():
-        raise ManifestError(f"{label}.output_slot is required when produces_artifact=true")
-    output_slot = output_slot_raw.strip()
-
-    return {
-        "produces_artifact": produces_artifact,
-        "output_slot": output_slot,
-        "output_schema": output_schema,
-    }
-
-
 def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
     if not path.exists():
         raise ManifestError(f"Manifest not found: {path}")
@@ -292,9 +269,7 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         skill_ids.add(skill_id)
 
         skill_path = _require_string(skill, "path", label)
-        persistence = _parse_skill_persistence(skill, label, skill_id)
         skill["path"] = skill_path
-        skill["persistence"] = persistence
         skill_lookup[skill_id] = skill
 
     buddies = manifest.get("buddies")
@@ -308,7 +283,7 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
             raise ManifestError(f"{label} must be an object")
 
         buddy_id = _require_string(buddy, "id", label)
-        if not _BUDDY_ID_RE.match(buddy_id):
+        if not _SAFE_ID_RE.match(buddy_id):
             raise ManifestError(f"{label}.id must match /^[a-z][a-z0-9-]*$/")
         if buddy_id in buddy_ids:
             raise ManifestError(f"duplicate buddy id: {buddy_id}")
@@ -317,6 +292,19 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         _require_string(buddy, "label", label)
         _require_string(buddy, "scope", label)
         declared_skills = _require_string_list(buddy, "skills", label, allow_empty=True)
+        artifact_kinds = _require_string_list(buddy, "artifact_kinds", label)
+        normalized_artifact_kinds: list[str] = []
+        seen_artifact_kinds: set[str] = set()
+        for artifact_kind in artifact_kinds:
+            if not _SAFE_ID_RE.match(artifact_kind):
+                raise ManifestError(
+                    f"{label}.artifact_kinds values must match /^[a-z][a-z0-9-]*$/; got '{artifact_kind}'"
+                )
+            if artifact_kind in seen_artifact_kinds:
+                raise ManifestError(f"{label}.artifact_kinds contains duplicate value '{artifact_kind}'")
+            seen_artifact_kinds.add(artifact_kind)
+            normalized_artifact_kinds.append(artifact_kind)
+        buddy["artifact_kinds"] = normalized_artifact_kinds
         permissions = _require_string_list(buddy, "permissions", label)
         for permission in permissions:
             _validate_permission(permission, label)
@@ -360,7 +348,7 @@ def buddy_authority_profile(manifest: dict[str, Any], buddy_id: str) -> dict[str
         "permission_scope": DEBUG_API_PERMISSION_SCOPE,
         "runtime_note": (
             "buddy->skills controls which runtime packages are materialized under .agents/skills, "
-            "and persist accepts only skill_id values from that active membership. "
+            "and persist commits one buddy run in the active buddy context (not a single native skill id). "
             "object permission enforcement remains in manual/debug mutation APIs."
         ),
     }
@@ -376,7 +364,6 @@ def buddy_skill_docs(manifest: dict[str, Any], buddy_id: str) -> list[dict[str, 
             {
                 "id": skill["id"],
                 "path": skill["path"],
-                "persistence": dict(skill.get("persistence", {})),
             }
         )
     return docs

@@ -30,16 +30,18 @@ description: Use when the task is drafting a PRD, defining MVP scope, or turning
 1. Define the PRD summary and key decisions.
 2. Capture risks, open questions, and one concrete suggested next step.
 3. Put PRD-specific detail under `artifact_content.specialized_sections.prd` (problem, user_value, requirements, scope).
-4. If an explicit PM track lifecycle mutation is required, include `state_effects.track_operation` explicitly.
+4. If an explicit PM track lifecycle mutation is required, include `state_effects.track` explicitly.
 
 ## Verification
 - Keep the result product-definition centered.
 - Keep PRD detail in `specialized_sections.prd`, not top-level PM fields.
-- Use `state_effects.track_operation` only for explicit PM lifecycle intent.
+- Use `state_effects.track` only for explicit PM lifecycle intent.
 
 ## Shared Runtime Rules
 - See `framework/docs/skill-runtime-shared-rules.md`.
-- Emit buddy-level result JSON directly and persist with the same native `skill_id`.
+- This native skill contributes content to the current buddy run.
+- Do not call persist from the skill perspective.
+- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
 
 ## Required Output Fields
 Top-level envelope keys:

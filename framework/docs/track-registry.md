@@ -54,7 +54,10 @@ Required fields:
 - `title`
 - `task_id`
 - `buddy`
-- `skill_id`
+- `kind`
+- `revision`
+- `supersedes_artifact_id`
+- `is_current`
 - `source_run_id`
 - `summary`
 - `content`
@@ -65,7 +68,7 @@ Artifacts participate in track flow through `artifact.task_id -> task.track_id`.
 
 ## Permission Model
 
-- `pm` controls track lifecycle operations (`create`, `update`, `advance`, `archive`) through PM skill outputs using `state_effects.track_operation`.
+- `pm` controls track lifecycle operations (`create`, `update`, `advance`, `archive`) through PM buddy-run commits using `state_effects.track`.
 - Non-PM buddies do not directly mutate track lifecycle fields.
 - Track inspection should come from prepared task/track context and workspace projection.
 - Retired top-level `track_operation` payloads are not accepted by runtime persist.
@@ -73,4 +76,4 @@ Artifacts participate in track flow through `artifact.task_id -> task.track_id`.
 ## Auto-Register Rule
 
 When a task is bound to a track, runtime registers the task id in that track's `task_ids`.
-Artifact creation updates task `artifact_ids` and per-slot `artifact_slots` revision state.
+Artifact creation updates task `artifact_ids` and per-kind `artifact_slots` revision state.

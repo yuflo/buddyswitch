@@ -10,10 +10,10 @@ If work should move to another buddy, open that buddy's locked instance.
 
 1. Prepare context with `scripts/turn_runtime.py prepare "<ordinary request>"`.
 2. Let Codex CLI use the native skills exposed in `.agents/skills`.
-3. Execute the selected native skill in this host session.
-4. Emit buddy-level result JSON directly from the selected native skill.
-5. Persist with `scripts/turn_runtime.py persist` (`persist-skill-result`), reporting the Codex skill name as `skill_id`.
-6. If another turn is needed, derive a new `request_text` from `receipt.next_state`, then run `prepare` again.
+3. Execute any needed native skills inside this locked buddy session.
+4. Build one buddy run commit with artifacts, state effects, handoff, and contributor audit metadata.
+5. Persist with `scripts/turn_runtime.py persist --context <context> --result <result>`.
+6. If another turn is needed, derive a new request from `receipt.next_state` or `receipt.handoff`.
 
 ## Buddy Lock
 
@@ -28,12 +28,12 @@ If work should move to another buddy, open that buddy's locked instance.
 - Final terminal output must use exactly two sections in this order: `Receipt`, `Summary`.
 - In `Receipt`, render:
   - `Persisted: ok|failed`
+  - `Buddy: <buddy_id>`
   - `Task: <task_title> [<task_id>]`
-  - `Track: <track_title> [<track_id>]` only when `receipt.track_id` exists
-  - `Artifact: <artifact_id|none>`
+  - `Track: <track_title> [<track_id>]` only when available
+  - `Artifacts: <artifact_id_1>, <artifact_id_2>|none`
   - `Run: <run_id>`
-  - `Related Runs: <run_id_1>, <run_id_2>` only when present
-- Use IDs and titles from `receipt`; object paths stay debug-only details.
+  - `Handoff: <next_buddy>|none`
 
 ## Summary Contract
 

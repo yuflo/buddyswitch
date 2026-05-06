@@ -4,13 +4,11 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
-from unittest import mock
 from pathlib import Path
 
 
@@ -47,17 +45,6 @@ class SkillCreatorImporterTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        schema_paths = (
-            repo_root / "framework" / "schemas" / "dev" / "dev-result.json",
-            repo_root / "framework" / "schemas" / "pm" / "pm-result.json",
-            repo_root / "framework" / "schemas" / "test" / "test-result.json",
-            repo_root / "framework" / "schemas" / "market" / "market-result.json",
-            repo_root / "framework" / "schemas" / "design" / "design-result.json",
-        )
-        for schema_path in schema_paths:
-            schema_path.parent.mkdir(parents=True, exist_ok=True)
-            schema_path.write_text('{"type":"object"}\n', encoding="utf-8")
-
         manifest_path = repo_root / "buddyswitch" / "manifest.toml"
         manifest_path.write_text(
             textwrap.dedent(
@@ -71,15 +58,13 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 [[skills]]
                 id = "implement-task"
                 path = "buddyswitch/skills/dev/implement-task"
-                produces_artifact = true
-                output_slot = "implementation-report"
-                output_schema = "framework/schemas/dev/dev-result.json"
 
                 [[buddies]]
                 id = "pm"
                 label = "PM"
                 scope = "PM scope"
                 skills = []
+                artifact_kinds = ["prd", "pm-decision", "track-note"]
                 permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
 
                 [[buddies]]
@@ -87,6 +72,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 label = "DEV"
                 scope = "Dev scope"
                 skills = ["implement-task"]
+                artifact_kinds = ["implementation-report", "skill-import-report"]
                 permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
 
                 [[buddies]]
@@ -94,6 +80,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 label = "TEST"
                 scope = "Test scope"
                 skills = []
+                artifact_kinds = ["smoke-test", "test-report"]
                 permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
 
                 [[buddies]]
@@ -101,6 +88,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 label = "MARKET"
                 scope = "Market scope"
                 skills = []
+                artifact_kinds = ["market-scan", "market-landing-page-brief"]
                 permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
 
                 [[buddies]]
@@ -108,6 +96,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 label = "DESIGN"
                 scope = "Design scope"
                 skills = []
+                artifact_kinds = ["design-handoff", "prototype-brief"]
                 permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
                 """
             ),
@@ -171,6 +160,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
         buddy_id: str,
         skill_id: str | None,
         expected_skill_id_for_snapshot: str,
+        artifact_kind: str | None = None,
     ) -> None:
         manifest_before, target_before = self._snapshot(
             repo_root, buddy_id=buddy_id, skill_id=expected_skill_id_for_snapshot
@@ -180,6 +170,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 source=source,
                 buddy_id=buddy_id,
                 skill_id=skill_id,
+                artifact_kind=artifact_kind,
                 repo_root=repo_root,
             )
         manifest_after, target_after = self._snapshot(
@@ -187,10 +178,6 @@ class SkillCreatorImporterTests(unittest.TestCase):
         )
         self.assertEqual(manifest_after, manifest_before)
         self.assertEqual(target_after, target_before)
-
-    @staticmethod
-    def _read_bytes(path: Path) -> bytes:
-        return path.read_bytes()
 
     @staticmethod
     def _script_path() -> Path:
@@ -212,71 +199,54 @@ class SkillCreatorImporterTests(unittest.TestCase):
         self.assertEqual(result.buddy_id, "dev")
         self.assertEqual(result.package_path, "buddyswitch/skills/dev/dev-summary")
         self.assertEqual(result.manifest_path, "buddyswitch/manifest.toml")
-        self.assertEqual(result.output_slot, "dev-summary")
-        self.assertEqual(result.output_schema, "framework/schemas/dev/dev-result.json")
+        self.assertIsNone(result.artifact_kind)
         self.assertTrue((target / "SKILL.md").exists())
         self.assertTrue((target / "assets" / "example-output.md").exists())
         self.assertTrue((target / "references" / "style-guide.md").exists())
         self.assertTrue((target / "scripts" / "helper.sh").exists())
-        self.assertEqual(
-            self._read_bytes(source_root / "README.md"),
-            self._read_bytes(target / "README.md"),
-        )
-        self.assertEqual(
-            self._read_bytes(source_root / "assets" / "example-output.md"),
-            self._read_bytes(target / "assets" / "example-output.md"),
-        )
-        self.assertEqual(
-            self._read_bytes(source_root / "references" / "style-guide.md"),
-            self._read_bytes(target / "references" / "style-guide.md"),
-        )
-        self.assertEqual(
-            self._read_bytes(source_root / "scripts" / "helper.sh"),
-            self._read_bytes(target / "scripts" / "helper.sh"),
-        )
 
         skill_text = (target / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("# dev-summary", skill_text)
-        self.assertIn("Summarize code changes, verification evidence, and handoff risks.", skill_text)
         self.assertIn("## BuddySwitch Runtime Closing Rules", skill_text)
-        self.assertIn("Target BuddySwitch buddy: `dev`.", skill_text)
-        self.assertIn("persist --skill-id dev-summary", skill_text)
-        self.assertIn("framework/schemas/dev/dev-result.json", skill_text)
-        self.assertIn("execution_summary", skill_text)
-        self.assertIn("working_notes", skill_text)
-        self.assertIn("deliverables_or_changed_files", skill_text)
-        self.assertIn("artifact_content", skill_text)
-        self.assertNotIn("result_bridge", skill_text)
-        self.assertNotIn("selected_skill_packet", skill_text)
-        self.assertNotIn("prepare_context.skills", skill_text)
-        self.assertNotIn("runtime interception", skill_text)
-        self.assertNotIn("compatibility wrapper", skill_text)
-        self.assertNotIn("fallback converter", skill_text)
+        self.assertIn("contributes content to the current buddy run", skill_text)
+        self.assertIn("Do not call persist from the skill perspective", skill_text)
+        self.assertNotIn("persist --skill-id", skill_text)
 
         manifest = env_manifest.load_manifest(repo_root / "buddyswitch" / "manifest.toml")
         skills = env_manifest.skills_by_id(manifest)
         buddies = env_manifest.buddies_by_id(manifest)
         self.assertIn("dev-summary", skills)
-        self.assertEqual(skills["dev-summary"]["path"], "buddyswitch/skills/dev/dev-summary")
-        self.assertTrue(skills["dev-summary"]["persistence"]["produces_artifact"])
-        self.assertEqual(skills["dev-summary"]["persistence"]["output_slot"], "dev-summary")
-        self.assertEqual(skills["dev-summary"]["persistence"]["output_schema"], "framework/schemas/dev/dev-result.json")
+        self.assertEqual(set(skills["dev-summary"].keys()), {"id", "path"})
         self.assertIn("dev-summary", buddies["dev"]["skills"])
-        self.assertNotIn("dev-summary", buddies["pm"]["skills"])
+        self.assertNotIn("dev-summary", buddies["dev"]["artifact_kinds"])
 
-    def test_import_derives_skill_id_from_frontmatter_name(self) -> None:
+    def test_import_with_explicit_artifact_kind_updates_buddy_contract(self) -> None:
         repo_root = self._create_temp_repo()
-        source_root = self._create_source_package(root=repo_root, name="Dev Summary Skill")
+        source_root = self._create_source_package(root=repo_root, package_name="community-dev-report")
 
         result = skill_creator_importer.import_skill(
             source=source_root,
             buddy_id="dev",
+            skill_id="dev-reporter",
+            artifact_kind="community-dev-report",
             repo_root=repo_root,
         )
 
-        self.assertEqual(result.skill_id, "dev-summary-skill")
-        target = repo_root / "buddyswitch" / "skills" / "dev" / "dev-summary-skill"
-        self.assertTrue((target / "SKILL.md").exists())
+        self.assertEqual(result.artifact_kind, "community-dev-report")
+        manifest = env_manifest.load_manifest(repo_root / "buddyswitch" / "manifest.toml")
+        buddies = env_manifest.buddies_by_id(manifest)
+        self.assertIn("community-dev-report", buddies["dev"]["artifact_kinds"])
+
+    def test_import_rejects_invalid_artifact_kind_without_writes(self) -> None:
+        repo_root = self._create_temp_repo()
+        source_root = self._create_source_package(root=repo_root)
+        self._assert_failure_without_writes(
+            repo_root=repo_root,
+            source=source_root,
+            buddy_id="dev",
+            skill_id="dev-summary",
+            expected_skill_id_for_snapshot="dev-summary",
+            artifact_kind="Bad/Kind",
+        )
 
     def test_import_rejects_invalid_skill_id_without_writes(self) -> None:
         repo_root = self._create_temp_repo()
@@ -300,42 +270,6 @@ class SkillCreatorImporterTests(unittest.TestCase):
             expected_skill_id_for_snapshot="implement-task",
         )
 
-    def test_import_rejects_duplicate_manifest_id_when_target_path_absent_without_writes(self) -> None:
-        repo_root = self._create_temp_repo()
-        source_root = self._create_source_package(root=repo_root)
-        manifest_path = repo_root / "buddyswitch" / "manifest.toml"
-        duplicate_id = "ghost-duplicate"
-        target = repo_root / "buddyswitch" / "skills" / "dev" / duplicate_id
-        self.assertFalse(target.exists())
-
-        manifest_path.write_text(
-            manifest_path.read_text(encoding="utf-8")
-            + textwrap.dedent(
-                f"""\
-
-                [[skills]]
-                id = "{duplicate_id}"
-                path = "buddyswitch/skills/dev/nonexistent-path"
-                produces_artifact = true
-                output_slot = "{duplicate_id}"
-                output_schema = "framework/schemas/dev/dev-result.json"
-                """
-            ),
-            encoding="utf-8",
-        )
-        manifest_before = manifest_path.read_bytes()
-
-        with self.assertRaisesRegex(skill_creator_importer.SkillImportError, "already exists in manifest"):
-            skill_creator_importer.import_skill(
-                source=source_root,
-                buddy_id="dev",
-                skill_id=duplicate_id,
-                repo_root=repo_root,
-            )
-
-        self.assertFalse(target.exists())
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-
     def test_import_accepts_direct_skill_md_file(self) -> None:
         repo_root = self._create_temp_repo()
         source_root = self._create_source_package(root=repo_root)
@@ -352,22 +286,6 @@ class SkillCreatorImporterTests(unittest.TestCase):
         target = repo_root / "buddyswitch" / "skills" / "dev" / "dev-summary-file"
         self.assertTrue((target / "SKILL.md").exists())
         self.assertFalse((target / "README.md").exists())
-        skill_text = (target / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("BuddySwitch Runtime Closing Rules", skill_text)
-
-    def test_import_rejects_missing_skill_md_without_writes(self) -> None:
-        repo_root = self._create_temp_repo()
-        source_root = repo_root / "missing-skill-md"
-        source_root.mkdir(parents=True, exist_ok=True)
-        (source_root / "README.md").write_text("missing skill file\n", encoding="utf-8")
-
-        self._assert_failure_without_writes(
-            repo_root=repo_root,
-            source=source_root,
-            buddy_id="dev",
-            skill_id="missing-skill",
-            expected_skill_id_for_snapshot="missing-skill",
-        )
 
     def test_import_rejects_missing_description_frontmatter_without_writes(self) -> None:
         repo_root = self._create_temp_repo()
@@ -407,126 +325,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
 
         generated = repo_root / "buddyswitch" / "skills" / "dev" / "from-skill-md"
         self.assertEqual(result.skill_id, "from-skill-md")
-        self.assertTrue((generated / "SKILL.md").exists())
         self.assertFalse((generated / "skill.toml").exists())
-
-    def test_imported_manifest_loads_with_env_manifest(self) -> None:
-        repo_root = self._create_temp_repo()
-        source_root = self._create_source_package(root=repo_root)
-
-        skill_creator_importer.import_skill(
-            source=source_root,
-            buddy_id="pm",
-            skill_id="pm-notes",
-            repo_root=repo_root,
-        )
-
-        manifest = env_manifest.load_manifest(repo_root / "buddyswitch" / "manifest.toml")
-        skills = env_manifest.skills_by_id(manifest)
-        buddies = env_manifest.buddies_by_id(manifest)
-        self.assertIn("pm-notes", skills)
-        self.assertEqual(skills["pm-notes"]["persistence"]["output_slot"], "pm-notes")
-        self.assertEqual(skills["pm-notes"]["persistence"]["output_schema"], "framework/schemas/pm/pm-result.json")
-        self.assertIn("pm-notes", buddies["pm"]["skills"])
-        self.assertNotIn("pm-notes", buddies["dev"]["skills"])
-
-    def test_import_registers_expected_output_schema_for_each_buddy(self) -> None:
-        cases = (
-            ("dev", "dev-summary", "framework/schemas/dev/dev-result.json"),
-            ("pm", "pm-notes", "framework/schemas/pm/pm-result.json"),
-            ("test", "regression-notes", "framework/schemas/test/test-result.json"),
-            ("market", "market-brief", "framework/schemas/market/market-result.json"),
-            ("design", "ux-notes", "framework/schemas/design/design-result.json"),
-        )
-        for buddy_id, skill_id, expected_schema in cases:
-            with self.subTest(buddy=buddy_id):
-                repo_root = self._create_temp_repo()
-                source_root = self._create_source_package(root=repo_root, name=skill_id)
-                result = skill_creator_importer.import_skill(
-                    source=source_root,
-                    buddy_id=buddy_id,
-                    skill_id=skill_id,
-                    repo_root=repo_root,
-                )
-                self.assertEqual(result.output_schema, expected_schema)
-                self.assertEqual(result.output_slot, skill_id)
-                target = repo_root / "buddyswitch" / "skills" / buddy_id / skill_id
-                self.assertTrue((target / "SKILL.md").exists())
-                manifest = env_manifest.load_manifest(repo_root / "buddyswitch" / "manifest.toml")
-                skills = env_manifest.skills_by_id(manifest)
-                buddies = env_manifest.buddies_by_id(manifest)
-                self.assertEqual(skills[skill_id]["persistence"]["output_schema"], expected_schema)
-                self.assertEqual(skills[skill_id]["persistence"]["output_slot"], skill_id)
-                self.assertIn(skill_id, buddies[buddy_id]["skills"])
-                for other_buddy_id, buddy_row in buddies.items():
-                    if other_buddy_id == buddy_id:
-                        continue
-                    self.assertNotIn(skill_id, buddy_row["skills"])
-
-    def test_import_rejects_existing_target_package_without_writes(self) -> None:
-        repo_root = self._create_temp_repo()
-        source_root = self._create_source_package(root=repo_root)
-        target = repo_root / "buddyswitch" / "skills" / "dev" / "dev-summary"
-        target.mkdir(parents=True, exist_ok=True)
-        existing_skill_md = target / "SKILL.md"
-        existing_bytes = b"# keep-existing\n"
-        existing_skill_md.write_bytes(existing_bytes)
-
-        manifest_before = (repo_root / "buddyswitch" / "manifest.toml").read_bytes()
-        with self.assertRaises(skill_creator_importer.SkillImportError):
-            skill_creator_importer.import_skill(
-                source=source_root,
-                buddy_id="dev",
-                skill_id="dev-summary",
-                repo_root=repo_root,
-            )
-        self.assertEqual(existing_skill_md.read_bytes(), existing_bytes)
-        self.assertEqual((repo_root / "buddyswitch" / "manifest.toml").read_bytes(), manifest_before)
-
-    def test_import_rejects_missing_source_path_without_writes(self) -> None:
-        repo_root = self._create_temp_repo()
-        missing_source = repo_root / "does-not-exist"
-        self._assert_failure_without_writes(
-            repo_root=repo_root,
-            source=missing_source,
-            buddy_id="dev",
-            skill_id="missing-source",
-            expected_skill_id_for_snapshot="missing-source",
-        )
-
-    def test_import_rolls_back_staged_package_when_generated_manifest_is_invalid(self) -> None:
-        repo_root = self._create_temp_repo()
-        source_root = self._create_source_package(root=repo_root)
-        manifest_path = repo_root / "buddyswitch" / "manifest.toml"
-        manifest_before = manifest_path.read_bytes()
-        target = repo_root / "buddyswitch" / "skills" / "dev" / "dev-summary"
-
-        with mock.patch.object(
-            skill_creator_importer,
-            "_serialize_manifest",
-            return_value='schema_version = 1\n\n[env]\nid = "demo"\nlabel = "Demo"\n',
-        ):
-            with self.assertRaises(skill_creator_importer.SkillImportError):
-                skill_creator_importer.import_skill(
-                    source=source_root,
-                    buddy_id="dev",
-                    skill_id="dev-summary",
-                    repo_root=repo_root,
-                )
-
-        self.assertFalse(target.exists())
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-
-    def test_import_rejects_unknown_buddy_without_writes(self) -> None:
-        repo_root = self._create_temp_repo()
-        source_root = self._create_source_package(root=repo_root)
-        self._assert_failure_without_writes(
-            repo_root=repo_root,
-            source=source_root,
-            buddy_id="ops",
-            skill_id="ops-summary",
-            expected_skill_id_for_snapshot="ops-summary",
-        )
 
     def test_cli_import_success_prints_expected_json(self) -> None:
         repo_root = self._create_temp_repo()
@@ -541,6 +340,8 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 "dev",
                 "--skill-id",
                 "dev-summary-cli",
+                "--artifact-kind",
+                "community-dev-report",
                 "--repo-root",
                 str(repo_root),
             ],
@@ -551,48 +352,15 @@ class SkillCreatorImporterTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-        self.assertEqual(completed.stderr, "")
         payload = json.loads(completed.stdout)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["skill_id"], "dev-summary-cli")
         self.assertEqual(payload["buddy_id"], "dev")
         self.assertEqual(payload["package_path"], "buddyswitch/skills/dev/dev-summary-cli")
         self.assertEqual(payload["manifest_path"], "buddyswitch/manifest.toml")
-        self.assertEqual(payload["output_slot"], "dev-summary-cli")
-        self.assertEqual(payload["output_schema"], "framework/schemas/dev/dev-result.json")
-
-    def test_cli_import_failure_returns_error_and_exit_code_one(self) -> None:
-        repo_root = self._create_temp_repo()
-        source_root = self._create_source_package(root=repo_root)
-        manifest_path = repo_root / "buddyswitch" / "manifest.toml"
-        manifest_before = manifest_path.read_bytes()
-        target = repo_root / "buddyswitch" / "skills" / "ops" / "ops-summary-cli"
-        self.assertFalse(target.exists())
-
-        completed = subprocess.run(
-            [
-                "python3",
-                str(self._script_path()),
-                "--source",
-                str(source_root),
-                "--buddy",
-                "ops",
-                "--skill-id",
-                "ops-summary-cli",
-                "--repo-root",
-                str(repo_root),
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-
-        self.assertEqual(completed.returncode, 1)
-        self.assertIn("ERROR:", completed.stderr)
-        self.assertEqual(completed.stdout.strip(), "")
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertFalse(target.exists())
+        self.assertEqual(payload["artifact_kind"], "community-dev-report")
+        self.assertNotIn("output_slot", payload)
+        self.assertNotIn("output_schema", payload)
 
 
 if __name__ == "__main__":

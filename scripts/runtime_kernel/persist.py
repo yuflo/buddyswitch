@@ -6,10 +6,9 @@ from __future__ import annotations
 from typing import Any
 
 
-def persist_skill_result_request(
+def persist_buddy_run_request(
     context: dict[str, Any],
     *,
-    skill_id: str,
     result: dict[str, Any],
     manifest_path: "Path | None" = None,
 ) -> dict[str, Any]:
@@ -17,9 +16,8 @@ def persist_skill_result_request(
 
     if manifest_path is None:
         manifest_path = turn_runtime.DEFAULT_MANIFEST
-    return turn_runtime.persist_skill_result(
+    return turn_runtime.persist_buddy_run(
         context,
-        skill_id=skill_id,
         result=result,
         manifest_path=manifest_path,
     )

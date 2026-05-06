@@ -15,13 +15,14 @@ BuddySwitch runtime treats source skill packages as opaque during materializatio
 Codex CLI owns package acceptance after install into runtime `.agents/skills/<skill-id>`.
 Do not treat package file style as a runtime gate.
 
-BuddySwitch-specific persistence contract lives in `buddyswitch/manifest.toml` per `[[skills]]` entry:
+Skill registry contract lives in `buddyswitch/manifest.toml` per `[[skills]]` entry:
 
 - `id`
 - `path`
-- `produces_artifact`
-- `output_schema`
-- `output_slot` when `produces_artifact = true`
+
+Buddy-level persistence contract lives in `[[buddies]]` entries:
+
+- `artifact_kinds`
 
 ## Runtime Materialization Rules
 
@@ -34,9 +35,9 @@ BuddySwitch-specific persistence contract lives in `buddyswitch/manifest.toml` p
 - `prepare-turn-context` returns context/state/run envelope only.
 - `prepare` does not return skill candidates, instruction paths, or custom skill packets.
 - `prepare` validates context/reservation safety only; it does not gate on package/source/schema readiness.
-- `persist-skill-result` records the Codex `skill_id` and validates membership from active buddy manifest skills.
-- `persist-skill-result` keeps native `skill_id` identity in receipt, artifact, and run audit metadata.
-- `persist-skill-result` validates write safety minimums (non-empty `execution_summary`, object `artifact_content`, list-shaped optional note fields, and PM track-effect safety). Full schema completeness is guidance unless a field is required for safe writes.
+- `persist-buddy-run` validates active buddy ownership, reserved run usage, and write-safety minimums.
+- Native `skill_id` values are contributor audit metadata only (`contributors.skills`), not artifact/receipt/run ownership.
+- `persist-buddy-run` validates collaboration-safe shape (`execution_summary`, optional `artifacts`, `state_effects`, `handoff`, `contributors`) and requires at least one durable signal.
 
 ## Output Discipline
 

@@ -88,7 +88,9 @@ description: Use when the task is testing whether a product idea has credible de
 ## Shared Runtime Rules
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
-- Emit buddy-level result JSON directly from this native skill and persist it with `persist --skill-id <native skill id>` using the same native `skill_id`.
+- This native skill contributes content to the current buddy run.
+- Do not call persist from the skill perspective.
+- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
 
 ## Required Output Fields
 

@@ -12,6 +12,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +27,14 @@ import skill_creator_importer  # noqa: E402
 
 
 class RuntimeSkillsInstallerTests(unittest.TestCase):
+    _DEFAULT_ARTIFACT_KINDS = {
+        "pm": ["prd", "pm-decision", "track-note"],
+        "market": ["market-scan", "market-landing-page-brief"],
+        "design": ["design-handoff", "prototype-brief"],
+        "dev": ["implementation-report", "skill-import-report"],
+        "test": ["smoke-test", "test-report"],
+    }
+
     def _write_skill_package(
         self,
         root: Path,
@@ -84,15 +93,12 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
     ) -> Path:
         skill_blocks = []
         for row in skills:
-            output_slot_line = f'output_slot = "{row["output_slot"]}"\n' if row.get("output_slot") else ""
             skill_blocks.append(
                 textwrap.dedent(
                     f"""\
                     [[skills]]
                     id = "{row['id']}"
                     path = "{row['path']}"
-                    produces_artifact = {row['produces_artifact']}
-                    {output_slot_line}output_schema = "{row['output_schema']}"
                     """
                 )
             )
@@ -100,6 +106,8 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
         buddy_blocks = []
         for buddy_id, member_skills in buddies.items():
             skills_list = ", ".join(json.dumps(item) for item in member_skills)
+            artifact_kinds = self._DEFAULT_ARTIFACT_KINDS.get(buddy_id, ["artifact-note"])
+            artifact_kinds_list = ", ".join(json.dumps(item) for item in artifact_kinds)
             buddy_blocks.append(
                 textwrap.dedent(
                     f"""\
@@ -108,6 +116,7 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     label = "{buddy_id.upper()}"
                     scope = "{buddy_id} scope"
                     skills = [{skills_list}]
+                    artifact_kinds = [{artifact_kinds_list}]
                     permissions = ["task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
                     """
                 )
@@ -220,23 +229,14 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "write-prd",
                         "path": write_prd.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "prd",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
                     },
                     {
                         "id": "track-manager",
                         "path": track_manager.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "track-operation",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
                     },
                     {
                         "id": "shape-prototype",
                         "path": shape_prototype.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "design-handoff",
-                        "output_schema": "framework/schemas/design/design-result.json",
                     },
                 ],
                 buddies={"pm": ["write-prd", "track-manager"], "design": ["shape-prototype"]},
@@ -267,23 +267,14 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "write-prd",
                         "path": write_prd.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "prd",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
                     },
                     {
                         "id": "track-manager",
                         "path": track_manager.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "track-operation",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
                     },
                     {
                         "id": "shape-prototype",
                         "path": shape_prototype.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "design-handoff",
-                        "output_schema": "framework/schemas/design/design-result.json",
                     },
                 ],
                 buddies={"pm": ["write-prd", "track-manager"], "design": ["shape-prototype"]},
@@ -325,9 +316,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "community-skill",
                         "path": community_skill.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "community-output",
-                        "output_schema": "framework/schemas/dev/dev-result.json",
                     }
                 ],
                 buddies={"dev": ["community-skill"]},
@@ -364,9 +352,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "opaque-dir",
                         "path": opaque_package.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "opaque-output",
-                        "output_schema": "framework/schemas/dev/dev-result.json",
                     }
                 ],
                 buddies={"dev": ["opaque-dir"]},
@@ -390,9 +375,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "write-prd",
                         "path": write_prd.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "prd",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
                     }
                 ],
                 buddies={"pm": ["write-prd"]},
@@ -436,9 +418,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "write-prd",
                         "path": str(write_prd.resolve()),
-                        "produces_artifact": "true",
-                        "output_slot": "prd",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
                     }
                 ],
                 buddies={"pm": ["write-prd"]},
@@ -461,9 +440,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "write-prd",
                         "path": "../outside/skill",
-                        "produces_artifact": "true",
-                        "output_slot": "prd",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
                     }
                 ],
                 buddies={"pm": ["write-prd"]},
@@ -486,9 +462,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "missing-source",
                         "path": "missing/source/package",
-                        "produces_artifact": "true",
-                        "output_slot": "missing-source",
-                        "output_schema": "framework/schemas/dev/dev-result.json",
                     }
                 ],
                 buddies={"pm": ["missing-source"]},
@@ -516,9 +489,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "write-prd",
                         "path": write_prd.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "prd",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
                     }
                 ],
                 buddies={"pm": ["write-prd"]},
@@ -589,9 +559,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "bad/skill",
                         "path": invalid_id_pkg.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "prd",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
                     }
                 ],
                 buddies={"pm": ["bad/skill"]},
@@ -618,9 +585,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "source-real",
                         "path": symlink_pkg.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "prd",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
                     }
                 ],
                 buddies={"pm": ["source-real"]},
@@ -652,9 +616,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "parent-link-skill",
                         "path": (linked_parent / "skills" / "parent-link-skill").relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "prd",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
                     }
                 ],
                 buddies={"pm": ["parent-link-skill"]},
@@ -707,9 +668,9 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
         fixture_package = ROOT / "tests" / "fixtures" / "community-skills" / "dev-summary"
         self.assertTrue((fixture_package / "SKILL.md").exists())
         fixture_text = (fixture_package / "SKILL.md").read_text(encoding="utf-8").lower()
-        self.assertIn("buddy-level result json", fixture_text)
-        self.assertIn("skill_id", fixture_text)
-        self.assertIn("dev-result", fixture_text)
+        self.assertIn("contributes content to the current buddy run", fixture_text)
+        self.assertIn("do not call persist from the skill perspective", fixture_text)
+        self.assertNotIn("persist --skill-id", fixture_text)
         self.assertNotIn("result_bridge", fixture_text)
         self.assertNotIn("implement-task.json", fixture_text)
 
@@ -721,9 +682,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "dev-summary",
                         "path": fixture_package.relative_to(ROOT).as_posix(),
-                        "produces_artifact": "true",
-                        "output_slot": "implementation-report",
-                        "output_schema": "framework/schemas/dev/dev-result.json",
                     }
                 ],
                 buddies={"dev": ["dev-summary"]},
@@ -766,9 +724,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "implement-task",
                         "path": "buddyswitch/skills/dev/implement-task",
-                        "produces_artifact": "true",
-                        "output_slot": "implementation-report",
-                        "output_schema": "framework/schemas/dev/dev-result.json",
                     }
                 ],
                 buddies={"dev": ["implement-task"]},
@@ -803,7 +758,7 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
 
             workspace = temp_root / "workspace"
             workspace.mkdir(parents=True, exist_ok=True)
-            with unittest.mock.patch.object(runtime_skills, "ROOT", repo_root):
+            with mock.patch.object(runtime_skills, "ROOT", repo_root):
                 installed = runtime_skills.install_runtime_skills(
                     manifest_path=manifest,
                     buddy_id="dev",
@@ -845,9 +800,6 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                     {
                         "id": "write-prd",
                         "path": "buddyswitch/skills/pm/write-prd",
-                        "produces_artifact": "true",
-                        "output_slot": "prd",
-                        "output_schema": "framework/schemas/pm/pm-result.json",
                     }
                 ],
                 buddies={"pm": ["write-prd"], "dev": []},
@@ -878,7 +830,7 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
 
             workspace = temp_root / "workspace"
             workspace.mkdir(parents=True, exist_ok=True)
-            with unittest.mock.patch.object(runtime_skills, "ROOT", repo_root):
+            with mock.patch.object(runtime_skills, "ROOT", repo_root):
                 installed = runtime_skills.install_runtime_skills(
                     manifest_path=manifest,
                     buddy_id="pm",

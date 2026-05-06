@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-"""Red tests for turn-oriented BuddySwitch runtime behavior."""
+"""Buddy-run persistence behavior tests for turn runtime."""
 
 from __future__ import annotations
 
-import importlib
+import argparse
+import contextlib
+import copy
+import io
 import json
 import os
 import subprocess
 import sys
-import tempfile
-import textwrap
 import unittest
-from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
-
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -22,1971 +21,669 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_store  # noqa: E402
-import runtime_store.projections as workspace_projections  # noqa: E402
-import workspace_data  # noqa: E402
+import turn_runtime  # noqa: E402
+from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
-RUNTIME_WORKSPACE_HEADER = "# BuddySwitch Runtime Workspace\n"
-FORBIDDEN_PREPARE_CONCEPTS = (
-    "selected_skill",
-    "skill_candidates",
-    "skill_instructions",
-    "run_instructions_by_skill",
-    "selected_skill_packet",
-    "instruction_path",
-)
+MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
 
 
-def _load_turn_runtime():
-    try:
-        return importlib.import_module("turn_runtime")
-    except ModuleNotFoundError as exc:
-        raise AssertionError(
-            "scripts/turn_runtime.py is required for turn-runtime tests"
-        ) from exc
-
-
-def _relative_to_runtime_or_repo(path: Path) -> str:
-    candidate = path.resolve()
-    for base in (workspace_data.ROOT, ROOT):
-        try:
-            return candidate.relative_to(base.resolve()).as_posix()
-        except ValueError:
-            continue
-    return candidate.as_posix()
-
-
-def _contains_concept_recursive(payload: object, concept: str) -> bool:
-    concept_lower = concept.lower()
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            if isinstance(key, str) and concept_lower in key.lower():
-                return True
-            if _contains_concept_recursive(value, concept):
-                return True
-        return False
-    if isinstance(payload, list):
-        return any(_contains_concept_recursive(item, concept) for item in payload)
-    if isinstance(payload, str):
-        return concept_lower in payload.lower()
-    return False
-
-
-class TurnRuntimeWorkspaceTestMixin:
-    def setUp(self) -> None:
-        super().setUp()
-        self._tmp_dir = tempfile.TemporaryDirectory(dir=ROOT)
-        self.addCleanup(self._tmp_dir.cleanup)
-        self.runtime_root = Path(self._tmp_dir.name)
-        (self.runtime_root / "AGENTS.md").write_text(
-            RUNTIME_WORKSPACE_HEADER + "\nTest-only runtime workspace.\n",
-            encoding="utf-8",
-        )
-
-        objects_root = self.runtime_root / "buddyswitch" / "objects"
-        content_root = self.runtime_root / "buddyswitch" / "content"
-
-        self._patchers = [
-            patch.object(env_store, "ROOT", self.runtime_root),
-            patch.object(env_store, "OBJECTS_ROOT", objects_root),
-            patch.object(env_store, "TRACKS_DIR", objects_root / "tracks"),
-            patch.object(env_store, "TASKS_DIR", objects_root / "tasks"),
-            patch.object(env_store, "ARTIFACT_OBJECTS_DIR", objects_root / "artifacts"),
-            patch.object(env_store, "CONTENT_ROOT", content_root),
-            patch.object(env_store, "RUN_CONTENT_DIR", content_root / "runs"),
-            patch.object(workspace_data, "ROOT", self.runtime_root),
-            patch.object(workspace_data, "rel", _relative_to_runtime_or_repo),
-        ]
-        for patcher in self._patchers:
-            patcher.start()
-        self.addCleanup(self._stop_patchers)
-
-    def _stop_patchers(self) -> None:
-        for patcher in reversed(self._patchers):
-            patcher.stop()
-
-    def _runtime_path(self, repo_relative_path: str) -> Path:
-        return self.runtime_root / repo_relative_path
-
-
-class TurnRuntimeBehaviorTests(TurnRuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _write_instance_json(
-        self,
-        *,
-        instance_id: str,
-        buddy: str,
-        current_task_id: str | None = None,
-        current_track_id: str | None = None,
-    ) -> Path:
-        instance_root = self.runtime_root / "instances" / instance_id
-        instance_root.mkdir(parents=True, exist_ok=True)
-        instance_json = instance_root / "instance.json"
-        instance_payload = {
-            "instance_id": instance_id,
-            "buddy": buddy,
-            "status": "active",
-            "current_task_id": current_task_id,
-            "current_track_id": current_track_id,
-            "workspace_dir": str(instance_root / "workspace"),
-            "created_at": "2026-05-02T00:00:00Z",
-            "updated_at": "2026-05-02T00:00:00Z",
-        }
-        instance_json.write_text(json.dumps(instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-        return instance_json
-
-    @staticmethod
-    def _product_env(instance_json: Path, *, buddy: str, instance_id: str, shared_root: Path) -> dict[str, str]:
-        return {
-            "BUDDYSWITCH_ACTIVE_BUDDY": buddy,
-            "BUDDYSWITCH_INSTANCE_ID": instance_id,
-            "BUDDYSWITCH_INSTANCE_JSON": str(instance_json),
-            "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
-        }
-
-    @staticmethod
-    def _pm_result_payload() -> dict[str, object]:
-        return {
-            "execution_summary": "Captured onboarding PRD updates.",
-            "working_notes": ["Focused on scope and acceptance criteria."],
-            "deliverables_or_changed_files": [],
-            "artifact_content": {
-                "summary": "Captured onboarding PRD updates.",
-                "decisions": ["Ship guided onboarding flow before broader redesign."],
-                "risks": ["Unknown migration edge cases"],
-                "open_questions": ["Need follow-up QA pass?"],
-                "suggested_next_step": "Hand off to design for a flow draft.",
-                "specialized_sections": {
-                    "prd": {
-                        "problem": "Users need clearer onboarding scope.",
-                        "user_value": "Faster onboarding completion with clearer guidance.",
-                        "requirements": ["Define launch acceptance criteria", "Capture follow-up questions"],
-                        "scope": {
-                            "in_scope": ["Onboarding flow scope and acceptance criteria"],
-                            "out_of_scope": ["Implement delivery code"],
-                        },
-                    }
+def _pm_commit() -> dict[str, object]:
+    return {
+        "execution_summary": "PM wrote the AI schedule tool landing page PRD and created the delivery track.",
+        "working_notes": [
+            "The user requested PRD creation and track binding in one PM run.",
+        ],
+        "artifacts": [
+            {
+                "kind": "prd",
+                "title": "AI Schedule Tool Landing Page PRD",
+                "summary": "Defines landing page scope, sections, MVP requirements, and acceptance criteria.",
+                "content": {
+                    "problem": "Busy professionals need an AI-assisted way to reduce scheduling overhead.",
+                    "requirements": [
+                        "Explain the core promise in the hero",
+                        "Show concrete scheduling workflows",
+                    ],
                 },
+            }
+        ],
+        "state_effects": {
+            "track": {
+                "action": "create",
+                "track_id": "track-ai-schedule-landing-page",
+                "title": "AI Schedule Tool Landing Page",
+                "status": "active",
+                "current_buddy": "pm",
+                "next_buddy": "market",
+                "summary": "Cross-buddy landing page iteration for an AI schedule tool.",
             },
-        }
+            "task": {
+                "status": "done",
+                "summary": "PM PRD is ready for market positioning research.",
+            },
+        },
+        "handoff": {
+            "next_buddy": "market",
+            "reason": "Market should validate competitor landing page positioning before design.",
+            "context": "Use the PRD artifact and track summary as source context.",
+        },
+        "contributors": {
+            "skills": ["write-prd", "track-manager"],
+            "agents": [],
+        },
+    }
 
-    @staticmethod
-    def _dev_result_payload() -> dict[str, object]:
+
+class TurnRuntimeBuddyRunTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _session(self, *, buddy: str, payload: dict[str, object] | None = None) -> dict[str, object]:
         return {
-            "execution_summary": "Implemented onboarding banner behavior.",
-            "working_notes": ["Scoped changes to app shell only."],
-            "deliverables_or_changed_files": ["projects/app/main.js"],
-            "artifact_content": {
-                "task_summary": "Implemented onboarding banner behavior.",
-                "changed_files": ["projects/app/main.js"],
-                "implementation_notes": ["Kept feature flag boundaries unchanged."],
-                "verification": {
-                    "checks_run": ["npm test"],
-                    "passed": ["unit tests passed"],
-                    "failed": [],
-                    "blocked": [],
-                },
-                "risks": ["Manual browser smoke not run."],
-                "follow_ups": ["Run manual smoke in product mode."],
-            },
+            "instance_id": "instance-test",
+            "active_buddy": buddy,
+            "payload": payload or {},
         }
 
-    @staticmethod
-    def _test_result_payload() -> dict[str, object]:
-        return {
-            "execution_summary": "Executed smoke checks for onboarding.",
-            "working_notes": ["Coverage focused on critical path only."],
-            "deliverables_or_changed_files": ["runs/raw/smoke-log.txt"],
-            "artifact_content": {
-                "test_scope": "Onboarding critical path smoke checks.",
-                "checks_run": ["npm test -- smoke"],
-                "passed_items": ["Main onboarding route renders"],
-                "failed_items": [],
-                "blocked_items": [],
-                "reproduction_notes": [],
-                "readiness": "ready",
-            },
-        }
+    def _prepare(self, request_text: str, *, buddy: str, payload: dict[str, object] | None = None) -> dict[str, object]:
+        with patch.object(turn_runtime, "_load_product_mode_session", return_value=self._session(buddy=buddy, payload=payload)):
+            context = turn_runtime.prepare_turn_context(request_text, manifest_path=MANIFEST)
+        self.assertTrue(context["ok"], msg=context)
+        return context
 
-    @staticmethod
-    def _design_result_payload() -> dict[str, object]:
-        return {
-            "execution_summary": "Prepared onboarding design handoff summary.",
-            "working_notes": ["Kept flow proposal aligned to PM scope."],
-            "deliverables_or_changed_files": ["runs/raw/design-preview.png"],
-            "artifact_content": {
-                "design_goal": "Clarify onboarding guidance steps.",
-                "flow_or_screen_summary": "Single guided step with progressive disclosure.",
-                "interaction_notes": ["CTA keeps users in context."],
-                "assets_or_preview_refs": ["runs/raw/design-preview.png"],
-                "handoff_notes": ["Include loading/empty states."],
-                "open_questions": ["Need localization before prototype sign-off?"],
-            },
-        }
-
-    @staticmethod
-    def _market_result_payload() -> dict[str, object]:
-        return {
-            "execution_summary": "Completed founder market research scan.",
-            "working_notes": ["Captured strongest pains and caveats."],
-            "deliverables_or_changed_files": ["runs/raw/research-notes.md"],
-            "artifact_content": {
-                "research_question": "Do founders need faster validation loops?",
-                "evidence": ["Founder interview excerpts indicate repeated validation delays."],
-                "insights": ["Speed and confidence are both required."],
-                "assumptions": ["Early-stage B2B SaaS focus remains stable."],
-                "risks": ["Sample size remains limited."],
-                "conclusion": "Demand appears real but still needs deeper validation.",
-                "recommended_next_step": "Run targeted follow-up interviews.",
-                "specialized_sections": {
-                    "research_scan": {
-                        "channel_plan": ["Founder forums", "Founder Slack groups"],
-                    }
-                },
-            },
-        }
-
-    @staticmethod
-    def _track_manager_result_payload(
-        *,
-        action: str,
-        track_id: str | None = None,
-        title: str | None = None,
-        status: str | None = None,
-        current_buddy: str | None = None,
-        next_buddy: str | None = None,
-        summary: str | None = None,
-        execution_summary: str = "Applied track lifecycle operation.",
-    ) -> dict[str, object]:
-        operation: dict[str, object] = {"action": action}
-        if track_id is not None:
-            operation["track_id"] = track_id
-        if title is not None:
-            operation["title"] = title
-        if status is not None:
-            operation["status"] = status
-        if current_buddy is not None:
-            operation["current_buddy"] = current_buddy
-        if next_buddy is not None:
-            operation["next_buddy"] = next_buddy
-        if summary is not None:
-            operation["summary"] = summary
-
-        return {
-            "execution_summary": execution_summary,
-            "working_notes": ["Track lifecycle operation persisted through PM result payload."],
-            "deliverables_or_changed_files": [],
-            "artifact_content": {
-                "summary": execution_summary,
-                "decisions": [f"Track operation '{action}' was requested explicitly."],
-                "risks": [],
-                "open_questions": [],
-                "suggested_next_step": "Continue with the next routed task.",
-                "specialized_sections": {
-                    "track_operation": operation,
-                },
-            },
-            "state_effects": {
-                "track_operation": operation,
-            },
-        }
-
-    def _prepare(
-        self,
-        request_text: str,
-        *,
-        env: dict[str, str],
-        manifest_path: Path | None = None,
-    ) -> dict[str, object]:
-        turn_runtime = _load_turn_runtime()
-        with patch.dict(os.environ, env, clear=True):
-            return turn_runtime.prepare_turn_context(
-                request_text,
-                manifest_path=manifest_path or turn_runtime.DEFAULT_MANIFEST,
-            )
-
-    def _persist(
-        self,
-        context: dict[str, object],
-        *,
-        skill_id: object,
-        result: dict[str, object] | None = None,
-        env: dict[str, str],
-        manifest_path: Path | None = None,
-    ) -> dict[str, object]:
-        turn_runtime = _load_turn_runtime()
-        payload = result or self._pm_result_payload()
-        with patch.dict(os.environ, env, clear=True):
-            return turn_runtime.persist_skill_result(
-                context,
-                skill_id=skill_id,
-                result=payload,
-                manifest_path=manifest_path or turn_runtime.DEFAULT_MANIFEST,
-            )
-
-    def _runtime_state_snapshot(self) -> dict[str, bytes]:
-        snapshot: dict[str, bytes] = {}
-        for relative_dir in (
-            "buddyswitch/objects/tasks",
-            "buddyswitch/objects/tracks",
-            "buddyswitch/objects/artifacts",
-            "buddyswitch/content/runs",
-            "buddyswitch/content/runs/reserved",
-        ):
-            directory = self._runtime_path(relative_dir)
-            if not directory.exists():
-                continue
-            for path in sorted(directory.rglob("*")):
-                if path.is_file():
-                    snapshot[path.relative_to(self.runtime_root).as_posix()] = path.read_bytes()
-        return snapshot
-
-    def _load_runtime_json(self, relative_path: str) -> dict[str, object]:
-        payload = json.loads(self._runtime_path(relative_path).read_text(encoding="utf-8"))
-        self.assertIsInstance(payload, dict)
+    def _persist(self, context: dict[str, object], result: dict[str, object]) -> dict[str, object]:
+        payload = turn_runtime.persist_buddy_run(context, result=result, manifest_path=MANIFEST)
+        self.assertTrue(payload["ok"], msg=payload)
         return payload
 
-    def _write_test_manifest_with_community_dev_skill(self, root: Path) -> Path:
-        manifest_path = root / "manifest.toml"
-        fixture_skill = (ROOT / "tests" / "fixtures" / "community-skills" / "dev-summary").relative_to(ROOT).as_posix()
-        write_prd_skill = (ROOT / "buddyswitch" / "skills" / "pm" / "write-prd").relative_to(ROOT).as_posix()
-        manifest_path.write_text(
-            textwrap.dedent(
-                f"""\
-                schema_version = 1
+    def _run_payload(self, run_id: str) -> dict[str, object]:
+        run_path = self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")
+        return json.loads(run_path.read_text(encoding="utf-8"))
 
-                [env]
-                id = "test"
-                label = "Test Env"
+    def _runtime_state_snapshot(self) -> dict[str, object]:
+        def _load_dir(dir_path: Path) -> dict[str, object]:
+            rows: dict[str, object] = {}
+            if not dir_path.exists():
+                return rows
+            for path in sorted(dir_path.glob("*.json")):
+                rows[path.name] = json.loads(path.read_text(encoding="utf-8"))
+            return rows
 
-                [[skills]]
-                id = "write-prd"
-                path = "{write_prd_skill}"
-                produces_artifact = true
-                output_slot = "prd"
-                output_schema = "framework/schemas/pm/pm-result.json"
+        return {
+            "tracks": _load_dir(self._runtime_path("buddyswitch/objects/tracks")),
+            "tasks": _load_dir(self._runtime_path("buddyswitch/objects/tasks")),
+            "artifacts": _load_dir(self._runtime_path("buddyswitch/objects/artifacts")),
+            "runs": _load_dir(self._runtime_path("buddyswitch/content/runs")),
+            "reservations": _load_dir(self._runtime_path("buddyswitch/content/runs/reserved")),
+        }
 
-                [[skills]]
-                id = "dev-summary"
-                path = "{fixture_skill}"
-                produces_artifact = true
-                output_slot = "dev-summary"
-                output_schema = "framework/schemas/dev/dev-result.json"
+    def _assert_runtime_state_unchanged(self, before: dict[str, object], after: dict[str, object]) -> None:
+        self.assertEqual(after, before)
 
-                [[buddies]]
-                id = "pm"
-                label = "PM"
-                scope = "PM scope"
-                skills = ["write-prd"]
-                permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
-
-                [[buddies]]
-                id = "dev"
-                label = "DEV"
-                scope = "Dev scope"
-                skills = ["dev-summary"]
-                permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
-                """
-            ),
-            encoding="utf-8",
-        )
-        return manifest_path
-
-    def _write_test_manifest_with_imported_pm_skill(
+    def _persist_via_cmd(
         self,
-        root: Path,
         *,
-        output_schema: str = "framework/schemas/pm/pm-result.json",
-    ) -> Path:
-        manifest_path = root / "manifest.toml"
-        imported_skill = (ROOT / "tests" / "fixtures" / "community-skills" / "dev-summary").relative_to(ROOT).as_posix()
-        write_prd_skill = (ROOT / "buddyswitch" / "skills" / "pm" / "write-prd").relative_to(ROOT).as_posix()
-        manifest_path.write_text(
-            textwrap.dedent(
-                f"""\
-                schema_version = 1
-
-                [env]
-                id = "test"
-                label = "Test Env"
-
-                [[skills]]
-                id = "write-prd"
-                path = "{write_prd_skill}"
-                produces_artifact = true
-                output_slot = "prd"
-                output_schema = "framework/schemas/pm/pm-result.json"
-
-                [[skills]]
-                id = "pm-notes"
-                path = "{imported_skill}"
-                produces_artifact = true
-                output_slot = "pm-notes"
-                output_schema = "{output_schema}"
-
-                [[buddies]]
-                id = "pm"
-                label = "PM"
-                scope = "PM scope"
-                skills = ["write-prd", "pm-notes"]
-                permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
-
-                [[buddies]]
-                id = "dev"
-                label = "DEV"
-                scope = "Dev scope"
-                skills = []
-                permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
-                """
-            ),
-            encoding="utf-8",
-        )
-        return manifest_path
-
-    def _write_prepare_boundary_manifest(
-        self,
-        root: Path,
-        *,
-        dev_skill_path: str = "missing/community/source",
-        dev_output_schema: str = "framework/schemas/dev/missing-runtime-gate.json",
-        dev_skills: list[str] | None = None,
-        pm_output_schema: str = "framework/schemas/pm/pm-result.json",
-    ) -> Path:
-        manifest_path = root / "manifest.toml"
-        dev_skill_membership = dev_skills if dev_skills is not None else ["community-dev"]
-        dev_skills_list = ", ".join(f"\"{skill_id}\"" for skill_id in dev_skill_membership)
-        manifest_path.write_text(
-            textwrap.dedent(
-                f"""\
-                schema_version = 1
-
-                [env]
-                id = "test"
-                label = "Test Env"
-
-                [[skills]]
-                id = "community-dev"
-                path = "{dev_skill_path}"
-                produces_artifact = true
-                output_slot = "implementation-report"
-                output_schema = "{dev_output_schema}"
-
-                [[buddies]]
-                id = "pm"
-                label = "PM"
-                scope = "PM scope"
-                skills = ["write-prd"]
-                permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
-
-                [[skills]]
-                id = "write-prd"
-                path = "buddyswitch/skills/pm/write-prd"
-                produces_artifact = true
-                output_slot = "prd"
-                output_schema = "{pm_output_schema}"
-
-                [[buddies]]
-                id = "dev"
-                label = "DEV"
-                scope = "Dev scope"
-                skills = [{dev_skills_list}]
-                permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
-                """
-            ),
-            encoding="utf-8",
-        )
-        return manifest_path
-
-    def _assert_prepare_has_context_only_shape(self, context: dict[str, object]) -> None:
-        expected_key_order = [
-            "ok",
-            "context_revision",
-            "instance_id",
-            "active_buddy",
-            "request_text",
-            "current_task_id",
-            "current_track_id",
-            "task_context",
-            "track_context",
-            "track_artifact_index",
-            "run_envelope",
-            "warnings",
-        ]
-        self.assertEqual(list(context.keys()), expected_key_order)
-        self.assertNotIn("skills", context)
-        self.assertNotIn("inputs_by_skill", context)
-        self.assertNotIn("run_instructions_by_skill", context)
-        self.assertNotIn("selected_skill_packet", context)
-        for forbidden in FORBIDDEN_PREPARE_CONCEPTS:
-            self.assertFalse(
-                _contains_concept_recursive(context, forbidden),
-                msg=f"prepare context leaked forbidden concept: {forbidden}",
-            )
-
-    def _assert_prepare_rejected_without_writes(self, request_text: str, *, env: dict[str, str], instance_json: Path) -> None:
-        snapshot_before = self._runtime_state_snapshot()
-        instance_before = instance_json.read_text(encoding="utf-8")
-
-        payload = self._prepare(request_text, env=env)
-
-        self.assertFalse(payload.get("ok"), msg=f"legacy command-shaped input should fail closed: {request_text}")
-        error_payload = payload.get("error")
-        self.assertIsInstance(error_payload, dict)
-        if isinstance(error_payload, dict):
-            self.assertIn("ordinary request", json.dumps(error_payload).lower())
-
-        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
-
-    def _assert_persist_rejected_without_writes(
-        self,
         context: dict[str, object],
-        *,
-        skill_id: object,
-        env: dict[str, str],
-        result: dict[str, object] | None = None,
-        manifest_path: Path | None = None,
-    ) -> None:
-        snapshot_before = self._runtime_state_snapshot()
-        instance_json_path: Path | None = None
-        instance_before: str | None = None
-        raw_instance_json = env.get("BUDDYSWITCH_INSTANCE_JSON")
-        if isinstance(raw_instance_json, str) and raw_instance_json.strip():
-            instance_json_path = Path(raw_instance_json.strip())
-            if instance_json_path.exists():
-                instance_before = instance_json_path.read_text(encoding="utf-8")
-        try:
-            payload = self._persist(
-                context,
-                skill_id=skill_id,
-                result=result,
-                env=env,
-                manifest_path=manifest_path,
-            )
-        except Exception:
-            rejected = True
-        else:
-            rejected = not bool(payload.get("ok"))
-        self.assertTrue(rejected, msg="persist input should be rejected")
-        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-        if instance_json_path is not None and instance_before is not None:
-            self.assertEqual(instance_json_path.read_text(encoding="utf-8"), instance_before)
-
-    def test_prepare_turn_context_accepts_ordinary_request_and_creates_reserved_run(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-01", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-01", shared_root=self.runtime_root)
-
-        payload = self._prepare("Draft the MVP PRD for onboarding rewrite", env=env)
-
-        self.assertTrue(payload["ok"])
-        self._assert_prepare_has_context_only_shape(payload)
-        self.assertEqual(payload["active_buddy"], "pm")
-        self.assertEqual(payload["request_text"], "Draft the MVP PRD for onboarding rewrite")
-        self.assertIsInstance(payload.get("current_task_id"), str)
-        run_envelope = payload.get("run_envelope")
-        self.assertIsInstance(run_envelope, dict)
-        if isinstance(run_envelope, dict):
-            self.assertEqual(run_envelope.get("status"), "reserved")
-            self.assertIsInstance(run_envelope.get("run_id"), str)
-
-        task_path = self._runtime_path(f"buddyswitch/objects/tasks/{payload['current_task_id']}.json")
-        self.assertTrue(task_path.exists())
-        reserved_dir = self._runtime_path("buddyswitch/content/runs/reserved")
-        self.assertTrue(any(reserved_dir.glob("*.json")))
-
-    def test_prepare_turn_context_reuses_existing_instance_binding(self) -> None:
-        existing_track_id = "track-existing-binding"
-        existing_task_id = "task-existing-binding"
-        env_store.create_track(existing_track_id, "Existing onboarding track", current_buddy="pm")
-        env_store.create_task(existing_task_id, "Existing onboarding task", buddy="pm", track_id=existing_track_id)
-        env_store.register_task_to_track(existing_track_id, existing_task_id)
-
-        instance_json = self._write_instance_json(
-            instance_id="inst-ut-02",
-            buddy="pm",
-            current_task_id=existing_task_id,
-            current_track_id=existing_track_id,
+        result: dict[str, object],
+        session_buddy: str,
+    ) -> tuple[int, dict[str, object]]:
+        raw_dir = self._runtime_path("runs/raw")
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        context_path = raw_dir / "persist-context.json"
+        result_path = raw_dir / "persist-result.json"
+        context_path.write_text(json.dumps(context, ensure_ascii=True), encoding="utf-8")
+        result_path.write_text(json.dumps(result, ensure_ascii=True), encoding="utf-8")
+        args = argparse.Namespace(
+            context=str(context_path),
+            result=str(result_path),
+            manifest=MANIFEST,
         )
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-02", shared_root=self.runtime_root)
-
-        payload = self._prepare("Continue the onboarding PRD", env=env)
-
-        self.assertTrue(payload["ok"])
-        self._assert_prepare_has_context_only_shape(payload)
-        self.assertEqual(payload["current_task_id"], existing_task_id)
-        self.assertEqual(payload["current_track_id"], existing_track_id)
-        self.assertEqual(len(list(self._runtime_path("buddyswitch/objects/tasks").glob("*.json"))), 1)
-
-    def test_locked_buddy_stays_bound_to_instance_scope(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-03", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-03", shared_root=self.runtime_root)
-
-        context = self._prepare("Ask dev later to implement this after PRD approval", env=env)
-
-        self.assertTrue(context["ok"])
-        self._assert_prepare_has_context_only_shape(context)
-        self.assertEqual(context["active_buddy"], "pm")
-        self.assertFalse(list(self._runtime_path("buddyswitch/objects/tasks").glob("task-dev-*.json")))
-
-        self._assert_persist_rejected_without_writes(context, skill_id="implement-task", env=env)
-
-    def test_command_shaped_legacy_input_is_rejected_before_any_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-04", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-04", shared_root=self.runtime_root)
-
-        self._assert_prepare_rejected_without_writes("switch pm: Draft the PRD", env=env, instance_json=instance_json)
-        self._assert_prepare_rejected_without_writes("switch dev: Implement the PRD", env=env, instance_json=instance_json)
-        self._assert_prepare_rejected_without_writes(
-            "switch dev(task-a) -> track-a: Implement the PRD",
-            env=env,
-            instance_json=instance_json,
-        )
-
-    def test_natural_language_switch_word_is_accepted(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-05", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-05", shared_root=self.runtime_root)
-
-        payload = self._prepare("Help users switch plans without losing draft data", env=env)
-
-        self.assertTrue(payload["ok"])
-        self._assert_prepare_has_context_only_shape(payload)
-        self.assertEqual(payload["request_text"], "Help users switch plans without losing draft data")
-        self.assertTrue(any(self._runtime_path("buddyswitch/content/runs/reserved").glob("*.json")))
-
-    def test_prepare_turn_context_has_no_debug_parser_or_router_dependency(self) -> None:
-        turn_runtime = _load_turn_runtime()
-        source = (ROOT / "scripts" / "turn_runtime.py").read_text(encoding="utf-8")
-        self.assertNotIn("parse_switch", source)
-        self.assertNotIn("codex_router", source)
-
-        instance_json = self._write_instance_json(instance_id="inst-ut-06", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-06", shared_root=self.runtime_root)
-        payload = self._prepare("Draft onboarding PRD", env=env)
-
-        self.assertTrue(payload["ok"])
-        self._assert_prepare_has_context_only_shape(payload)
-        self.assertTrue(hasattr(turn_runtime, "prepare_turn_context"))
-
-    def test_prepare_succeeds_when_skill_source_and_schema_are_not_ready(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            manifest_path = self._write_prepare_boundary_manifest(Path(temp_dir))
-            instance_json = self._write_instance_json(instance_id="inst-ut-prepare-boundary", buddy="dev")
-            env = self._product_env(
-                instance_json,
-                buddy="dev",
-                instance_id="inst-ut-prepare-boundary",
-                shared_root=self.runtime_root,
-            )
-
-            payload = self._prepare(
-                "Summarize checkout banner implementation",
-                env=env,
-                manifest_path=manifest_path,
-            )
-
-        self.assertTrue(payload["ok"])
-        self._assert_prepare_has_context_only_shape(payload)
-        run_envelope = payload.get("run_envelope")
-        self.assertIsInstance(run_envelope, dict)
-        if isinstance(run_envelope, dict):
-            self.assertEqual(run_envelope.get("status"), "reserved")
-        self.assertIsInstance(payload.get("current_task_id"), str)
-
-    def test_prepare_succeeds_when_active_buddy_has_no_registered_skills(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            manifest_path = self._write_prepare_boundary_manifest(Path(temp_dir), dev_skills=[])
-            instance_json = self._write_instance_json(instance_id="inst-ut-prepare-empty-skills", buddy="dev")
-            env = self._product_env(
-                instance_json,
-                buddy="dev",
-                instance_id="inst-ut-prepare-empty-skills",
-                shared_root=self.runtime_root,
-            )
-
-            payload = self._prepare(
-                "Keep implementing onboarding task context",
-                env=env,
-                manifest_path=manifest_path,
-            )
-
-        self.assertTrue(payload["ok"])
-        self._assert_prepare_has_context_only_shape(payload)
-        run_envelope = payload.get("run_envelope")
-        self.assertIsInstance(run_envelope, dict)
-        if isinstance(run_envelope, dict):
-            self.assertEqual(run_envelope.get("status"), "reserved")
-
-    def test_prepare_succeeds_with_existing_malformed_skill_package_contents(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            temp_root = Path(temp_dir)
-            package_root = temp_root / "skills" / "community-dev"
-            package_root.mkdir(parents=True, exist_ok=True)
-            (package_root / "SKILL.md").write_text("# Community Dev Skill\nNo frontmatter.\n", encoding="utf-8")
-            (package_root / "skill.toml").write_text('name = "legacy-metadata"\n', encoding="utf-8")
-            manifest_path = self._write_prepare_boundary_manifest(
-                temp_root,
-                dev_skill_path=package_root.relative_to(ROOT).as_posix(),
-            )
-            instance_json = self._write_instance_json(instance_id="inst-ut-prepare-malformed-skill", buddy="dev")
-            env = self._product_env(
-                instance_json,
-                buddy="dev",
-                instance_id="inst-ut-prepare-malformed-skill",
-                shared_root=self.runtime_root,
-            )
-
-            payload = self._prepare(
-                "Keep implementing onboarding task context",
-                env=env,
-                manifest_path=manifest_path,
-            )
-
-        self.assertTrue(payload["ok"])
-        self._assert_prepare_has_context_only_shape(payload)
-
-    def test_prepare_rejects_empty_request_without_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-prepare-empty-input", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-prepare-empty-input",
-            shared_root=self.runtime_root,
-        )
-        snapshot_before = self._runtime_state_snapshot()
-        instance_before = instance_json.read_text(encoding="utf-8")
-
-        payload = self._prepare("   ", env=env)
-
-        self.assertFalse(payload.get("ok"))
-        error_payload = payload.get("error")
-        self.assertIsInstance(error_payload, dict)
-        if isinstance(error_payload, dict):
-            self.assertEqual(error_payload.get("code"), "E_EMPTY_INPUT")
-        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
-
-    def test_prepare_rejects_partial_product_identity_env_without_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-prepare-partial-env", buddy="pm")
-        env = {
-            "BUDDYSWITCH_INSTANCE_ID": "inst-ut-prepare-partial-env",
-            "BUDDYSWITCH_INSTANCE_JSON": str(instance_json),
-            "BUDDYSWITCH_SHARED_ROOT": str(self.runtime_root),
-        }
-        snapshot_before = self._runtime_state_snapshot()
-        instance_before = instance_json.read_text(encoding="utf-8")
-
-        with self.assertRaises(ValueError):
-            self._prepare("Draft onboarding PRD", env=env)
-
-        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
-
-    def test_prepare_rejects_missing_product_identity_env_without_writes(self) -> None:
-        snapshot_before = self._runtime_state_snapshot()
-
-        payload = self._prepare("Draft onboarding PRD", env={})
-
-        self.assertFalse(payload.get("ok"))
-        error_payload = payload.get("error")
-        self.assertIsInstance(error_payload, dict)
-        if isinstance(error_payload, dict):
-            self.assertEqual(error_payload.get("code"), "E_PRODUCT_MODE_REQUIRED")
-        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-
-    def test_prepare_rejects_instance_id_mismatch_without_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-prepare-id-a", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-prepare-id-b",
-            shared_root=self.runtime_root,
-        )
-        snapshot_before = self._runtime_state_snapshot()
-        instance_before = instance_json.read_text(encoding="utf-8")
-
-        with self.assertRaises(ValueError):
-            self._prepare("Draft onboarding PRD", env=env)
-
-        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
-
-    def test_prepare_rejects_existing_task_owned_by_other_buddy_without_writes(self) -> None:
-        env_store.create_task("task-owned-by-dev", "Task Owned By Dev", buddy="dev")
-
-        instance_json = self._write_instance_json(
-            instance_id="inst-ut-prepare-task-buddy-conflict",
-            buddy="pm",
-            current_task_id="task-owned-by-dev",
-        )
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-prepare-task-buddy-conflict",
-            shared_root=self.runtime_root,
-        )
-        snapshot_before = self._runtime_state_snapshot()
-        instance_before = instance_json.read_text(encoding="utf-8")
-
-        with self.assertRaises(ValueError):
-            self._prepare("Continue onboarding PRD", env=env)
-
-        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
-
-    def test_prepare_rejects_track_binding_conflict_before_creating_missing_explicit_track(self) -> None:
-        env_store.create_track("track-binding-a", "Track Binding A", current_buddy="pm")
-        env_store.create_task(
-            "task-binding-conflict-missing-track",
-            "Task Binding Conflict Missing Track",
-            buddy="pm",
-            track_id="track-binding-a",
-        )
-        env_store.register_task_to_track("track-binding-a", "task-binding-conflict-missing-track")
-
-        instance_json = self._write_instance_json(
-            instance_id="inst-ut-prepare-binding-conflict-missing-track",
-            buddy="pm",
-            current_task_id="task-binding-conflict-missing-track",
-            current_track_id="track-binding-new",
-        )
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-prepare-binding-conflict-missing-track",
-            shared_root=self.runtime_root,
-        )
-        snapshot_before = self._runtime_state_snapshot()
-        instance_before = instance_json.read_text(encoding="utf-8")
-
-        with self.assertRaises(ValueError):
-            self._prepare("Continue onboarding PRD", env=env)
-
-        self.assertFalse(self._runtime_path("buddyswitch/objects/tracks/track-binding-new.json").exists())
-        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
-
-    def test_prepare_rejects_task_track_binding_conflict_without_writes(self) -> None:
-        env_store.create_track("track-binding-a", "Track Binding A", current_buddy="pm")
-        env_store.create_track("track-binding-b", "Track Binding B", current_buddy="pm")
-        env_store.create_task(
-            "task-binding-conflict",
-            "Task Binding Conflict",
-            buddy="pm",
-            track_id="track-binding-a",
-        )
-        env_store.register_task_to_track("track-binding-a", "task-binding-conflict")
-
-        instance_json = self._write_instance_json(
-            instance_id="inst-ut-prepare-binding-conflict",
-            buddy="pm",
-            current_task_id="task-binding-conflict",
-            current_track_id="track-binding-b",
-        )
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-prepare-binding-conflict",
-            shared_root=self.runtime_root,
-        )
-        snapshot_before = self._runtime_state_snapshot()
-        instance_before = instance_json.read_text(encoding="utf-8")
-
-        with self.assertRaises(ValueError):
-            self._prepare("Continue onboarding PRD", env=env)
-
-        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
-
-    def test_persist_validates_skill_id_from_active_buddy_manifest_membership(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-07", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-07", shared_root=self.runtime_root)
-
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-        self._assert_prepare_has_context_only_shape(context)
-
-        self._assert_persist_rejected_without_writes(context, skill_id="", env=env)
-        self._assert_persist_rejected_without_writes(context, skill_id=["write-prd"], env=env)
-        self._assert_persist_rejected_without_writes(context, skill_id="implement-task", env=env)
-        self._assert_persist_rejected_without_writes(context, skill_id="not-in-manifest", env=env)
-
-        payload = self._persist(context, skill_id="write-prd", env=env)
-        self.assertTrue(payload["ok"])
-
-    def test_persist_rejects_tampered_context_identity_without_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-08", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-08", shared_root=self.runtime_root)
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-        self._assert_prepare_has_context_only_shape(context)
-
-        tamper_cases = []
-
-        buddy_tampered = deepcopy(context)
-        buddy_tampered["active_buddy"] = "dev"
-        tamper_cases.append(buddy_tampered)
-
-        task_tampered = deepcopy(context)
-        task_tampered["current_task_id"] = "task-tampered"
-        tamper_cases.append(task_tampered)
-
-        run_tampered = deepcopy(context)
-        if isinstance(run_tampered.get("run_envelope"), dict):
-            run_tampered["run_envelope"] = dict(run_tampered["run_envelope"])
-            run_tampered["run_envelope"]["run_id"] = "run-tampered"
-        tamper_cases.append(run_tampered)
-
-        request_tampered = deepcopy(context)
-        request_tampered["request_text"] = "Tampered request"
-        tamper_cases.append(request_tampered)
-
-        for tampered in tamper_cases:
-            with self.subTest(tamper=tampered.get("request_text", "case")):
-                self._assert_persist_rejected_without_writes(tampered, skill_id="write-prd", env=env)
-
-    def test_persist_rejects_context_payload_not_ok_without_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-persist-context-not-ok", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-persist-context-not-ok",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-
-        invalid_context = deepcopy(context)
-        invalid_context["ok"] = False
-        invalid_context["error"] = {"code": "E_FORCED_TEST", "message": "forced invalid context"}
-        self._assert_persist_rejected_without_writes(invalid_context, skill_id="write-prd", env=env)
-
-    def test_persist_rejects_stale_context_revision_without_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-persist-stale-revision", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-persist-stale-revision",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-
-        stale_context = deepcopy(context)
-        stale_context["context_revision"] = f"{context['context_revision']}-stale"
-        self._assert_persist_rejected_without_writes(stale_context, skill_id="write-prd", env=env)
-
-    def test_persist_rejects_run_reservation_context_revision_mismatch_without_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-persist-reservation-mismatch", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-persist-reservation-mismatch",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-
-        run_envelope = context.get("run_envelope")
-        self.assertIsInstance(run_envelope, dict)
-        assert isinstance(run_envelope, dict)
-        run_id = run_envelope["run_id"]
-        reservation_path = self._runtime_path(f"buddyswitch/content/runs/reserved/{run_id}.json")
-        reservation_payload = json.loads(reservation_path.read_text(encoding="utf-8"))
-        self.assertIsInstance(reservation_payload, dict)
-        assert isinstance(reservation_payload, dict)
-        reservation_payload["context_revision"] = "task-pm-stale:999"
-        reservation_path.write_text(
-            json.dumps(reservation_payload, ensure_ascii=True, indent=2) + "\n",
-            encoding="utf-8",
-        )
-
-        self._assert_persist_rejected_without_writes(context, skill_id="write-prd", env=env)
-
-    def test_persist_rejects_duplicate_run_id_without_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-persist-duplicate-run", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-persist-duplicate-run",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-
-        run_envelope = context.get("run_envelope")
-        self.assertIsInstance(run_envelope, dict)
-        assert isinstance(run_envelope, dict)
-        run_id = run_envelope["run_id"]
-        duplicate_run_path = self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")
-        duplicate_run_path.parent.mkdir(parents=True, exist_ok=True)
-        duplicate_run_path.write_text(
-            json.dumps({"run_id": run_id, "current_task_id": context["current_task_id"]}, ensure_ascii=True, indent=2)
-            + "\n",
-            encoding="utf-8",
-        )
-
-        self._assert_persist_rejected_without_writes(context, skill_id="write-prd", env=env)
-
-    def test_persist_rejects_selected_skill_without_output_slot_without_writes(self) -> None:
-        turn_runtime = _load_turn_runtime()
-        instance_json = self._write_instance_json(instance_id="inst-ut-persist-missing-output-slot", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-persist-missing-output-slot",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-
-        with patch.object(
-            turn_runtime,
-            "_resolve_execution_skill",
-            return_value={
-                "id": "write-prd",
-                "persistence": {
-                    "produces_artifact": True,
-                    "output_schema": "framework/schemas/pm/pm-result.json",
-                },
-            },
+        session = self._session(buddy=session_buddy, payload={})
+        stdout = io.StringIO()
+        with (
+            patch.object(turn_runtime, "_load_product_mode_session", return_value=session),
+            patch.object(turn_runtime, "_hold_product_runtime_lock", side_effect=lambda _: contextlib.nullcontext()),
+            patch("sys.stdout", new=stdout),
         ):
-            self._assert_persist_rejected_without_writes(context, skill_id="write-prd", env=env)
-
-    def test_persist_rejects_non_pm_track_operation_without_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-persist-non-pm-track-effect", buddy="dev")
-        env = self._product_env(
-            instance_json,
-            buddy="dev",
-            instance_id="inst-ut-persist-non-pm-track-effect",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Implement onboarding behavior", env=env)
-        self.assertTrue(context["ok"])
-
-        invalid_result = self._track_manager_result_payload(
-            action="create",
-            track_id="track-dev-forbidden",
-            current_buddy="pm",
-            next_buddy="test",
-            execution_summary="Attempted non-PM track mutation.",
-        )
-        self._assert_persist_rejected_without_writes(
-            context,
-            skill_id="implement-task",
-            result=invalid_result,
-            env=env,
-        )
-
-    def test_persist_rejects_invalid_track_operation_action_without_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-persist-invalid-track-action", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-persist-invalid-track-action",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Create onboarding delivery track", env=env)
-        self.assertTrue(context["ok"])
-
-        invalid_result = self._track_manager_result_payload(
-            action="reopen",
-            track_id="track-invalid-action",
-            execution_summary="Attempted invalid track action.",
-        )
-        self._assert_persist_rejected_without_writes(
-            context,
-            skill_id="track-manager",
-            result=invalid_result,
-            env=env,
-        )
-
-    def test_persist_rejects_track_operation_track_binding_conflict_without_writes(self) -> None:
-        env_store.create_track("track-binding-main", "Track Binding Main", current_buddy="pm")
-        env_store.create_track("track-binding-other", "Track Binding Other", current_buddy="pm")
-        env_store.create_task(
-            "task-track-binding-main",
-            "Task Track Binding Main",
-            buddy="pm",
-            track_id="track-binding-main",
-        )
-        env_store.register_task_to_track("track-binding-main", "task-track-binding-main")
-
-        instance_json = self._write_instance_json(
-            instance_id="inst-ut-persist-track-binding-conflict",
-            buddy="pm",
-            current_task_id="task-track-binding-main",
-            current_track_id="track-binding-main",
-        )
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-persist-track-binding-conflict",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Update onboarding delivery track", env=env)
-        self.assertTrue(context["ok"])
-        self.assertEqual(context["current_track_id"], "track-binding-main")
-
-        invalid_result = self._track_manager_result_payload(
-            action="update",
-            track_id="track-binding-other",
-            title="Wrong Track",
-            execution_summary="Attempted conflicting track update.",
-        )
-        self._assert_persist_rejected_without_writes(
-            context,
-            skill_id="track-manager",
-            result=invalid_result,
-            env=env,
-        )
-
-    def test_persist_rejects_pm_track_operation_with_invalid_buddy_ids_without_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-persist-invalid-track-buddy", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-persist-invalid-track-buddy",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Create onboarding delivery track", env=env)
-        self.assertTrue(context["ok"])
-
-        invalid_cases = (
-            (
-                "invalid-current-buddy",
-                self._track_manager_result_payload(
-                    action="create",
-                    track_id="track-invalid-current",
-                    current_buddy="pm-unknown",
-                    next_buddy="design",
-                    execution_summary="Attempted invalid current_buddy.",
-                ),
-            ),
-            (
-                "invalid-next-buddy",
-                self._track_manager_result_payload(
-                    action="create",
-                    track_id="track-invalid-next",
-                    current_buddy="pm",
-                    next_buddy="design-unknown",
-                    execution_summary="Attempted invalid next_buddy.",
-                ),
-            ),
-        )
-
-        for label, invalid_result in invalid_cases:
-            with self.subTest(case=label):
-                self._assert_persist_rejected_without_writes(
-                    context,
-                    skill_id="track-manager",
-                    result=invalid_result,
-                    env=env,
-                )
-
-    def test_successful_persist_returns_structured_receipt_contract(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-09", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-09", shared_root=self.runtime_root)
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-        self._assert_prepare_has_context_only_shape(context)
-
-        payload = self._persist(context, skill_id="write-prd", env=env)
-
-        self.assertTrue(payload["ok"])
-        self.assertIn("receipt", payload)
-        self.assertIn("refreshed_context", payload)
-        receipt = payload["receipt"]
-        self.assertIsInstance(receipt, dict)
-        if isinstance(receipt, dict):
-            for key in (
-                "ok",
-                "skill_id",
-                "task_id",
-                "task_title",
-                "artifact_id",
-                "artifact_ids",
-                "run_id",
-                "next_state",
-                "receipt_paths",
-                "related_run_ids",
-            ):
-                self.assertIn(key, receipt)
-            self.assertEqual(receipt["run_id"], context["run_envelope"]["run_id"])
-            self.assertIn(receipt["artifact_id"], receipt["artifact_ids"])
-            self.assertEqual(receipt["next_state"]["task_id"], receipt["task_id"])
-            self.assertNotIn("recommended_switch", receipt)
-            self.assertNotIn("reference_switches", receipt)
-            receipt_paths = receipt.get("receipt_paths")
-            self.assertIsInstance(receipt_paths, dict)
-            if isinstance(receipt_paths, dict):
-                for rel_path in receipt_paths.values():
-                    if isinstance(rel_path, str):
-                        self.assertTrue(self._runtime_path(rel_path).exists())
-                    elif isinstance(rel_path, list):
-                        for item in rel_path:
-                            if isinstance(item, str):
-                                self.assertTrue(self._runtime_path(item).exists())
-
-    def test_artifact_buddy_persist_keeps_native_skill_identity_across_receipt_artifact_and_run(self) -> None:
-        cases = (
-            ("pm", "write-prd", self._pm_result_payload()),
-            ("dev", "implement-task", self._dev_result_payload()),
-            ("test", "smoke-test", self._test_result_payload()),
-            ("design", "shape-prototype", self._design_result_payload()),
-            ("market", "research-scan", self._market_result_payload()),
-        )
-        for buddy, skill_id, result_payload in cases:
-            with self.subTest(buddy=buddy, skill=skill_id):
-                instance_id = f"inst-ut-native-{buddy}"
-                instance_json = self._write_instance_json(instance_id=instance_id, buddy=buddy)
-                env = self._product_env(
-                    instance_json,
-                    buddy=buddy,
-                    instance_id=instance_id,
-                    shared_root=self.runtime_root,
-                )
-                context = self._prepare(f"Execute {skill_id} in {buddy} flow", env=env)
-                self.assertTrue(context["ok"])
-
-                payload = self._persist(context, skill_id=skill_id, result=result_payload, env=env)
-                self.assertTrue(payload["ok"])
-
-                receipt = payload["receipt"]
-                self.assertIsInstance(receipt, dict)
-                assert isinstance(receipt, dict)
-                self.assertEqual(receipt["skill_id"], skill_id)
-
-                artifact_paths = receipt["receipt_paths"]["artifacts"]
-                self.assertIsInstance(artifact_paths, list)
-                assert isinstance(artifact_paths, list)
-                self.assertEqual(len(artifact_paths), 1)
-                artifact_object = self._load_runtime_json(artifact_paths[0])
-                self.assertEqual(artifact_object["skill_id"], skill_id)
-                self.assertEqual(artifact_object["summary"], result_payload["execution_summary"])
-                self.assertEqual(artifact_object["content"], result_payload["artifact_content"])
-
-                run_audit = self._load_runtime_json(receipt["receipt_paths"]["run"])
-                self.assertEqual(run_audit["skill_id"], skill_id)
-                self.assertEqual(run_audit["execution_summary"], result_payload["execution_summary"])
-                self.assertEqual(run_audit["working_notes"], result_payload["working_notes"])
-                self.assertEqual(
-                    run_audit["deliverables_or_changed_files"],
-                    result_payload["deliverables_or_changed_files"],
-                )
-
-    def test_persist_accepts_minimum_write_safe_result(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-dev-minimum", buddy="dev")
-        env = self._product_env(
-            instance_json,
-            buddy="dev",
-            instance_id="inst-ut-dev-minimum",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Implement onboarding behavior", env=env)
-        self.assertTrue(context["ok"])
-
-        minimum_result = {
-            "execution_summary": "Saved implementation note.",
-            "working_notes": [],
-            "deliverables_or_changed_files": [],
-            "artifact_content": {
-                "summary": "Saved implementation note.",
-                "freeform": {
-                    "community_output": "This content does not need full buddy schema completeness.",
-                },
-            },
-        }
-
-        payload = self._persist(context, skill_id="implement-task", result=minimum_result, env=env)
-        self.assertTrue(payload["ok"])
-        receipt = payload["receipt"]
-        self.assertIsInstance(receipt, dict)
-        assert isinstance(receipt, dict)
-        artifact_object = self._load_runtime_json(receipt["receipt_paths"]["artifacts"][0])
-        self.assertEqual(artifact_object["summary"], minimum_result["execution_summary"])
-        self.assertEqual(artifact_object["content"], minimum_result["artifact_content"])
-        run_audit = self._load_runtime_json(receipt["receipt_paths"]["run"])
-        self.assertEqual(run_audit["execution_summary"], minimum_result["execution_summary"])
-
-    def test_imported_skill_id_persists_minimum_result_for_target_buddy(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            manifest_path = self._write_test_manifest_with_community_dev_skill(Path(temp_dir))
-            instance_json = self._write_instance_json(instance_id="inst-ut-imported-minimum", buddy="dev")
-            env = self._product_env(
-                instance_json,
-                buddy="dev",
-                instance_id="inst-ut-imported-minimum",
-                shared_root=self.runtime_root,
-            )
-            context = self._prepare(
-                "Summarize imported skill output",
-                env=env,
-                manifest_path=manifest_path,
-            )
-            self.assertTrue(context["ok"])
-
-            minimum_result = {
-                "execution_summary": "Saved imported skill summary.",
-                "working_notes": [],
-                "deliverables_or_changed_files": [],
-                "artifact_content": {
-                    "summary": "Saved imported skill summary.",
-                    "freeform": {
-                        "imported_skill": "dev-summary",
-                    },
-                },
-            }
-
-            payload = self._persist(
-                context,
-                skill_id="dev-summary",
-                result=minimum_result,
-                env=env,
-                manifest_path=manifest_path,
-            )
-            self.assertTrue(payload["ok"])
-            receipt = payload["receipt"]
-            self.assertIsInstance(receipt, dict)
-            assert isinstance(receipt, dict)
-            self.assertEqual(receipt["skill_id"], "dev-summary")
-            artifact_object = self._load_runtime_json(receipt["receipt_paths"]["artifacts"][0])
-            self.assertEqual(artifact_object["skill_id"], "dev-summary")
-            run_audit = self._load_runtime_json(receipt["receipt_paths"]["run"])
-            self.assertEqual(run_audit["skill_id"], "dev-summary")
-
-    def test_imported_skill_id_rejects_wrong_buddy_without_writes(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            manifest_path = self._write_test_manifest_with_community_dev_skill(Path(temp_dir))
-            instance_json = self._write_instance_json(instance_id="inst-ut-imported-wrong-buddy", buddy="pm")
-            env = self._product_env(
-                instance_json,
-                buddy="pm",
-                instance_id="inst-ut-imported-wrong-buddy",
-                shared_root=self.runtime_root,
-            )
-            context = self._prepare(
-                "Draft onboarding PRD",
-                env=env,
-                manifest_path=manifest_path,
-            )
-            self.assertTrue(context["ok"])
-            self._assert_persist_rejected_without_writes(
-                context,
-                skill_id="dev-summary",
-                env=env,
-                manifest_path=manifest_path,
-            )
-
-    def test_imported_pm_skill_id_persists_minimum_result_for_target_buddy(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            manifest_path = self._write_test_manifest_with_imported_pm_skill(Path(temp_dir))
-            instance_json = self._write_instance_json(instance_id="inst-ut-imported-pm-minimum", buddy="pm")
-            env = self._product_env(
-                instance_json,
-                buddy="pm",
-                instance_id="inst-ut-imported-pm-minimum",
-                shared_root=self.runtime_root,
-            )
-            context = self._prepare(
-                "Summarize imported PM notes",
-                env=env,
-                manifest_path=manifest_path,
-            )
-            self.assertTrue(context["ok"])
-
-            minimum_result = {
-                "execution_summary": "Saved imported PM notes.",
-                "working_notes": [],
-                "deliverables_or_changed_files": [],
-                "artifact_content": {
-                    "summary": "Saved imported PM notes.",
-                    "freeform": {
-                        "imported_skill": "pm-notes",
-                    },
-                },
-            }
-            payload = self._persist(
-                context,
-                skill_id="pm-notes",
-                result=minimum_result,
-                env=env,
-                manifest_path=manifest_path,
-            )
-            self.assertTrue(payload["ok"])
-            receipt = payload["receipt"]
-            self.assertIsInstance(receipt, dict)
-            assert isinstance(receipt, dict)
-            self.assertEqual(receipt["skill_id"], "pm-notes")
-            artifact_object = self._load_runtime_json(receipt["receipt_paths"]["artifacts"][0])
-            self.assertEqual(artifact_object["skill_id"], "pm-notes")
-            run_audit = self._load_runtime_json(receipt["receipt_paths"]["run"])
-            self.assertEqual(run_audit["skill_id"], "pm-notes")
-
-    def test_imported_pm_skill_rejects_invalid_minimum_result_without_writes(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            manifest_path = self._write_test_manifest_with_imported_pm_skill(Path(temp_dir))
-            instance_json = self._write_instance_json(instance_id="inst-ut-imported-pm-invalid", buddy="pm")
-            env = self._product_env(
-                instance_json,
-                buddy="pm",
-                instance_id="inst-ut-imported-pm-invalid",
-                shared_root=self.runtime_root,
-            )
-            context = self._prepare(
-                "Summarize imported PM notes",
-                env=env,
-                manifest_path=manifest_path,
-            )
-            self.assertTrue(context["ok"])
-            invalid_result = {
-                "execution_summary": "",
-                "working_notes": "not a list",
-                "artifact_content": "not an object",
-            }
-            self._assert_persist_rejected_without_writes(
-                context,
-                skill_id="pm-notes",
-                result=invalid_result,
-                env=env,
-                manifest_path=manifest_path,
-            )
-
-    def test_imported_pm_skill_accepts_missing_output_schema_file_when_result_is_write_safe(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            manifest_path = self._write_test_manifest_with_imported_pm_skill(
-                Path(temp_dir),
-                output_schema="framework/schemas/pm/missing-imported-schema.json",
-            )
-            instance_json = self._write_instance_json(instance_id="inst-ut-imported-pm-missing-schema", buddy="pm")
-            env = self._product_env(
-                instance_json,
-                buddy="pm",
-                instance_id="inst-ut-imported-pm-missing-schema",
-                shared_root=self.runtime_root,
-            )
-            context = self._prepare(
-                "Summarize imported PM notes",
-                env=env,
-                manifest_path=manifest_path,
-            )
-            self.assertTrue(context["ok"])
-            minimum_result = {
-                "execution_summary": "Saved imported PM notes.",
-                "working_notes": [],
-                "deliverables_or_changed_files": [],
-                "artifact_content": {
-                    "summary": "Saved imported PM notes.",
-                    "freeform": {
-                        "imported_skill": "pm-notes",
-                    },
-                },
-            }
-            payload = self._persist(
-                context,
-                skill_id="pm-notes",
-                result=minimum_result,
-                env=env,
-                manifest_path=manifest_path,
-            )
-
-        self.assertTrue(payload["ok"])
-        receipt = payload["receipt"]
-        self.assertIsInstance(receipt, dict)
-        assert isinstance(receipt, dict)
-        self.assertEqual(receipt["skill_id"], "pm-notes")
-
-    def test_community_skill_direct_buddy_result_persists_with_native_skill_id(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            manifest_path = self._write_test_manifest_with_community_dev_skill(Path(temp_dir))
-
-            dev_instance_json = self._write_instance_json(instance_id="inst-ut-community-dev", buddy="dev")
-            dev_env = self._product_env(
-                dev_instance_json,
-                buddy="dev",
-                instance_id="inst-ut-community-dev",
-                shared_root=self.runtime_root,
-            )
-            context = self._prepare(
-                "Summarize checkout banner implementation",
-                env=dev_env,
-                manifest_path=manifest_path,
-            )
-            self.assertTrue(context["ok"])
-
-            direct_dev_result = {
-                "execution_summary": "Summarized checkout banner implementation.",
-                "working_notes": ["Kept changes scoped to projects/app."],
-                "deliverables_or_changed_files": ["projects/app/main.js"],
-                "artifact_content": {
-                    "task_summary": "Summarized checkout banner implementation.",
-                    "changed_files": ["projects/app/main.js"],
-                    "implementation_notes": ["Confirmed implementation details from changed files."],
-                    "verification": {
-                        "checks_run": ["npm test"],
-                        "passed": ["Unit tests passed"],
-                        "failed": [],
-                        "blocked": ["Manual browser smoke not run"],
-                    },
-                    "risks": ["Manual browser smoke not run"],
-                    "follow_ups": ["Run browser smoke test before release."],
-                },
-            }
-
-            payload = self._persist(
-                context,
-                skill_id="dev-summary",
-                result=direct_dev_result,
-                env=dev_env,
-                manifest_path=manifest_path,
-            )
-            self.assertTrue(payload["ok"])
-            receipt = payload["receipt"]
-            self.assertIsInstance(receipt, dict)
-            assert isinstance(receipt, dict)
-            self.assertEqual(receipt["skill_id"], "dev-summary")
-
-            artifact_object = self._load_runtime_json(receipt["receipt_paths"]["artifacts"][0])
-            self.assertEqual(artifact_object["skill_id"], "dev-summary")
-            self.assertEqual(artifact_object["content"], direct_dev_result["artifact_content"])
-
-            run_audit = self._load_runtime_json(receipt["receipt_paths"]["run"])
-            self.assertEqual(run_audit["skill_id"], "dev-summary")
-
-            pm_instance_json = self._write_instance_json(instance_id="inst-ut-community-pm", buddy="pm")
-            pm_env = self._product_env(
-                pm_instance_json,
-                buddy="pm",
-                instance_id="inst-ut-community-pm",
-                shared_root=self.runtime_root,
-            )
-            pm_context = self._prepare("Draft onboarding PRD", env=pm_env, manifest_path=manifest_path)
-            self.assertTrue(pm_context["ok"])
-            self._assert_persist_rejected_without_writes(
-                pm_context,
-                skill_id="dev-summary",
-                env=pm_env,
-                manifest_path=manifest_path,
-            )
-
-    def test_track_manager_persist_receipt_includes_artifact_and_track_metadata(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-09-track", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-09-track",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Create onboarding delivery track", env=env)
-        self.assertTrue(context["ok"])
-
-        payload = self._persist(
-            context,
-            skill_id="track-manager",
-            result=self._track_manager_result_payload(
-                action="create",
-                track_id="track-onboarding-delivery",
-                title="Onboarding Delivery",
-                status="active",
-                current_buddy="pm",
-                next_buddy="design",
-                summary="Cross-functional onboarding delivery flow.",
-                execution_summary="Created onboarding track.",
-            ),
-            env=env,
-        )
-
-        self.assertTrue(payload["ok"])
-        receipt = payload["receipt"]
-        self.assertIsInstance(receipt, dict)
-        if isinstance(receipt, dict):
-            self.assertEqual(receipt.get("track_action"), "create")
-            self.assertIsInstance(receipt.get("artifact_id"), str)
-            self.assertTrue(receipt.get("artifact_id"))
-            self.assertIn(receipt["artifact_id"], receipt.get("artifact_ids", []))
-            self.assertIsInstance(receipt.get("track_id"), str)
-            self.assertIsInstance(receipt.get("track_title"), str)
-
-    def test_persist_ignores_extra_top_level_runtime_metadata_and_keeps_context_authoritative(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-09-boundary", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-09-boundary",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-
-        result_with_extra_runtime_field = self._pm_result_payload()
-        result_with_extra_runtime_field["task_id"] = "task-should-not-be-accepted"
-        payload = self._persist(context, skill_id="write-prd", result=result_with_extra_runtime_field, env=env)
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["receipt"]["task_id"], context["current_task_id"])
-
-    def test_persist_accepts_missing_output_schema_file_when_result_is_write_safe(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            manifest_path = self._write_prepare_boundary_manifest(
-                Path(temp_dir),
-                pm_output_schema="framework/schemas/pm/missing-runtime-gate.json",
-            )
-            instance_json = self._write_instance_json(instance_id="inst-ut-09-missing-schema", buddy="pm")
-            env = self._product_env(
-                instance_json,
-                buddy="pm",
-                instance_id="inst-ut-09-missing-schema",
-                shared_root=self.runtime_root,
-            )
-            context = self._prepare("Draft onboarding PRD", env=env, manifest_path=manifest_path)
-            self.assertTrue(context["ok"])
-
-            minimum_result = {
-                "execution_summary": "Saved PM implementation summary.",
-                "working_notes": [],
-                "deliverables_or_changed_files": [],
-                "artifact_content": {
-                    "summary": "Saved PM implementation summary.",
-                    "freeform": {
-                        "community_output": "Missing output_schema file should not block safe writes.",
-                    },
-                },
-            }
-            payload = self._persist(
-                context,
-                skill_id="write-prd",
-                result=minimum_result,
-                env=env,
-                manifest_path=manifest_path,
-            )
-
-        self.assertTrue(payload["ok"])
-        receipt = payload["receipt"]
-        self.assertIsInstance(receipt, dict)
-        assert isinstance(receipt, dict)
-        artifact_object = self._load_runtime_json(receipt["receipt_paths"]["artifacts"][0])
-        self.assertEqual(artifact_object["content"], minimum_result["artifact_content"])
-
-    def test_persist_rejects_invalid_minimum_write_shape_without_partial_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-09-invalid-min-shape", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-09-invalid-min-shape",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-
-        invalid_payloads = [
-            {
-                "execution_summary": "",
-                "working_notes": [],
-                "deliverables_or_changed_files": [],
-                "artifact_content": {},
-            },
-            {
-                "execution_summary": "Has summary",
-                "working_notes": "not-a-list",
-                "deliverables_or_changed_files": [],
-                "artifact_content": {},
-            },
-            {
-                "execution_summary": "Has summary",
-                "working_notes": [],
-                "deliverables_or_changed_files": "not-a-list",
-                "artifact_content": {},
-            },
-            {
-                "execution_summary": "Has summary",
-                "working_notes": [],
-                "deliverables_or_changed_files": [],
-            },
-            {
-                "execution_summary": "Has summary",
-                "working_notes": [],
-                "deliverables_or_changed_files": [],
-                "artifact_content": "not-an-object",
-            },
-        ]
-        for invalid_payload in invalid_payloads:
-            with self.subTest(payload=invalid_payload):
-                snapshot_before = self._runtime_state_snapshot()
-                instance_before = instance_json.read_text(encoding="utf-8")
-                with self.assertRaises(ValueError):
-                    self._persist(
-                        context,
-                        skill_id="write-prd",
-                        result=invalid_payload,
-                        env=env,
-                    )
-                self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-                self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
-
-    def test_persist_rejects_retired_top_level_track_operation_before_durable_writes(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-09-retired-track-payload", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-09-retired-track-payload",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Create onboarding delivery track", env=env)
-        self.assertTrue(context["ok"])
-
-        snapshot_before = self._runtime_state_snapshot()
-        instance_before = instance_json.read_text(encoding="utf-8")
-        invalid_payload = self._pm_result_payload()
-        invalid_payload["track_operation"] = {"action": "create", "track_id": "track-legacy"}
-        with self.assertRaises(ValueError):
-            self._persist(context, skill_id="track-manager", result=invalid_payload, env=env)
-        self.assertEqual(self._runtime_state_snapshot(), snapshot_before)
-        self.assertEqual(instance_json.read_text(encoding="utf-8"), instance_before)
-
-    def test_track_manager_update_operation_updates_track_fields_and_artifact_revision(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-track-update", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-track-update",
-            shared_root=self.runtime_root,
-        )
-
-        create_context = self._prepare("Create onboarding delivery track", env=env)
-        self.assertTrue(create_context["ok"])
-        create_payload = self._persist(
-            create_context,
-            skill_id="track-manager",
-            result=self._track_manager_result_payload(
-                action="create",
-                track_id="track-onboarding-update",
-                title="Onboarding Update",
-                status="active",
-                current_buddy="pm",
-                next_buddy="design",
-                summary="Initial cross-functional flow.",
-                execution_summary="Created onboarding update track.",
-            ),
-            env=env,
-        )
-        self.assertTrue(create_payload["ok"])
-        create_receipt = create_payload["receipt"]
-        created_track_id = create_receipt["track_id"]
-        create_artifact_id = create_receipt["artifact_id"]
-        self.assertIsInstance(created_track_id, str)
-        self.assertIsInstance(create_artifact_id, str)
-        instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
-        instance_payload["current_task_id"] = create_receipt["task_id"]
-        instance_payload["current_track_id"] = created_track_id
-        instance_json.write_text(json.dumps(instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-
-        update_context = self._prepare("Update onboarding delivery track", env=env)
-        self.assertTrue(update_context["ok"])
-        self.assertEqual(update_context["current_task_id"], create_receipt["task_id"])
-        self.assertEqual(update_context["current_track_id"], created_track_id)
-        update_payload = self._persist(
-            update_context,
-            skill_id="track-manager",
-            result=self._track_manager_result_payload(
-                action="update",
-                track_id=created_track_id,
-                title="Onboarding Execution Updated",
-                status="blocked",
-                summary="Blocked pending policy review.",
-                execution_summary="Updated onboarding track fields.",
-            ),
-            env=env,
-        )
-
-        self.assertTrue(update_payload["ok"])
-        receipt = update_payload["receipt"]
-        self.assertEqual(receipt["track_action"], "update")
-        self.assertIsInstance(receipt.get("artifact_id"), str)
-        self.assertIn(receipt.get("artifact_id"), receipt.get("artifact_ids", []))
-        update_artifact_id = receipt["artifact_id"]
-
-        track_object = self._load_runtime_json(receipt["receipt_paths"]["track"])
-        self.assertEqual(track_object["id"], created_track_id)
-        self.assertEqual(track_object["title"], "Onboarding Execution Updated")
-        self.assertEqual(track_object["status"], "blocked")
-        self.assertEqual(track_object["summary"], "Blocked pending policy review.")
-
-        task_object = self._load_runtime_json(receipt["receipt_paths"]["task"])
-        slot_state = task_object["artifact_slots"]["track-operation"]
-        self.assertEqual(slot_state["current_artifact_id"], update_artifact_id)
-        self.assertEqual(slot_state["revision_count"], 2)
-
-        updated_artifact = self._load_runtime_json(receipt["receipt_paths"]["artifacts"][0])
-        self.assertEqual(updated_artifact["slot"], "track-operation")
-        self.assertEqual(updated_artifact["revision"], 2)
-        self.assertEqual(updated_artifact["supersedes_artifact_id"], create_artifact_id)
-        self.assertTrue(updated_artifact["is_current"])
-
-        created_artifact = self._load_runtime_json(create_receipt["receipt_paths"]["artifacts"][0])
-        self.assertFalse(created_artifact["is_current"])
-
-    def test_track_manager_advance_operation_still_succeeds(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-track-advance", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-track-advance",
-            shared_root=self.runtime_root,
-        )
-
-        create_context = self._prepare("Create onboarding delivery track", env=env)
-        self.assertTrue(create_context["ok"])
-        create_payload = self._persist(
-            create_context,
-            skill_id="track-manager",
-            result=self._track_manager_result_payload(
-                action="create",
-                track_id="track-onboarding-advance",
-                title="Onboarding Advance",
-                status="active",
-                current_buddy="pm",
-                next_buddy="design",
-                summary="Initial cross-functional flow.",
-                execution_summary="Created onboarding track.",
-            ),
-            env=env,
-        )
-        self.assertTrue(create_payload["ok"])
-        created_track_id = create_payload["receipt"]["track_id"]
-        self.assertIsInstance(created_track_id, str)
-
-        advance_context = self._prepare("Advance onboarding delivery track", env=env)
-        self.assertTrue(advance_context["ok"])
-        advance_payload = self._persist(
-            advance_context,
-            skill_id="track-manager",
-            result=self._track_manager_result_payload(
-                action="advance",
-                track_id=created_track_id,
-                current_buddy="pm",
-                next_buddy="dev",
-                status="active",
-                summary="Ready for implementation planning.",
-                execution_summary="Advanced onboarding track to dev.",
-            ),
-            env=env,
-        )
-
-        self.assertTrue(advance_payload["ok"])
-        receipt = advance_payload["receipt"]
-        self.assertEqual(receipt["track_action"], "advance")
-        self.assertIsInstance(receipt.get("artifact_id"), str)
-        self.assertTrue(receipt.get("artifact_ids"))
-        track_object = self._load_runtime_json(receipt["receipt_paths"]["track"])
-        self.assertEqual(track_object["id"], created_track_id)
-        self.assertEqual(track_object["next_buddy"], "dev")
-
-    def test_track_manager_archive_operation_sets_track_archived_mode(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-track-archive", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-ut-track-archive",
-            shared_root=self.runtime_root,
-        )
-
-        create_context = self._prepare("Create onboarding delivery track", env=env)
-        self.assertTrue(create_context["ok"])
-        create_payload = self._persist(
-            create_context,
-            skill_id="track-manager",
-            result=self._track_manager_result_payload(
-                action="create",
-                track_id="track-onboarding-archive",
-                title="Onboarding Archive",
-                status="active",
-                current_buddy="pm",
-                next_buddy="design",
-                summary="Ready to archive after closeout.",
-                execution_summary="Created onboarding archive track.",
-            ),
-            env=env,
-        )
-        self.assertTrue(create_payload["ok"])
-        created_track_id = create_payload["receipt"]["track_id"]
-        self.assertIsInstance(created_track_id, str)
-        instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
-        instance_payload["current_task_id"] = create_payload["receipt"]["task_id"]
-        instance_payload["current_track_id"] = created_track_id
-        instance_json.write_text(json.dumps(instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-
-        archive_context = self._prepare("Archive onboarding delivery track", env=env)
-        self.assertTrue(archive_context["ok"])
-        self.assertEqual(archive_context["current_task_id"], create_payload["receipt"]["task_id"])
-        self.assertEqual(archive_context["current_track_id"], created_track_id)
-        archive_payload = self._persist(
-            archive_context,
-            skill_id="track-manager",
-            result=self._track_manager_result_payload(
-                action="archive",
-                track_id=created_track_id,
-                execution_summary="Archived onboarding track.",
-            ),
-            env=env,
-        )
-
-        self.assertTrue(archive_payload["ok"])
-        receipt = archive_payload["receipt"]
-        self.assertEqual(receipt["track_action"], "archive")
-        self.assertIsInstance(receipt.get("artifact_id"), str)
-        self.assertIn(receipt.get("artifact_id"), receipt.get("artifact_ids", []))
-        self.assertEqual(receipt["next_state"]["mode"], "track_archived")
-
-        track_object = self._load_runtime_json(receipt["receipt_paths"]["track"])
-        self.assertEqual(track_object["id"], created_track_id)
-        self.assertEqual(track_object["status"], "archived")
-
-    def test_workspace_projection_uses_structured_state_after_persist(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-10", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-10", shared_root=self.runtime_root)
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-
-        persisted = self._persist(context, skill_id="write-prd", env=env)
-        self.assertTrue(persisted["ok"])
-
-        projection = workspace_projections.build_workspace_projection()
-        self.assertTrue(projection["tasks"])
-        self.assertTrue(projection["artifacts"])
-        self.assertTrue(projection["run_audits"])
-
-        run_row = projection["run_audits"][0]
-        self.assertIn("next_state", run_row)
-        self.assertIn("receipt_paths", run_row)
-        self.assertNotIn("recommended_switch", json.dumps(run_row))
-        self.assertNotIn("reference_switches", json.dumps(run_row))
-
-    def test_runtime_state_writes_stay_in_runtime_workspace_not_source_checkout(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-ut-11", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-ut-11", shared_root=self.runtime_root)
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-
-        persisted = self._persist(context, skill_id="write-prd", env=env)
-        self.assertTrue(persisted["ok"])
-        receipt = persisted["receipt"]
-        self.assertIsInstance(receipt, dict)
-        assert isinstance(receipt, dict)
-
-        run_path = self._runtime_path(receipt["receipt_paths"]["run"])
-        self.assertTrue(run_path.exists())
-
-        source_run_path = ROOT / receipt["receipt_paths"]["run"]
-        self.assertFalse(source_run_path.exists())
-
-    def test_persist_cli_help_requires_explicit_skill_id(self) -> None:
+            exit_code = turn_runtime._cmd_persist(args)
+        payload = json.loads(stdout.getvalue())
+        return exit_code, payload
+
+    def test_persist_cli_help_exposes_context_result_only(self) -> None:
         completed = subprocess.run(
             ["python3", str(ROOT / "scripts" / "turn_runtime.py"), "persist", "--help"],
-            cwd=ROOT,
             text=True,
             capture_output=True,
             check=False,
         )
-        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-        self.assertIn("Chosen skill id. Required.", completed.stdout)
-        self.assertNotIn("Optional only when the prepared context exposes exactly one available skill", completed.stdout)
+        self.assertEqual(completed.returncode, 0)
+        self.assertIn("--context", completed.stdout)
+        self.assertIn("--result", completed.stdout)
+        self.assertNotIn("--skill-id", completed.stdout)
+
+    def test_public_api_persists_buddy_run_without_skill_id(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+
+        payload = self._persist(context, _pm_commit())
+
+        receipt = payload["receipt"]
+        self.assertEqual(receipt["buddy_id"], "pm")
+        self.assertIn("run_id", receipt)
+        self.assertIn("artifact_ids", receipt)
+        self.assertNotIn("skill_id", receipt)
+
+        artifact = env_store.get_artifact(receipt["artifact_ids"][0])
+        self.assertIsNotNone(artifact)
+        assert artifact is not None
+        self.assertEqual(artifact["kind"], "prd")
+        self.assertEqual(artifact["buddy"], "pm")
+        self.assertEqual(artifact["source_run_id"], receipt["run_id"])
+        self.assertNotIn("skill_id", artifact)
+        self.assertNotIn("slot", artifact)
+
+        run_audit = self._run_payload(receipt["run_id"])
+        self.assertEqual(run_audit["buddy_id"], "pm")
+        self.assertIn("contributors", run_audit)
+        self.assertNotIn("skill_id", run_audit)
+
+    def test_prepare_rejects_legacy_command_shaped_request_without_reservation(self) -> None:
+        with patch.object(turn_runtime, "_load_product_mode_session", return_value=self._session(buddy="pm")):
+            payload = turn_runtime.prepare_turn_context(
+                "switch market: do competitor scan",
+                manifest_path=MANIFEST,
+            )
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_LEGACY_COMMAND_INPUT")
+        reserved = list(turn_runtime._reserved_run_path("placeholder").parent.glob("*.json"))  # type: ignore[attr-defined]
+        self.assertEqual(reserved, [])
+
+    def test_prepare_rejects_task_track_binding_conflict_without_reservation(self) -> None:
+        env_store.create_track(
+            "track-existing",
+            "Existing",
+            status="active",
+            current_buddy="pm",
+            next_buddy=None,
+            summary="existing",
+        )
+        env_store.create_task(
+            "task-existing",
+            "Existing PM Task",
+            buddy="pm",
+            track_id="track-existing",
+            status="active",
+            summary="",
+            initial_run_id=None,
+        )
+        session = self._session(
+            buddy="pm",
+            payload={
+                "current_task_id": "task-existing",
+                "current_track_id": "track-other",
+            },
+        )
+        with (
+            patch.object(turn_runtime, "_load_product_mode_session", return_value=session),
+            self.assertRaisesRegex(ValueError, "cannot switch to"),
+        ):
+            turn_runtime.prepare_turn_context(PM_REQUEST, manifest_path=MANIFEST)
+        reserved = list(turn_runtime._reserved_run_path("placeholder").parent.glob("*.json"))  # type: ignore[attr-defined]
+        self.assertEqual(reserved, [])
+
+    def test_rejects_top_level_skill_id_before_writes(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        invalid = _pm_commit()
+        invalid["skill_id"] = "write-prd"
+        artifacts_before = [row["id"] for row in env_store.list_artifacts()]
+
+        with self.assertRaisesRegex(ValueError, "skill_id"):
+            turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
+
+        artifacts_after = [row["id"] for row in env_store.list_artifacts()]
+        self.assertEqual(artifacts_after, artifacts_before)
+
+    def test_rejects_invalid_artifact_kind_for_active_buddy_before_writes(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        invalid = _pm_commit()
+        invalid["artifacts"][0]["kind"] = "market-landing-page-brief"  # type: ignore[index]
+        runs_before = [row["id"] for row in env_store.list_tasks()]
+
+        with self.assertRaisesRegex(ValueError, "artifact kind"):
+            turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
+
+        runs_after = [row["id"] for row in env_store.list_tasks()]
+        self.assertEqual(runs_after, runs_before)
+
+    def test_rejects_duplicate_artifact_kinds_atomically(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        invalid = _pm_commit()
+        invalid["artifacts"] = [
+            invalid["artifacts"][0],  # type: ignore[index]
+            {
+                "kind": "prd",
+                "title": "Duplicate kind",
+                "content": {"note": "duplicate"},
+            },
+        ]
+        artifacts_before = [row["id"] for row in env_store.list_artifacts()]
+
+        with self.assertRaisesRegex(ValueError, "duplicate artifact kind"):
+            turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
+
+        artifacts_after = [row["id"] for row in env_store.list_artifacts()]
+        self.assertEqual(artifacts_after, artifacts_before)
+
+    def test_persists_multiple_valid_artifacts_in_single_run(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        commit = _pm_commit()
+        commit["artifacts"] = [
+            commit["artifacts"][0],  # type: ignore[index]
+            {
+                "kind": "pm-decision",
+                "title": "PM Decision Record",
+                "summary": "Decision note for landing page sequencing.",
+                "content": {"decision": "Market first, then design."},
+            },
+        ]
+
+        payload = self._persist(context, commit)
+        receipt = payload["receipt"]
+        self.assertEqual(len(receipt["artifact_ids"]), 2)
+        artifact_rows = [env_store.get_artifact(artifact_id) for artifact_id in receipt["artifact_ids"]]
+        self.assertTrue(all(row is not None for row in artifact_rows))
+        rows = [row for row in artifact_rows if isinstance(row, dict)]
+        self.assertEqual({row["kind"] for row in rows}, {"prd", "pm-decision"})
+        self.assertTrue(all(row["source_run_id"] == receipt["run_id"] for row in rows))
+
+    def test_rejects_mixed_valid_and_invalid_artifact_list_atomically(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        invalid = _pm_commit()
+        invalid["artifacts"] = [
+            invalid["artifacts"][0],  # type: ignore[index]
+            {
+                "kind": "market-landing-page-brief",
+                "title": "Wrong buddy kind",
+                "content": {"note": "should fail"},
+            },
+        ]
+        state_before = self._runtime_state_snapshot()
+
+        with self.assertRaisesRegex(ValueError, "artifact kind"):
+            turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
+
+        state_after = self._runtime_state_snapshot()
+        self._assert_runtime_state_unchanged(state_before, state_after)
+
+    def test_rejects_handoff_track_next_buddy_mismatch_before_writes(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        invalid = _pm_commit()
+        invalid["handoff"]["next_buddy"] = "design"  # type: ignore[index]
+        artifacts_before = [row["id"] for row in env_store.list_artifacts()]
+
+        with self.assertRaisesRegex(ValueError, "must match"):
+            turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
+
+        artifacts_after = [row["id"] for row in env_store.list_artifacts()]
+        self.assertEqual(artifacts_after, artifacts_before)
+
+    def test_supports_task_effect_status_and_summary(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+
+        payload = self._persist(context, _pm_commit())
+
+        receipt = payload["receipt"]
+        task = env_store.get_task(receipt["task_id"])
+        self.assertIsNotNone(task)
+        assert task is not None
+        self.assertEqual(task["status"], "done")
+        self.assertIn("PM PRD", task["summary"])
+
+    def test_second_run_on_same_task_includes_previous_run_in_related_run_ids(self) -> None:
+        first_context = self._prepare(PM_REQUEST, buddy="pm")
+        first = self._persist(first_context, _pm_commit())
+        first_receipt = first["receipt"]
+
+        second_context = self._prepare(
+            "继续完善同一个PRD任务并更新结论",
+            buddy="pm",
+            payload={
+                "current_task_id": first_receipt["task_id"],
+                "current_track_id": first_receipt["track_id"],
+            },
+        )
+        second_commit = {
+            "execution_summary": "PM refined the PRD based on review feedback.",
+            "artifacts": [
+                {
+                    "kind": "prd",
+                    "title": "AI Schedule Tool Landing Page PRD v2",
+                    "summary": "Refined scope and acceptance criteria.",
+                    "content": {"problem": "Refined problem framing."},
+                }
+            ],
+            "contributors": {"skills": ["write-prd"], "agents": []},
+        }
+        second = self._persist(second_context, second_commit)
+        second_receipt = second["receipt"]
+        self.assertIn(first_receipt["run_id"], second_receipt["related_run_ids"])
+
+    def test_supports_track_update_advance_and_archive_actions(self) -> None:
+        create_context = self._prepare(PM_REQUEST, buddy="pm")
+        create_receipt = self._persist(create_context, _pm_commit())["receipt"]
+        task_id = create_receipt["task_id"]
+        track_id = create_receipt["track_id"]
+
+        update_context = self._prepare(
+            "更新track摘要",
+            buddy="pm",
+            payload={"current_task_id": task_id, "current_track_id": track_id},
+        )
+        update_commit = {
+            "execution_summary": "PM updated track summary.",
+            "state_effects": {
+                "track": {
+                    "action": "update",
+                    "track_id": track_id,
+                    "summary": "Updated summary for PM->Market flow.",
+                }
+            },
+        }
+        update_receipt = self._persist(update_context, update_commit)["receipt"]
+        self.assertEqual(update_receipt["track_action"], "update")
+        track = env_store.get_track(track_id)
+        self.assertIsNotNone(track)
+        assert track is not None
+        self.assertEqual(track["summary"], "Updated summary for PM->Market flow.")
+
+        advance_context = self._prepare(
+            "推进到design",
+            buddy="pm",
+            payload={"current_task_id": task_id, "current_track_id": track_id},
+        )
+        advance_commit = {
+            "execution_summary": "PM advanced track to design.",
+            "state_effects": {
+                "track": {
+                    "action": "advance",
+                    "track_id": track_id,
+                    "next_buddy": "design",
+                }
+            },
+        }
+        advance_receipt = self._persist(advance_context, advance_commit)["receipt"]
+        self.assertEqual(advance_receipt["track_action"], "advance")
+        track = env_store.get_track(track_id)
+        self.assertIsNotNone(track)
+        assert track is not None
+        self.assertEqual(track["next_buddy"], "design")
+
+        archive_context = self._prepare(
+            "归档track",
+            buddy="pm",
+            payload={"current_task_id": task_id, "current_track_id": track_id},
+        )
+        archive_commit = {
+            "execution_summary": "PM archived completed track.",
+            "state_effects": {"track": {"action": "archive", "track_id": track_id}},
+        }
+        archive_receipt = self._persist(archive_context, archive_commit)["receipt"]
+        self.assertEqual(archive_receipt["track_action"], "archive")
+        track = env_store.get_track(track_id)
+        self.assertIsNotNone(track)
+        assert track is not None
+        self.assertEqual(track["status"], "archived")
+
+    def test_rejects_unauthorized_track_action_before_writes(self) -> None:
+        context = self._prepare("market request", buddy="market")
+        invalid = {
+            "execution_summary": "Market attempt",
+            "state_effects": {
+                "track": {
+                    "action": "create",
+                    "track_id": "track-market-illegal",
+                    "title": "Illegal",
+                    "status": "active",
+                    "current_buddy": "market",
+                }
+            },
+        }
+
+        with self.assertRaisesRegex(ValueError, "not allowed"):
+            turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
+
+    def test_rejects_handoff_to_unknown_buddy_before_writes(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        invalid = _pm_commit()
+        invalid["handoff"]["next_buddy"] = "unknown"  # type: ignore[index]
+        artifacts_before = [row["id"] for row in env_store.list_artifacts()]
+
+        with self.assertRaisesRegex(ValueError, "manifest buddy id"):
+            turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
+
+        artifacts_after = [row["id"] for row in env_store.list_artifacts()]
+        self.assertEqual(artifacts_after, artifacts_before)
+
+    def test_rejects_handoff_with_empty_reason_before_writes(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        invalid = _pm_commit()
+        invalid["handoff"]["reason"] = " "  # type: ignore[index]
+        artifacts_before = [row["id"] for row in env_store.list_artifacts()]
+
+        with self.assertRaisesRegex(ValueError, "handoff.reason"):
+            turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
+
+        artifacts_after = [row["id"] for row in env_store.list_artifacts()]
+        self.assertEqual(artifacts_after, artifacts_before)
+
+    def test_handoff_only_commit_is_valid_durable_signal(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        handoff_only = {
+            "execution_summary": "PM requested market follow-up before adding artifacts.",
+            "handoff": {
+                "next_buddy": "market",
+                "reason": "Need market positioning input before expanding scope.",
+                "context": "Start from the current PM task context.",
+            },
+            "contributors": {"skills": ["track-manager"], "agents": []},
+        }
+
+        payload = self._persist(context, handoff_only)
+        receipt = payload["receipt"]
+        self.assertEqual(receipt["artifact_ids"], [])
+        self.assertEqual(receipt["handoff"]["next_buddy"], "market")
+        run_audit = self._run_payload(receipt["run_id"])
+        self.assertEqual(run_audit["handoff"]["next_buddy"], "market")
+
+    def test_rejects_valid_artifact_plus_invalid_track_effect_atomically(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        invalid = {
+            "execution_summary": "PM attempted artifact + invalid track update.",
+            "artifacts": [
+                {
+                    "kind": "prd",
+                    "title": "AI Schedule Tool Landing Page PRD",
+                    "content": {"problem": "Busy professionals need schedule help."},
+                }
+            ],
+            "state_effects": {
+                "track": {
+                    "action": "update",
+                    "track_id": "track-does-not-exist",
+                    "summary": "should fail",
+                }
+            },
+        }
+        state_before = self._runtime_state_snapshot()
+
+        with self.assertRaisesRegex(ValueError, "Track not found"):
+            turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
+
+        state_after = self._runtime_state_snapshot()
+        self._assert_runtime_state_unchanged(state_before, state_after)
+
+    def test_product_mode_context_buddy_mismatch_fails_atomically(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        state_before = self._runtime_state_snapshot()
+
+        exit_code, payload = self._persist_via_cmd(
+            context=context,
+            result=_pm_commit(),
+            session_buddy="market",
+        )
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertIn("buddy mismatch", payload["error"]["message"])
+        state_after = self._runtime_state_snapshot()
+        self._assert_runtime_state_unchanged(state_before, state_after)
+
+    def test_contributor_skill_string_is_persisted_as_audit_metadata(self) -> None:
+        context = self._prepare("实现并汇总开发结果", buddy="dev")
+        commit = {
+            "execution_summary": "Dev completed implementation and recorded contributor audit metadata.",
+            "artifacts": [
+                {
+                    "kind": "implementation-report",
+                    "title": "Implementation Report",
+                    "summary": "Dev implementation summary.",
+                    "content": {"result": "ok"},
+                }
+            ],
+            "contributors": {
+                "skills": ["dev-summary"],
+                "agents": [],
+            },
+        }
+
+        payload = self._persist(context, commit)
+        receipt = payload["receipt"]
+        run_audit = self._run_payload(receipt["run_id"])
+        self.assertEqual(run_audit["contributors"]["skills"], ["dev-summary"])
+
+    def test_contributor_skill_id_cannot_bypass_buddy_artifact_kinds(self) -> None:
+        context = self._prepare("实现并汇总开发结果", buddy="dev")
+        invalid = {
+            "execution_summary": "Dev tried to persist imported skill id as artifact kind.",
+            "artifacts": [
+                {
+                    "kind": "dev-summary",
+                    "title": "Invalid Kind",
+                    "content": {"result": "should fail"},
+                }
+            ],
+            "contributors": {
+                "skills": ["dev-summary"],
+                "agents": [],
+            },
+        }
+        state_before = self._runtime_state_snapshot()
+
+        with self.assertRaisesRegex(ValueError, "artifact kind"):
+            turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
+
+        state_after = self._runtime_state_snapshot()
+        self._assert_runtime_state_unchanged(state_before, state_after)
+
+    def test_run_id_is_single_use_and_replay_fails_without_new_writes(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+
+        first = self._persist(context, _pm_commit())
+        first_receipt = first["receipt"]
+        state_before_replay = self._runtime_state_snapshot()
+
+        with self.assertRaisesRegex(ValueError, "already committed"):
+            turn_runtime.persist_buddy_run(context, result=_pm_commit(), manifest_path=MANIFEST)
+
+        state_after_replay = self._runtime_state_snapshot()
+        self._assert_runtime_state_unchanged(state_before_replay, state_after_replay)
+
+    def test_rejects_stale_context_revision_before_writes(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        stale = copy.deepcopy(context)
+        stale["context_revision"] = "ctx-stale"
+        state_before = self._runtime_state_snapshot()
+
+        with self.assertRaisesRegex(ValueError, "context_revision mismatch"):
+            turn_runtime.persist_buddy_run(stale, result=_pm_commit(), manifest_path=MANIFEST)
+
+        state_after = self._runtime_state_snapshot()
+        self._assert_runtime_state_unchanged(state_before, state_after)
+
+    def test_rejects_task_effect_with_explicit_foreign_task_id_atomically(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        other_task = env_store.create_task(
+            "task-pm-other",
+            "Other PM Task",
+            buddy="pm",
+            status="active",
+            summary="",
+            initial_run_id=None,
+        )
+        invalid = {
+            "execution_summary": "PM tried to patch another task in task effect.",
+            "state_effects": {
+                "task": {
+                    "task_id": other_task["id"],
+                    "status": "done",
+                }
+            },
+        }
+        state_before = self._runtime_state_snapshot()
+
+        with self.assertRaisesRegex(ValueError, "unsupported"):
+            turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
+
+        state_after = self._runtime_state_snapshot()
+        self._assert_runtime_state_unchanged(state_before, state_after)
+
+    def test_rejects_track_create_that_would_rebind_existing_task_atomically(self) -> None:
+        existing_track = env_store.create_track(
+            "track-existing",
+            "Existing Track",
+            status="active",
+            current_buddy="pm",
+            next_buddy=None,
+            summary="existing",
+        )
+        existing_task = env_store.create_task(
+            "task-existing",
+            "Existing PM Task",
+            buddy="pm",
+            track_id=existing_track["id"],
+            status="active",
+            summary="",
+            initial_run_id=None,
+        )
+        context = self._prepare(
+            "继续已有任务但尝试另建新track",
+            buddy="pm",
+            payload={"current_task_id": existing_task["id"]},
+        )
+        invalid = {
+            "execution_summary": "PM attempted to create a new track for an already bound task.",
+            "state_effects": {
+                "track": {
+                    "action": "create",
+                    "title": "New Track Should Not Be Created",
+                    "status": "active",
+                    "current_buddy": "pm",
+                    "summary": "should fail before any writes",
+                }
+            },
+        }
+        state_before = self._runtime_state_snapshot()
+
+        with self.assertRaisesRegex(ValueError, "already bound"):
+            turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
+
+        state_after = self._runtime_state_snapshot()
+        self._assert_runtime_state_unchanged(state_before, state_after)
+
+    def test_rejects_commit_without_durable_signal(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        invalid = {"execution_summary": "summary only"}
+
+        with self.assertRaisesRegex(ValueError, "durable collaboration signal"):
+            turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
 
 
 if __name__ == "__main__":

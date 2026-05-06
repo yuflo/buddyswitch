@@ -7,13 +7,13 @@
   "artifact_content": {
     "summary": "Track operation request recorded for runtime persistence.",
     "decisions": [
-      "Track lifecycle change is persisted through PM state_effects.track_operation."
+      "Track lifecycle change is persisted through PM state_effects.track."
     ],
     "risks": [],
     "open_questions": [],
     "suggested_next_step": "Continue with the next task using receipt.next_state.",
     "specialized_sections": {
-      "track_operation": {
+      "track": {
         "action": "advance",
         "track_id": "track-onboarding-delivery",
         "current_buddy": "pm",
@@ -24,7 +24,7 @@
     }
   },
   "state_effects": {
-    "track_operation": {
+    "track": {
       "action": "advance",
       "track_id": "track-onboarding-delivery",
       "current_buddy": "pm",

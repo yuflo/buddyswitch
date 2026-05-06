@@ -251,8 +251,7 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     title = artifact.get("title")
     task_id = artifact.get("task_id")
     buddy = artifact.get("buddy")
-    skill_id = artifact.get("skill_id")
-    slot = artifact.get("slot")
+    kind = artifact.get("kind")
     revision = artifact.get("revision")
     supersedes_sentinel = object()
     supersedes_artifact_id = artifact.get("supersedes_artifact_id", supersedes_sentinel)
@@ -268,10 +267,9 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     require_id(task_id, "artifact.task_id")
     if not isinstance(buddy, str) or not buddy.strip():
         raise ValueError("artifact.buddy must be a non-empty string")
-    if not isinstance(skill_id, str) or not skill_id.strip():
-        raise ValueError("artifact.skill_id must be a non-empty string")
-    if not isinstance(slot, str) or not slot.strip():
-        raise ValueError("artifact.slot must be a non-empty string")
+    if not isinstance(kind, str) or not kind.strip():
+        raise ValueError("artifact.kind must be a non-empty string")
+    require_id(kind.strip(), "artifact.kind")
     if not isinstance(revision, int) or revision <= 0:
         raise ValueError("artifact.revision must be a positive integer")
     if supersedes_artifact_id is supersedes_sentinel:
@@ -295,8 +293,7 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         "title": title.strip(),
         "task_id": task_id,
         "buddy": buddy.strip(),
-        "skill_id": skill_id.strip(),
-        "slot": slot.strip(),
+        "kind": kind.strip(),
         "revision": revision,
         "supersedes_artifact_id": supersedes_artifact_id,
         "is_current": is_current,
@@ -308,26 +305,22 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _artifact_slot_name(task: dict[str, Any], artifact: dict[str, Any] | None = None) -> str:
+def _artifact_kind_name(task: dict[str, Any], artifact: dict[str, Any] | None = None) -> str:
     if artifact is not None:
-        slot = artifact.get("slot")
-        if isinstance(slot, str) and slot.strip():
-            return slot.strip()
-    if artifact is not None:
-        skill_id = artifact.get("skill_id")
-        if isinstance(skill_id, str) and skill_id.strip():
-            return skill_id.strip()
+        kind = artifact.get("kind")
+        if isinstance(kind, str) and kind.strip():
+            return kind.strip()
     task_title = task.get("title")
     if isinstance(task_title, str) and task_title.strip():
         return slugify(task_title)
     return "artifact"
 
 
-def _task_slot_state(task: dict[str, Any], slot: str) -> dict[str, Any] | None:
+def _task_kind_state(task: dict[str, Any], kind: str) -> dict[str, Any] | None:
     artifact_slots = task.get("artifact_slots", {})
     if not isinstance(artifact_slots, dict):
         return None
-    row = artifact_slots.get(slot)
+    row = artifact_slots.get(kind)
     return row if isinstance(row, dict) else None
 
 
@@ -407,11 +400,12 @@ def _legacy_build_track_artifact_index(track_id: str | None) -> dict[str, Any] |
                 {
                     "artifact_id": artifact["id"],
                     "title": artifact["title"],
-                    "slot": artifact.get("slot"),
+                    "kind": artifact.get("kind"),
                     "revision": artifact.get("revision"),
                     "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
                     "summary": artifact.get("summary", ""),
-                    "skill_id": artifact.get("skill_id", ""),
+                    "source_run_id": artifact.get("source_run_id"),
+                    "source_buddy": artifact.get("buddy"),
                     "updated_at": artifact_updated_at,
                     "is_current": bool(artifact.get("is_current")),
                 }
@@ -667,24 +661,24 @@ def _legacy_add_artifact_to_task(task_id: str, artifact_id: str, *, summary: str
     artifact = get_artifact(artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
-    slot = _artifact_slot_name(task, artifact)
+    kind = _artifact_kind_name(task, artifact)
     revision = artifact.get("revision")
     if not isinstance(revision, int) or revision <= 0:
         raise ValueError("artifact.revision must be a positive integer")
     if artifact_id not in task["artifact_ids"]:
         task["artifact_ids"].append(artifact_id)
     artifact_slots = task.setdefault("artifact_slots", {})
-    current_slot = artifact_slots.get(slot)
-    if not isinstance(current_slot, dict):
-        current_slot = None
-    current_artifact_id = current_slot.get("current_artifact_id") if current_slot else None
-    current_revision_count = current_slot.get("revision_count") if current_slot else None
-    if current_slot is None or not isinstance(current_artifact_id, str) or not current_artifact_id:
+    current_kind = artifact_slots.get(kind)
+    if not isinstance(current_kind, dict):
+        current_kind = None
+    current_artifact_id = current_kind.get("current_artifact_id") if current_kind else None
+    current_revision_count = current_kind.get("revision_count") if current_kind else None
+    if current_kind is None or not isinstance(current_artifact_id, str) or not current_artifact_id:
         if not artifact.get("is_current"):
             artifact["is_current"] = True
             artifact["updated_at"] = now_iso()
             save_artifact(artifact)
-        artifact_slots[slot] = {
+        artifact_slots[kind] = {
             "current_artifact_id": artifact_id,
             "revision_count": revision,
         }
@@ -695,12 +689,12 @@ def _legacy_add_artifact_to_task(task_id: str, artifact_id: str, *, summary: str
                 current_artifact["is_current"] = False
                 current_artifact["updated_at"] = now_iso()
                 save_artifact(current_artifact)
-        artifact_slots[slot] = {
+        artifact_slots[kind] = {
             "current_artifact_id": artifact_id,
             "revision_count": max(current_revision_count if isinstance(current_revision_count, int) else 0, revision),
         }
     else:
-        artifact_slots[slot] = {
+        artifact_slots[kind] = {
             "current_artifact_id": current_artifact_id,
             "revision_count": max(current_revision_count if isinstance(current_revision_count, int) else 0, revision),
         }
@@ -715,11 +709,11 @@ def _legacy_remove_artifact_from_task(task_id: str, artifact_id: str) -> dict[st
     if task is None:
         raise ValueError(f"task not found: {task_id}")
     artifact = get_artifact(artifact_id)
-    slot = _artifact_slot_name(task, artifact) if artifact else None
-    slot_state = _task_slot_state(task, slot) if slot else None
+    kind = _artifact_kind_name(task, artifact) if artifact else None
+    kind_state = _task_kind_state(task, kind) if kind else None
     task["artifact_ids"] = [item for item in task["artifact_ids"] if item != artifact_id]
-    if slot and slot_state is not None and isinstance(task.get("artifact_slots"), dict):
-        deleting_current = slot_state.get("current_artifact_id") == artifact_id
+    if kind and kind_state is not None and isinstance(task.get("artifact_slots"), dict):
+        deleting_current = kind_state.get("current_artifact_id") == artifact_id
         if deleting_current:
             candidates = []
             artifact_map = {item["id"]: item for item in list_artifacts()}
@@ -727,12 +721,12 @@ def _legacy_remove_artifact_from_task(task_id: str, artifact_id: str) -> dict[st
                 candidate = artifact_map.get(candidate_id)
                 if candidate is None:
                     continue
-                if _artifact_slot_name(task, candidate) == slot:
+                if _artifact_kind_name(task, candidate) == kind:
                     candidates.append(candidate)
             if candidates:
                 candidates.sort(key=lambda row: (row.get("revision", 0), row.get("updated_at", ""), row["id"]), reverse=True)
                 promoted = candidates[0]
-                revision_count = slot_state.get("revision_count", promoted["revision"])
+                revision_count = kind_state.get("revision_count", promoted["revision"])
                 if not isinstance(revision_count, int) or revision_count < promoted["revision"]:
                     revision_count = promoted["revision"]
                 timestamp = now_iso()
@@ -740,12 +734,12 @@ def _legacy_remove_artifact_from_task(task_id: str, artifact_id: str) -> dict[st
                     candidate["is_current"] = candidate["id"] == promoted["id"]
                     candidate["updated_at"] = timestamp
                     save_artifact(candidate)
-                task["artifact_slots"][slot] = {
+                task["artifact_slots"][kind] = {
                     "current_artifact_id": promoted["id"],
                     "revision_count": revision_count,
                 }
             else:
-                task["artifact_slots"].pop(slot, None)
+                task["artifact_slots"].pop(kind, None)
     task["updated_at"] = now_iso()
     return save_task(task)
 
@@ -755,8 +749,7 @@ def _legacy_create_artifact(
     artifact_id: str | None,
     title: str,
     buddy: str,
-    skill_id: str,
-    slot: str | None = None,
+    kind: str,
     task_id: str,
     source_run_id: str,
     summary: str = "",
@@ -764,7 +757,7 @@ def _legacy_create_artifact(
     auto_register: bool = True,
 ) -> dict[str, Any]:
     if not auto_register:
-        raise ValueError("auto_register=False is not supported for v2 slot-aware artifact creation")
+        raise ValueError("auto_register=False is not supported for v2 kind-aware artifact creation")
     task = get_task(task_id)
     if task is None:
         raise ValueError(f"task not found: {task_id}")
@@ -774,10 +767,11 @@ def _legacy_create_artifact(
         raise ValueError(f"artifact already exists: {resolved_id}")
     if task["buddy"] != buddy:
         raise ValueError(f"artifact.buddy '{buddy}' must match task buddy '{task['buddy']}'")
-    resolved_slot = slot.strip() if isinstance(slot, str) and slot.strip() else _artifact_slot_name(task, {"skill_id": skill_id, "title": title})
-    current_slot = _task_slot_state(task, resolved_slot)
-    previous = get_artifact(current_slot["current_artifact_id"]) if current_slot else None
-    revision = 1 if current_slot is None else int(current_slot["revision_count"]) + 1
+    normalized_kind = kind.strip() if isinstance(kind, str) else ""
+    require_id(normalized_kind, "artifact.kind")
+    current_kind = _task_kind_state(task, normalized_kind)
+    previous = get_artifact(current_kind["current_artifact_id"]) if current_kind else None
+    revision = 1 if current_kind is None else int(current_kind["revision_count"]) + 1
     if previous is not None:
         previous["is_current"] = False
         previous["updated_at"] = now_iso()
@@ -788,8 +782,7 @@ def _legacy_create_artifact(
         "title": title,
         "task_id": task_id,
         "buddy": buddy,
-        "skill_id": skill_id,
-        "slot": resolved_slot,
+        "kind": normalized_kind,
         "revision": revision,
         "supersedes_artifact_id": previous["id"] if previous else None,
         "is_current": True,
@@ -819,7 +812,7 @@ def _legacy_update_artifact(
         "title",
         "task_id",
         "buddy",
-        "skill_id",
+        "kind",
         "source_run_id",
         "summary",
         "content",
@@ -844,6 +837,7 @@ def _legacy_update_artifact(
         raise ValueError(f"task not found: {new_task_id}")
     if artifact.get("buddy") != task["buddy"]:
         raise ValueError("artifact.buddy must match artifact.task_id owner")
+    require_id(artifact.get("kind"), "artifact.kind")
     require_id(artifact.get("source_run_id"), "artifact.source_run_id")
 
     artifact["updated_at"] = now_iso()
@@ -1034,8 +1028,7 @@ def create_artifact(
     artifact_id: str | None,
     title: str,
     buddy: str,
-    skill_id: str,
-    slot: str | None = None,
+    kind: str,
     task_id: str,
     source_run_id: str,
     summary: str = "",
@@ -1046,8 +1039,7 @@ def create_artifact(
         artifact_id=artifact_id,
         title=title,
         buddy=buddy,
-        skill_id=skill_id,
-        slot=slot,
+        kind=kind,
         task_id=task_id,
         source_run_id=source_run_id,
         summary=summary,

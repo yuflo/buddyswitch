@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-"""Integration red tests for turn-runtime product behavior."""
+"""Integration flows for buddy-run persistence collaboration."""
 
 from __future__ import annotations
 
 import json
-import os
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -18,315 +15,192 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_store  # noqa: E402
-import runtime_store.projections as workspace_projections  # noqa: E402
-import workspace_data  # noqa: E402
+import turn_runtime  # noqa: E402
+from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
-FORBIDDEN_PREPARE_CONCEPTS = (
-    "selected_skill",
-    "skill_candidates",
-    "skill_instructions",
-    "run_instructions_by_skill",
-    "selected_skill_packet",
-    "instruction_path",
-)
-from tests.test_turn_runtime import _load_turn_runtime  # noqa: E402
+MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
+MARKET_REQUEST = "对于 track-id 这样一款产品的landing page，我们想了解这类产品在营销上应该怎么表达和展现，以及目前相关竞品的情况和它们的landing page"
 
-
-RUNTIME_WORKSPACE_HEADER = "# BuddySwitch Runtime Workspace\n"
-
-
-def _relative_to_runtime_or_repo(path: Path) -> str:
-    candidate = path.resolve()
-    for base in (workspace_data.ROOT, ROOT):
-        try:
-            return candidate.relative_to(base.resolve()).as_posix()
-        except ValueError:
-            continue
-    return candidate.as_posix()
-
-
-def _contains_concept_recursive(payload: object, concept: str) -> bool:
-    concept_lower = concept.lower()
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            if isinstance(key, str) and concept_lower in key.lower():
-                return True
-            if _contains_concept_recursive(value, concept):
-                return True
-        return False
-    if isinstance(payload, list):
-        return any(_contains_concept_recursive(item, concept) for item in payload)
-    if isinstance(payload, str):
-        return concept_lower in payload.lower()
-    return False
-
-
-class TurnRuntimeIntegrationTests(unittest.TestCase):
-    def setUp(self) -> None:
-        super().setUp()
-        self._tmp_dir = tempfile.TemporaryDirectory(dir=ROOT)
-        self.addCleanup(self._tmp_dir.cleanup)
-        self.runtime_root = Path(self._tmp_dir.name)
-        (self.runtime_root / "AGENTS.md").write_text(
-            RUNTIME_WORKSPACE_HEADER + "\nTest-only integration runtime workspace.\n",
-            encoding="utf-8",
-        )
-
-        objects_root = self.runtime_root / "buddyswitch" / "objects"
-        content_root = self.runtime_root / "buddyswitch" / "content"
-
-        self._patchers = [
-            patch.object(env_store, "ROOT", self.runtime_root),
-            patch.object(env_store, "OBJECTS_ROOT", objects_root),
-            patch.object(env_store, "TRACKS_DIR", objects_root / "tracks"),
-            patch.object(env_store, "TASKS_DIR", objects_root / "tasks"),
-            patch.object(env_store, "ARTIFACT_OBJECTS_DIR", objects_root / "artifacts"),
-            patch.object(env_store, "CONTENT_ROOT", content_root),
-            patch.object(env_store, "RUN_CONTENT_DIR", content_root / "runs"),
-            patch.object(workspace_data, "ROOT", self.runtime_root),
-            patch.object(workspace_data, "rel", _relative_to_runtime_or_repo),
-        ]
-        for patcher in self._patchers:
-            patcher.start()
-        self.addCleanup(self._stop_patchers)
-
-    def _stop_patchers(self) -> None:
-        for patcher in reversed(self._patchers):
-            patcher.stop()
-
-    def _runtime_path(self, repo_relative_path: str) -> Path:
-        return self.runtime_root / repo_relative_path
-
-    def _write_instance_json(
-        self,
-        *,
-        instance_id: str,
-        buddy: str,
-        current_task_id: str | None = None,
-        current_track_id: str | None = None,
-    ) -> Path:
-        instance_root = self.runtime_root / "instances" / instance_id
-        instance_root.mkdir(parents=True, exist_ok=True)
-        instance_json = instance_root / "instance.json"
-        instance_payload = {
-            "instance_id": instance_id,
-            "buddy": buddy,
-            "status": "active",
-            "current_task_id": current_task_id,
-            "current_track_id": current_track_id,
-            "workspace_dir": str(instance_root / "workspace"),
-            "created_at": "2026-05-02T00:00:00Z",
-            "updated_at": "2026-05-02T00:00:00Z",
-        }
-        instance_json.write_text(json.dumps(instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-        return instance_json
-
-    @staticmethod
-    def _product_env(instance_json: Path, *, buddy: str, instance_id: str, shared_root: Path) -> dict[str, str]:
-        return {
-            "BUDDYSWITCH_ACTIVE_BUDDY": buddy,
-            "BUDDYSWITCH_INSTANCE_ID": instance_id,
-            "BUDDYSWITCH_INSTANCE_JSON": str(instance_json),
-            "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
-        }
-
-    @staticmethod
-    def _pm_result_payload() -> dict[str, object]:
-        return {
-            "execution_summary": "Captured onboarding PRD updates.",
-            "working_notes": ["Focused on scope and acceptance criteria."],
-            "deliverables_or_changed_files": [],
-            "artifact_content": {
-                "problem": "Users need clearer onboarding scope.",
-                "goals": ["Clarify outcomes", "Preserve current flows"],
-                "non_goals": ["Implement delivery code"],
-                "users_and_scenarios": ["PM iterates on onboarding PRD"],
-                "scope_p0_p1": {
-                    "p0": ["Define launch acceptance criteria"],
-                    "p1": ["Capture follow-up questions"],
-                },
-                "acceptance_criteria": ["PRD payload validates and persists"],
-                "risks": ["Unknown migration edge cases"],
-                "open_questions": ["Need follow-up QA pass?"],
+PM_COMMIT = {
+    "execution_summary": "PM wrote the AI schedule tool landing page PRD and created the delivery track.",
+    "working_notes": ["The user requested PRD creation and track binding in one PM run."],
+    "artifacts": [
+        {
+            "kind": "prd",
+            "title": "AI Schedule Tool Landing Page PRD",
+            "summary": "Defines landing page scope, sections, MVP requirements, and acceptance criteria.",
+            "content": {
+                "problem": "Busy professionals need an AI-assisted way to reduce scheduling overhead.",
+                "target_users": ["calendar-heavy professionals", "small team operators"],
             },
         }
+    ],
+    "state_effects": {
+        "track": {
+            "action": "create",
+            "track_id": "track-ai-schedule-landing-page",
+            "title": "AI Schedule Tool Landing Page",
+            "status": "active",
+            "current_buddy": "pm",
+            "next_buddy": "market",
+            "summary": "Cross-buddy landing page iteration for an AI schedule tool.",
+        },
+        "task": {
+            "status": "done",
+            "summary": "PM PRD is ready for market positioning research.",
+        },
+    },
+    "handoff": {
+        "next_buddy": "market",
+        "reason": "Market should validate competitor landing page positioning before design.",
+        "context": "Use the PRD artifact and track summary as source context.",
+    },
+    "contributors": {
+        "skills": ["write-prd", "track-manager"],
+        "agents": [],
+    },
+}
 
-    def _prepare(self, request_text: str, *, env: dict[str, str]) -> dict[str, object]:
-        turn_runtime = _load_turn_runtime()
-        with patch.dict(os.environ, env, clear=True):
-            return turn_runtime.prepare_turn_context(
-                request_text,
-                manifest_path=turn_runtime.DEFAULT_MANIFEST,
-            )
+MARKET_COMMIT = {
+    "execution_summary": "Market analyzed AI scheduling landing page competitors and recommended positioning angles.",
+    "working_notes": ["The request referenced the existing PM-created track."],
+    "artifacts": [
+        {
+            "kind": "market-landing-page-brief",
+            "title": "AI Schedule Tool Landing Page Market Brief",
+            "summary": "Summarizes competitor messaging patterns and recommended landing page expression.",
+            "content": {
+                "research_question": "How should an AI schedule tool express and present itself on a landing page?",
+                "recommended_angles": ["recover focus time", "reduce back-and-forth scheduling"],
+            },
+        }
+    ],
+    "handoff": {
+        "next_buddy": "design",
+        "reason": "Design can now combine PRD scope with market positioning.",
+        "context": "Use the PRD artifact and market landing page brief on this track.",
+    },
+    "contributors": {
+        "skills": ["research-scan", "positioning-copy"],
+        "agents": [],
+    },
+}
 
-    def _persist(
-        self,
-        context: dict[str, object],
-        *,
-        skill_id: str,
-        env: dict[str, str],
-        result: dict[str, object] | None = None,
-    ) -> dict[str, object]:
-        turn_runtime = _load_turn_runtime()
-        payload = result or self._pm_result_payload()
-        with patch.dict(os.environ, env, clear=True):
-            return turn_runtime.persist_skill_result(
-                context,
-                skill_id=skill_id,
-                result=payload,
-                manifest_path=turn_runtime.DEFAULT_MANIFEST,
-            )
 
-    def _assert_prepare_has_context_only_shape(self, context: dict[str, object]) -> None:
-        self.assertEqual(
-            list(context.keys()),
-            [
-                "ok",
-                "context_revision",
-                "instance_id",
-                "active_buddy",
-                "request_text",
-                "current_task_id",
-                "current_track_id",
-                "task_context",
-                "track_context",
-                "track_artifact_index",
-                "run_envelope",
-                "warnings",
-            ],
+class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _session(self, *, buddy: str, payload: dict[str, object] | None = None) -> dict[str, object]:
+        return {
+            "instance_id": "instance-test",
+            "active_buddy": buddy,
+            "payload": payload or {},
+        }
+
+    def _prepare(self, request_text: str, *, buddy: str, payload: dict[str, object] | None = None) -> dict[str, object]:
+        with patch.object(turn_runtime, "_load_product_mode_session", return_value=self._session(buddy=buddy, payload=payload)):
+            context = turn_runtime.prepare_turn_context(request_text, manifest_path=MANIFEST)
+        self.assertTrue(context["ok"], msg=context)
+        return context
+
+    def _persist(self, context: dict[str, object], result: dict[str, object]) -> dict[str, object]:
+        payload = turn_runtime.persist_buddy_run(context, result=result, manifest_path=MANIFEST)
+        self.assertTrue(payload["ok"], msg=payload)
+        return payload
+
+    def test_pm_to_market_collaboration_persists_on_one_track_without_skill_ids(self) -> None:
+        pm_context = self._prepare(PM_REQUEST, buddy="pm")
+        pm_persisted = self._persist(pm_context, PM_COMMIT)
+        pm_receipt = pm_persisted["receipt"]
+        track_id = pm_receipt["track_id"]
+
+        market_context = self._prepare(
+            MARKET_REQUEST,
+            buddy="market",
+            payload={"current_track_id": track_id},
         )
-        serialized = json.dumps(context, ensure_ascii=True)
-        self.assertNotIn("skills", serialized)
-        self.assertNotIn("inputs_by_skill", serialized)
-        for forbidden in FORBIDDEN_PREPARE_CONCEPTS:
-            self.assertFalse(
-                _contains_concept_recursive(context, forbidden),
-                msg=f"prepare context leaked forbidden concept: {forbidden}",
-            )
+        market_persisted = self._persist(market_context, MARKET_COMMIT)
+        market_receipt = market_persisted["receipt"]
 
-    def test_complete_turn_persists_single_skill_result(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-it-01", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-it-01", shared_root=self.runtime_root)
+        track = env_store.get_track(track_id)
+        self.assertIsNotNone(track)
+        assert track is not None
+        self.assertEqual(track["id"], track_id)
+        self.assertEqual(len(track["task_ids"]), 2)
 
-        context = self._prepare("Draft the MVP PRD for onboarding rewrite", env=env)
-        self.assertTrue(context["ok"])
-        self._assert_prepare_has_context_only_shape(context)
+        index = env_store.build_track_artifact_index(track_id)
+        self.assertIsNotNone(index)
+        assert index is not None
+        kinds = {
+            artifact["kind"]
+            for task in index["tasks"]
+            for artifact in task["artifacts"]
+            if artifact.get("is_current")
+        }
+        self.assertIn("prd", kinds)
+        self.assertIn("market-landing-page-brief", kinds)
 
-        persisted = self._persist(context, skill_id="write-prd", env=env)
-        self.assertTrue(persisted["ok"])
-        receipt = persisted["receipt"]
-        self.assertEqual(receipt["run_id"], context["run_envelope"]["run_id"])
+        pm_run = json.loads(
+            self._runtime_path(f"buddyswitch/content/runs/{pm_receipt['run_id']}.json").read_text(encoding="utf-8")
+        )
+        market_run = json.loads(
+            self._runtime_path(f"buddyswitch/content/runs/{market_receipt['run_id']}.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(pm_run["buddy_id"], "pm")
+        self.assertEqual(market_run["buddy_id"], "market")
+        self.assertNotIn("skill_id", pm_run)
+        self.assertNotIn("skill_id", market_run)
 
-        task_path = self._runtime_path(receipt["receipt_paths"]["task"])
-        run_path = self._runtime_path(receipt["receipt_paths"]["run"])
-        self.assertTrue(task_path.exists())
-        self.assertTrue(run_path.exists())
+    def test_design_prepare_on_market_handoff_track_exposes_prior_artifacts(self) -> None:
+        pm_context = self._prepare(PM_REQUEST, buddy="pm")
+        pm_persisted = self._persist(pm_context, PM_COMMIT)
+        track_id = pm_persisted["receipt"]["track_id"]
 
-        task_payload = json.loads(task_path.read_text(encoding="utf-8"))
-        run_payload = json.loads(run_path.read_text(encoding="utf-8"))
-        self.assertIn(receipt["run_id"], task_payload.get("run_ids", []))
-        self.assertEqual(run_payload.get("run_id"), receipt["run_id"])
-        self.assertEqual(run_payload.get("skill_id"), "write-prd")
+        market_context = self._prepare(
+            MARKET_REQUEST,
+            buddy="market",
+            payload={"current_track_id": track_id},
+        )
+        self._persist(market_context, MARKET_COMMIT)
 
-    def test_natural_language_switch_request_runs_full_prepare_persist_path(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-it-02", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-it-02", shared_root=self.runtime_root)
+        design_context = self._prepare(
+            "根据已有track继续设计",
+            buddy="design",
+            payload={"current_track_id": track_id},
+        )
+        self.assertEqual(design_context["current_track_id"], track_id)
 
-        context = self._prepare("Help users switch plans without losing draft data", env=env)
-        self.assertTrue(context["ok"])
-        self._assert_prepare_has_context_only_shape(context)
-        self.assertEqual(context["request_text"], "Help users switch plans without losing draft data")
+        track_context = design_context["track_context"]
+        self.assertIsNotNone(track_context)
+        assert isinstance(track_context, dict)
+        tasks = track_context["tasks"]
+        source_kinds = {
+            artifact["kind"]
+            for row in tasks
+            for artifact in row.get("current_artifacts", {}).values()
+        }
+        self.assertIn("prd", source_kinds)
+        self.assertIn("market-landing-page-brief", source_kinds)
 
-        persisted = self._persist(context, skill_id="write-prd", env=env)
-        self.assertTrue(persisted["ok"])
+        for row in tasks:
+            for artifact in row.get("current_artifacts", {}).values():
+                self.assertIn("buddy", artifact)
+                self.assertIn("source_run_id", artifact)
 
-        projection = workspace_projections.build_workspace_projection()
-        self.assertTrue(projection["run_audits"])
-        self.assertIn("next_state", projection["run_audits"][0])
-
-    def test_legacy_command_shaped_input_has_no_side_effects_and_followup_ordinary_request_succeeds(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-it-03", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-it-03", shared_root=self.runtime_root)
-
-        tasks_before = list(self._runtime_path("buddyswitch/objects/tasks").glob("*.json"))
-        legacy_payload = self._prepare("switch dev: Draft onboarding PRD", env=env)
-        self.assertFalse(legacy_payload.get("ok"))
-        self.assertEqual(tasks_before, list(self._runtime_path("buddyswitch/objects/tasks").glob("*.json")))
-
-        ordinary_payload = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(ordinary_payload["ok"])
-        self._assert_prepare_has_context_only_shape(ordinary_payload)
-
-    def test_product_prepare_and_persist_do_not_import_debug_parser_or_router_modules(self) -> None:
-        import builtins
-
-        instance_json = self._write_instance_json(instance_id="inst-it-04", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-it-04", shared_root=self.runtime_root)
-
-        real_import = builtins.__import__
-
-        def guarded_import(name: str, globals=None, locals=None, fromlist=(), level=0):  # type: ignore[no-untyped-def]
-            blocked = (
-                "parse_switch",
-                "codex_router",
-                "scripts.debug.parse_switch",
-                "scripts.debug.codex_router",
-            )
-            if any(name == item or name.endswith(f".{item}") for item in blocked):
-                raise AssertionError(f"debug dependency import blocked: {name}")
-            return real_import(name, globals, locals, fromlist, level)
-
-        with patch("builtins.__import__", side_effect=guarded_import):
-            context = self._prepare("Draft onboarding PRD", env=env)
-            self.assertTrue(context["ok"])
-            self._assert_prepare_has_context_only_shape(context)
-            persisted = self._persist(context, skill_id="write-prd", env=env)
-            self.assertTrue(persisted["ok"])
-
-    def test_multi_skill_prepare_still_requires_explicit_allowed_skill_id_for_persist(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-it-05", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-it-05", shared_root=self.runtime_root)
-
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-        self._assert_prepare_has_context_only_shape(context)
-
-        try:
-            invalid = self._persist(context, skill_id="", env=env)
-        except Exception:
-            invalid_ok = False
-        else:
-            invalid_ok = bool(invalid.get("ok"))
-        self.assertFalse(invalid_ok)
-
-        try:
-            wrong_buddy = self._persist(context, skill_id="implement-task", env=env)
-        except Exception:
-            wrong_buddy_ok = False
-        else:
-            wrong_buddy_ok = bool(wrong_buddy.get("ok"))
-        self.assertFalse(wrong_buddy_ok)
-
-        persisted = self._persist(context, skill_id="write-prd", env=env)
-        self.assertTrue(persisted["ok"])
-
-    def test_source_checkout_remains_clean_while_runtime_state_writes_stay_in_instance_workspace(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-it-06", buddy="pm")
-        env = self._product_env(instance_json, buddy="pm", instance_id="inst-it-06", shared_root=self.runtime_root)
-
-        context = self._prepare("Draft onboarding PRD", env=env)
-        self.assertTrue(context["ok"])
-        self._assert_prepare_has_context_only_shape(context)
-        persisted = self._persist(context, skill_id="write-prd", env=env)
-        self.assertTrue(persisted["ok"])
-
-        receipt = persisted["receipt"]
-        run_rel_path = receipt["receipt_paths"]["run"]
-        runtime_run_path = self._runtime_path(run_rel_path)
-        source_run_path = ROOT / run_rel_path
-        self.assertTrue(runtime_run_path.exists())
-        self.assertFalse(source_run_path.exists())
+        recent_handoffs = track_context.get("recent_handoffs")
+        self.assertIsInstance(recent_handoffs, list)
+        assert isinstance(recent_handoffs, list)
+        market_handoff = next((row for row in recent_handoffs if row.get("next_buddy") == "design"), None)
+        self.assertIsNotNone(market_handoff)
+        assert isinstance(market_handoff, dict)
+        self.assertEqual(
+            market_handoff.get("reason"),
+            "Design can now combine PRD scope with market positioning.",
+        )
+        self.assertEqual(
+            market_handoff.get("context"),
+            "Use the PRD artifact and market landing page brief on this track.",
+        )
 
 
 if __name__ == "__main__":

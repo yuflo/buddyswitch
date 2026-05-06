@@ -7,86 +7,50 @@ label = "BuddySwitch Env"
 [[skills]]
 id = "research-scan"
 path = "buddyswitch/skills/market/research-scan"
-produces_artifact = true
-output_slot = "market-scan"
-output_schema = "framework/schemas/market/market-result.json"
 
 [[skills]]
 id = "pmf-recon"
 path = "buddyswitch/skills/market/pmf-recon"
-produces_artifact = true
-output_slot = "pmf-report"
-output_schema = "framework/schemas/market/market-result.json"
 
 [[skills]]
 id = "customer-discovery"
 path = "buddyswitch/skills/market/customer-discovery"
-produces_artifact = true
-output_slot = "customer-discovery"
-output_schema = "framework/schemas/market/market-result.json"
 
 [[skills]]
 id = "positioning-copy"
 path = "buddyswitch/skills/market/positioning-copy"
-produces_artifact = true
-output_slot = "positioning-brief"
-output_schema = "framework/schemas/market/market-result.json"
 
 [[skills]]
 id = "channel-discovery"
 path = "buddyswitch/skills/market/channel-discovery"
-produces_artifact = true
-output_slot = "channel-plan"
-output_schema = "framework/schemas/market/market-result.json"
 
 [[skills]]
 id = "launch-prep"
 path = "buddyswitch/skills/market/launch-prep"
-produces_artifact = true
-output_slot = "launch-prep"
-output_schema = "framework/schemas/market/market-result.json"
 
 [[skills]]
 id = "write-prd"
 path = "buddyswitch/skills/pm/write-prd"
-produces_artifact = true
-output_slot = "prd"
-output_schema = "framework/schemas/pm/pm-result.json"
 
 [[skills]]
 id = "track-manager"
 path = "buddyswitch/skills/pm/track-manager"
-produces_artifact = true
-output_slot = "track-operation"
-output_schema = "framework/schemas/pm/pm-result.json"
 
 [[skills]]
 id = "shape-prototype"
 path = "buddyswitch/skills/design/shape-prototype"
-produces_artifact = true
-output_slot = "design-handoff"
-output_schema = "framework/schemas/design/design-result.json"
 
 [[skills]]
 id = "implement-task"
 path = "buddyswitch/skills/dev/implement-task"
-produces_artifact = true
-output_slot = "implementation-report"
-output_schema = "framework/schemas/dev/dev-result.json"
 
 [[skills]]
 id = "skill-creator-importer"
 path = "buddyswitch/skills/dev/skill-creator-importer"
-produces_artifact = true
-output_slot = "skill-import-report"
-output_schema = "framework/schemas/dev/dev-result.json"
 
 [[skills]]
 id = "smoke-test"
 path = "buddyswitch/skills/test/smoke-test"
-produces_artifact = true
-output_slot = "smoke-test"
-output_schema = "framework/schemas/test/test-result.json"
 
 [[buddies]]
 id = "market"
@@ -100,6 +64,15 @@ skills = [
   "channel-discovery",
   "launch-prep",
 ]
+artifact_kinds = [
+  "market-scan",
+  "pmf-report",
+  "customer-discovery",
+  "positioning-brief",
+  "channel-plan",
+  "launch-prep",
+  "market-landing-page-brief",
+]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
 [[buddies]]
@@ -107,11 +80,13 @@ id = "pm"
 label = "PM"
 scope = "Own product iteration and track progression."
 skills = ["write-prd", "track-manager"]
+artifact_kinds = ["prd", "pm-decision", "track-note"]
 permissions = [
   "track.read",
   "track.create",
   "track.update",
   "track.advance",
+  "track.archive",
   "task.read",
   "task.create",
   "task.update",
@@ -127,6 +102,7 @@ id = "design"
 label = "Design"
 scope = "Shape UI/UX prototype direction and design handoff outcomes."
 skills = ["shape-prototype"]
+artifact_kinds = ["design-handoff", "prototype-brief"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
 [[buddies]]
@@ -134,6 +110,7 @@ id = "dev"
 label = "Dev"
 scope = "Implement approved scope in project code."
 skills = ["implement-task", "skill-creator-importer"]
+artifact_kinds = ["implementation-report", "skill-import-report"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
 [[buddies]]
@@ -141,4 +118,5 @@ id = "test"
 label = "Test"
 scope = "Validate behavior and report pass/fail/blocked outcomes."
 skills = ["smoke-test"]
+artifact_kinds = ["smoke-test", "test-report"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]

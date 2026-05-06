@@ -405,13 +405,6 @@ def _derive_task_title(demand: str) -> str:
     return snippet if snippet else "Task"
 
 
-def _derive_artifact_title(active_buddy: str, skill_id: str, request_text: str) -> str:
-    snippet = " ".join(request_text.split()[:8]).strip()
-    if snippet:
-        return f"{active_buddy.upper()} {skill_id} - {snippet}"
-    return f"{active_buddy.upper()} {skill_id}"
-
-
 def _derive_artifact_id(task_id: str, kind: str) -> str:
     existing = {artifact["id"] for artifact in list_artifacts()}
     base = f"art-{slugify(f'{task_id}-{kind}')}"
@@ -437,23 +430,6 @@ def _build_next_state(
         "next_buddy": resolved_next_buddy,
         "mode": mode,
     }
-
-
-def _resolve_execution_skill(
-    *,
-    buddy_id: str,
-    skill_id: str,
-    manifest_path: Path,
-) -> dict[str, Any]:
-    manifest = load_manifest(manifest_path)
-    buddy = require_buddy(manifest, buddy_id)
-    allowed_skill_ids = {row for row in buddy.get("skills", []) if isinstance(row, str)}
-    if skill_id not in allowed_skill_ids:
-        raise ValueError(f"skill_id '{skill_id}' is not available for buddy '{buddy_id}' in the manifest")
-    selected_skill = next((skill for skill in manifest.get("skills", []) if skill.get("id") == skill_id), None)
-    if selected_skill is None:
-        raise ValueError(f"skill '{skill_id}' is missing from manifest skills list")
-    return selected_skill
 
 
 def _validate_context_revision(context: dict[str, Any]) -> dict[str, Any]:
@@ -495,25 +471,12 @@ def _validate_context_revision(context: dict[str, Any]) -> dict[str, Any]:
     return stored_task
 
 
-def _validate_minimum_persist_result(result: dict[str, Any]) -> None:
-    summary = result.get("execution_summary")
-    if not isinstance(summary, str) or not summary.strip():
-        raise ValueError("execution_summary must be a non-empty string")
-    artifact_content = result.get("artifact_content")
-    if not isinstance(artifact_content, dict):
-        raise ValueError("artifact_content must be an object")
-    for key in ("working_notes", "deliverables_or_changed_files"):
-        value = result.get(key)
-        if value is not None and not isinstance(value, list):
-            raise ValueError(f"{key} must be a list when present")
-
-
 def _assert_run_id_unused(run_id: str) -> None:
     normalized_run_id = run_id.strip()
     if any(normalized_run_id in task.get("run_ids", []) for task in list_tasks()):
-        raise ValueError(f"run_id already exists: {normalized_run_id}")
+        raise ValueError(f"run_id already committed: {normalized_run_id}")
     if (env_store.ROOT / run_content_path(normalized_run_id)).exists():
-        raise ValueError(f"run_id already exists: {normalized_run_id}")
+        raise ValueError(f"run_id already committed: {normalized_run_id}")
 
 
 def _track_object_path(track_id: str) -> str:
@@ -570,19 +533,14 @@ def _scan_task_recent_runs(task_id: str, *, limit: int = 3) -> list[dict[str, An
             continue
         if not isinstance(payload, dict):
             continue
-        resolved_task_id = payload.get("resolved_task_id")
-        if isinstance(resolved_task_id, str) and resolved_task_id:
-            persisted_task_id = resolved_task_id
-        else:
-            persisted_task_id = payload.get("current_task_id")
-            if not isinstance(persisted_task_id, str) or not persisted_task_id:
-                continue
+        persisted_task_id = payload.get("task_id")
+        if not isinstance(persisted_task_id, str) or not persisted_task_id:
+            continue
         if persisted_task_id != task_id:
             continue
         rows.append(
             {
                 "run_id": payload.get("run_id", path.stem),
-                "skill_id": payload.get("skill_id"),
                 "execution_summary": payload.get("execution_summary"),
                 "timestamp": payload.get("timestamp"),
             }
@@ -645,7 +603,7 @@ def _build_track_context(track_id: str | None) -> dict[str, Any] | None:
         current_artifacts: dict[str, dict[str, Any]] = {}
         artifact_slots = task.get("artifact_slots", {})
         if isinstance(artifact_slots, dict):
-            for slot, row in artifact_slots.items():
+            for kind, row in artifact_slots.items():
                 if not isinstance(row, dict):
                     continue
                 artifact_id = row.get("current_artifact_id")
@@ -653,7 +611,7 @@ def _build_track_context(track_id: str | None) -> dict[str, Any] | None:
                     continue
                 artifact = get_artifact(artifact_id)
                 if artifact is not None:
-                    current_artifacts[slot] = artifact
+                    current_artifacts[kind] = artifact
         rows.append(
             {
                 "task_id": task["id"],
@@ -674,7 +632,52 @@ def _build_track_context(track_id: str | None) -> dict[str, Any] | None:
             "summary": track.get("summary", ""),
         },
         "tasks": rows,
+        "recent_handoffs": _scan_track_recent_handoffs(track["id"], limit=5),
     }
+
+
+def _scan_track_recent_handoffs(track_id: str, *, limit: int = 5) -> list[dict[str, Any]]:
+    run_root = env_store.ROOT / "buddyswitch" / "content" / "runs"
+    if not run_root.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for path in run_root.glob("*.json"):
+        if path.name == ".gitkeep":
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        payload_track_id = payload.get("track_id")
+        if not isinstance(payload_track_id, str) or payload_track_id != track_id:
+            continue
+        handoff = payload.get("handoff")
+        if not isinstance(handoff, dict):
+            continue
+        next_buddy = handoff.get("next_buddy")
+        reason = handoff.get("reason")
+        context = handoff.get("context")
+        if not isinstance(next_buddy, str) or not next_buddy.strip():
+            continue
+        if not isinstance(reason, str) or not reason.strip():
+            continue
+        if not isinstance(context, str) or not context.strip():
+            continue
+        rows.append(
+            {
+                "run_id": payload.get("run_id", path.stem),
+                "task_id": payload.get("task_id"),
+                "buddy_id": payload.get("buddy_id"),
+                "next_buddy": next_buddy.strip(),
+                "reason": reason.strip(),
+                "context": context.strip(),
+                "timestamp": payload.get("timestamp"),
+            }
+        )
+    rows.sort(key=lambda row: (row.get("timestamp") or "", row.get("run_id") or ""), reverse=True)
+    return rows[:limit]
 
 
 def _derive_context_revision(task: dict[str, Any], sequence: int) -> str:
@@ -997,14 +1000,6 @@ def _read_json_input(source: str, *, stdin_text: str | None = None) -> dict[str,
     return payload
 
 
-def _strip_run_fields(result: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "execution_summary": result.get("execution_summary"),
-        "working_notes": result.get("working_notes") or [],
-        "deliverables_or_changed_files": result.get("deliverables_or_changed_files") or [],
-    }
-
-
 def _receipt_paths(
     *,
     run_content_path_value: str,
@@ -1020,63 +1015,254 @@ def _receipt_paths(
     return paths
 
 
-def _build_run_audit(
+def _validate_run_envelope(
     *,
-    resolved: dict[str, Any],
+    context: dict[str, Any],
+    active_buddy: str,
+    request_text: str,
     task_id: str,
-    effective_track_id: str | None,
-    skill_id: str,
-    run_id: str,
-    artifact_ids: list[str],
-    track_action: str | None,
-    paths: dict[str, Any],
-    writes: list[str],
-    result: dict[str, Any],
-    task_title: str,
-    track_title: str | None,
-    related_run_ids: list[str],
-    next_state: dict[str, Any],
-) -> dict[str, Any]:
-    audit = {
-        "run_id": run_id,
-        "timestamp": now_iso(),
-        "request_text": resolved.get("request_text"),
-        "active_buddy": resolved.get("active_buddy"),
-        "current_task_id": resolved.get("current_task_id"),
-        "current_track_id": resolved.get("current_track_id"),
-        "resolved_task_id": task_id,
-        "effective_track_id": effective_track_id,
-        "skill_id": skill_id,
-        "artifact_ids": artifact_ids,
-        "track_action": track_action,
-        "task_title": task_title,
-        "track_title": track_title,
-        "next_state": next_state,
-        "receipt_paths": paths,
-        "related_run_ids": related_run_ids,
-        "paths": paths,
-        "writes": writes,
+    track_id: str | None,
+) -> tuple[str, dict[str, Any]]:
+    run_envelope = context.get("run_envelope")
+    if not isinstance(run_envelope, dict):
+        raise ValueError("run_envelope is required")
+    context_turn_identity = run_envelope.get("turn_identity")
+    if not isinstance(context_turn_identity, dict):
+        raise ValueError("run_envelope.turn_identity is required")
+    if context_turn_identity.get("active_buddy") != active_buddy:
+        raise ValueError("run_envelope.turn_identity active_buddy mismatch")
+    if context_turn_identity.get("request_text") != request_text:
+        raise ValueError("run_envelope.turn_identity request_text mismatch")
+    if context_turn_identity.get("task_id") != task_id:
+        raise ValueError("run_envelope.turn_identity task_id mismatch")
+    if context_turn_identity.get("track_id") != track_id:
+        raise ValueError("run_envelope.turn_identity track_id mismatch")
+
+    reserved_run_id = run_envelope.get("run_id")
+    if not isinstance(reserved_run_id, str) or not reserved_run_id.strip():
+        raise ValueError("run_envelope.run_id is required")
+    run_id = reserved_run_id.strip()
+    _assert_run_id_unused(run_id)
+    reservation = _load_run_reservation(run_id)
+
+    reserved_context_revision = reservation.get("context_revision")
+    if reserved_context_revision != context.get("context_revision"):
+        raise ValueError("run reservation mismatch: context_revision differs from reserved envelope")
+    reserved_task_id = reservation.get("task_id")
+    if reserved_task_id != task_id:
+        raise ValueError("run reservation mismatch: task_id differs from reserved envelope")
+    reserved_sequence = reservation.get("sequence")
+    if reserved_sequence != run_envelope.get("sequence"):
+        raise ValueError("run reservation mismatch: sequence differs from reserved envelope")
+    reservation_turn_identity = reservation.get("turn_identity")
+    if not isinstance(reservation_turn_identity, dict):
+        raise ValueError("run reservation mismatch: turn_identity payload is missing")
+    if _normalize_turn_identity(reservation_turn_identity) != _normalize_turn_identity(context_turn_identity):
+        raise ValueError("run reservation mismatch: turn_identity differs from reserved envelope")
+
+    return run_id, run_envelope
+
+
+def _require_string_list(value: Any, label: str) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError(f"{label} must be a list")
+    cleaned: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{label} must contain non-empty strings")
+        cleaned.append(item.strip())
+    return cleaned
+
+
+def _known_buddy_ids(manifest: dict[str, Any]) -> set[str]:
+    return {
+        buddy.get("id")
+        for buddy in manifest.get("buddies", [])
+        if isinstance(buddy, dict) and isinstance(buddy.get("id"), str)
     }
-    audit.update(_strip_run_fields(result))
-    return audit
 
 
-def _ensure_task_binding(
+def _validate_handoff(handoff: Any, known_buddies: set[str]) -> dict[str, Any]:
+    if not isinstance(handoff, dict):
+        raise ValueError("handoff must be an object")
+    next_buddy = handoff.get("next_buddy")
+    reason = handoff.get("reason")
+    context = handoff.get("context")
+    if not isinstance(next_buddy, str) or not next_buddy.strip():
+        raise ValueError("handoff.next_buddy must be a non-empty string")
+    if next_buddy.strip() not in known_buddies:
+        raise ValueError(f"handoff.next_buddy must reference a manifest buddy id; got '{next_buddy}'")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("handoff.reason must be a non-empty string")
+    if not isinstance(context, str) or not context.strip():
+        raise ValueError("handoff.context must be a non-empty string")
+    return {
+        "next_buddy": next_buddy.strip(),
+        "reason": reason.strip(),
+        "context": context.strip(),
+    }
+
+
+def _validate_state_effects(
     *,
+    state_effects: Any,
+    buddy: dict[str, Any],
     task: dict[str, Any],
     explicit_track_id: str | None,
-) -> tuple[dict[str, Any], str | None, list[str]]:
-    writes: list[str] = [_task_object_path(task["id"])]
-    if not explicit_track_id:
-        return task, task.get("track_id"), writes
+    known_buddies: set[str],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if state_effects is None:
+        return None, None
+    if not isinstance(state_effects, dict):
+        raise ValueError("state_effects must be an object")
 
-    _validate_task_binding(task=task, explicit_track_id=explicit_track_id)
-    if task.get("track_id") == explicit_track_id:
-        return task, explicit_track_id, writes
+    track_effect = state_effects.get("track")
+    task_effect = state_effects.get("task")
 
-    updated_task = register_task_to_track(explicit_track_id, task["id"])
-    writes = [_task_object_path(updated_task["id"]), _track_object_path(explicit_track_id)]
-    return updated_task, explicit_track_id, writes
+    normalized_track: dict[str, Any] | None = None
+    if track_effect is not None:
+        if not isinstance(track_effect, dict):
+            raise ValueError("state_effects.track must be an object")
+        allowed_track_keys = {"action", "track_id", "title", "status", "current_buddy", "next_buddy", "summary"}
+        unsupported_track_keys = sorted(key for key in track_effect if key not in allowed_track_keys)
+        if unsupported_track_keys:
+            raise ValueError(
+                "state_effects.track has unsupported keys: "
+                + ", ".join(unsupported_track_keys)
+            )
+        action = track_effect.get("action")
+        if action not in TRACK_ACTIONS:
+            raise ValueError("state_effects.track.action must be one of create/update/advance/archive")
+        permission = f"track.{action}"
+        buddy_permissions = set(buddy.get("permissions", []))
+        if permission not in buddy_permissions:
+            raise ValueError(f"buddy '{buddy.get('id')}' is not allowed to perform '{permission}'")
+
+        normalized_track = {"action": action}
+        for key in ("track_id", "title", "status", "current_buddy", "next_buddy", "summary"):
+            if key in track_effect:
+                normalized_track[key] = track_effect.get(key)
+
+        for key in ("current_buddy", "next_buddy"):
+            if key not in normalized_track or normalized_track.get(key) is None:
+                continue
+            value = normalized_track.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"state_effects.track.{key} must be a non-empty string when provided")
+            value = value.strip()
+            if value not in known_buddies:
+                raise ValueError(f"state_effects.track.{key} must reference a manifest buddy id; got '{value}'")
+            normalized_track[key] = value
+
+        if "status" in normalized_track and normalized_track.get("status") is not None:
+            status = normalized_track.get("status")
+            if status not in STATUS_VALUES:
+                raise ValueError(f"state_effects.track.status must be one of {', '.join(STATUS_VALUES)}")
+
+        requested_track_id = normalized_track.get("track_id")
+        normalized_requested_track_id: str | None
+        if isinstance(requested_track_id, str) and requested_track_id.strip():
+            normalized_requested_track_id = requested_track_id.strip()
+            normalized_track["track_id"] = normalized_requested_track_id
+        else:
+            normalized_requested_track_id = None
+            normalized_track.pop("track_id", None)
+
+        if explicit_track_id and normalized_requested_track_id and normalized_requested_track_id != explicit_track_id:
+            raise ValueError("state_effects.track.track_id must match current_track_id when current_track_id is set")
+
+        if action == "create":
+            existing_bound_track = explicit_track_id or task.get("track_id")
+            if isinstance(existing_bound_track, str) and existing_bound_track:
+                raise ValueError(
+                    "state_effects.track.create cannot be used when the prepared task is already bound "
+                    f"to track '{existing_bound_track}'."
+                )
+
+        target_track_id = normalized_requested_track_id or explicit_track_id or task.get("track_id")
+        if action != "create":
+            if not isinstance(target_track_id, str) or not target_track_id:
+                raise ValueError("state_effects.track requires track_id for non-create actions")
+            if get_track(target_track_id) is None:
+                raise ValueError(f"Track not found: {target_track_id}")
+            if action in {"update", "advance"}:
+                mutable = {
+                    key: normalized_track.get(key)
+                    for key in ("title", "status", "current_buddy", "next_buddy", "summary")
+                    if key in normalized_track and normalized_track.get(key) is not None
+                }
+                if not mutable:
+                    raise ValueError("state_effects.track for update/advance must include at least one mutable field")
+
+    normalized_task: dict[str, Any] | None = None
+    if task_effect is not None:
+        if not isinstance(task_effect, dict):
+            raise ValueError("state_effects.task must be an object")
+        allowed_task_keys = {"status", "summary"}
+        unsupported_task_keys = sorted(key for key in task_effect if key not in allowed_task_keys)
+        if unsupported_task_keys:
+            raise ValueError(
+                "state_effects.task has unsupported keys: "
+                + ", ".join(unsupported_task_keys)
+            )
+        normalized_task = {}
+        if "status" in task_effect:
+            status = task_effect.get("status")
+            if status not in STATUS_VALUES:
+                raise ValueError(f"state_effects.task.status must be one of {', '.join(STATUS_VALUES)}")
+            normalized_task["status"] = status
+        if "summary" in task_effect:
+            summary = task_effect.get("summary")
+            if summary is not None and not isinstance(summary, str):
+                raise ValueError("state_effects.task.summary must be a string")
+            normalized_task["summary"] = summary or ""
+        if not normalized_task:
+            raise ValueError("state_effects.task must include at least one of status or summary")
+
+    return normalized_track, normalized_task
+
+
+def _validate_artifacts(
+    *,
+    artifacts: Any,
+    allowed_kinds: set[str],
+) -> list[dict[str, Any]]:
+    if artifacts is None:
+        return []
+    if not isinstance(artifacts, list):
+        raise ValueError("artifacts must be a list")
+    normalized: list[dict[str, Any]] = []
+    seen_kinds: set[str] = set()
+    for index, artifact in enumerate(artifacts):
+        if not isinstance(artifact, dict):
+            raise ValueError("artifacts items must be objects")
+        kind = artifact.get("kind")
+        title = artifact.get("title")
+        content = artifact.get("content")
+        summary = artifact.get("summary", "")
+        if not isinstance(kind, str) or not kind.strip():
+            raise ValueError(f"artifacts[{index}].kind must be a non-empty string")
+        normalized_kind = kind.strip()
+        if normalized_kind in seen_kinds:
+            raise ValueError("duplicate artifact kind in one commit")
+        if normalized_kind not in allowed_kinds:
+            raise ValueError(f"artifact kind '{normalized_kind}' is not allowed for this buddy")
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError(f"artifacts[{index}].title must be a non-empty string")
+        if not isinstance(content, dict):
+            raise ValueError(f"artifacts[{index}].content must be an object")
+        if summary is not None and not isinstance(summary, str):
+            raise ValueError(f"artifacts[{index}].summary must be a string when provided")
+        seen_kinds.add(normalized_kind)
+        normalized.append(
+            {
+                "kind": normalized_kind,
+                "title": title.strip(),
+                "summary": summary or "",
+                "content": content,
+            }
+        )
+    return normalized
 
 
 def _validate_task_binding(
@@ -1092,213 +1278,286 @@ def _validate_task_binding(
         )
 
 
-def _track_operation_from_result(result: dict[str, Any]) -> dict[str, Any] | None:
-    if "track_operation" in result:
-        raise ValueError("top-level track_operation is retired; use state_effects.track_operation")
-    state_effects = result.get("state_effects")
-    if state_effects is None:
-        return None
-    if not isinstance(state_effects, dict):
-        raise ValueError("state_effects must be an object")
-    track_operation = state_effects.get("track_operation")
-    if track_operation is None:
-        return None
-    if not isinstance(track_operation, dict):
-        raise ValueError("state_effects.track_operation must be an object")
-    return dict(track_operation)
-
-
-def _validate_track_operation_effect(
+def _apply_track_effect(
     *,
-    operation: dict[str, Any] | None,
-    active_buddy: str,
-    task: dict[str, Any],
-    explicit_track_id: str | None,
-    known_buddy_ids: set[str],
-) -> dict[str, Any] | None:
-    if operation is None:
-        return None
-    if active_buddy != "pm":
-        raise ValueError("state_effects.track_operation is only allowed for buddy 'pm'")
-
-    action = str(operation.get("action") or "").lower()
-    if action not in TRACK_ACTIONS:
-        raise ValueError("state_effects.track_operation.action must be one of create/update/advance/archive")
-
-    normalized: dict[str, Any] = {"action": action}
-    for key in ("track_id", "title", "status", "current_buddy", "next_buddy", "summary"):
-        if key in operation:
-            normalized[key] = operation.get(key)
-
-    for key in ("current_buddy", "next_buddy"):
-        value = normalized.get(key)
-        if value is None:
-            continue
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(f"state_effects.track_operation.{key} must be a non-empty string when provided")
-        value = value.strip()
-        if value not in known_buddy_ids:
-            valid = ", ".join(sorted(known_buddy_ids))
-            raise ValueError(
-                f"state_effects.track_operation.{key} must reference a manifest buddy id; got '{value}'. "
-                f"Valid: {valid}"
-            )
-        normalized[key] = value
-
-    op_track_id = normalized.get("track_id")
-    if isinstance(op_track_id, str) and op_track_id.strip():
-        op_track_id = op_track_id.strip()
-        normalized["track_id"] = op_track_id
-    elif op_track_id is None:
-        normalized.pop("track_id", None)
-
-    if explicit_track_id and isinstance(op_track_id, str) and op_track_id != explicit_track_id:
-        raise ValueError(
-            "state_effects.track_operation.track_id must match current_track_id when current_track_id is set"
-        )
-
-    target_track_id = op_track_id or explicit_track_id or task.get("track_id")
-    status = normalized.get("status")
-    if status is not None and status not in STATUS_VALUES:
-        raise ValueError(f"state_effects.track_operation.status must be one of {', '.join(STATUS_VALUES)}")
-
-    if action != "create":
-        if not isinstance(target_track_id, str) or not target_track_id:
-            raise ValueError("state_effects.track_operation requires track_id for non-create actions")
-        if get_track(target_track_id) is None:
-            raise ValueError(f"Track not found: {target_track_id}")
-        if action in {"update", "advance"}:
-            patch: dict[str, Any] = {}
-            for key in ("title", "status", "current_buddy", "next_buddy", "summary"):
-                if key in normalized and normalized.get(key) is not None:
-                    patch[key] = normalized.get(key)
-            if not patch:
-                raise ValueError("state_effects.track_operation for update/advance must include at least one mutable field")
-    return normalized
-
-
-def _apply_track_operation_effect(
-    *,
-    operation: dict[str, Any] | None,
+    track_effect: dict[str, Any] | None,
     active_buddy: str,
     request_text: str,
     task: dict[str, Any],
     effective_track_id: str | None,
 ) -> tuple[dict[str, Any], str | None, str | None, str | None, str | None, list[str]]:
-    if operation is None:
+    if track_effect is None:
         return task, effective_track_id, None, None, None, []
 
-    action = str(operation.get("action") or "").lower()
+    action = str(track_effect.get("action") or "")
     if action == "create":
-        new_id = operation.get("track_id") or _derive_track_id(request_text)
-        title = operation.get("title") or str(new_id).replace("-", " ").title()
-        status = operation.get("status") or "active"
+        new_id = track_effect.get("track_id") or _derive_track_id(request_text)
+        title = track_effect.get("title") or str(new_id).replace("-", " ").title()
+        status = track_effect.get("status") or "active"
         track = create_track(
             str(new_id),
             str(title),
             status=str(status),
-            current_buddy=operation.get("current_buddy") or active_buddy,
-            next_buddy=operation.get("next_buddy"),
-            summary=operation.get("summary") or "",
+            current_buddy=track_effect.get("current_buddy") or active_buddy,
+            next_buddy=track_effect.get("next_buddy"),
+            summary=track_effect.get("summary") or "",
         )
         updated_task = register_task_to_track(track["id"], task["id"])
         writes = [_task_object_path(updated_task["id"]), _track_object_path(track["id"])]
         return updated_task, track["id"], track["title"], track.get("next_buddy"), action, writes
 
-    target_track_id = operation.get("track_id") or effective_track_id
+    target_track_id = track_effect.get("track_id") or effective_track_id
     if not isinstance(target_track_id, str) or not target_track_id:
-        raise ValueError("state_effects.track_operation requires track_id for non-create actions")
+        raise ValueError("state_effects.track requires track_id for non-create actions")
 
     if action in {"update", "advance"}:
         patch: dict[str, Any] = {}
         for key in ("title", "status", "current_buddy", "next_buddy", "summary"):
-            if key in operation and operation.get(key) is not None:
-                patch[key] = operation.get(key)
+            if key in track_effect and track_effect.get(key) is not None:
+                patch[key] = track_effect.get(key)
         track = update_track(target_track_id, patch)
     elif action == "archive":
         track = update_track(target_track_id, {"status": "archived"})
     else:
-        raise ValueError("state_effects.track_operation.action must be one of create/update/advance/archive")
+        raise ValueError("state_effects.track.action must be one of create/update/advance/archive")
 
     updated_task = register_task_to_track(track["id"], task["id"])
     writes = [_task_object_path(updated_task["id"]), _track_object_path(track["id"])]
     return updated_task, track["id"], track["title"], track.get("next_buddy"), action, writes
 
 
-def _persist_artifact_skill(
+def _validate_buddy_run_commit(
     *,
-    resolved: dict[str, Any],
-    skill: dict[str, Any],
+    context: dict[str, Any],
     result: dict[str, Any],
-    run_id: str,
+    manifest: dict[str, Any],
+    buddy: dict[str, Any],
     task: dict[str, Any],
-    explicit_track_id: str | None,
-    track_operation: dict[str, Any] | None,
+    current_track_id: str | None,
 ) -> dict[str, Any]:
-    active_buddy = resolved.get("active_buddy")
+    if "skill_id" in result:
+        raise ValueError("top-level skill_id is not allowed in buddy run commits")
+
+    execution_summary = result.get("execution_summary")
+    if not isinstance(execution_summary, str) or not execution_summary.strip():
+        raise ValueError("execution_summary must be a non-empty string")
+
+    working_notes = result.get("working_notes")
+    normalized_working_notes: list[str]
+    if working_notes is None:
+        normalized_working_notes = []
+    else:
+        normalized_working_notes = _require_string_list(working_notes, "working_notes")
+
+    known_buddies = _known_buddy_ids(manifest)
+    allowed_kinds = {
+        kind
+        for kind in buddy.get("artifact_kinds", [])
+        if isinstance(kind, str) and kind
+    }
+    normalized_artifacts = _validate_artifacts(artifacts=result.get("artifacts"), allowed_kinds=allowed_kinds)
+
+    normalized_track_effect, normalized_task_effect = _validate_state_effects(
+        state_effects=result.get("state_effects"),
+        buddy=buddy,
+        task=task,
+        explicit_track_id=current_track_id,
+        known_buddies=known_buddies,
+    )
+
+    normalized_handoff: dict[str, Any] | None = None
+    if result.get("handoff") is not None:
+        normalized_handoff = _validate_handoff(result.get("handoff"), known_buddies)
+
+    if normalized_handoff is not None and normalized_track_effect is not None:
+        track_next_buddy = normalized_track_effect.get("next_buddy")
+        if isinstance(track_next_buddy, str) and track_next_buddy and track_next_buddy != normalized_handoff["next_buddy"]:
+            raise ValueError("handoff.next_buddy and state_effects.track.next_buddy must match")
+
+    contributors = result.get("contributors")
+    normalized_contributors = {"skills": [], "agents": []}
+    if contributors is not None:
+        if not isinstance(contributors, dict):
+            raise ValueError("contributors must be an object")
+        if "skills" in contributors:
+            normalized_contributors["skills"] = _require_string_list(contributors.get("skills"), "contributors.skills")
+        if "agents" in contributors:
+            normalized_contributors["agents"] = _require_string_list(contributors.get("agents"), "contributors.agents")
+
+    has_state_effects = normalized_track_effect is not None or normalized_task_effect is not None
+    if not normalized_artifacts and not has_state_effects and normalized_handoff is None:
+        raise ValueError("at least one durable collaboration signal is required (artifacts/state_effects/handoff)")
+
+    return {
+        "execution_summary": execution_summary.strip(),
+        "working_notes": normalized_working_notes,
+        "artifacts": normalized_artifacts,
+        "track_effect": normalized_track_effect,
+        "task_effect": normalized_task_effect,
+        "handoff": normalized_handoff,
+        "contributors": normalized_contributors,
+    }
+
+
+def _build_run_audit(
+    *,
+    run_id: str,
+    active_buddy: str,
+    task: dict[str, Any],
+    track_id: str | None,
+    track_title: str | None,
+    artifact_ids: list[str],
+    track_action: str | None,
+    writes: list[str],
+    receipt_paths: dict[str, Any],
+    related_run_ids: list[str],
+    next_state: dict[str, Any],
+    commit: dict[str, Any],
+) -> dict[str, Any]:
+    state_effects: dict[str, Any] = {}
+    if commit.get("track_effect") is not None:
+        state_effects["track"] = commit["track_effect"]
+    if commit.get("task_effect") is not None:
+        state_effects["task"] = commit["task_effect"]
+
+    audit: dict[str, Any] = {
+        "run_id": run_id,
+        "timestamp": now_iso(),
+        "buddy_id": active_buddy,
+        "task_id": task["id"],
+        "track_id": track_id,
+        "task_title": task["title"],
+        "track_title": track_title,
+        "artifact_ids": artifact_ids,
+        "execution_summary": commit["execution_summary"],
+        "working_notes": commit["working_notes"],
+        "state_effects": state_effects,
+        "handoff": commit.get("handoff"),
+        "contributors": commit.get("contributors", {"skills": [], "agents": []}),
+        "next_state": next_state,
+        "track_action": track_action,
+        "receipt_paths": receipt_paths,
+        "related_run_ids": related_run_ids,
+        "writes": writes,
+    }
+    return audit
+
+
+def _persist_buddy_run(
+    context: dict[str, Any],
+    *,
+    result: dict[str, Any],
+    manifest_path: Path = DEFAULT_MANIFEST,
+) -> dict[str, Any]:
+    if not context.get("ok"):
+        raise ValueError("context payload must be successful before persist_buddy_run")
+    if not isinstance(result, dict):
+        raise ValueError("result payload must be a JSON object")
+
+    early_run_envelope = context.get("run_envelope")
+    if not isinstance(early_run_envelope, dict):
+        raise ValueError("run_envelope is required")
+    early_run_id = early_run_envelope.get("run_id")
+    if not isinstance(early_run_id, str) or not early_run_id.strip():
+        raise ValueError("run_envelope.run_id is required")
+    _assert_run_id_unused(early_run_id.strip())
+
+    stored_task = _validate_context_revision(context)
+
+    active_buddy = context.get("active_buddy")
     if not isinstance(active_buddy, str) or not active_buddy.strip():
         raise ValueError("active_buddy is required")
     active_buddy = active_buddy.strip()
-    request_text = resolved.get("request_text")
+
+    request_text = context.get("request_text")
     if not isinstance(request_text, str) or not request_text.strip():
         raise ValueError("request_text is required")
-    skill_id = skill["id"]
-    persistence = skill.get("persistence")
-    if not isinstance(persistence, dict):
-        raise ValueError(f"skill '{skill_id}' must define persistence")
-    output_slot = persistence.get("output_slot")
-    if not isinstance(output_slot, str) or not output_slot:
-        raise ValueError(f"skill '{skill_id}' must define a non-empty output_slot")
-    output_slot = output_slot.strip()
-    if not output_slot:
-        raise ValueError(f"skill '{skill_id}' must define a non-empty output_slot")
 
-    _validate_task_binding(task=task, explicit_track_id=explicit_track_id)
-    effective_track_id = explicit_track_id or task.get("track_id")
-    task_after_effect, effective_track_id, track_title, next_buddy, track_action, effect_writes = _apply_track_operation_effect(
-        operation=track_operation,
+    current_task_id = context.get("current_task_id")
+    if not isinstance(current_task_id, str) or not current_task_id.strip():
+        raise ValueError("current_task_id is required")
+    current_task_id = current_task_id.strip()
+    if current_task_id != stored_task["id"]:
+        raise ValueError(f"current_task_id mismatch: expected '{stored_task['id']}', received '{current_task_id}'")
+
+    raw_current_track_id = context.get("current_track_id")
+    current_track_id = raw_current_track_id.strip() if isinstance(raw_current_track_id, str) and raw_current_track_id.strip() else None
+
+    run_id, _ = _validate_run_envelope(
+        context=context,
         active_buddy=active_buddy,
         request_text=request_text,
-        task=task,
+        task_id=current_task_id,
+        track_id=current_track_id,
+    )
+
+    manifest = load_manifest(manifest_path)
+    buddy = require_buddy(manifest, active_buddy)
+    commit = _validate_buddy_run_commit(
+        context=context,
+        result=result,
+        manifest=manifest,
+        buddy=buddy,
+        task=stored_task,
+        current_track_id=current_track_id,
+    )
+
+    _validate_task_binding(task=stored_task, explicit_track_id=current_track_id)
+    effective_track_id = current_track_id or stored_task.get("track_id")
+
+    task_after_track, effective_track_id, track_title, track_next_buddy, track_action, track_writes = _apply_track_effect(
+        track_effect=commit.get("track_effect"),
+        active_buddy=active_buddy,
+        request_text=request_text,
+        task=stored_task,
         effective_track_id=effective_track_id,
     )
-    task, effective_track_id, binding_writes = _ensure_task_binding(
-        task=task_after_effect,
-        explicit_track_id=effective_track_id,
-    )
 
-    artifact_id = _derive_artifact_id(task["id"], output_slot)
-    artifact_summary = str(result.get("execution_summary") or "")
-    artifact = create_artifact(
-        artifact_id=artifact_id,
-        title=_derive_artifact_title(active_buddy, skill_id, request_text),
-        buddy=active_buddy,
-        skill_id=skill_id,
-        slot=output_slot,
-        task_id=task["id"],
-        source_run_id=run_id,
-        summary=artifact_summary,
-        content=result["artifact_content"],
-        auto_register=True,
-    )
-    add_run_to_task(task["id"], run_id, summary=artifact_summary)
+    task = task_after_track
+    if effective_track_id:
+        task = register_task_to_track(effective_track_id, task["id"])
 
-    run_content_path_value = run_content_path(run_id)
-    artifact_ids = [artifact["id"]]
-    related_run_ids = _related_run_ids_for_task(task["id"], run_id, limit=2)
+    if commit.get("task_effect") is not None:
+        task_patch: dict[str, Any] = {}
+        task_effect = commit["task_effect"]
+        if "status" in task_effect:
+            task_patch["status"] = task_effect["status"]
+        if "summary" in task_effect:
+            task_patch["summary"] = task_effect["summary"]
+        if task_patch:
+            task = env_store.update_task(task["id"], task_patch)
+
+    artifact_ids: list[str] = []
+    for artifact_payload in commit["artifacts"]:
+        artifact = create_artifact(
+            artifact_id=_derive_artifact_id(task["id"], artifact_payload["kind"]),
+            title=artifact_payload["title"],
+            buddy=active_buddy,
+            kind=artifact_payload["kind"],
+            task_id=task["id"],
+            source_run_id=run_id,
+            summary=artifact_payload.get("summary", ""),
+            content=artifact_payload["content"],
+            auto_register=True,
+        )
+        artifact_ids.append(artifact["id"])
+
+    summary_for_task_run = commit["execution_summary"]
+    task_effect = commit.get("task_effect")
+    if isinstance(task_effect, dict) and isinstance(task_effect.get("summary"), str):
+        summary_for_task_run = task_effect.get("summary") or summary_for_task_run
+    add_run_to_task(task["id"], run_id, summary=summary_for_task_run)
+
     if effective_track_id:
         track = get_track(effective_track_id)
-        if track:
+        if track is not None:
             if track_title is None:
-                track_title = track["title"]
-            if next_buddy is None:
-                next_buddy = track.get("next_buddy")
-    receipt_paths = _receipt_paths(
-        run_content_path_value=run_content_path_value,
-        task_id=task["id"],
-        artifact_ids=artifact_ids,
-        track_id=effective_track_id,
-    )
+                track_title = track.get("title")
+            if track_next_buddy is None:
+                track_next_buddy = track.get("next_buddy")
+
+    handoff = commit.get("handoff")
+    next_buddy = handoff.get("next_buddy") if isinstance(handoff, dict) else track_next_buddy
     next_state = _build_next_state(
         task_id=task["id"],
         track_id=effective_track_id,
@@ -1306,165 +1565,67 @@ def _persist_artifact_skill(
         next_buddy=next_buddy,
         track_action=track_action,
     )
-    writes = list(effect_writes) + list(binding_writes)
-    writes.extend([_task_object_path(task["id"]), _artifact_object_path(artifact["id"]), run_content_path_value])
+
+    run_content_path_value = run_content_path(run_id)
+    related_run_ids = _related_run_ids_for_task(task["id"], run_id, limit=2)
+    receipt_paths = _receipt_paths(
+        run_content_path_value=run_content_path_value,
+        task_id=task["id"],
+        artifact_ids=artifact_ids,
+        track_id=effective_track_id,
+    )
+
+    writes = list(track_writes)
+    writes.append(_task_object_path(task["id"]))
+    writes.extend(_artifact_object_path(artifact_id) for artifact_id in artifact_ids)
+    writes.append(run_content_path_value)
     if effective_track_id:
         writes.append(_track_object_path(effective_track_id))
     writes = list(dict.fromkeys(writes))
-    save_run_content(
-        run_id,
-        _build_run_audit(
-            resolved=resolved,
-            task_id=task["id"],
-            effective_track_id=effective_track_id,
-            skill_id=skill_id,
-            run_id=run_id,
-            artifact_ids=artifact_ids,
-            track_action=track_action,
-            paths=receipt_paths,
-            writes=writes,
-            result=result,
-            task_title=task["title"],
-            track_title=track_title,
-            related_run_ids=related_run_ids,
-            next_state=next_state,
-        ),
+
+    run_audit = _build_run_audit(
+        run_id=run_id,
+        active_buddy=active_buddy,
+        task=task,
+        track_id=effective_track_id,
+        track_title=track_title,
+        artifact_ids=artifact_ids,
+        track_action=track_action,
+        writes=writes,
+        receipt_paths=receipt_paths,
+        related_run_ids=related_run_ids,
+        next_state=next_state,
+        commit=commit,
     )
-    receipt = {
+    save_run_content(run_id, run_audit)
+
+    receipt: dict[str, Any] = {
         "ok": True,
-        "skill_id": skill_id,
+        "buddy_id": active_buddy,
         "task_id": task["id"],
-        "artifact_id": artifact["id"],
-        "artifact_ids": artifact_ids,
-        "track_id": effective_track_id,
         "task_title": task["title"],
-        "track_title": track_title,
+        "artifact_ids": artifact_ids,
+        "run_id": run_id,
         "next_state": next_state,
         "receipt_paths": receipt_paths,
         "related_run_ids": related_run_ids,
-        "run_id": run_id,
-        "paths": receipt_paths,
-        "writes": writes,
     }
+    if effective_track_id:
+        receipt["track_id"] = effective_track_id
+        if track_title is not None:
+            receipt["track_title"] = track_title
     if track_action is not None:
         receipt["track_action"] = track_action
-    return receipt
-
-
-def _persist_skill_result(
-    context: dict[str, Any],
-    *,
-    skill_id: str,
-    result: dict[str, Any],
-    manifest_path: Path = DEFAULT_MANIFEST,
-) -> dict[str, Any]:
-    if not context.get("ok"):
-        raise ValueError("context payload must be successful before persist_skill_result")
-    if not isinstance(skill_id, str) or not skill_id.strip():
-        raise ValueError("persist requires a single skill_id string")
-    selected_skill_id = skill_id.strip()
-    if not isinstance(result, dict):
-        raise ValueError("result payload must be a JSON object")
-
-    stored_task = _validate_context_revision(context)
-    active_buddy = context.get("active_buddy")
-    if not isinstance(active_buddy, str) or not active_buddy.strip():
-        raise ValueError("active_buddy is required")
-    active_buddy = active_buddy.strip()
-    request_text = context.get("request_text")
-    if not isinstance(request_text, str) or not request_text.strip():
-        raise ValueError("request_text is required")
-    current_task_id = context.get("current_task_id")
-    if not isinstance(current_task_id, str) or not current_task_id.strip():
-        raise ValueError("current_task_id is required")
-    current_task_id = current_task_id.strip()
-    if current_task_id != stored_task["id"]:
-        raise ValueError(f"current_task_id mismatch: expected '{stored_task['id']}', received '{current_task_id}'")
-    raw_current_track_id = context.get("current_track_id")
-    current_track_id = raw_current_track_id.strip() if isinstance(raw_current_track_id, str) and raw_current_track_id.strip() else None
-
-    manifest = load_manifest(manifest_path)
-    buddy = require_buddy(manifest, active_buddy)
-    allowed_skill_ids = {row for row in buddy.get("skills", []) if isinstance(row, str)}
-    known_buddy_ids = {row.get("id") for row in manifest.get("buddies", []) if isinstance(row, dict) and isinstance(row.get("id"), str)}
-    if selected_skill_id not in allowed_skill_ids:
-        raise ValueError(f"selected skill_id '{selected_skill_id}' is not allowed for buddy '{active_buddy}'")
-
-    run_envelope = context.get("run_envelope")
-    if not isinstance(run_envelope, dict):
-        raise ValueError("run_envelope is required")
-    context_turn_identity = run_envelope.get("turn_identity")
-    if not isinstance(context_turn_identity, dict):
-        raise ValueError("run_envelope.turn_identity is required")
-    if context_turn_identity.get("active_buddy") != active_buddy:
-        raise ValueError("run_envelope.turn_identity active_buddy mismatch")
-    if context_turn_identity.get("request_text") != request_text:
-        raise ValueError("run_envelope.turn_identity request_text mismatch")
-    if context_turn_identity.get("task_id") != current_task_id:
-        raise ValueError("run_envelope.turn_identity task_id mismatch")
-    if context_turn_identity.get("track_id") != current_track_id:
-        raise ValueError("run_envelope.turn_identity track_id mismatch")
-    reserved_run_id = run_envelope.get("run_id")
-    if not isinstance(reserved_run_id, str) or not reserved_run_id.strip():
-        raise ValueError("run_envelope.run_id is required")
-    run_id = reserved_run_id.strip()
-    _assert_run_id_unused(run_id)
-    reservation = _load_run_reservation(run_id)
-    reserved_context_revision = reservation.get("context_revision")
-    if reserved_context_revision != context.get("context_revision"):
-        raise ValueError("run reservation mismatch: context_revision differs from reserved envelope")
-    reserved_task_id = reservation.get("task_id")
-    if reserved_task_id != stored_task["id"]:
-        raise ValueError("run reservation mismatch: task_id differs from reserved envelope")
-    reserved_sequence = reservation.get("sequence")
-    if reserved_sequence != run_envelope.get("sequence"):
-        raise ValueError("run reservation mismatch: sequence differs from reserved envelope")
-    reservation_turn_identity = reservation.get("turn_identity")
-    if not isinstance(reservation_turn_identity, dict) or not isinstance(context_turn_identity, dict):
-        raise ValueError("run reservation mismatch: turn_identity payload is missing")
-    if _normalize_turn_identity(reservation_turn_identity) != _normalize_turn_identity(context_turn_identity):
-        raise ValueError("run reservation mismatch: turn_identity differs from reserved envelope")
-
-    selected_skill = _resolve_execution_skill(
-        buddy_id=active_buddy,
-        skill_id=selected_skill_id,
-        manifest_path=manifest_path,
-    )
-    _validate_minimum_persist_result(result)
-    track_operation = _validate_track_operation_effect(
-        operation=_track_operation_from_result(result),
-        active_buddy=active_buddy,
-        task=stored_task,
-        explicit_track_id=current_track_id,
-        known_buddy_ids=known_buddy_ids,
-    )
-    persist_context = {
-        "active_buddy": active_buddy,
-        "request_text": request_text,
-        "current_task_id": current_task_id,
-        "current_track_id": current_track_id,
-    }
-
-    try:
-        receipt = _persist_artifact_skill(
-            resolved=persist_context,
-            skill=selected_skill,
-            result=result,
-            run_id=run_id,
-            task=stored_task,
-            explicit_track_id=current_track_id,
-            track_operation=track_operation,
-        )
-    except (ValueError, OSError):
-        raise
+    if handoff is not None:
+        receipt["handoff"] = handoff
 
     reservation_clear_warning = _clear_run_reservation(run_id)
     if reservation_clear_warning is not None:
-        receipt_warnings = receipt.setdefault("warnings", []) if isinstance(receipt, dict) else []
-        if isinstance(receipt_warnings, list):
-            receipt_warnings.append(reservation_clear_warning)
-    refreshed_context = _post_persist_refreshed_context_unavailable(receipt)
+        warnings = receipt.setdefault("warnings", [])
+        if isinstance(warnings, list):
+            warnings.append(reservation_clear_warning)
 
+    refreshed_context = _post_persist_refreshed_context_unavailable(receipt)
     return {
         "ok": True,
         "receipt": receipt,
@@ -1472,16 +1633,14 @@ def _persist_skill_result(
     }
 
 
-def persist_skill_result(
+def persist_buddy_run(
     context: dict[str, Any],
     *,
-    skill_id: str,
     result: dict[str, Any],
     manifest_path: Path = DEFAULT_MANIFEST,
 ) -> dict[str, Any]:
-    return _persist_skill_result(
+    return _persist_buddy_run(
         context,
-        skill_id=skill_id,
         result=result,
         manifest_path=manifest_path,
     )
@@ -1509,16 +1668,6 @@ def _cmd_prepare(args: argparse.Namespace) -> int:
         payload = runtime_error("E_RUNTIME_PREPARE", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0 if payload.get("ok") else 1
-
-
-def _derive_cli_persist_skill_id(
-    context: dict[str, Any],
-    requested_skill_id: str | None,
-) -> str:
-    _ = context
-    if isinstance(requested_skill_id, str) and requested_skill_id.strip():
-        return requested_skill_id.strip()
-    raise ValueError("skill_id is required")
 
 
 def _validate_product_persist_context_binding(context: dict[str, Any], product_session: dict[str, Any]) -> None:
@@ -1574,9 +1723,8 @@ def _cmd_persist(args: argparse.Namespace) -> int:
         result = _read_json_input(args.result, stdin_text=stdin_text if args.result == "-" else None)
         product_session = _load_product_mode_session(args.manifest)
         if product_session is None:
-            payload = persist_skill_result(
+            payload = persist_buddy_run(
                 context,
-                skill_id=_derive_cli_persist_skill_id(context, args.skill_id),
                 result=result,
                 manifest_path=args.manifest,
             )
@@ -1586,9 +1734,8 @@ def _cmd_persist(args: argparse.Namespace) -> int:
                 if product_session is None:
                     raise ValueError("product-mode env disappeared while acquiring runtime lock")
                 _validate_product_persist_context_binding(context, product_session)
-                payload = persist_skill_result(
+                payload = persist_buddy_run(
                     context,
-                    skill_id=_derive_cli_persist_skill_id(context, args.skill_id),
                     result=result,
                     manifest_path=args.manifest,
                 )
@@ -1618,10 +1765,6 @@ def build_parser() -> argparse.ArgumentParser:
     persist_cmd = subparsers.add_parser("persist", help="Persist a structured BuddySwitch run result.")
     persist_cmd.add_argument("--context", required=True, help="Prepared turn context JSON file, or '-' for stdin")
     persist_cmd.add_argument("--result", required=True, help="Structured result JSON file, or '-' for stdin")
-    persist_cmd.add_argument(
-        "--skill-id",
-        help="Chosen skill id. Required.",
-    )
     persist_cmd.set_defaults(func=_cmd_persist)
 
     return parser

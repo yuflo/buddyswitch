@@ -26,9 +26,9 @@ Draft the MVP PRD for onboarding rewrite
 ## Product Runtime Loop
 
 1. `prepare-turn-context`
-2. Codex CLI discovers native runtime skills from `.agents/skills` and runs exactly one selected skill
-3. The selected native skill emits buddy-level result JSON directly
-4. `persist-skill-result` with the same native `skill_id`
+2. Codex CLI discovers native runtime skills from `.agents/skills` and runs needed skills inside the locked buddy session
+3. Integrate outputs into one buddy run commit payload
+4. `persist-buddy-run` with `--context` and `--result`
 
 Runtime CLI:
 
@@ -39,7 +39,6 @@ python3 scripts/turn_runtime.py prepare "Draft onboarding PRD"
 ```bash
 python3 scripts/turn_runtime.py persist \
   --context /tmp/prepare-context.json \
-  --skill-id write-prd \
   --result /tmp/result.json
 ```
 

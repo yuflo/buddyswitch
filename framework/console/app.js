@@ -749,7 +749,7 @@ function renderArtifactHistory(parent, artifacts) {
     const item = createEl("div", "history-row");
     item.append(
       createEl("strong", "", artifactTitle(artifact)),
-      createEl("span", "", `${artifact.skill_id || "unknown skill"} | ${artifact.updated_at || "no timestamp"}`),
+      createEl("span", "", `${artifact.kind || "unknown kind"} | ${artifact.updated_at || "no timestamp"}`),
     );
     list.append(item);
   });
@@ -768,7 +768,7 @@ function renderRelatedRuns(parent, runs) {
     const item = createEl("div", "history-row");
     item.append(
       createEl("strong", "", run.run_id || "run-unknown"),
-      createEl("span", "", `${run.buddy || "unknown"} / ${run.skill_id || "unknown"} | ${run.updated_at || "no timestamp"}`),
+      createEl("span", "", `${run.buddy || "unknown"} | ${run.track_action || "persist"} | ${run.updated_at || "no timestamp"}`),
       createEl("p", "task-summary line-clamp-2", clampText(run.execution_summary || run.demand || "No summary", 180)),
     );
     list.append(item);
@@ -1008,7 +1008,7 @@ function renderRunHistory(track) {
     const receiptPathSummary = formatReceiptPaths(audit);
     const header = createEl("div", "run-header");
     header.append(
-      createEl("strong", "", `${audit.buddy || "unknown"} / ${audit.skill_id || "unknown"}`),
+      createEl("strong", "", `${audit.buddy || "unknown"} | ${audit.track_action || "persist"}`),
       createEl("span", "run-time", audit.updated_at || "no timestamp"),
     );
     item.append(
@@ -1060,7 +1060,7 @@ function renderRunHistoryForTask(task) {
     const receiptPathSummary = formatReceiptPaths(audit);
     const header = createEl("div", "run-header");
     header.append(
-      createEl("strong", "", `${audit.buddy || "unknown"} / ${audit.skill_id || "unknown"}`),
+      createEl("strong", "", `${audit.buddy || "unknown"} | ${audit.track_action || "persist"}`),
       createEl("span", "run-time", audit.updated_at || "no timestamp"),
     );
     item.append(

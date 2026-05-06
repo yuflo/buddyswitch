@@ -1,6 +1,6 @@
 # Skill Runtime Shared Rules
 
-These rules apply to artifact-producing BuddySwitch skills in launcher-managed runtime sessions.
+These rules apply to native BuddySwitch skills in launcher-managed runtime sessions.
 
 ## Three Runtime Gates
 
@@ -10,29 +10,35 @@ These rules apply to artifact-producing BuddySwitch skills in launcher-managed r
 
 Codex CLI owns package acceptance after `.agents/skills/<skill-id>` is materialized.
 
-## Direct Emission Rule
+Persist commits one active buddy run result. Native skills may contribute to that result, but native skill ids do not own the persist boundary, artifact identity, receipt identity, or write permissions.
 
-- Native artifact-producing skills emit buddy-level result JSON directly.
-- Call `persist --skill-id <native-skill-id>` with that direct result payload.
-- Keep the same native `skill_id` in the persist call; runtime preserves it in receipt, artifact, and run audit metadata.
+## Contribution Rule
+
+- Native skills contribute content to the current buddy run.
+- Do not call persist from a skill perspective.
+- The locked buddy session persists once per turn with:
+  - `scripts/turn_runtime.py persist --context <context> --result <result>`
 
 ## Runtime Write-Safety Minimums
 
 `persist` requires only the minimum payload shape needed for safe writes:
 
 - non-empty string `execution_summary`;
-- object `artifact_content`;
-- `working_notes` and `deliverables_or_changed_files` as lists when present.
-
-Write `execution_summary` into `artifact.summary` and keep that summary selection-ready for downstream buddies.
+- optional `working_notes` list of strings;
+- optional `artifacts` list with object items (`kind`, `title`, object `content`, optional `summary`);
+- optional `state_effects` object (`track`, `task`);
+- optional `handoff` object (`next_buddy`, `reason`, `context`);
+- optional `contributors` object (`skills`/`agents` string lists);
+- at least one durable collaboration signal: artifact, state effect, or handoff.
 
 Buddy-level schemas remain authoring and development guidance. Runtime does not require full schema completeness unless a field is needed for safe writes.
 
-## Task And Artifact Boundaries
+## Task, Artifact, And Handoff Boundaries
 
 - Follow `framework/docs/track-registry.md` for track context.
-- PM lifecycle mutations must use `state_effects.track_operation` in PM result payloads.
-- Retired top-level `track_operation` payloads are rejected.
+- Track lifecycle mutations must use `state_effects.track`.
+- Task updates must use `state_effects.task`.
+- Handoff is explicit collaboration state and does not implicitly mutate tracks.
 
 ## Durable Output Paths
 

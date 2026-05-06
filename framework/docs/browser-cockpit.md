@@ -5,15 +5,15 @@
 Define the execution contract for market research skills inside a buddy-locked instance without changing BuddySwitch object authority or skill boundaries.
 
 Runtime instances materialize active buddy skills under `.agents/skills`.
-BuddySwitch does not open browser tools itself; Codex executes the selected native skill while BuddySwitch remains the control layer.
+BuddySwitch does not open browser tools itself; Codex executes native skills while BuddySwitch remains the control layer.
 `prepare` provides context and run envelope only; Codex handles native skill discovery/execution.
 
 ## Per-Run Contract
 
-- The host chooses exactly one `market` `skill_id` for the run.
-- Codex discovers the active runtime skill package from `.agents/skills/<skill-id>/SKILL.md`.
-- The host executes the selected skill locally while treating the browser contract in this doc as binding runtime constraints.
-- This cockpit contract applies to one selected skill at a time; it does not turn BuddySwitch into a multi-skill workflow engine.
+- The host may execute one or more `market` native skills within one prepared buddy run.
+- Codex discovers active runtime skill packages from `.agents/skills/<skill-id>/SKILL.md`.
+- The host executes selected skill work locally while treating the browser contract in this doc as binding runtime constraints.
+- This cockpit contract defines execution constraints only; persistence remains one buddy-run commit per turn.
 
 ## Applies To
 
@@ -24,7 +24,7 @@ BuddySwitch does not open browser tools itself; Codex executes the selected nati
 - `channel-discovery`
 - `launch-prep`
 
-These six skills stay separate and keep their own output schemas, slots, and scope boundaries.
+These six skills stay separate and keep their own output schemas, artifact kinds, and scope boundaries.
 
 ## Shared Runtime Contract
 
@@ -58,8 +58,8 @@ All six market skills use the same browser runtime contract:
 
 4. Ordered host execution
 - For `market-browser-native`, discovery starts with `chrome-devtools-cockpit`; browser-external search is outside the default scope unless an explicit `user-approved` one-off downgrade is granted.
-- The selected native skill is the host-facing browser contract for the chosen run.
-- The host may not replace that contract with manual reconstruction or ad hoc market-specific shortcuts.
+- Active native skills used in the run are the host-facing browser contract for that run.
+- The host may not replace those contracts with manual reconstruction or ad hoc market-specific shortcuts.
 
 ## Cockpit Bootstrap
 

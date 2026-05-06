@@ -788,10 +788,11 @@ exec "$real_git" "$@"
             for token in (
                 "## Receipt Contract",
                 "Persisted: ok|failed",
+                "Buddy: <buddy_id>",
                 "Task: <task_title> [<task_id>]",
-                "Artifact: <artifact_id|none>",
+                "Artifacts: <artifact_id_1>, <artifact_id_2>|none",
                 "Run: <run_id>",
-                "Related Runs: <run_id_1>, <run_id_2>",
+                "Handoff: <next_buddy>|none",
                 "## Summary Contract",
             ):
                 self.assertIn(token, runtime_prompt)
@@ -867,10 +868,11 @@ exec "$real_git" "$@"
             for token in (
                 "## Receipt Contract",
                 "Persisted: ok|failed",
+                "Buddy: <buddy_id>",
                 "Task: <task_title> [<task_id>]",
-                "Artifact: <artifact_id|none>",
+                "Artifacts: <artifact_id_1>, <artifact_id_2>|none",
                 "Run: <run_id>",
-                "Related Runs: <run_id_1>, <run_id_2>",
+                "Handoff: <next_buddy>|none",
                 "## Summary Contract",
             ):
                 self.assertIn(token, prompt_text)
@@ -1129,20 +1131,21 @@ exec "$real_git" "$@"
             for token in (
                 ".agents/skills",
                 "codex cli",
-                "native skill",
-                "emit buddy-level result json directly",
-                "buddy-level result json",
-                "skill_id",
-                "persist-skill-result",
+                "native skills",
+                "build one buddy run commit",
+                "persist --context <context> --result <result>",
                 "## receipt contract",
                 "## summary contract",
                 "persisted: ok|failed",
+                "buddy: <buddy_id>",
                 "task: <task_title> [<task_id>]",
-                "artifact: <artifact_id|none>",
+                "artifacts: <artifact_id_1>, <artifact_id_2>|none",
                 "run: <run_id>",
-                "related runs: <run_id_1>, <run_id_2>",
+                "handoff: <next_buddy>|none",
             ):
                 self.assertIn(token, copied_agents)
+            self.assertNotIn("skill_id", copied_agents)
+            self.assertNotIn("persist-skill-result", copied_agents)
             self.assertNotIn("scripts/result_bridge.py", copied_agents)
             self.assertNotIn("choose exactly one skill_id from prepare_context.skills", copied_agents)
             self.assertNotIn("read and execute the selected buddyswitch skill.md", copied_agents)

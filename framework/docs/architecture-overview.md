@@ -1,32 +1,32 @@
 # BuddySwitch Architecture Overview
 
 BuddySwitch is a runtime control layer used inside a host Codex session.
-The host performs execution; BuddySwitch enforces boundaries and records state.
+The host executes native skills; BuddySwitch enforces boundaries and persists collaboration state.
 
 ## Responsibilities
 
 BuddySwitch:
 
 - prepares turn context from locked instance metadata and ordinary `request_text`
-- loads buddy and skill metadata from `buddyswitch/manifest.toml`
-- returns allowed skill candidates and selected input bundles
-- validates skill outputs against schema
+- loads buddy/skill metadata from `buddyswitch/manifest.toml`
+- reserves one run id per prepared turn
+- validates buddy-run commit shape and write permissions
 - persists canonical task, artifact, track, and run state
 
 Host Codex session:
 
 - interprets user intent
-- chooses exactly one `skill_id` from returned candidates
-- executes the selected skill workflow
-- returns schema-valid result payload for persistence
+- runs one or more native skills from runtime `.agents/skills`
+- integrates outputs into one buddy-run commit payload
+- persists once per turn through the runtime persist boundary
 
 ## Canonical Flow
 
 1. `prepare-turn-context` via `scripts/turn_runtime.py prepare`
-2. host execution of exactly one selected skill
-3. `persist-skill-result` via `scripts/turn_runtime.py persist`
+2. host execution of needed native skills inside the locked buddy session
+3. `persist-buddy-run` via `scripts/turn_runtime.py persist --context ... --result ...`
 
-If another turn is needed, use `receipt.next_state` to compose new ordinary `request_text`, then run `prepare` again.
+If another turn is needed, use `receipt.next_state` or `receipt.handoff` to compose a new ordinary `request_text`, then run `prepare` again.
 
 ## Runtime Boundaries
 
@@ -42,8 +42,8 @@ If another turn is needed, use `receipt.next_state` to compose new ordinary `req
 - Artifacts: `buddyswitch/objects/artifacts/*.json`
 - Runs: `buddyswitch/content/runs/*.json`
 
-Artifact slots are task-scoped and revision-aware.
-Run audit rows include `next_state` and `receipt_paths` for deterministic follow-up.
+Artifacts are task-scoped, keyed by buddy-level `kind`, and revisioned per `(task, kind)`.
+Run audit rows include `next_state`, `handoff`, and `receipt_paths` for deterministic follow-up.
 
 ## Current Skill Inventory
 
@@ -63,4 +63,4 @@ Other buddies:
 - `dev`: `implement-task`
 - `test`: `smoke-test`
 
-PM track lifecycle mutations are expressed as PM result payload `state_effects.track_operation` and persisted through the same artifact flow as other skills.
+Track lifecycle mutations are explicit `state_effects.track` actions (`create|update|advance|archive`) validated against buddy permissions.

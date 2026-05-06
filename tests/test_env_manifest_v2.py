@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""V2 manifest loading and persistence contract tests."""
+"""V2 manifest loading tests for buddy-level persistence metadata."""
 
 from __future__ import annotations
 
@@ -35,25 +35,17 @@ class EnvManifestV2Tests(unittest.TestCase):
         *,
         skills: list[dict[str, object]],
         buddies: dict[str, list[str]],
+        artifact_kinds_by_buddy: dict[str, list[str]] | None = None,
         permissions_by_buddy: dict[str, list[str]] | None = None,
     ) -> Path:
         skill_blocks: list[str] = []
         for row in skills:
-            produces = row.get("produces_artifact", True)
-            if isinstance(produces, bool):
-                produces_value = "true" if produces else "false"
-            else:
-                produces_value = str(produces)
-            output_slot = row.get("output_slot")
-            output_slot_line = f'output_slot = "{output_slot}"\n' if output_slot is not None else ""
             skill_blocks.append(
                 textwrap.dedent(
                     f"""\
                     [[skills]]
                     id = "{row['id']}"
                     path = "{row['path']}"
-                    produces_artifact = {produces_value}
-                    {output_slot_line}output_schema = "{row.get('output_schema', 'framework/schemas/pm/pm-result.json')}"
                     """
                 )
             )
@@ -61,8 +53,10 @@ class EnvManifestV2Tests(unittest.TestCase):
         buddy_blocks: list[str] = []
         for buddy_id, skill_ids in buddies.items():
             permissions = permissions_by_buddy.get(buddy_id, DEFAULT_PERMISSIONS) if permissions_by_buddy else DEFAULT_PERMISSIONS
+            artifact_kinds = artifact_kinds_by_buddy.get(buddy_id, ["artifact-note"]) if artifact_kinds_by_buddy else ["artifact-note"]
             skills_line = ", ".join(f'"{skill_id}"' for skill_id in skill_ids)
             permissions_line = ", ".join(f'"{permission}"' for permission in permissions)
+            artifact_kinds_line = ", ".join(f'"{kind}"' for kind in artifact_kinds)
             buddy_blocks.append(
                 textwrap.dedent(
                     f"""\
@@ -71,6 +65,7 @@ class EnvManifestV2Tests(unittest.TestCase):
                     label = "{buddy_id.upper()}"
                     scope = "{buddy_id} scope"
                     skills = [{skills_line}]
+                    artifact_kinds = [{artifact_kinds_line}]
                     permissions = [{permissions_line}]
                     """
                 )
@@ -101,12 +96,10 @@ class EnvManifestV2Tests(unittest.TestCase):
                     {
                         "id": "community-skill",
                         "path": package_root.relative_to(ROOT).as_posix(),
-                        "produces_artifact": True,
-                        "output_slot": "community-output",
-                        "output_schema": "framework/schemas/dev/dev-result.json",
                     }
                 ],
                 buddies={"dev": ["community-skill"]},
+                artifact_kinds_by_buddy={"dev": ["implementation-report"]},
             )
 
             loaded = env_manifest.load_manifest(manifest_path)
@@ -123,41 +116,15 @@ class EnvManifestV2Tests(unittest.TestCase):
                     {
                         "id": "missing-source-skill",
                         "path": "does/not/exist",
-                        "produces_artifact": True,
-                        "output_slot": "missing-source",
-                        "output_schema": "framework/schemas/dev/dev-result.json",
                     }
                 ],
                 buddies={"dev": ["missing-source-skill"]},
+                artifact_kinds_by_buddy={"dev": ["implementation-report"]},
             )
 
             loaded = env_manifest.load_manifest(manifest_path)
 
         self.assertEqual(loaded["skills"][0]["path"], "does/not/exist")
-
-    def test_load_manifest_does_not_require_output_schema_file_for_prepare_paths(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            temp_root = Path(temp_dir)
-            manifest_path = self._write_manifest(
-                temp_root,
-                skills=[
-                    {
-                        "id": "schema-later",
-                        "path": "buddyswitch/skills/dev/implement-task",
-                        "produces_artifact": True,
-                        "output_slot": "implementation-report",
-                        "output_schema": "framework/schemas/dev/not-runtime-gated.json",
-                    }
-                ],
-                buddies={"dev": ["schema-later"]},
-            )
-
-            loaded = env_manifest.load_manifest(manifest_path)
-
-        self.assertEqual(
-            loaded["skills"][0]["persistence"]["output_schema"],
-            "framework/schemas/dev/not-runtime-gated.json",
-        )
 
     def test_load_manifest_rejects_duplicate_skill_ids(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
@@ -168,17 +135,14 @@ class EnvManifestV2Tests(unittest.TestCase):
                     {
                         "id": "duplicate",
                         "path": "buddyswitch/skills/pm/write-prd",
-                        "produces_artifact": True,
-                        "output_slot": "one",
                     },
                     {
                         "id": "duplicate",
                         "path": "buddyswitch/skills/pm/track-manager",
-                        "produces_artifact": True,
-                        "output_slot": "two",
                     },
                 ],
                 buddies={"pm": ["duplicate"]},
+                artifact_kinds_by_buddy={"pm": ["prd"]},
             )
 
             with self.assertRaisesRegex(env_manifest.ManifestError, "duplicate skill id"):
@@ -193,11 +157,10 @@ class EnvManifestV2Tests(unittest.TestCase):
                     {
                         "id": "declared",
                         "path": "buddyswitch/skills/pm/write-prd",
-                        "produces_artifact": True,
-                        "output_slot": "prd",
                     }
                 ],
                 buddies={"pm": ["not-declared"]},
+                artifact_kinds_by_buddy={"pm": ["prd"]},
             )
 
             with self.assertRaisesRegex(env_manifest.ManifestError, "unknown skill"):
@@ -212,65 +175,17 @@ class EnvManifestV2Tests(unittest.TestCase):
                     {
                         "id": "write-prd",
                         "path": "buddyswitch/skills/pm/write-prd",
-                        "produces_artifact": True,
-                        "output_slot": "prd",
                     }
                 ],
                 buddies={"pm": ["write-prd"]},
+                artifact_kinds_by_buddy={"pm": ["prd"]},
                 permissions_by_buddy={"pm": ["project.read"]},
             )
 
             with self.assertRaisesRegex(env_manifest.ManifestError, "unsupported object"):
                 env_manifest.load_manifest(manifest_path)
 
-    def test_load_manifest_requires_persistence_fields(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            temp_root = Path(temp_dir)
-            missing_slot_manifest = self._write_manifest(
-                temp_root,
-                skills=[
-                    {
-                        "id": "demo-skill",
-                        "path": "buddyswitch/skills/pm/write-prd",
-                        "produces_artifact": True,
-                        "output_slot": None,
-                    }
-                ],
-                buddies={"pm": ["demo-skill"]},
-            )
-            with self.assertRaisesRegex(env_manifest.ManifestError, "output_slot"):
-                env_manifest.load_manifest(missing_slot_manifest)
-
-            missing_bool_manifest = temp_root / "manifest-bad-bool.toml"
-            missing_bool_manifest.write_text(
-                textwrap.dedent(
-                    """\
-                    schema_version = 1
-
-                    [env]
-                    id = "demo"
-                    label = "Demo"
-
-                    [[skills]]
-                    id = "demo-skill"
-                    path = "buddyswitch/skills/pm/write-prd"
-                    output_slot = "prd"
-                    output_schema = "framework/schemas/pm/pm-result.json"
-
-                    [[buddies]]
-                    id = "pm"
-                    label = "PM"
-                    scope = "Owns scope."
-                    skills = ["demo-skill"]
-                    permissions = ["task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
-                    """
-                ),
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(env_manifest.ManifestError, "produces_artifact"):
-                env_manifest.load_manifest(missing_bool_manifest)
-
-    def test_load_manifest_rejects_non_artifact_persistence(self) -> None:
+    def test_load_manifest_requires_artifact_kinds(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             temp_root = Path(temp_dir)
             manifest_path = self._write_manifest(
@@ -279,57 +194,50 @@ class EnvManifestV2Tests(unittest.TestCase):
                     {
                         "id": "demo-skill",
                         "path": "buddyswitch/skills/pm/write-prd",
-                        "produces_artifact": False,
-                        "output_slot": None,
                     }
                 ],
                 buddies={"pm": ["demo-skill"]},
+                artifact_kinds_by_buddy={"pm": []},
             )
 
-            with self.assertRaisesRegex(env_manifest.ManifestError, "produces_artifact=false is not supported"):
+            with self.assertRaisesRegex(env_manifest.ManifestError, "artifact_kinds"):
                 env_manifest.load_manifest(manifest_path)
 
-    def test_live_manifest_exposes_persistence_contracts(self) -> None:
+    def test_load_manifest_rejects_invalid_artifact_kind_id(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest_path = self._write_manifest(
+                temp_root,
+                skills=[
+                    {
+                        "id": "demo-skill",
+                        "path": "buddyswitch/skills/pm/write-prd",
+                    }
+                ],
+                buddies={"pm": ["demo-skill"]},
+                artifact_kinds_by_buddy={"pm": ["PRD"]},
+            )
+
+            with self.assertRaisesRegex(env_manifest.ManifestError, "artifact_kinds"):
+                env_manifest.load_manifest(manifest_path)
+
+    def test_live_manifest_exposes_buddy_artifact_kinds_and_no_skill_persistence_payload(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         skills = {skill["id"]: skill for skill in manifest["skills"]}
+        buddies = env_manifest.buddies_by_id(manifest)
 
-        self.assertEqual(skills["write-prd"]["persistence"]["output_slot"], "prd")
-        self.assertTrue(skills["write-prd"]["persistence"]["produces_artifact"])
-        self.assertEqual(skills["track-manager"]["persistence"]["output_slot"], "track-operation")
-        self.assertTrue(skills["track-manager"]["persistence"]["produces_artifact"])
+        self.assertIn("write-prd", skills)
+        self.assertNotIn("persistence", skills["write-prd"])
+        self.assertIn("artifact_kinds", buddies["pm"])
+        self.assertIn("prd", buddies["pm"]["artifact_kinds"])
 
-    def test_live_manifest_maps_artifact_skills_to_buddy_level_schema_metadata(self) -> None:
-        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
-        skills = {skill["id"]: skill for skill in manifest["skills"]}
-
-        expected_artifact_schema_by_skill = {
-            "write-prd": "framework/schemas/pm/pm-result.json",
-            "track-manager": "framework/schemas/pm/pm-result.json",
-            "implement-task": "framework/schemas/dev/dev-result.json",
-            "skill-creator-importer": "framework/schemas/dev/dev-result.json",
-            "smoke-test": "framework/schemas/test/test-result.json",
-            "shape-prototype": "framework/schemas/design/design-result.json",
-            "research-scan": "framework/schemas/market/market-result.json",
-            "pmf-recon": "framework/schemas/market/market-result.json",
-            "customer-discovery": "framework/schemas/market/market-result.json",
-            "positioning-copy": "framework/schemas/market/market-result.json",
-            "channel-discovery": "framework/schemas/market/market-result.json",
-            "launch-prep": "framework/schemas/market/market-result.json",
-        }
-        for skill_id, expected_schema in expected_artifact_schema_by_skill.items():
-            with self.subTest(skill=skill_id):
-                persistence = skills[skill_id]["persistence"]
-                self.assertTrue(persistence["produces_artifact"])
-                self.assertIsInstance(persistence["output_slot"], str)
-                self.assertEqual(persistence["output_schema"], expected_schema)
-
-    def test_buddy_authority_profile_uses_membership_and_persist_wording(self) -> None:
+    def test_buddy_authority_profile_uses_membership_and_buddy_run_persist_wording(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         authority = env_manifest.buddy_authority_profile(manifest, "pm")
 
         self.assertEqual(authority["routing_skills"], ["write-prd", "track-manager"])
         self.assertIn("materialized", authority["runtime_note"])
-        self.assertIn("persist", authority["runtime_note"])
+        self.assertIn("buddy run", authority["runtime_note"].lower())
 
 
 if __name__ == "__main__":

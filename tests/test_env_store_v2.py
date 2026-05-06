@@ -248,8 +248,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-revision-prd-r1",
             title="PRD revision 1",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=task["id"],
             source_run_id="run-seed-v2-revision",
             summary="Initial PRD",
@@ -259,8 +258,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-revision-prd-r2",
             title="PRD revision 2",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=task["id"],
             source_run_id="run-seed-v2-revision-2",
             summary="Revised PRD",
@@ -301,8 +299,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-revision-prd-r1",
             title="PRD revision 1",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=task["id"],
             source_run_id="run-seed-v2-revision",
             summary="Initial PRD",
@@ -314,8 +311,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 artifact_id="art-task-pm-v2-revision-prd-r2",
                 title="PRD revision 2",
                 buddy="pm",
-                skill_id="write-prd",
-                slot="prd",
+            kind="prd",
                 task_id=task["id"],
                 source_run_id="run-seed-v2-revision-2",
                 summary="Revised PRD",
@@ -341,8 +337,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-revision-prd-r1",
             title="PRD revision 1",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=task["id"],
             source_run_id="run-seed-v2-revision",
             summary="Initial PRD",
@@ -352,8 +347,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-revision-prd-r2",
             title="PRD revision 2",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=task["id"],
             source_run_id="run-seed-v2-revision-2",
             summary="Revised PRD",
@@ -383,8 +377,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-revision-prd-r1",
             title="PRD revision 1",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=task["id"],
             source_run_id="run-seed-v2-revision",
             summary="Initial PRD",
@@ -394,8 +387,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-revision-prd-r2",
             title="PRD revision 2",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=task["id"],
             source_run_id="run-seed-v2-revision-2",
             summary="Revised PRD",
@@ -415,8 +407,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-revision-prd-r3",
             title="PRD revision 3",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=task["id"],
             source_run_id="run-seed-v2-revision-3",
             summary="Third PRD",
@@ -451,8 +442,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-move-source-prd-r1",
             title="Source PRD 1",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=source["id"],
             source_run_id="run-seed-v2-move-source",
             summary="Source old",
@@ -462,8 +452,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-move-source-prd-r2",
             title="Source PRD 2",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=source["id"],
             source_run_id="run-seed-v2-move-source-2",
             summary="Source current",
@@ -473,8 +462,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-move-dest-prd-r1",
             title="Dest PRD 1",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=dest["id"],
             source_run_id="run-seed-v2-move-dest",
             summary="Dest current",
@@ -490,7 +478,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         current_artifacts = [
             artifact
             for artifact in (moved, dest_current_after, moved_source_current)
-            if artifact["task_id"] == dest["id"] and artifact["slot"] == "prd" and artifact["is_current"]
+            if artifact["task_id"] == dest["id"] and artifact["kind"] == "prd" and artifact["is_current"]
         ]
 
         self.assertFalse(moved["is_current"])
@@ -517,8 +505,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-move-source-prd-r1",
             title="Source PRD 1",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=source["id"],
             source_run_id="run-seed-v2-move-source",
             summary="Source old",
@@ -528,8 +515,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-move-source-prd-r2",
             title="Source PRD 2",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=source["id"],
             source_run_id="run-seed-v2-move-source-2",
             summary="Source current",
@@ -539,8 +525,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             artifact_id="art-task-pm-v2-move-dest-prd-r1",
             title="Dest PRD 1",
             buddy="pm",
-            skill_id="write-prd",
-            slot="prd",
+            kind="prd",
             task_id=dest["id"],
             source_run_id="run-seed-v2-move-dest",
             summary="Dest current",
@@ -555,7 +540,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         current_artifacts = [
             artifact
             for artifact in (moved, dest_current_after, get_artifact(source_old["id"]))
-            if artifact["task_id"] == dest["id"] and artifact["slot"] == "prd" and artifact["is_current"]
+            if artifact["task_id"] == dest["id"] and artifact["kind"] == "prd" and artifact["is_current"]
         ]
 
         self.assertTrue(moved["is_current"])

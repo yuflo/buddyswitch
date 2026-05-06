@@ -79,7 +79,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         artifact_id=args.artifact_id,
         title=args.title,
         buddy=_validate_buddy_ref(manifest, args.buddy, "buddy") or args.buddy,
-        skill_id=args.skill_id,
+        kind=args.kind,
         task_id=args.task_id,
         source_run_id=args.source_run_id,
         summary=args.summary or "",
@@ -94,7 +94,7 @@ def cmd_update(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
     require_permission(manifest, args.actor, "artifact.update")
     patch = {}
-    for field in ("title", "buddy", "skill_id", "summary", "source_run_id"):
+    for field in ("title", "buddy", "kind", "summary", "source_run_id"):
         value = getattr(args, field)
         if value is not None:
             if field == "buddy":
@@ -158,7 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     cmd.add_argument("--artifact-id")
     cmd.add_argument("--title", required=True)
     cmd.add_argument("--buddy", required=True)
-    cmd.add_argument("--skill-id", required=True)
+    cmd.add_argument("--kind", required=True)
     cmd.add_argument("--task-id", required=True)
     cmd.add_argument("--source-run-id", required=True)
     cmd.add_argument("--summary")
@@ -172,7 +172,7 @@ def build_parser() -> argparse.ArgumentParser:
     cmd.add_argument("artifact_id")
     cmd.add_argument("--title")
     cmd.add_argument("--buddy")
-    cmd.add_argument("--skill-id")
+    cmd.add_argument("--kind")
     cmd.add_argument("--task-id")
     cmd.add_argument("--source-run-id")
     cmd.add_argument("--summary")

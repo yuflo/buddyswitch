@@ -43,13 +43,14 @@ Every run should return:
 3. deliverables or changed files
 4. next-step state or handoff note (optional)
 
-Native Dev skill output must emit buddy-level result JSON directly and persist with `persist --skill-id <native-skill-id>` using the same native `skill_id`.
+Native Dev skill output contributes content to one buddy run commit.
+Persist once per turn with `scripts/turn_runtime.py persist --context <context> --result <result>`.
 
 Terminal final output must follow `Receipt -> Summary`:
-- `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifact`, `Run`, optional `Related Runs`)
+- `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifacts`, `Run`, optional `Handoff`)
 - `Receipt` may include an optional next-step state or handoff note (non-command wording)
 - `Summary` keeps 1-2 lines, with up to 4 open questions
-- Runtime commit boundary is `persist-skill-result`.
+- Runtime commit boundary is `persist-buddy-run`.
 
 ## Execution Summary Rule
 

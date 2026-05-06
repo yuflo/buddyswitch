@@ -1,0 +1,38 @@
+{
+  "contract_id": "persist-buddy-run",
+  "contract_version": "2026-05-06",
+  "request_boundary": "active_buddy + reserved run_id + current task/track context",
+  "response_key_order": [
+    "ok",
+    "receipt",
+    "refreshed_context"
+  ],
+  "commit_required_keys": [
+    "execution_summary"
+  ],
+  "commit_optional_keys": [
+    "working_notes",
+    "artifacts",
+    "state_effects",
+    "handoff",
+    "contributors"
+  ],
+  "receipt_required_keys": [
+    "ok",
+    "buddy_id",
+    "task_id",
+    "task_title",
+    "artifact_ids",
+    "run_id",
+    "next_state",
+    "receipt_paths",
+    "related_run_ids"
+  ],
+  "receipt_optional_keys": [
+    "track_id",
+    "track_title",
+    "track_action",
+    "handoff",
+    "warnings"
+  ]
+}

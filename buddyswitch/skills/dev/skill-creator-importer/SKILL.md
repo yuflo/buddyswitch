@@ -27,7 +27,9 @@ description: Use when importing an external Codex-native skill package into Budd
 
 ## Shared Runtime Rules
 - See `framework/docs/skill-runtime-shared-rules.md`.
-- Emit buddy-level Dev result JSON directly and persist with `persist --skill-id skill-creator-importer`.
+- This native skill contributes content to the current buddy run.
+- Do not call persist from the skill perspective.
+- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
 - Do not introduce transcript parsing, runtime adapter layers, or legacy markdown output paths.
 
 ## Required Output Fields
