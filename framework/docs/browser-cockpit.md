@@ -17,7 +17,7 @@ Env profile source of truth:
 
 - The host may execute one or more `market` native skills within one prepared buddy run.
 - Codex discovers active runtime skill packages from `.agents/skills/<skill-id>/SKILL.md`.
-- The host executes selected skill work locally while treating the browser contract in this doc as binding runtime constraints.
+- Codex executes active native skill package work inside the locked buddy run while this browser contract remains the binding runtime constraint.
 - This cockpit contract defines execution constraints only; persistence remains one buddy-run commit per turn.
 
 ## Applies To

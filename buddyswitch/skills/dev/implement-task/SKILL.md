@@ -50,23 +50,22 @@ description: Use when the task is implementing scoped product changes, bug fixes
 - Do not call persist from the skill perspective.
 - The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
 
-## Required Output Fields
+## BuddySwitch Commit Output
 
-Top-level envelope keys:
+Contribute to one buddy-run commit. Do not call persist from inside the skill.
 
+Required top-level field:
 - `execution_summary`
-- `working_notes`
-- `deliverables_or_changed_files`
-- `artifact_content`
 
-Buddy-specific fields inside `artifact_content`:
+Use `artifacts` when this skill produces a durable artifact:
+- `kind`: `implementation-report`
+- `title`: concise artifact title
+- `summary`: short downstream selection summary
+- `content`: include `task_summary`, `changed_files`, `implementation_notes`, `verification`, `risks`, and `follow_ups`
 
-- `task_summary`
-- `changed_files`
-- `implementation_notes`
-- `verification`
-- `risks`
-- `follow_ups`
+Use optional `working_notes` for concise reasoning or verification notes.
+Use optional `state_effects.task` only for the current prepared task.
+Use optional `handoff` when another manifest buddy should continue.
 
 ## Guardrails
 

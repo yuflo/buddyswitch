@@ -1,10 +1,7 @@
 {
   "type": "object",
   "required": [
-    "execution_summary",
-    "working_notes",
-    "deliverables_or_changed_files",
-    "artifact_content"
+    "execution_summary"
   ],
   "properties": {
     "execution_summary": {"type": "string"},
@@ -12,44 +9,70 @@
       "type": "array",
       "items": {"type": "string"}
     },
-    "deliverables_or_changed_files": {
+    "artifacts": {
       "type": "array",
-      "items": {"type": "string"}
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "title",
+          "content"
+        ],
+        "properties": {
+          "kind": {"type": "string"},
+          "title": {"type": "string"},
+          "summary": {"type": "string"},
+          "content": {"type": "object"}
+        },
+        "additionalProperties": false
+      }
     },
-    "artifact_content": {
+    "state_effects": {
       "type": "object",
-      "required": [
-        "test_scope",
-        "checks_run",
-        "passed_items",
-        "failed_items",
-        "blocked_items",
-        "reproduction_notes",
-        "readiness"
-      ],
       "properties": {
-        "test_scope": {"type": "string"},
-        "checks_run": {
+        "task": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["active", "blocked", "done", "archived"]
+            },
+            "summary": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "handoff": {
+      "type": "object",
+      "required": ["next_buddy", "reason", "context"],
+      "properties": {
+        "next_buddy": {"type": "string"},
+        "reason": {"type": "string"},
+        "context": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "contributors": {
+      "type": "object",
+      "properties": {
+        "skills": {
           "type": "array",
           "items": {"type": "string"}
         },
-        "passed_items": {
+        "agents": {
           "type": "array",
           "items": {"type": "string"}
-        },
-        "failed_items": {
-          "type": "array",
-          "items": {"type": "string"}
-        },
-        "blocked_items": {
-          "type": "array",
-          "items": {"type": "string"}
-        },
-        "reproduction_notes": {
-          "type": "array",
-          "items": {"type": "string"}
-        },
-        "readiness": {"type": "string"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "tool_evidence": {
+      "type": "object",
+      "properties": {
+        "browser_cockpit_token": {"type": "string"},
+        "approved_downgrade_token": {"type": "string"}
       },
       "additionalProperties": false
     }

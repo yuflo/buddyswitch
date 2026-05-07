@@ -94,6 +94,27 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("turn_runtime", app_js)
         self.assertNotIn("runtime_store.repositories", app_js)
 
+    def test_browser_ui_does_not_import_runtime_internals(self) -> None:
+        ui_surfaces = (
+            ROOT / "framework" / "console" / "app.js",
+            ROOT / "projects" / "app" / "main.js",
+        )
+        forbidden_runtime_internals = (
+            "env_store",
+            "runtime_store.projections",
+            "turn_runtime",
+            "workspace_data",
+        )
+
+        for path in ui_surfaces:
+            text = path.read_text(encoding="utf-8")
+            for token in forbidden_runtime_internals:
+                with self.subTest(path=str(path.relative_to(ROOT)), token=token):
+                    self.assertNotIn(token, text)
+
+        console_app_js = (ROOT / "framework" / "console" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("/api/workspace", console_app_js)
+
     def test_importer_does_not_reintroduce_retired_runtime_paths(self) -> None:
         importer_text = (ROOT / "scripts" / "skill_creator_importer.py").read_text(encoding="utf-8")
         for token in (
@@ -162,6 +183,40 @@ class RepoConsistencyTests(unittest.TestCase):
             for token in forbidden_tokens:
                 with self.subTest(path=rel_path, token=token):
                     self.assertNotIn(token, text)
+
+    def test_active_authoring_surfaces_use_buddy_run_commit_shape(self) -> None:
+        tracked = self._git_ls_files(
+            "framework/contracts",
+            "framework/schemas",
+            "buddyswitch/skills",
+        )
+        forbidden_tokens = (
+            "deliverables_or_changed" + "_files",
+            "artifact" + "_content",
+            "specialized" + "_sections",
+            "track" + "_operation",
+        )
+        for rel_path in tracked:
+            path = ROOT / rel_path
+            if not path.exists() or path.suffix not in {".md", ".json"}:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for token in forbidden_tokens:
+                with self.subTest(path=rel_path, token=token):
+                    self.assertNotIn(token, text)
+
+    def test_active_store_has_no_legacy_named_repository_layer(self) -> None:
+        active_paths = (
+            ROOT / "scripts" / "env_store.py",
+            ROOT / "scripts" / "runtime_store" / "__init__.py",
+            ROOT / "scripts" / "runtime_store" / "projections.py",
+            ROOT / "tests" / "test_env_store_v2.py",
+        )
+        for path in active_paths:
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("_legacy_", text)
+        self.assertFalse((ROOT / "scripts" / "runtime_store" / "repositories.py").exists())
 
     def test_parallel_contract_surface_targets_persist_buddy_run(self) -> None:
         contract_test = (ROOT / "tests" / "test_parallel_contracts.py").read_text(encoding="utf-8")

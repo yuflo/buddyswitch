@@ -3,23 +3,19 @@
   "working_notes": [
     "Capture major design constraints and tradeoffs."
   ],
-  "deliverables_or_changed_files": [
-    ".sandbox/design/preview/index.html"
-  ],
-  "artifact_content": {
-    "design_goal": "State the main UX/design goal.",
-    "flow_or_screen_summary": "Summarize target flow or screen direction.",
-    "interaction_notes": [
-      "Important interaction behavior"
-    ],
-    "assets_or_preview_refs": [
-      ".sandbox/design/preview/index.html"
-    ],
-    "handoff_notes": [
-      "Implementation or QA handoff note"
-    ],
-    "open_questions": [
-      "Open design question requiring follow-up"
-    ]
-  }
+  "artifacts": [
+    {
+      "kind": "design-handoff",
+      "title": "Design Handoff: Requested Prototype Scope",
+      "summary": "Selection-ready handoff for downstream implementation and testing.",
+      "content": {
+        "design_goal": "",
+        "flow_or_screen_summary": "",
+        "interaction_notes": [],
+        "assets_or_preview_refs": [],
+        "handoff_notes": [],
+        "open_questions": []
+      }
+    }
+  ]
 }

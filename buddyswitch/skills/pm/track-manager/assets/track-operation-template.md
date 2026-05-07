@@ -1,36 +1,19 @@
 {
-  "execution_summary": "Applied requested track lifecycle operation.",
+  "execution_summary": "Updated the active delivery track.",
   "working_notes": [
-    "State effect is explicit and scoped to PM track lifecycle authority."
+    "Track mutation is PM-owned and uses state_effects.track."
   ],
-  "deliverables_or_changed_files": [],
-  "artifact_content": {
-    "summary": "Track operation request recorded for runtime persistence.",
-    "decisions": [
-      "Track lifecycle change is persisted through PM state_effects.track."
-    ],
-    "risks": [],
-    "open_questions": [],
-    "suggested_next_step": "Continue with the next task using receipt.next_state.",
-    "specialized_sections": {
-      "track": {
-        "action": "advance",
-        "track_id": "track-onboarding-delivery",
-        "current_buddy": "pm",
-        "next_buddy": "dev",
-        "status": "active",
-        "summary": "Ready for implementation planning."
-      }
-    }
-  },
   "state_effects": {
     "track": {
       "action": "advance",
-      "track_id": "track-onboarding-delivery",
-      "current_buddy": "pm",
+      "track_id": "track-example",
       "next_buddy": "dev",
-      "status": "active",
-      "summary": "Ready for implementation planning."
+      "summary": "Why the track should move to Dev."
     }
+  },
+  "handoff": {
+    "next_buddy": "dev",
+    "reason": "Implementation should continue from the approved product scope.",
+    "context": "Include the relevant artifact or task context here."
   }
 }

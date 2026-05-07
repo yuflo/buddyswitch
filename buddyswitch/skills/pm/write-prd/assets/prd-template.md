@@ -1,40 +1,29 @@
 {
-  "execution_summary": "PM result summary for the requested PRD task.",
+  "execution_summary": "PRD summary for the requested product outcome.",
   "working_notes": [
-    "Describe key constraints and decisions made while drafting the PRD."
+    "Key assumption, evidence note, or scope decision."
   ],
-  "deliverables_or_changed_files": [
-    "runs/raw/prd-notes.md"
-  ],
-  "artifact_content": {
-    "summary": "One-paragraph PRD summary suitable for downstream selection.",
-    "decisions": [
-      "Decision with rationale"
-    ],
-    "risks": [
-      "Known risk"
-    ],
-    "open_questions": [
-      "Question needing follow-up"
-    ],
-    "suggested_next_step": "Recommend one concrete next handoff step.",
-    "specialized_sections": {
-      "prd": {
-        "problem": "Describe the user or business problem to solve.",
-        "user_value": "Describe concrete value users get if this ships.",
-        "requirements": [
-          "Requirement 1",
-          "Requirement 2"
-        ],
-        "scope": {
-          "in_scope": [
-            "In-scope item"
-          ],
-          "out_of_scope": [
-            "Out-of-scope item"
-          ]
-        }
+  "artifacts": [
+    {
+      "kind": "prd",
+      "title": "PRD: Requested Outcome",
+      "summary": "Selection-ready PRD summary for downstream design/dev/test.",
+      "content": {
+        "prd": {
+          "problem": "",
+          "user_value": "",
+          "requirements": [],
+          "acceptance_criteria": [],
+          "scope": {
+            "in_scope": [],
+            "out_of_scope": []
+          }
+        },
+        "decisions": [],
+        "risks": [],
+        "open_questions": [],
+        "suggested_next_step": ""
       }
     }
-  }
+  ]
 }

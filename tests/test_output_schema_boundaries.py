@@ -23,11 +23,24 @@ BUDDY_RESULT_SCHEMA_PATHS = {
     "design": ROOT / "framework" / "schemas" / "design" / "design-result.json",
 }
 
-COMMON_ENVELOPE_KEYS = {
+COMMON_REQUIRED_COMMIT_KEYS = {
     "execution_summary",
+}
+
+COMMON_OPTIONAL_COMMIT_KEYS = {
     "working_notes",
+    "artifacts",
+    "state_effects",
+    "handoff",
+    "contributors",
+    "tool_evidence",
+}
+
+RETIRED_AUTHORING_KEYS = {
     "deliverables_or_changed_files",
     "artifact_content",
+    "specialized_sections",
+    "track_operation",
 }
 
 RUNTIME_METADATA_FIELDS = {
@@ -45,52 +58,6 @@ RUNTIME_METADATA_FIELDS = {
     "writes",
 }
 
-BUDDY_ARTIFACT_REQUIRED_FIELDS = {
-    "pm": {
-        "summary",
-        "decisions",
-        "risks",
-        "open_questions",
-        "suggested_next_step",
-        "specialized_sections",
-    },
-    "dev": {
-        "task_summary",
-        "changed_files",
-        "implementation_notes",
-        "verification",
-        "risks",
-        "follow_ups",
-    },
-    "test": {
-        "test_scope",
-        "checks_run",
-        "passed_items",
-        "failed_items",
-        "blocked_items",
-        "reproduction_notes",
-        "readiness",
-    },
-    "market": {
-        "research_question",
-        "evidence",
-        "insights",
-        "assumptions",
-        "risks",
-        "conclusion",
-        "recommended_next_step",
-        "specialized_sections",
-    },
-    "design": {
-        "design_goal",
-        "flow_or_screen_summary",
-        "interaction_notes",
-        "assets_or_preview_refs",
-        "handoff_notes",
-        "open_questions",
-    },
-}
-
 
 class OutputSchemaBoundaryTests(unittest.TestCase):
     def _load_buddy_schema(self, buddy_id: str) -> dict[str, object]:
@@ -98,20 +65,18 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
         return output_schema.load_output_schema(path)
 
     def _sample_payload_for_buddy(self, buddy_id: str) -> dict[str, object]:
-        artifact_content_by_buddy: dict[str, dict[str, object]] = {
+        content_by_buddy: dict[str, dict[str, object]] = {
             "pm": {
                 "summary": "PRD summary",
                 "decisions": ["Ship guided flow first."],
                 "risks": ["Copy may still be unclear."],
                 "open_questions": ["Need localization in v1?"],
                 "suggested_next_step": "Hand off to design for flow draft.",
-                "specialized_sections": {
-                    "prd": {
-                        "problem": "Users cannot complete onboarding quickly.",
-                        "user_value": "Faster onboarding completion.",
-                        "requirements": ["Define scope", "Capture acceptance criteria"],
-                        "scope": {"in_scope": ["Onboarding copy"], "out_of_scope": ["Billing refactor"]},
-                    }
+                "prd": {
+                    "problem": "Users cannot complete onboarding quickly.",
+                    "user_value": "Faster onboarding completion.",
+                    "requirements": ["Define scope", "Capture acceptance criteria"],
+                    "scope": {"in_scope": ["Onboarding copy"], "out_of_scope": ["Billing refactor"]},
                 },
             },
             "dev": {
@@ -144,9 +109,7 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
                 "risks": ["Sample size still small."],
                 "conclusion": "Demand appears real but incomplete.",
                 "recommended_next_step": "Run 5 targeted interviews.",
-                "specialized_sections": {
-                    "pmf_recon": {"candidate_icps": ["B2B SaaS founders"]},
-                },
+                "source_traceability": [{"source_id": "src-1"}],
             },
             "design": {
                 "design_goal": "Clarify onboarding decisions.",
@@ -157,11 +120,24 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
                 "open_questions": ["Need accessibility review before handoff?"],
             },
         }
+        kind_by_buddy = {
+            "pm": "prd",
+            "dev": "implementation-report",
+            "test": "smoke-test",
+            "market": "market-scan",
+            "design": "design-handoff",
+        }
         return {
             "execution_summary": f"{buddy_id} result summary",
-            "working_notes": ["Focused on buddy-level schema contract."],
-            "deliverables_or_changed_files": ["runs/raw/result.json"],
-            "artifact_content": artifact_content_by_buddy[buddy_id],
+            "working_notes": ["Focused on buddy-run commit contract."],
+            "artifacts": [
+                {
+                    "kind": kind_by_buddy[buddy_id],
+                    "title": f"{buddy_id} artifact",
+                    "summary": f"{buddy_id} artifact summary",
+                    "content": content_by_buddy[buddy_id],
+                }
+            ],
         }
 
     def test_buddy_result_schema_boundary_is_exactly_five_buddies(self) -> None:
@@ -232,36 +208,28 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
 
         self.assertEqual(errors, [])
 
-    def test_buddy_result_schema_requires_common_envelope_and_blocks_runtime_metadata(self) -> None:
+    def test_buddy_result_schema_uses_compact_buddy_run_commit_boundary(self) -> None:
+        expected_properties = COMMON_REQUIRED_COMMIT_KEYS | COMMON_OPTIONAL_COMMIT_KEYS
         for buddy_id in BUDDY_RESULT_SCHEMA_PATHS:
             with self.subTest(buddy=buddy_id):
                 schema = self._load_buddy_schema(buddy_id)
-                required = schema.get("required")
-                self.assertEqual(set(required), COMMON_ENVELOPE_KEYS)
+                self.assertEqual(set(schema.get("required", [])), COMMON_REQUIRED_COMMIT_KEYS)
                 self.assertFalse(schema.get("additionalProperties"))
-
                 properties = schema.get("properties")
                 self.assertIsInstance(properties, dict)
                 assert isinstance(properties, dict)
-                self.assertTrue(COMMON_ENVELOPE_KEYS.issubset(set(properties)))
+                self.assertTrue(expected_properties.issubset(set(properties)))
+                for retired_key in RETIRED_AUTHORING_KEYS:
+                    self.assertNotIn(retired_key, properties)
                 for runtime_field in RUNTIME_METADATA_FIELDS:
                     self.assertNotIn(runtime_field, properties)
-                self.assertEqual(properties["artifact_content"].get("type"), "object")
 
-    def test_buddy_result_schema_requires_expected_artifact_content_fields(self) -> None:
-        for buddy_id, expected_fields in BUDDY_ARTIFACT_REQUIRED_FIELDS.items():
+    def test_buddy_result_schema_accepts_compact_artifact_commit_examples(self) -> None:
+        for buddy_id in BUDDY_RESULT_SCHEMA_PATHS:
             with self.subTest(buddy=buddy_id):
                 schema = self._load_buddy_schema(buddy_id)
-                properties = schema.get("properties")
-                self.assertIsInstance(properties, dict)
-                assert isinstance(properties, dict)
-                artifact_content = properties.get("artifact_content")
-                self.assertIsInstance(artifact_content, dict)
-                assert isinstance(artifact_content, dict)
-                required = artifact_content.get("required")
-                self.assertIsInstance(required, list)
-                assert isinstance(required, list)
-                self.assertEqual(set(required), expected_fields)
+                payload = self._sample_payload_for_buddy(buddy_id)
+                self.assertEqual(output_schema.validate_output_payload(payload, schema), [])
 
     def test_buddy_result_schema_rejects_runtime_metadata_top_level_fields(self) -> None:
         for buddy_id in BUDDY_RESULT_SCHEMA_PATHS:
@@ -272,62 +240,45 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
                 errors = output_schema.validate_output_payload(payload, schema)
                 self.assertIn("$: unsupported property 'task_id'", errors)
 
-    def test_market_result_schema_allows_specialized_sections_extension(self) -> None:
-        schema = self._load_buddy_schema("market")
-        payload = self._sample_payload_for_buddy("market")
-        payload["artifact_content"]["specialized_sections"] = {
-            "research_scan": {"channel_plan": ["founder communities"]},
-            "launch_prep": {"launch_window": "2026-Q3"},
-        }
-        self.assertEqual(output_schema.validate_output_payload(payload, schema), [])
-
-    def test_market_result_schema_accepts_examples_for_all_current_market_skills(self) -> None:
-        schema = self._load_buddy_schema("market")
-        base = self._sample_payload_for_buddy("market")
-        specialized_cases = {
-            "research-scan": {"research_scan": {"source_traceability": [{"source_id": "src-1"}]}},
-            "pmf-recon": {"pmf_recon": {"candidate_icps": ["SMB founders"]}},
-            "customer-discovery": {"customer_discovery": {"interview_targets": ["PM lead", "Founding engineer"]}},
-            "positioning-copy": {"positioning_copy": {"message_pillars": ["faster validation", "less guesswork"]}},
-            "channel-discovery": {"channel_discovery": {"channel_plan": ["Founder forums", "Slack groups"]}},
-            "launch-prep": {"launch_prep": {"launch_checklist": ["docs final", "pilot outreach"]}},
-        }
-        for skill_id, specialized_sections in specialized_cases.items():
-            with self.subTest(skill=skill_id):
-                payload = {
-                    "execution_summary": base["execution_summary"],
-                    "working_notes": list(base["working_notes"]),
-                    "deliverables_or_changed_files": list(base["deliverables_or_changed_files"]),
-                    "artifact_content": dict(base["artifact_content"]),
-                }
-                artifact_content = dict(payload["artifact_content"])
-                artifact_content["specialized_sections"] = specialized_sections
-                payload["artifact_content"] = artifact_content
-                self.assertEqual(output_schema.validate_output_payload(payload, schema), [])
-
-    def test_only_pm_schema_accepts_track_operation_state_effect(self) -> None:
-        pm_schema = self._load_buddy_schema("pm")
-        pm_payload = self._sample_payload_for_buddy("pm")
-        pm_payload["state_effects"] = {
-            "track_operation": {
+    def test_pm_schema_accepts_track_state_effect_and_rejects_track_operation(self) -> None:
+        schema = self._load_buddy_schema("pm")
+        payload = self._sample_payload_for_buddy("pm")
+        payload["state_effects"] = {
+            "track": {
                 "action": "advance",
                 "track_id": "track-onboarding",
                 "next_buddy": "dev",
             }
         }
-        self.assertEqual(output_schema.validate_output_payload(pm_payload, pm_schema), [])
+        self.assertEqual(output_schema.validate_output_payload(payload, schema), [])
 
+        retired_payload = self._sample_payload_for_buddy("pm")
+        retired_payload["state_effects"] = {
+            "track_operation": {
+                "action": "advance",
+                "track_id": "track-onboarding",
+            }
+        }
+        errors = output_schema.validate_output_payload(retired_payload, schema)
+        self.assertIn("$.state_effects: unsupported property 'track_operation'", errors)
+
+    def test_non_pm_schemas_reject_track_state_effects_but_allow_task_effects(self) -> None:
         for buddy_id in ("dev", "test", "market", "design"):
             with self.subTest(buddy=buddy_id):
                 schema = self._load_buddy_schema(buddy_id)
                 payload = self._sample_payload_for_buddy(buddy_id)
+                payload["state_effects"] = {"task": {"status": "active", "summary": "Still in progress."}}
+                self.assertEqual(output_schema.validate_output_payload(payload, schema), [])
+
+                payload = self._sample_payload_for_buddy(buddy_id)
                 payload["state_effects"] = {
-                    "track_operation": {
+                    "track": {
                         "action": "advance",
+                        "track_id": "track-onboarding",
                     }
                 }
                 errors = output_schema.validate_output_payload(payload, schema)
-                self.assertIn("$: unsupported property 'state_effects'", errors)
+                self.assertIn("$.state_effects: unsupported property 'track'", errors)
 
 
 if __name__ == "__main__":

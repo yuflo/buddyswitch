@@ -25,12 +25,12 @@ description: Use when the task is managing track lifecycle operations such as cr
 
 ## Steps
 1. Identify the target lifecycle action (`create|update|advance|archive`).
-2. Populate `artifact_content.specialized_sections.track` with the requested change.
-3. Mirror the same payload in `state_effects.track` for runtime application.
+2. Populate `state_effects.track` with the requested change.
+3. Add optional artifact content only when a durable PM note is needed.
 4. Keep mutation intent explicit; do not rely on implied track changes.
 
 ## Verification
-- Confirm output includes PM envelope keys plus required `artifact_content` keys.
+- Confirm output includes `execution_summary` and a valid `state_effects.track` payload.
 - Confirm `state_effects.track.action` is valid.
 - Confirm non-create actions reference an existing `track_id`.
 
@@ -39,6 +39,19 @@ description: Use when the task is managing track lifecycle operations such as cr
 - This native skill contributes content to the current buddy run.
 - Do not call persist from the skill perspective.
 - The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
+
+## BuddySwitch Commit Output
+
+Contribute to one buddy-run commit. Do not call persist from inside the skill.
+
+Required top-level field:
+- `execution_summary`
+
+Use `state_effects.track`, not an artifact-only placeholder, when the requested outcome is a track lifecycle change.
+
+Use optional `artifacts` only when a durable PM note (`track-note` or `pm-decision`) is needed.
+Use optional `working_notes` for concise reasoning or verification notes.
+Use optional `handoff` when another manifest buddy should continue.
 
 ## Example
 - `create onboarding-rewrite track for MVP handoff`

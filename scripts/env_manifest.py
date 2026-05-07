@@ -25,7 +25,6 @@ DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 _SAFE_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 ADVISORY_RUNTIME_METADATA_POLICY = "advisory"
 DEBUG_API_PERMISSION_SCOPE = "manual_debug_apis"
-# Retained for compatibility with older turn-runtime imports.
 BROWSER_COCKPIT_HOST_EXECUTION = {
     "execution_mode": "browser-cockpit-native",
     "browser_mode": "headed-only",

@@ -20,8 +20,6 @@ except ModuleNotFoundError:  # pragma: no cover - Windows fallback
 import env_store
 from env_manifest import DEFAULT_MANIFEST, load_manifest
 
-from .repositories import list_artifacts, list_tasks, list_tracks
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LOCK_WAIT_POLL_SECONDS = 0.05
@@ -340,11 +338,11 @@ def scan_run_audits() -> list[dict[str, Any]]:
 
 def build_workspace_projection() -> dict[str, Any]:
     manifest = load_manifest(DEFAULT_MANIFEST)
-    artifacts = [build_artifact_view(artifact) for artifact in list_artifacts()]
+    artifacts = [build_artifact_view(artifact) for artifact in env_store.list_artifacts()]
     artifact_map = {artifact["id"]: artifact for artifact in artifacts}
-    tasks = [build_task_view(task, artifact_map) for task in list_tasks()]
+    tasks = [build_task_view(task, artifact_map) for task in env_store.list_tasks()]
     task_map = {task["id"]: task for task in tasks}
-    tracks = build_track_views(list_tracks(), task_map, artifact_map)
+    tracks = build_track_views(env_store.list_tracks(), task_map, artifact_map)
     tracked_task_ids = {
         task_id
         for track in tracks

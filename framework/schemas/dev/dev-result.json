@@ -1,10 +1,7 @@
 {
   "type": "object",
   "required": [
-    "execution_summary",
-    "working_notes",
-    "deliverables_or_changed_files",
-    "artifact_content"
+    "execution_summary"
   ],
   "properties": {
     "execution_summary": {"type": "string"},
@@ -12,61 +9,70 @@
       "type": "array",
       "items": {"type": "string"}
     },
-    "deliverables_or_changed_files": {
+    "artifacts": {
       "type": "array",
-      "items": {"type": "string"}
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "title",
+          "content"
+        ],
+        "properties": {
+          "kind": {"type": "string"},
+          "title": {"type": "string"},
+          "summary": {"type": "string"},
+          "content": {"type": "object"}
+        },
+        "additionalProperties": false
+      }
     },
-    "artifact_content": {
+    "state_effects": {
       "type": "object",
-      "required": [
-        "task_summary",
-        "changed_files",
-        "implementation_notes",
-        "verification",
-        "risks",
-        "follow_ups"
-      ],
       "properties": {
-        "task_summary": {"type": "string"},
-        "changed_files": {
-          "type": "array",
-          "items": {"type": "string"}
-        },
-        "implementation_notes": {
-          "type": "array",
-          "items": {"type": "string"}
-        },
-        "verification": {
+        "task": {
           "type": "object",
-          "required": ["checks_run", "passed", "failed", "blocked"],
           "properties": {
-            "checks_run": {
-              "type": "array",
-              "items": {"type": "string"}
+            "status": {
+              "type": "string",
+              "enum": ["active", "blocked", "done", "archived"]
             },
-            "passed": {
-              "type": "array",
-              "items": {"type": "string"}
-            },
-            "failed": {
-              "type": "array",
-              "items": {"type": "string"}
-            },
-            "blocked": {
-              "type": "array",
-              "items": {"type": "string"}
-            }
+            "summary": {"type": "string"}
           },
           "additionalProperties": false
-        },
-        "risks": {
+        }
+      },
+      "additionalProperties": false
+    },
+    "handoff": {
+      "type": "object",
+      "required": ["next_buddy", "reason", "context"],
+      "properties": {
+        "next_buddy": {"type": "string"},
+        "reason": {"type": "string"},
+        "context": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "contributors": {
+      "type": "object",
+      "properties": {
+        "skills": {
           "type": "array",
           "items": {"type": "string"}
         },
-        "follow_ups": {
+        "agents": {
           "type": "array",
           "items": {"type": "string"}
         }
+      },
+      "additionalProperties": false
+    },
+    "tool_evidence": {
+      "type": "object",
+      "properties": {
+        "browser_cockpit_token": {"type": "string"},
+        "approved_downgrade_token": {"type": "string"}
       },
       "additionalProperties": false
     }

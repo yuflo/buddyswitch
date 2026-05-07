@@ -29,12 +29,12 @@ description: Use when the task is drafting a PRD, defining MVP scope, or turning
 ## Steps
 1. Define the PRD summary and key decisions.
 2. Capture risks, open questions, and one concrete suggested next step.
-3. Put PRD-specific detail under `artifact_content.specialized_sections.prd` (problem, user_value, requirements, scope).
+3. Put PRD-specific detail under `artifacts[].content.prd` (problem, user_value, requirements, scope).
 4. If an explicit PM track lifecycle mutation is required, include `state_effects.track` explicitly.
 
 ## Verification
 - Keep the result product-definition centered.
-- Keep PRD detail in `specialized_sections.prd`, not top-level PM fields.
+- Keep PRD detail in `artifacts[].content.prd`, not top-level PM fields.
 - Use `state_effects.track` only for explicit PM lifecycle intent.
 
 ## Shared Runtime Rules
@@ -43,20 +43,23 @@ description: Use when the task is drafting a PRD, defining MVP scope, or turning
 - Do not call persist from the skill perspective.
 - The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
 
-## Required Output Fields
-Top-level envelope keys:
-- `execution_summary`
-- `working_notes`
-- `deliverables_or_changed_files`
-- `artifact_content`
+## BuddySwitch Commit Output
 
-Required fields in `artifact_content`:
-- `summary`
-- `decisions`
-- `risks`
-- `open_questions`
-- `suggested_next_step`
-- `specialized_sections`
+Contribute to one buddy-run commit. Do not call persist from inside the skill.
+
+Required top-level field:
+- `execution_summary`
+
+Use `artifacts` when this skill produces a durable artifact:
+- `kind`: `prd`
+- `title`: concise artifact title
+- `summary`: short downstream selection summary
+- `content`: include `prd`, `decisions`, `risks`, `open_questions`, and `suggested_next_step`
+
+Use optional `working_notes` for concise reasoning or verification notes.
+Use optional `state_effects.task` only for the current prepared task.
+Use optional `state_effects.track` for PM lifecycle actions (`create|update|advance|archive`).
+Use optional `handoff` when another manifest buddy should continue.
 
 ## Examples
 - `Draft the MVP PRD for onboarding rewrite track`

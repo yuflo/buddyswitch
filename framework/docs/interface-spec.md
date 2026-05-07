@@ -44,7 +44,6 @@ These browser entrypoints must not reference runtime internals.
 Runtime internals that must not be referenced from UI surfaces include:
 
 - `env_store`
-- `runtime_store.repositories`
 - `runtime_store.projections`
 - `turn_runtime`
 - `workspace_data`
