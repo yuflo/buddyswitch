@@ -37,9 +37,9 @@ description: Use when the task is building broad market reality, category struct
 - Optional track context or summary hint.
 
 ## Outputs
-- A research artifact object with evidence, source traceability, patterns, caveats, and conclusion.
-- A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
-- Explicit notes when login, paywall, or anti-bot constraints degrade evidence quality.
+- A contribution to the current compact buddy-run commit.
+- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
+- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
 
 ## Research Defaults
 

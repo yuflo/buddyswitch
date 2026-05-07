@@ -15,7 +15,8 @@ buddyswitch_browser_default_profile_dir() {
     printf '%s/browser/profile\n' "${instance_root}"
     return 0
   fi
-  printf '%s/chrome/shared-browser\n' "${BUDDYSWITCH_SHARED_ROOT}"
+  echo "Browser profile default requires an instance-scoped root." >&2
+  return 2
 }
 
 buddyswitch_browser_default_log_file() {
@@ -24,7 +25,8 @@ buddyswitch_browser_default_log_file() {
     printf '%s/browser/chrome.log\n' "${instance_root}"
     return 0
   fi
-  printf '%s/log/chrome-cockpit.log\n' "${BUDDYSWITCH_SHARED_ROOT}"
+  echo "Browser log default requires an instance-scoped root." >&2
+  return 2
 }
 
 buddyswitch_browser_is_instance_mode() {
@@ -47,21 +49,20 @@ buddyswitch_browser_init_defaults() {
     export BUDDYSWITCH_BROWSER_DEFAULTS_INITIALIZED=1
   fi
 
-  default_profile_dir="$(buddyswitch_browser_default_profile_dir)"
-  default_log_file="$(buddyswitch_browser_default_log_file)"
-
   export BUDDYSWITCH_BROWSER_PORT="${BUDDYSWITCH_BROWSER_PORT:-9222}"
   export BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME="${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME:-chrome-devtools-cockpit}"
 
   if [[ "${BUDDYSWITCH_BROWSER_PROFILE_DIR_EXPLICIT:-0}" == "1" ]]; then
     export BUDDYSWITCH_BROWSER_PROFILE_DIR
   else
+    default_profile_dir="$(buddyswitch_browser_default_profile_dir)"
     export BUDDYSWITCH_BROWSER_PROFILE_DIR="${default_profile_dir}"
   fi
 
   if [[ "${BUDDYSWITCH_BROWSER_LOG_FILE_EXPLICIT:-0}" == "1" ]]; then
     export BUDDYSWITCH_BROWSER_LOG_FILE
   else
+    default_log_file="$(buddyswitch_browser_default_log_file)"
     export BUDDYSWITCH_BROWSER_LOG_FILE="${default_log_file}"
   fi
 }
@@ -79,10 +80,10 @@ Commands:
   help    Show this help message.
 
 Environment:
-  BUDDYSWITCH_BROWSER_PORT              Remote debugging port (default: ${BUDDYSWITCH_BROWSER_PORT})
-  BUDDYSWITCH_BROWSER_PROFILE_DIR       Shared Chrome profile dir (default: ${BUDDYSWITCH_BROWSER_PROFILE_DIR})
-  BUDDYSWITCH_BROWSER_LOG_FILE          Chrome log file (default: ${BUDDYSWITCH_BROWSER_LOG_FILE})
-  BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME  MCP server name (default: ${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME})
+  BUDDYSWITCH_BROWSER_PORT              Remote debugging port (default: ${BUDDYSWITCH_BROWSER_PORT:-9222})
+  BUDDYSWITCH_BROWSER_PROFILE_DIR       Chrome profile dir (default: ${BUDDYSWITCH_BROWSER_PROFILE_DIR:-<instance>/browser/profile})
+  BUDDYSWITCH_BROWSER_LOG_FILE          Chrome log file (default: ${BUDDYSWITCH_BROWSER_LOG_FILE:-<instance>/browser/chrome.log})
+  BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME  MCP server name (default: ${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME:-chrome-devtools-cockpit})
   BUDDYSWITCH_BROWSER_CHROME_BIN        Override Chrome binary path.
 EOF
 }
@@ -234,14 +235,6 @@ buddyswitch_browser_mcp_browser_url() {
       }
     }
   ' "${config_path}"
-}
-
-buddyswitch_browser_ensure_general_mcp() {
-  if buddyswitch_browser_has_mcp_server "chrome-devtools"; then
-    return 0
-  fi
-
-  buddyswitch_browser_add_mcp_server chrome-devtools npx chrome-devtools-mcp@latest
 }
 
 buddyswitch_browser_ensure_cockpit_mcp() {
@@ -485,9 +478,6 @@ buddyswitch_browser_bootstrap() {
   local strict_mode active_buddy capability require_browser
   buddyswitch_browser_init_defaults
   buddyswitch_ensure_shared_env
-  if ! buddyswitch_browser_is_instance_mode; then
-    buddyswitch_browser_ensure_general_mcp
-  fi
   strict_mode="${BUDDYSWITCH_BROWSER_ENSURE_STRICT:-0}"
   require_browser=1
   if [[ "${strict_mode}" != "1" ]] && buddyswitch_browser_is_instance_mode; then
@@ -515,7 +505,6 @@ buddyswitch_browser_bootstrap() {
 buddyswitch_browser_main() {
   local command arg
 
-  buddyswitch_browser_init_defaults
   command="${1:-status}"
   if [[ $# -gt 0 ]]; then
     shift
@@ -553,9 +542,10 @@ buddyswitch_browser_main() {
         echo "Unknown browser option: ${arg}" >&2
         buddyswitch_browser_usage >&2
         return 2
-        ;;
+      ;;
     esac
   done
+  buddyswitch_browser_init_defaults
 
   case "${command}" in
     status)

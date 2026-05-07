@@ -764,12 +764,7 @@ def build_cleanup_plan(
 ) -> dict[str, Any]:
     manifest_path = manifest_path or default_manifest_path(repo_root)
     valid_buddies = load_valid_buddies(manifest_path)
-    internal_scope = scope
-    if scope == "buddy":
-        internal_scope = "agent"
-    elif scope == "all-data":
-        internal_scope = "all-storage"
-    if internal_scope == "agent" and (buddy is None or buddy not in valid_buddies):
+    if scope == "buddy" and (buddy is None or buddy not in valid_buddies):
         raise ValueError(f"Invalid buddy '{buddy}'. Check buddyswitch/manifest.toml")
 
     plan = new_plan(scope, buddy=buddy)
@@ -781,7 +776,7 @@ def build_cleanup_plan(
     task_objects, invalid_task_objects = discover_task_objects(repo_root)
     run_content, invalid_run_content = discover_run_content(repo_root)
 
-    if internal_scope == "agent":
+    if scope == "buddy":
         add_dir_files(plan, f"runs/raw/{buddy}", "run_raw")
         for record in artifact_objects:
             if record["producer_buddy"] == buddy:
@@ -808,28 +803,7 @@ def build_cleanup_plan(
                 f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
             )
 
-    elif internal_scope == "all-agents":
-        add_dir_files(plan, "runs/raw", "run_raw")
-        add_dir_files(plan, "buddyswitch/objects/tracks", "track_objects")
-        for record in artifact_objects:
-            add_indexed_artifact(plan, record)
-        for record in task_objects:
-            add_indexed_task(plan, record)
-        for record in run_content:
-            add_run_content(plan, record)
-        for item in invalid_artifact_objects:
-            add_warning(plan, f"Deleting malformed artifact object during all-agents cleanup: {item['path']} ({item['reason']}).")
-            add_path(plan, repo_root / item["path"], "artifact_objects")
-            plan["direct_delete_paths"].append(item["path"])
-        for item in invalid_run_content:
-            add_warning(plan, f"Deleting malformed run content during all-agents cleanup: {item['path']} ({item['reason']}).")
-            add_run_content(plan, {"path": item["path"], "run_id": item["run_id"], "buddy": None})
-        for item in invalid_task_objects:
-            add_warning(plan, f"Deleting malformed task object during all-agents cleanup: {item['path']} ({item['reason']}).")
-            add_path(plan, repo_root / item["path"], "task_objects")
-            plan["direct_delete_paths"].append(item["path"])
-
-    elif internal_scope == "all-storage":
+    elif scope == "all-data":
         add_dir_files(plan, "runs/raw", "run_raw")
         add_dir_files(plan, "buddyswitch/objects/tracks", "track_objects")
         add_dir_files(plan, "buddyswitch/objects/tasks", "task_objects")
@@ -851,16 +825,16 @@ def build_cleanup_plan(
             if item["run_id"] not in plan["run_ids"]:
                 plan["run_ids"].append(item["run_id"])
         for item in invalid_artifact_objects:
-            add_warning(plan, f"All-storage cleanup will delete malformed artifact object: {item['path']} ({item['reason']}).")
+            add_warning(plan, f"All-data cleanup will delete malformed artifact object: {item['path']} ({item['reason']}).")
         for item in invalid_task_objects:
-            add_warning(plan, f"All-storage cleanup will delete malformed task object: {item['path']} ({item['reason']}).")
+            add_warning(plan, f"All-data cleanup will delete malformed task object: {item['path']} ({item['reason']}).")
         for item in invalid_run_content:
-            add_warning(plan, f"All-storage cleanup will delete malformed run content: {item['path']} ({item['reason']}).")
+            add_warning(plan, f"All-data cleanup will delete malformed run content: {item['path']} ({item['reason']}).")
     else:
         raise ValueError(f"Unsupported cleanup scope: {scope}")
 
     if shared_root is not None:
-        if internal_scope == "agent":
+        if scope == "buddy":
             for workspace in discover_instance_workspaces(plan, shared_root=shared_root, buddy_filter=buddy):
                 add_instance_workspace_dir_files(
                     plan,
@@ -869,7 +843,7 @@ def build_cleanup_plan(
                     relative_dir=f"runs/raw/{buddy}",
                     category="run_raw",
                 )
-        elif internal_scope == "all-storage":
+        elif scope == "all-data":
             for workspace in discover_instance_workspaces(plan, shared_root=shared_root, buddy_filter=None):
                 add_instance_workspace_dir_files(
                     plan,
@@ -899,7 +873,7 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(warnings, list):
         warnings = None
 
-    if plan["scope"] in {"agent", "buddy"}:
+    if plan["scope"] == "buddy":
         for record in plan["artifact_records"]:
             detach_artifact_from_task(root, record.get("task_id"), record["id"], warnings=warnings)
         for record in plan["task_records"]:
@@ -948,9 +922,9 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
 
 
 def print_text_plan(plan: dict[str, Any]) -> None:
-    if plan["scope"] in {"agent", "buddy"}:
+    if plan["scope"] == "buddy":
         target = f"--buddy {plan['buddy']}"
-    elif plan["scope"] in {"all-agents", "all-data"}:
+    elif plan["scope"] == "all-data":
         target = "--all-data"
     else:
         target = "--all-data"

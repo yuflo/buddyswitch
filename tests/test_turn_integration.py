@@ -72,7 +72,7 @@ MARKET_COMMIT = {
     "working_notes": ["The request referenced the existing PM-created track."],
     "artifacts": [
         {
-            "kind": "market-landing-page-brief",
+            "kind": "market-scan",
             "title": "AI Schedule Tool Landing Page Market Brief",
             "summary": "Summarizes competitor messaging patterns and recommended landing page expression.",
             "content": {
@@ -351,7 +351,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             if artifact.get("is_current")
         }
         self.assertIn("prd", kinds)
-        self.assertIn("market-landing-page-brief", kinds)
+        self.assertIn("market-scan", kinds)
 
         pm_run = json.loads(
             self._runtime_path(f"buddyswitch/content/runs/{pm_receipt['run_id']}.json").read_text(encoding="utf-8")
@@ -393,7 +393,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             for artifact in row.get("current_artifacts", {}).values()
         }
         self.assertIn("prd", source_kinds)
-        self.assertIn("market-landing-page-brief", source_kinds)
+        self.assertIn("market-scan", source_kinds)
 
         for row in tasks:
             for artifact in row.get("current_artifacts", {}).values():
@@ -531,7 +531,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             if artifact.get("is_current")
         }
         self.assertEqual(
-            {"prd", "market-landing-page-brief", "design-handoff", "implementation-report", "test-report"},
+            {"prd", "market-scan", "design-handoff", "implementation-report", "test-report"},
             kinds,
         )
 

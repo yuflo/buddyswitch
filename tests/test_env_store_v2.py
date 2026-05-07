@@ -185,7 +185,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(stored_second_json["supersedes_artifact_id"], stored_first["id"])
         self.assertNotIn("latest_artifact_id", stored_task_json)
 
-    def test_create_artifact_rejects_auto_register_false(self) -> None:
+    def test_create_artifact_always_registers_new_revision(self) -> None:
         task = create_task(
             "task-pm-v2-revision",
             "V2 Revision Task",
@@ -204,24 +204,24 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             content={"task_summary": "Initial PRD"},
         )
 
-        with self.assertRaisesRegex(ValueError, "auto_register=False is not supported"):
-            create_artifact(
-                artifact_id="art-task-pm-v2-revision-prd-r2",
-                title="PRD revision 2",
-                buddy="pm",
+        second = create_artifact(
+            artifact_id="art-task-pm-v2-revision-prd-r2",
+            title="PRD revision 2",
+            buddy="pm",
             kind="prd",
-                task_id=task["id"],
-                source_run_id="run-seed-v2-revision-2",
-                summary="Revised PRD",
-                content={"task_summary": "Revised PRD"},
-                auto_register=False,
-            )
+            task_id=task["id"],
+            source_run_id="run-seed-v2-revision-2",
+            summary="Revised PRD",
+            content={"task_summary": "Revised PRD"},
+        )
 
         stored_initial = get_artifact(initial["id"])
+        stored_second = get_artifact(second["id"])
         stored_task = get_task(task["id"])
-        self.assertTrue(stored_initial["is_current"])
-        self.assertEqual(stored_task["artifact_slots"]["prd"]["current_artifact_id"], initial["id"])
-        self.assertEqual(stored_task["artifact_slots"]["prd"]["revision_count"], 1)
+        self.assertFalse(stored_initial["is_current"])
+        self.assertTrue(stored_second["is_current"])
+        self.assertEqual(stored_task["artifact_slots"]["prd"]["current_artifact_id"], second["id"])
+        self.assertEqual(stored_task["artifact_slots"]["prd"]["revision_count"], 2)
 
     def test_updating_non_current_revision_keeps_slot_head_and_revision_count(self) -> None:
         task = create_task(

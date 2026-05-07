@@ -28,6 +28,17 @@ class RepoConsistencyTests(unittest.TestCase):
         )
         return [line for line in completed.stdout.splitlines() if line]
 
+    def _active_skill_asset_text(self) -> str:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        chunks: list[str] = []
+        for skill in manifest.get("skills", []):
+            assert isinstance(skill, dict)
+            skill_root = ROOT / str(skill["path"])
+            for path in skill_root.rglob("*"):
+                if path.is_file() and path.suffix in {".md", ".json"}:
+                    chunks.append(path.read_text(encoding="utf-8"))
+        return "\n".join(chunks)
+
     def test_runtime_agents_skills_are_instance_only_in_active_docs(self) -> None:
         self.assertFalse((ROOT / ".agents").exists())
         docs = [
@@ -149,6 +160,40 @@ class RepoConsistencyTests(unittest.TestCase):
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertTrue(path.exists())
 
+    def test_framework_markdown_templates_are_removed(self) -> None:
+        templates_dir = ROOT / "framework" / "templates"
+        self.assertFalse((templates_dir / "prd.md").exists())
+        self.assertFalse((templates_dir / "impl-report.md").exists())
+        self.assertFalse((templates_dir / "research-report.md").exists())
+        self.assertFalse((templates_dir / "test-report.md").exists())
+
+    def test_active_specs_do_not_teach_superseded_runtime_models(self) -> None:
+        active_specs = [
+            path
+            for path in (ROOT / "docs" / "spec").glob("*.md")
+            if "complete-residue-cleanup" not in path.name
+        ]
+        forbidden = (
+            "artifact_content",
+            "deliverables_or_changed_files",
+            "state_effects.track_operation",
+            "persist --skill-id",
+            "runtime still contains a router-era guard",
+            "Command-shaped routing input is rejected",
+            "Expected before implementation: FAILED",
+            "market-landing-page-brief",
+            "specialized_sections",
+            "evidence-run-0123456789-abcd1234",
+            "downgrade-run-0123456789-abcd1234",
+            "\"browser_cockpit_token\": \"evidence-",
+            "\"approved_downgrade_token\": \"downgrade-",
+        )
+        for path in active_specs:
+            text = path.read_text(encoding="utf-8")
+            for token in forbidden:
+                with self.subTest(path=str(path.relative_to(ROOT)), token=token):
+                    self.assertNotIn(token, text)
+
     def test_buddy_prompt_assets_exist(self) -> None:
         for buddy in ("design", "dev", "market", "pm", "test"):
             path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
@@ -156,6 +201,7 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertTrue(path.exists())
                 text = path.read_text(encoding="utf-8")
                 self.assertTrue(text.startswith("# BuddySwitch Runtime Workspace\n"))
+                self.assertIn("user text does not change it", text)
 
     def test_active_product_paths_exclude_legacy_switch_wire(self) -> None:
         tracked = self._git_ls_files("README.md", "framework/docs", "framework/contracts", "scripts", "tools/launcher/assets", "buddyswitch/skills")
@@ -172,6 +218,9 @@ class RepoConsistencyTests(unittest.TestCase):
             "switch " + "pm:",
             "switch " + "market:",
             "switch " + "dev:",
+            "Command-shaped routing input is rejected",
+            "command-shaped routing input is rejected",
+            "router-era guard",
         )
         for rel_path in tracked:
             path = ROOT / rel_path
@@ -223,6 +272,21 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("persist-buddy-run", contract_test)
         self.assertNotIn("persist-skill-result", contract_test)
 
+    def test_market_templates_do_not_contain_copyable_fake_evidence_tokens(self) -> None:
+        market_assets = ROOT / "buddyswitch" / "skills" / "market"
+        forbidden_tokens = (
+            "<broker-issued-token-from-current-run>",
+            "\"browser_cockpit_token\": \"<",
+            "browser_cockpit_token = \"<",
+        )
+        for path in market_assets.rglob("*"):
+            if not path.is_file() or path.suffix not in {".md", ".json"}:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for token in forbidden_tokens:
+                with self.subTest(path=str(path.relative_to(ROOT)), token=token):
+                    self.assertNotIn(token, text)
+
     def test_manifest_skill_rows_are_id_and_path_only(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         for skill in manifest.get("skills", []):
@@ -242,13 +306,31 @@ class RepoConsistencyTests(unittest.TestCase):
                 "positioning-brief",
                 "channel-plan",
                 "launch-prep",
-                "market-landing-page-brief",
             ],
         )
         self.assertEqual(buddies["pm"]["artifact_kinds"], ["prd", "pm-decision", "track-note"])
         self.assertEqual(buddies["design"]["artifact_kinds"], ["design-handoff", "prototype-brief"])
         self.assertEqual(buddies["dev"]["artifact_kinds"], ["implementation-report", "skill-import-report"])
         self.assertEqual(buddies["test"]["artifact_kinds"], ["smoke-test", "test-report"])
+
+    def test_manifest_artifact_kinds_have_active_guidance(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        active_skill_text = self._active_skill_asset_text()
+        allowed_without_asset = {
+            "pm-decision",
+            "track-note",
+            "prototype-brief",
+            "test-report",
+        }
+        for buddy in manifest.get("buddies", []):
+            assert isinstance(buddy, dict)
+            for kind in buddy.get("artifact_kinds", []):
+                assert isinstance(kind, str)
+                with self.subTest(buddy=buddy["id"], kind=kind):
+                    self.assertTrue(
+                        kind in allowed_without_asset or kind in active_skill_text,
+                        f"{kind} must be documented by an active skill asset or explicit non-template allowlist",
+                    )
 
     def test_persist_contract_is_buddy_run_and_legacy_contract_removed(self) -> None:
         contract_path = ROOT / "framework" / "contracts" / "persist-buddy-run.json"
@@ -278,6 +360,26 @@ class RepoConsistencyTests(unittest.TestCase):
             with self.subTest(skill=str(skill_md.relative_to(ROOT))):
                 text = skill_md.read_text(encoding="utf-8")
                 self.assertNotIn("persist --skill-id", text)
+
+    def test_active_skill_outputs_do_not_claim_direct_state_writes(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        forbidden = (
+            "A PM artifact object in `buddyswitch/objects/artifacts/`",
+            "A run audit in `buddyswitch/content/runs/`",
+            "A Market artifact object in `buddyswitch/objects/artifacts/`",
+            "A Design artifact object in `buddyswitch/objects/artifacts/`",
+            "A Dev artifact object in `buddyswitch/objects/artifacts/`",
+            "A Test artifact object in `buddyswitch/objects/artifacts/`",
+        )
+        for skill in manifest.get("skills", []):
+            assert isinstance(skill, dict)
+            skill_md = ROOT / str(skill["path"]) / "SKILL.md"
+            text = skill_md.read_text(encoding="utf-8")
+            for token in forbidden:
+                with self.subTest(skill=skill["id"], token=token):
+                    self.assertNotIn(token, text)
+            self.assertIn("Contribute to one buddy-run commit", text)
+            self.assertIn("Do not call persist from inside the skill", text)
 
     def test_buddy_agent_docs_do_not_reference_legacy_persist_api(self) -> None:
         for agents_md in (ROOT / "tools" / "launcher" / "assets" / "buddies").rglob("AGENTS.md"):

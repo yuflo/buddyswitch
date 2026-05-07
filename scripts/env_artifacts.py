@@ -84,7 +84,6 @@ def cmd_create(args: argparse.Namespace) -> int:
         source_run_id=args.source_run_id,
         summary=args.summary or "",
         content=content,
-        auto_register=not args.no_auto_register,
     )
     print(json.dumps(artifact, ensure_ascii=True, indent=2))
     return 0
@@ -108,7 +107,7 @@ def cmd_update(args: argparse.Namespace) -> int:
         patch["content"] = content
     if not patch:
         raise ValueError("update requires at least one field")
-    artifact = update_artifact(args.artifact_id, patch, auto_register=not args.no_auto_register)
+    artifact = update_artifact(args.artifact_id, patch)
     print(json.dumps(artifact, ensure_ascii=True, indent=2))
     return 0
 
@@ -116,19 +115,19 @@ def cmd_update(args: argparse.Namespace) -> int:
 def cmd_delete(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
     require_permission(manifest, args.actor, "artifact.delete")
-    artifact = delete_artifact(args.artifact_id, delete_file=args.delete_file)
+    artifact = delete_artifact(args.artifact_id)
     print(json.dumps(artifact, ensure_ascii=True, indent=2))
     return 0
 
 
 def cmd_cleanup_buddy(args: argparse.Namespace) -> int:
-    targets = delete_artifacts_by_buddy(args.buddy, delete_files=args.delete_files, dry_run=args.dry_run)
+    targets = delete_artifacts_by_buddy(args.buddy, dry_run=args.dry_run)
     print(json.dumps({"count": len(targets), "artifacts": targets}, ensure_ascii=True, indent=2))
     return 0
 
 
 def cmd_cleanup_all(args: argparse.Namespace) -> int:
-    targets = delete_all_artifacts(delete_files=args.delete_files, dry_run=args.dry_run)
+    targets = delete_all_artifacts(dry_run=args.dry_run)
     print(json.dumps({"count": len(targets), "artifacts": targets}, ensure_ascii=True, indent=2))
     return 0
 
@@ -164,7 +163,6 @@ def build_parser() -> argparse.ArgumentParser:
     cmd.add_argument("--summary")
     cmd.add_argument("--content-json", help="Structured artifact content as a JSON object")
     cmd.add_argument("--content-file", help="Path to a JSON object file for structured artifact content")
-    cmd.add_argument("--no-auto-register", action="store_true")
     cmd.add_argument("--actor", default="pm")
     cmd.set_defaults(func=cmd_create)
 
@@ -178,24 +176,20 @@ def build_parser() -> argparse.ArgumentParser:
     cmd.add_argument("--summary")
     cmd.add_argument("--content-json", help="Structured artifact content as a JSON object")
     cmd.add_argument("--content-file", help="Path to a JSON object file for structured artifact content")
-    cmd.add_argument("--no-auto-register", dest="no_auto_register", action="store_true")
     cmd.add_argument("--actor", default="pm")
     cmd.set_defaults(func=cmd_update)
 
     cmd = subparsers.add_parser("delete")
     cmd.add_argument("artifact_id")
-    cmd.add_argument("--delete-file", action="store_true")
     cmd.add_argument("--actor", default="pm")
     cmd.set_defaults(func=cmd_delete)
 
     cmd = subparsers.add_parser("cleanup-buddy", help="Admin cleanup for artifacts produced by one buddy")
     cmd.add_argument("--buddy", required=True)
-    cmd.add_argument("--delete-files", action="store_true")
     cmd.add_argument("--dry-run", action="store_true")
     cmd.set_defaults(func=cmd_cleanup_buddy)
 
     cmd = subparsers.add_parser("cleanup-all", help="Admin cleanup for all artifact objects")
-    cmd.add_argument("--delete-files", action="store_true")
     cmd.add_argument("--dry-run", action="store_true")
     cmd.set_defaults(func=cmd_cleanup_all)
     return parser

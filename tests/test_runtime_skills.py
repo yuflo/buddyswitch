@@ -29,7 +29,7 @@ import skill_creator_importer  # noqa: E402
 class RuntimeSkillsInstallerTests(unittest.TestCase):
     _DEFAULT_ARTIFACT_KINDS = {
         "pm": ["prd", "pm-decision", "track-note"],
-        "market": ["market-scan", "market-landing-page-brief"],
+        "market": ["market-scan", "pmf-report"],
         "design": ["design-handoff", "prototype-brief"],
         "dev": ["implementation-report", "skill-import-report"],
         "test": ["smoke-test", "test-report"],

@@ -330,7 +330,7 @@ class TurnRuntimeBuddyRunTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_rejects_invalid_artifact_kind_for_active_buddy_before_writes(self) -> None:
         context = self._prepare(PM_REQUEST, buddy="pm")
         invalid = _pm_commit()
-        invalid["artifacts"][0]["kind"] = "market-landing-page-brief"  # type: ignore[index]
+        invalid["artifacts"][0]["kind"] = "market-scan"  # type: ignore[index]
         runs_before = [row["id"] for row in env_store.list_tasks()]
 
         with self.assertRaisesRegex(ValueError, "artifact kind"):
@@ -386,7 +386,7 @@ class TurnRuntimeBuddyRunTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         invalid["artifacts"] = [
             invalid["artifacts"][0],  # type: ignore[index]
             {
-                "kind": "market-landing-page-brief",
+                "kind": "market-scan",
                 "title": "Wrong buddy kind",
                 "content": {"note": "should fail"},
             },

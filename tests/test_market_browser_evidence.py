@@ -34,7 +34,7 @@ def _market_commit(tool_evidence: dict[str, str] | None = None) -> dict[str, obj
         "working_notes": ["Market run for AI schedule tool landing page."],
         "artifacts": [
             {
-                "kind": "market-landing-page-brief",
+                "kind": "market-scan",
                 "title": "AI Schedule Tool Landing Page Market Brief",
                 "summary": "Summarizes competitor messaging and recommended angle.",
                 "content": {
@@ -45,7 +45,6 @@ def _market_commit(tool_evidence: dict[str, str] | None = None) -> dict[str, obj
                     "risks": [],
                     "conclusion": "Lead with reduced scheduling back-and-forth.",
                     "recommended_next_step": "Design should shape a concrete before/after hero flow.",
-                    "specialized_sections": {},
                 },
             }
         ],

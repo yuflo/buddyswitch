@@ -8,7 +8,8 @@ Define the active runtime contract for launcher-managed buddy instances.
 
 - Users submit ordinary request text.
 - Active buddy comes from launcher metadata (`BUDDYSWITCH_ACTIVE_BUDDY`, `BUDDYSWITCH_INSTANCE_ID`, `BUDDYSWITCH_INSTANCE_JSON`).
-- Command-shaped routing input is rejected before any task, artifact, run, or reservation writes.
+- User text never routes or changes the active buddy. Text that resembles retired switch-prefixed buddy syntax is preserved as ordinary `request_text`.
+- Retired top-level launcher commands still fail closed at the launcher boundary; that is separate from runtime request text handling.
 
 ## Runtime Entry
 

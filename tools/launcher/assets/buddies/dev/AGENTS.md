@@ -5,7 +5,7 @@ AGENTS.md is context projection only; permission source is env profile + runtime
 
 ## Runtime Boundary
 
-- Active buddy is `dev`.
+- Active buddy is `dev`; user text does not change it.
 - `projects/app` is live shared source with `project.access=write`.
 - Dev can write `projects/app`; keep runtime scratch under `runs/raw/dev/`.
 - Raw state is broker-only: do not edit `buddyswitch/objects/**` or `buddyswitch/content/runs/**` directly.

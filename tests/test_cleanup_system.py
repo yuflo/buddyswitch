@@ -266,15 +266,26 @@ class CleanupBackendTests(unittest.TestCase):
         self.repo_root = Path(self.temp_dir.name)
         self.fixture = CleanupFixture(self.repo_root)
 
-    def test_agent_plan_includes_run_content_and_scoped_warnings(self) -> None:
+    def test_backend_rejects_retired_scope_names(self) -> None:
+        for scope, buddy in (("agent", "market"), ("all-agents", None), ("all-storage", None)):
+            with self.subTest(scope=scope):
+                with self.assertRaisesRegex(ValueError, "Unsupported cleanup scope"):
+                    env_cleanup.build_cleanup_plan(
+                        scope=scope,
+                        buddy=buddy,
+                        repo_root=self.repo_root,
+                        manifest_path=self.fixture.manifest_path,
+                    )
+
+    def test_buddy_plan_includes_run_content_and_scoped_warnings(self) -> None:
         plan = env_cleanup.build_cleanup_plan(
-            scope="agent",
+            scope="buddy",
             buddy="market",
             repo_root=self.repo_root,
             manifest_path=self.fixture.manifest_path,
         )
 
-        self.assertEqual(plan["scope"], "agent")
+        self.assertEqual(plan["scope"], "buddy")
         self.assertEqual(plan["buddy"], "market")
         self.assertIn("art-market", plan["artifact_object_ids"])
         self.assertIn("task-market", plan["task_object_ids"])
@@ -290,9 +301,9 @@ class CleanupBackendTests(unittest.TestCase):
         self.assertTrue(any("bad-object.json" in warning for warning in plan["warnings"]))
         self.assertTrue(any("bad-task.json" in warning for warning in plan["warnings"]))
 
-    def test_agent_execute_detaches_track_and_preserves_other_buddy_files(self) -> None:
+    def test_buddy_execute_detaches_track_and_preserves_other_buddy_files(self) -> None:
         plan = env_cleanup.build_cleanup_plan(
-            scope="agent",
+            scope="buddy",
             buddy="market",
             repo_root=self.repo_root,
             manifest_path=self.fixture.manifest_path,
@@ -312,9 +323,9 @@ class CleanupBackendTests(unittest.TestCase):
         self.assertEqual(track["task_ids"], ["task-pm"])
         self.assertFalse(self.fixture.exists("buddyswitch/content/runs/.gitkeep"))
 
-    def test_all_storage_execute_deletes_all_generated_state_and_restores_skeleton(self) -> None:
+    def test_all_data_execute_deletes_all_generated_state_and_restores_skeleton(self) -> None:
         plan = env_cleanup.build_cleanup_plan(
-            scope="all-storage",
+            scope="all-data",
             buddy=None,
             repo_root=self.repo_root,
             manifest_path=self.fixture.manifest_path,
@@ -421,7 +432,7 @@ class CleanupBackendTests(unittest.TestCase):
         )
         self.assertTrue(artifact["is_current"])
 
-    def test_agent_cleanup_skips_symlinked_index_roots(self) -> None:
+    def test_buddy_cleanup_skips_symlinked_index_roots(self) -> None:
         outside_dir = tempfile.TemporaryDirectory(dir=ROOT)
         self.addCleanup(outside_dir.cleanup)
         outside_root = Path(outside_dir.name)
@@ -487,7 +498,7 @@ class CleanupBackendTests(unittest.TestCase):
             internal_dir.symlink_to(external_dir, target_is_directory=True)
 
         plan = env_cleanup.build_cleanup_plan(
-            scope="agent",
+            scope="buddy",
             buddy="market",
             repo_root=self.repo_root,
             manifest_path=self.fixture.manifest_path,
@@ -515,7 +526,7 @@ class CleanupBackendTests(unittest.TestCase):
         self.assertNotIn("buddyswitch/objects/artifacts/art-market.json", result["deleted_paths"])
         self.assertNotIn("buddyswitch/content/runs/run-market.json", result["deleted_paths"])
 
-    def test_agent_cleanup_skips_unsafe_detach_when_tasks_root_is_symlinked(self) -> None:
+    def test_buddy_cleanup_skips_unsafe_detach_when_tasks_root_is_symlinked(self) -> None:
         outside_dir = tempfile.TemporaryDirectory(dir=ROOT)
         self.addCleanup(outside_dir.cleanup)
         outside_root = Path(outside_dir.name)
@@ -546,7 +557,7 @@ class CleanupBackendTests(unittest.TestCase):
         internal_tasks_dir.symlink_to(outside_tasks, target_is_directory=True)
 
         plan = env_cleanup.build_cleanup_plan(
-            scope="agent",
+            scope="buddy",
             buddy="market",
             repo_root=self.repo_root,
             manifest_path=self.fixture.manifest_path,
@@ -563,7 +574,7 @@ class CleanupBackendTests(unittest.TestCase):
             "cleanup must not detach artifacts by mutating task JSON through a symlinked tasks root",
         )
 
-    def test_agent_cleanup_skips_unsafe_detach_when_tracks_root_is_symlinked(self) -> None:
+    def test_buddy_cleanup_skips_unsafe_detach_when_tracks_root_is_symlinked(self) -> None:
         outside_dir = tempfile.TemporaryDirectory(dir=ROOT)
         self.addCleanup(outside_dir.cleanup)
         outside_root = Path(outside_dir.name)
@@ -587,7 +598,7 @@ class CleanupBackendTests(unittest.TestCase):
         internal_tracks_dir.symlink_to(outside_tracks, target_is_directory=True)
 
         plan = env_cleanup.build_cleanup_plan(
-            scope="agent",
+            scope="buddy",
             buddy="market",
             repo_root=self.repo_root,
             manifest_path=self.fixture.manifest_path,
@@ -603,7 +614,7 @@ class CleanupBackendTests(unittest.TestCase):
             "cleanup must not detach tasks by mutating track JSON through a symlinked tracks root",
         )
 
-    def test_all_storage_cleanup_does_not_recreate_skeleton_through_symlinked_parents(self) -> None:
+    def test_all_data_cleanup_does_not_recreate_skeleton_through_symlinked_parents(self) -> None:
         outside_dir = tempfile.TemporaryDirectory(dir=ROOT)
         self.addCleanup(outside_dir.cleanup)
         outside_root = Path(outside_dir.name)
@@ -622,7 +633,7 @@ class CleanupBackendTests(unittest.TestCase):
         internal_objects_parent.symlink_to(outside_objects_parent, target_is_directory=True)
 
         plan = env_cleanup.build_cleanup_plan(
-            scope="all-storage",
+            scope="all-data",
             buddy=None,
             repo_root=self.repo_root,
             manifest_path=self.fixture.manifest_path,
@@ -905,7 +916,7 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         self.assertFalse((market_workspace / "runs" / "raw" / "market" / "market.log").exists())
         self.assertFalse((pm_workspace / "runs" / "raw" / "pm" / "pm.log").exists())
 
-    def test_shell_all_storage_dry_run_does_not_mutate_source_checkout_or_excludes(self) -> None:
+    def test_shell_all_data_dry_run_does_not_mutate_source_checkout_or_excludes(self) -> None:
         exclude_path = self.repo_root / ".git" / "info" / "exclude"
         exclude_path.parent.mkdir(parents=True, exist_ok=True)
         exclude_path.write_text(

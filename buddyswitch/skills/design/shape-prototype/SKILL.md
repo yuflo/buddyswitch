@@ -24,9 +24,9 @@ description: Use when the task is shaping a visible UI/UX prototype and producin
 - Constraints about target screens, CTA flow, navigation, or preview environment.
 
 ## Outputs
-- A design-handoff artifact describing design goal, flow/screen summary, interaction notes, preview refs, handoff notes, and open questions.
-- Preview-oriented runtime outputs under `.sandbox/design/` when needed.
-- A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
+- A contribution to the current compact buddy-run commit.
+- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
+- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
 
 ## Steps
 

@@ -33,9 +33,9 @@ description: Use when the task is choosing the first believable user-acquisition
 - Optional assumptions about budget, effort, or available distribution access.
 
 ## Outputs
-- A channel-discovery artifact object with candidate channels, scoring criteria, ranked options, recommended channels, experiment plan, kill signals, and conclusion.
-- A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
-- Explicit notes when channel confidence is limited by missing evidence or thin reachability data.
+- A contribution to the current compact buddy-run commit.
+- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
+- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
 
 ## Market Research Cockpit Runtime
 

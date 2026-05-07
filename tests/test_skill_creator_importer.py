@@ -88,7 +88,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 label = "MARKET"
                 scope = "Market scope"
                 skills = []
-                artifact_kinds = ["market-scan", "market-landing-page-brief"]
+                artifact_kinds = ["market-scan", "pmf-report"]
                 permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
 
                 [[buddies]]

@@ -3370,6 +3370,74 @@ exit 1
             self.assertIn("runtime lock required", direct_start.stderr)
             self.assertFalse(shared_root.exists(), "direct locked start bootstrap must not mutate shared root")
 
+    def test_locked_start_bootstrap_requires_buddy_env_before_workspace_setup(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            runtime_lock = ROOT / "tools" / "launcher" / "runtime_lock.py"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            env.pop("BUDDYSWITCH_START_BUDDY", None)
+            env.pop("BUDDYSWITCH_START_INSTANCE_ID", None)
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(runtime_lock),
+                    "--shared-root",
+                    str(shared_root),
+                    "--",
+                    str(LAUNCHER),
+                    "__locked-start-bootstrap",
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("BUDDYSWITCH_START_BUDDY is required", completed.stderr)
+            self.assertFalse((shared_root / "workspace").exists(), "missing buddy env must fail before workspace prep")
+
+    def test_locked_start_bootstrap_requires_instance_id_env(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            runtime_lock = ROOT / "tools" / "launcher" / "runtime_lock.py"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            env["BUDDYSWITCH_START_BUDDY"] = "pm"
+            env.pop("BUDDYSWITCH_START_INSTANCE_ID", None)
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(runtime_lock),
+                    "--shared-root",
+                    str(shared_root),
+                    "--",
+                    str(LAUNCHER),
+                    "__locked-start-bootstrap",
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("BUDDYSWITCH_START_INSTANCE_ID is required", completed.stderr)
+            self.assertFalse((shared_root / "workspace").exists(), "missing instance id must fail before workspace prep")
+
     def test_launcher_help_and_reset_flow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -3561,24 +3629,18 @@ exit 1
             self.assertIn("Unknown top-level command: debug", debug_result.stderr)
             self.assertFalse(capture_path.exists(), "unknown top-level command must not invoke codex")
 
-    def test_non_instance_workspace_sync_keeps_repo_project_codex_config(self) -> None:
+    def test_locked_workspace_sync_command_is_not_supported_even_under_runtime_lock(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
             runtime_lock = ROOT / "tools" / "launcher" / "runtime_lock.py"
-            runtime_agents_template = ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md"
-
-            repo_project_config = ROOT / ".codex" / "config.toml"
-            before = repo_project_config.read_text(encoding="utf-8")
+            workspace_dir = shared_root / "workspace"
 
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
             env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
-            env["BUDDYSWITCH_START_BUDDY"] = "pm"
-            env["BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE"] = str(runtime_agents_template)
-            env.pop("BUDDYSWITCH_INSTANCE_ID", None)
 
             completed = subprocess.run(
                 [
@@ -3597,11 +3659,9 @@ exit 1
                 check=False,
             )
 
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            self.assertIn("Workspace synced:", completed.stdout)
-            self.assertNotIn("BUDDYSWITCH_INSTANCE_ID", env)
-            self.assertTrue(repo_project_config.exists())
-            self.assertEqual(repo_project_config.read_text(encoding="utf-8"), before)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("Unknown top-level command: __locked-workspace-sync", completed.stderr)
+            self.assertFalse(workspace_dir.exists(), "retired locked sync command must not create workspace")
 
     def test_removed_cleanup_command_fails_closed_without_launching_codex(self) -> None:
         with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
@@ -4929,7 +4989,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             self.assertFalse(self._legacy_runtime_lock_path(shared_root).exists())
             self.assertFalse(self._runtime_lock_path(shared_root).exists())
 
-    def test_locked_workspace_sync_entrypoint_rejects_direct_invocation_without_lock(self) -> None:
+    def test_locked_workspace_sync_entrypoint_fails_closed_as_unknown_command(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -4949,7 +5009,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             )
 
             self.assertEqual(direct_sync.returncode, 2)
-            self.assertIn("runtime lock required", direct_sync.stderr)
+            self.assertIn("Unknown top-level command: __locked-workspace-sync", direct_sync.stderr)
             self.assertFalse(workspace_dir.exists(), "direct locked entrypoint must not mutate workspace")
 
     def test_workspace_command_requires_explicit_subcommand(self) -> None:

@@ -82,23 +82,6 @@ def require_id(value: str, label: str) -> str:
     return value
 
 
-def normalize_repo_path(raw_path: str) -> str:
-    path = Path(raw_path)
-    if path.is_absolute() or ".." in path.parts:
-        raise ValueError(f"path must be repo-relative and must not contain '..': {raw_path}")
-    return path.as_posix()
-
-
-def normalize_run_content_path(raw_path: str) -> str:
-    normalized = normalize_repo_path(raw_path)
-    path = Path(normalized)
-    if path.parts[:3] != ("buddyswitch", "content", "runs"):
-        raise ValueError("run content path must start with buddyswitch/content/runs/")
-    if path.suffix.lower() != ".json":
-        raise ValueError("run content path must be a JSON file (*.json)")
-    return normalized
-
-
 def slugify(text: str) -> str:
     cleaned = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return cleaned or "artifact"
@@ -335,17 +318,6 @@ def _task_kind_state(task: dict[str, Any], kind: str) -> dict[str, Any] | None:
     return row if isinstance(row, dict) else None
 
 
-def _current_task_artifact_id(task: dict[str, Any]) -> str | None:
-    artifact_slots = task.get("artifact_slots", {})
-    if isinstance(artifact_slots, dict):
-        for row in artifact_slots.values():
-            if isinstance(row, dict):
-                current_artifact_id = row.get("current_artifact_id")
-                if isinstance(current_artifact_id, str) and current_artifact_id:
-                    return current_artifact_id
-    return None
-
-
 def list_tracks() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in TRACKS_DIR.glob("*.json"):
@@ -374,14 +346,6 @@ def _task_artifacts_from_map(task: dict[str, Any], artifact_map: dict[str, dict[
     rows = [artifact_map[item] for item in task.get("artifact_ids", []) if item in artifact_map]
     rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
     return rows
-
-
-def list_task_artifacts(task_id: str) -> list[dict[str, Any]]:
-    task = get_task(task_id)
-    if task is None:
-        raise ValueError(f"task not found: {task_id}")
-    artifact_map = {artifact["id"]: artifact for artifact in list_artifacts()}
-    return _task_artifacts_from_map(task, artifact_map)
 
 
 def build_track_artifact_index(track_id: str | None) -> dict[str, Any] | None:
@@ -520,28 +484,6 @@ def update_track(track_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         track[key] = value
     track["updated_at"] = now_iso()
     return save_track(track)
-
-
-def advance_track(
-    track_id: str,
-    *,
-    current_buddy: str | None = None,
-    next_buddy: str | None = None,
-    status: str | None = None,
-    summary: str | None = None,
-) -> dict[str, Any]:
-    patch: dict[str, Any] = {}
-    if current_buddy is not None:
-        patch["current_buddy"] = current_buddy
-    if next_buddy is not None:
-        patch["next_buddy"] = next_buddy
-    if status is not None:
-        patch["status"] = status
-    if summary is not None:
-        patch["summary"] = summary
-    if not patch:
-        raise ValueError("advance requires at least one field")
-    return update_track(track_id, patch)
 
 
 def _register_task_id(track_id: str, task_id: str) -> dict[str, Any]:
@@ -765,10 +707,7 @@ def create_artifact(
     source_run_id: str,
     summary: str = "",
     content: dict[str, Any] | None = None,
-    auto_register: bool = True,
 ) -> dict[str, Any]:
-    if not auto_register:
-        raise ValueError("auto_register=False is not supported for v2 kind-aware artifact creation")
     task = get_task(task_id)
     if task is None:
         raise ValueError(f"task not found: {task_id}")
@@ -804,8 +743,7 @@ def create_artifact(
         "updated_at": timestamp,
     }
     artifact = save_artifact(artifact)
-    if auto_register:
-        add_artifact_to_task(task_id, resolved_id, summary=summary or None)
+    add_artifact_to_task(task_id, resolved_id, summary=summary or None)
     return artifact
 
 
@@ -861,7 +799,7 @@ def update_artifact(
     return artifact
 
 
-def delete_artifact(artifact_id: str, *, delete_file: bool = False) -> dict[str, Any]:
+def delete_artifact(artifact_id: str) -> dict[str, Any]:
     require_runtime_workspace_write_root()
     artifact = get_artifact(artifact_id)
     if artifact is None:
@@ -878,23 +816,22 @@ def delete_artifact(artifact_id: str, *, delete_file: bool = False) -> dict[str,
 def delete_artifacts_by_buddy(
     buddy_id: str,
     *,
-    delete_files: bool = False,
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     targets = [artifact for artifact in list_artifacts() if artifact.get("buddy") == buddy_id]
     if dry_run:
         return targets
     for artifact in targets:
-        delete_artifact(artifact["id"], delete_file=delete_files)
+        delete_artifact(artifact["id"])
     return targets
 
 
-def delete_all_artifacts(*, delete_files: bool = False, dry_run: bool = False) -> list[dict[str, Any]]:
+def delete_all_artifacts(*, dry_run: bool = False) -> list[dict[str, Any]]:
     targets = list_artifacts()
     if dry_run:
         return targets
     for artifact in targets:
-        delete_artifact(artifact["id"], delete_file=delete_files)
+        delete_artifact(artifact["id"])
     return targets
 
 

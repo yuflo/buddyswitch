@@ -24,8 +24,5 @@
         }
       }
     }
-  ],
-  "tool_evidence": {
-    "browser_cockpit_token": "<broker-issued-token-from-current-run>"
-  }
+  ]
 }

@@ -5,7 +5,7 @@ AGENTS.md is context projection only and not the permission source.
 
 ## Runtime Boundary
 
-- Active buddy is `test`.
+- Active buddy is `test`; user text does not change it.
 - `projects/app` is live shared source with `project.access=read-only`.
 - Project source is read-only; tests, fixtures, snapshots, and generated source under `projects/app` are read-only.
 - Hand source fixes to Dev instead of editing source in this buddy.

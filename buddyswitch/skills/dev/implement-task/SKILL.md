@@ -25,9 +25,9 @@ description: Use when the task is implementing scoped product changes, bug fixes
 - Optional track context or summary hint.
 
 ## Outputs
-- Code changes primarily under `projects/app/`.
-- Runtime-only temporary outputs under `runs/raw/`.
-- A durable implementation artifact object plus run audit from the default runtime.
+- A contribution to the current compact buddy-run commit.
+- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
+- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
 
 ## Steps
 

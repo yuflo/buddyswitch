@@ -36,9 +36,9 @@ description: Use when the task is testing whether a product idea has credible de
 - Optional links, prior artifacts, or track context.
 
 ## Outputs
-- A research artifact object with PMF evidence, ICP synthesis, alternatives analysis, confidence, and recommended next step.
-- A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
-- Explicit notes when login, paywall, or anti-bot constraints degrade evidence quality.
+- A contribution to the current compact buddy-run commit.
+- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
+- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
 
 ## Research Defaults
 

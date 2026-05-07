@@ -940,7 +940,7 @@ Successful output shape:
 {
   "ok": true,
   "tool_evidence": {
-    "browser_cockpit_token": "evidence-run-0123456789-abcd1234"
+    "browser_cockpit_token": "<broker-issued-browser-cockpit-token-for-current-run>"
   }
 }
 ```
@@ -951,7 +951,7 @@ Approved downgrade output shape:
 {
   "ok": true,
   "tool_evidence": {
-    "approved_downgrade_token": "downgrade-run-0123456789-abcd1234"
+    "approved_downgrade_token": "<broker-issued-approved-downgrade-token-for-current-run>"
   }
 }
 ```
@@ -979,7 +979,7 @@ Broker checks:
 Broker writes token records under:
 
 ```text
-$BUDDYSWITCH_INSTANCE_ROOT/runtime/evidence-tokens/run-0123456789/evidence-run-0123456789-abcd1234.json
+$BUDDYSWITCH_INSTANCE_ROOT/runtime/evidence-tokens/run-<run-id>/<broker-issued-evidence-token>.json
 ```
 
 Host writable roots must not include `$BUDDYSWITCH_INSTANCE_ROOT/runtime`.

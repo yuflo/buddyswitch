@@ -71,7 +71,6 @@ artifact_kinds = [
   "positioning-brief",
   "channel-plan",
   "launch-prep",
-  "market-landing-page-brief",
 ]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 

@@ -18,10 +18,9 @@ description: Use when the task is managing track lifecycle operations such as cr
 - The request only needs track context as background.
 
 ## Outputs
-- A PM artifact object in `buddyswitch/objects/artifacts/` (`kind = track-note` or `pm-decision`).
-- PM result JSON matching `framework/schemas/pm/pm-result.json`.
-- Explicit `state_effects.track` for lifecycle mutation.
-- A run audit in `buddyswitch/content/runs/`.
+- A contribution to the current compact buddy-run commit.
+- Optional `state_effects.track` for explicit PM track lifecycle changes.
+- Optional `artifacts[]` only when a durable `track-note` or `pm-decision` is needed.
 
 ## Steps
 1. Identify the target lifecycle action (`create|update|advance|archive`).

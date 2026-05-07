@@ -1658,7 +1658,6 @@ def _persist_buddy_run(
             source_run_id=run_id,
             summary=artifact_payload.get("summary", ""),
             content=artifact_payload["content"],
-            auto_register=True,
         )
         artifact_ids.append(artifact["id"])
 

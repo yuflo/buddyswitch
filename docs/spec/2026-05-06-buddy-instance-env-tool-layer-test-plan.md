@@ -99,7 +99,7 @@ Use product-shaped data:
 - Test request: `验证 landing page hero 和 CTA 行为`
 - Track id: `track-ai-schedule-landing-page`
 - PRD artifact kind: `prd`
-- Market artifact kind: `market-landing-page-brief`
+- Market artifact kind: `market-scan`
 - Design artifact kind: `design-handoff`
 - Dev artifact kind: `implementation-report`
 - Test artifact kind: `test-report`
@@ -183,7 +183,7 @@ Do not use fake values whose only purpose is to trigger a private branch.
   ],
   "artifacts": [
     {
-      "kind": "market-landing-page-brief",
+      "kind": "market-scan",
       "title": "AI Schedule Tool Landing Page Market Brief",
       "summary": "Summarizes competitor messaging patterns and recommended landing page expression.",
       "content": {
@@ -198,28 +198,23 @@ Do not use fake values whose only purpose is to trigger a private branch.
         "assumptions": ["Competitor pages are representative of current category language."],
         "risks": ["Evidence depth is limited to the first browser proof loop."],
         "conclusion": "Lead with recovered focus time and reduced scheduling back-and-forth.",
-        "recommended_next_step": "Design should shape a hero flow around concrete before/after scheduling moments.",
-        "specialized_sections": {
-          "competitor_patterns": ["automation promise", "calendar cleanup", "team coordination"],
-          "recommended_angles": ["recover focus time", "reduce back-and-forth scheduling", "trustworthy calendar control"]
-        }
+        "recommended_next_step": "Design should shape a hero flow around concrete before/after scheduling moments."
       }
     }
   ],
   "handoff": {
     "next_buddy": "design",
     "reason": "Design can combine PRD scope with market positioning.",
-    "context": "Use the PRD artifact and market landing page brief on this track."
+    "context": "Use the PRD artifact and market scan artifact on this track."
   },
   "contributors": {
     "skills": ["research-scan", "positioning-copy"],
     "agents": []
-  },
-  "tool_evidence": {
-    "browser_cockpit_token": "evidence-run-0123456789-abcd1234"
   }
 }
 ```
+
+Execution rule: this static fixture intentionally omits `tool_evidence`. Test harnesses must inject a real `tool_evidence.browser_cockpit_token` issued by `scripts/browser_evidence.py issue` for the current run envelope.
 
 ### Market Valid Commit With Approved Downgrade
 
@@ -231,7 +226,7 @@ Do not use fake values whose only purpose is to trigger a private branch.
   ],
   "artifacts": [
     {
-      "kind": "market-landing-page-brief",
+      "kind": "market-scan",
       "title": "AI Schedule Tool Landing Page Market Brief With Downgrade",
       "summary": "Records limited evidence gathered under an explicit user-approved downgrade.",
       "content": {
@@ -246,10 +241,7 @@ Do not use fake values whose only purpose is to trigger a private branch.
         "assumptions": ["Downgrade evidence is lower confidence than browser-native discovery."],
         "risks": ["Market conclusion may miss page-level details."],
         "conclusion": "Use only as a temporary positioning input until browser-native research is available.",
-        "recommended_next_step": "Repeat browser-native research when cockpit access is restored.",
-        "specialized_sections": {
-          "downgrade_reason": "Browser-native cockpit access was blocked during this run."
-        }
+        "recommended_next_step": "Repeat browser-native research when cockpit access is restored."
       }
     }
   ],
@@ -261,12 +253,11 @@ Do not use fake values whose only purpose is to trigger a private branch.
   "contributors": {
     "skills": ["research-scan"],
     "agents": []
-  },
-  "tool_evidence": {
-    "approved_downgrade_token": "downgrade-run-0123456789-abcd1234"
   }
 }
 ```
+
+Execution rule: this static fixture intentionally omits `tool_evidence`. Test harnesses must inject a real `tool_evidence.approved_downgrade_token` issued by `scripts/browser_evidence.py approve-downgrade` for the current run envelope.
 
 ### Test Buddy Valid Commit
 
@@ -543,7 +534,7 @@ Cases:
    - Expected: rejection and state snapshot unchanged.
 
 7. Unauthorized artifact kind is rejected before writes.
-   - Input: PM commit with artifact kind `market-landing-page-brief`.
+   - Input: PM commit with artifact kind `market-scan`.
    - Expected: rejection and no artifact/run/task/track mutation.
 
 8. Duplicate artifact kind is rejected before writes.
@@ -761,7 +752,7 @@ payload = {
     "working_notes": ["This probe intentionally omits tool_evidence to prove runtime rejection."],
     "artifacts": [
         {
-            "kind": "market-landing-page-brief",
+            "kind": "market-scan",
             "title": "Missing Evidence Probe",
             "summary": "This artifact should be rejected because Market evidence is missing.",
             "content": {
@@ -771,8 +762,7 @@ payload = {
                 "assumptions": [],
                 "risks": ["No browser-native evidence was provided."],
                 "conclusion": "Reject this commit.",
-                "recommended_next_step": "Issue browser evidence token first.",
-                "specialized_sections": {}
+                "recommended_next_step": "Issue browser evidence token first."
             }
         }
     ]

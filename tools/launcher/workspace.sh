@@ -678,14 +678,3 @@ buddyswitch_workspace_prepare_execution_worktree() {
   buddyswitch_workspace_install_local_excludes
   buddyswitch_workspace_install_guardrail_hooks
 }
-
-buddyswitch_workspace_sync_execution_worktree() {
-  buddyswitch_workspace_init_defaults
-  buddyswitch_workspace_force_rebuild_execution_worktree
-  buddyswitch_workspace_sync_runtime_surface
-  buddyswitch_workspace_ensure_state_skeleton
-  buddyswitch_workspace_install_runtime_agents
-  buddyswitch_workspace_install_runtime_skills
-  buddyswitch_workspace_install_local_excludes
-  buddyswitch_workspace_install_guardrail_hooks
-}

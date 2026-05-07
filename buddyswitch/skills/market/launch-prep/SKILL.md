@@ -33,9 +33,9 @@ description: Use when the task is preparing a first launch, validation page, or 
 - Optional notes on audience, success criteria, or manual follow-up capacity.
 
 ## Outputs
-- A launch-prep artifact object with launch goal, audience, selected channel, launch assets, instrumentation plan, feedback collection plan, success and failure signals, and conclusion.
-- A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
-- Explicit notes when launch confidence depends on assumptions rather than observed evidence.
+- A contribution to the current compact buddy-run commit.
+- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
+- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
 
 ## Market Research Cockpit Runtime
 

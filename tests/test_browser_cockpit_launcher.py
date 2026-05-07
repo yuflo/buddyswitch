@@ -195,6 +195,35 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 "browser ensure should bootstrap from instance-scoped runtime state, not main-checkout skeletons",
             )
 
+    def test_browser_ensure_requires_instance_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "env", "browser", "ensure"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("env browser ensure requires --instance <instance-id>", completed.stderr)
+            self.assertFalse(shared_root.exists(), "ensure without --instance must fail before creating shared state")
+
+    def test_browser_launcher_source_is_instance_only(self) -> None:
+        text = (ROOT / "tools" / "launcher" / "browser_cockpit.sh").read_text(encoding="utf-8")
+        self.assertIn("chrome-devtools-cockpit", text)
+        self.assertNotIn("chrome/shared-browser", text)
+        self.assertNotIn("buddyswitch_browser_ensure_general_mcp", text)
+        self.assertNotIn("mcp add \"chrome-devtools\"", text)
+
     def test_browser_status_does_not_create_shared_root(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)

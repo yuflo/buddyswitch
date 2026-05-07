@@ -23,7 +23,6 @@ source "${CLEANUP_HELPER}"
 source "${RUNTIME_BROKER_HELPER}"
 
 buddyswitch_env_init
-buddyswitch_browser_init_defaults
 
 print_help() {
   cat <<EOF
@@ -55,10 +54,10 @@ Environment:
   BUDDYSWITCH_SOURCE_HOME      Source HOME for bootstrap (default: current HOME)
   BUDDYSWITCH_SOURCE_CODEX_HOME
                                Source CODEX_HOME for auth bootstrap
-  BUDDYSWITCH_BROWSER_PORT     Browser cockpit port (default: ${BUDDYSWITCH_BROWSER_PORT})
+  BUDDYSWITCH_BROWSER_PORT     Browser cockpit port (default: ${BUDDYSWITCH_BROWSER_PORT:-9222})
   BUDDYSWITCH_BROWSER_PROFILE_DIR
-                               Browser profile dir (default: ${BUDDYSWITCH_BROWSER_PROFILE_DIR})
-  BUDDYSWITCH_BROWSER_LOG_FILE Browser Chrome log file (default: ${BUDDYSWITCH_BROWSER_LOG_FILE})
+                               Browser profile dir (default: ${BUDDYSWITCH_BROWSER_PROFILE_DIR:-<instance>/browser/profile})
+  BUDDYSWITCH_BROWSER_LOG_FILE Browser Chrome log file (default: ${BUDDYSWITCH_BROWSER_LOG_FILE:-<instance>/browser/chrome.log})
 
 Paths:
   shared root: ${BUDDYSWITCH_SHARED_ROOT}
@@ -167,22 +166,20 @@ start_locked_bootstrap() {
   requested_buddy="${BUDDYSWITCH_START_BUDDY:-}"
   requested_instance_id="${BUDDYSWITCH_START_INSTANCE_ID:-}"
 
-  if [[ -n "${requested_buddy}" && -z "${requested_instance_id}" ]]; then
-    echo "Missing instance id for buddy startup." >&2
+  if [[ -z "${requested_buddy}" ]]; then
+    echo "BUDDYSWITCH_START_BUDDY is required for product instance bootstrap." >&2
     return 2
   fi
-  if [[ -z "${requested_buddy}" && -n "${requested_instance_id}" ]]; then
-    echo "Missing buddy for instance startup." >&2
+  if [[ -z "${requested_instance_id}" ]]; then
+    echo "BUDDYSWITCH_START_INSTANCE_ID is required for product instance bootstrap." >&2
     return 2
   fi
-  if [[ -n "${requested_buddy}" ]]; then
-    buddyswitch_validate_buddy_id "${requested_buddy}" || return $?
-    buddyswitch_validate_instance_id "${requested_instance_id}" || return $?
-    buddyswitch_require_env_profile "${requested_buddy}" || return $?
-    buddyswitch_require_buddy_agents_template "${requested_buddy}" || return $?
-    buddyswitch_env_bind_instance "${requested_instance_id}" || return $?
-    buddyswitch_browser_allocate_instance_port
-  fi
+  buddyswitch_validate_buddy_id "${requested_buddy}" || return $?
+  buddyswitch_validate_instance_id "${requested_instance_id}" || return $?
+  buddyswitch_require_env_profile "${requested_buddy}" || return $?
+  buddyswitch_require_buddy_agents_template "${requested_buddy}" || return $?
+  buddyswitch_env_bind_instance "${requested_instance_id}" || return $?
+  buddyswitch_browser_allocate_instance_port
 
   mkdir -p "${BUDDYSWITCH_RUN_STATE_DIR}"
   marker_path="$(buddyswitch_write_launcher_marker)"
@@ -190,23 +187,17 @@ start_locked_bootstrap() {
   buddyswitch_ensure_shared_env
   buddyswitch_workspace_prepare_execution_worktree
 
-  if [[ -n "${requested_buddy}" ]]; then
-    buddyswitch_workspace_ensure_project_worktree
-    buddyswitch_workspace_repair_runtime_projects_app_projection
-    buddyswitch_instance_activate "${requested_instance_id}" "${requested_buddy}" "inactive" >/dev/null
-    buddyswitch_runtime_broker_ensure
-    buddyswitch_patch_codex_config
-  fi
+  buddyswitch_workspace_ensure_project_worktree
+  buddyswitch_workspace_repair_runtime_projects_app_projection
+  buddyswitch_instance_activate "${requested_instance_id}" "${requested_buddy}" "inactive" >/dev/null
+  buddyswitch_runtime_broker_ensure
+  buddyswitch_patch_codex_config
   if ! buddyswitch_browser_bootstrap; then
-    if [[ -n "${requested_buddy}" ]]; then
-      buddyswitch_runtime_broker_stop
-    fi
+    buddyswitch_runtime_broker_stop
     return 1
   fi
-  if [[ -n "${requested_buddy}" ]]; then
-    buddyswitch_instance_set_browser_port "${requested_instance_id}" "${BUDDYSWITCH_BROWSER_PORT}"
-    buddyswitch_instance_set_status "${requested_instance_id}" "active"
-  fi
+  buddyswitch_instance_set_browser_port "${requested_instance_id}" "${BUDDYSWITCH_BROWSER_PORT}"
+  buddyswitch_instance_set_status "${requested_instance_id}" "active"
 }
 
 instance_set_inactive_locked() {
@@ -390,25 +381,6 @@ instance_delete_locked() {
   buddyswitch_workspace_remove_registered_worktrees_under_strict "${instance_root}" || return $?
   buddyswitch_workspace_force_remove_path "${instance_root}"
   echo "Instance deleted: ${instance_id}"
-}
-
-workspace_sync_locked() {
-  local active_count
-  buddyswitch_require_runtime_lock
-  active_count="$(buddyswitch_count_active_launchers)"
-  if [[ "${active_count}" -gt 0 ]]; then
-    echo "Workspace sync blocked: ${active_count} active buddyswitch-codex instance(s) detected." >&2
-    echo "Close active launcher sessions and retry." >&2
-    return 3
-  fi
-  if [[ -d "${BUDDYSWITCH_SHARED_ROOT}/instances" ]]; then
-    echo "Workspace sync blocked: no product-mode sync target once instances exist." >&2
-    echo "Start creates fresh instance workspaces; use env reset --yes to remove product-mode runtime state." >&2
-    return 3
-  fi
-
-  buddyswitch_workspace_sync_execution_worktree
-  echo "Workspace synced: ${BUDDYSWITCH_WORKSPACE_DIR}"
 }
 
 browser_ensure_locked() {
@@ -652,6 +624,12 @@ env_browser_main() {
 
   case "${command}" in
     status)
+      if [[ -z "${instance_id}" ]]; then
+        export BUDDYSWITCH_BROWSER_PROFILE_DIR="${BUDDYSWITCH_RUN_STATE_DIR}/browser-status-profile"
+        export BUDDYSWITCH_BROWSER_PROFILE_DIR_EXPLICIT=1
+        export BUDDYSWITCH_BROWSER_LOG_FILE="${BUDDYSWITCH_RUN_STATE_DIR}/chrome-cockpit.log"
+        export BUDDYSWITCH_BROWSER_LOG_FILE_EXPLICIT=1
+      fi
       if [[ "${#browser_args[@]}" -gt 0 ]]; then
         buddyswitch_browser_main status "${browser_args[@]}"
       else
@@ -783,10 +761,6 @@ main() {
     __locked-start-bootstrap)
       shift || true
       start_locked_bootstrap "$@"
-      ;;
-    __locked-workspace-sync)
-      shift || true
-      workspace_sync_locked "$@"
       ;;
     __locked-reset)
       shift || true

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import sys
 import unittest
 from argparse import Namespace
@@ -89,7 +90,6 @@ class DebugApiPermissionTests(unittest.TestCase):
             task_id="task-debug-ref",
             source_run_id="run-debug-ref",
             summary=None,
-            no_auto_register=True,
             content_json=None,
             content_file=None,
         )
@@ -110,7 +110,6 @@ class DebugApiPermissionTests(unittest.TestCase):
             summary="created",
             content_json='{"summary":"created"}',
             content_file=None,
-            no_auto_register=True,
         )
         artifact = {"id": "art-debug-content", "content": {"summary": "created"}}
         buffer = io.StringIO()
@@ -138,7 +137,6 @@ class DebugApiPermissionTests(unittest.TestCase):
             summary=None,
             content_json='{"summary":"updated"}',
             content_file=None,
-            no_auto_register=True,
         )
         artifact = {"id": "art-debug-content", "content": {"summary": "updated"}}
         buffer = io.StringIO()
@@ -151,7 +149,6 @@ class DebugApiPermissionTests(unittest.TestCase):
         mocked.assert_called_once_with(
             "art-debug-content",
             {"content": {"summary": "updated"}},
-            auto_register=False,
         )
 
     def test_artifact_get_command_alias_reads_by_id(self) -> None:
@@ -172,29 +169,58 @@ class DebugApiPermissionTests(unittest.TestCase):
 
 class AdminCleanupCommandTests(unittest.TestCase):
     def test_cleanup_buddy_runs_as_admin_helper(self) -> None:
-        args = Namespace(buddy="market", delete_files=False, dry_run=True)
+        args = Namespace(buddy="market", dry_run=True)
         buffer = io.StringIO()
         with patch.object(env_artifacts, "delete_artifacts_by_buddy", return_value=[]) as mocked:
             with redirect_stdout(buffer):
                 result = env_artifacts.cmd_cleanup_buddy(args)
 
         self.assertEqual(result, 0)
-        mocked.assert_called_once_with("market", delete_files=False, dry_run=True)
+        mocked.assert_called_once_with("market", dry_run=True)
         payload = json.loads(buffer.getvalue())
         self.assertEqual(payload["count"], 0)
 
     def test_cleanup_all_runs_as_admin_helper(self) -> None:
-        args = Namespace(delete_files=False, dry_run=True)
+        args = Namespace(dry_run=True)
         buffer = io.StringIO()
         with patch.object(env_artifacts, "delete_all_artifacts", return_value=[]) as mocked:
             with redirect_stdout(buffer):
                 result = env_artifacts.cmd_cleanup_all(args)
 
         self.assertEqual(result, 0)
-        mocked.assert_called_once_with(delete_files=False, dry_run=True)
+        mocked.assert_called_once_with(dry_run=True)
         payload = json.loads(buffer.getvalue())
         self.assertEqual(payload["count"], 0)
 
+
+class ArtifactCliHelpSurfaceTests(unittest.TestCase):
+    def _help_output(self, *args: str) -> str:
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "env_artifacts.py"), *args, "--help"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return completed.stdout
+
+    def test_create_help_does_not_expose_no_auto_register(self) -> None:
+        output = self._help_output("create")
+        self.assertNotIn("--no-auto-register", output)
+
+    def test_update_help_does_not_expose_no_auto_register(self) -> None:
+        output = self._help_output("update")
+        self.assertNotIn("--no-auto-register", output)
+
+    def test_delete_help_does_not_expose_delete_file(self) -> None:
+        output = self._help_output("delete")
+        self.assertNotIn("--delete-file", output)
+
+    def test_cleanup_help_does_not_expose_delete_files(self) -> None:
+        buddy_output = self._help_output("cleanup-buddy")
+        all_output = self._help_output("cleanup-all")
+        self.assertNotIn("--delete-files", buddy_output)
+        self.assertNotIn("--delete-files", all_output)
 
 if __name__ == "__main__":
     unittest.main()
