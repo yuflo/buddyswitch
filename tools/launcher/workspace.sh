@@ -290,6 +290,35 @@ buddyswitch_workspace_is_instance_mode() {
   [[ -n "${BUDDYSWITCH_INSTANCE_ID:-}" ]]
 }
 
+buddyswitch_workspace_neutralize_project_codex_config() {
+  local workspace_dir project_config project_config_dir
+
+  if ! buddyswitch_workspace_is_instance_mode; then
+    return 0
+  fi
+
+  workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
+  project_config="${workspace_dir}/.codex/config.toml"
+  project_config_dir="$(dirname "${project_config}")"
+
+  buddyswitch_workspace_require_path_under_shared_root \
+    "workspace dir" \
+    "${workspace_dir}" >/dev/null || return $?
+
+  # If .codex is a symlink, remove the workspace-local symlink itself.
+  # Never remove files through the symlink target.
+  if [[ -L "${project_config_dir}" ]]; then
+    rm -f "${project_config_dir}"
+    return 0
+  fi
+
+  if [[ -e "${project_config}" || -L "${project_config}" ]]; then
+    rm -f "${project_config}"
+  fi
+
+  rmdir "${project_config_dir}" >/dev/null 2>&1 || true
+}
+
 buddyswitch_workspace_stage_runtime_outputs() {
   local staging_root="$1"
   local workspace_dir relative_path source_path staged_path
@@ -524,6 +553,8 @@ for relative in runtime_surface:
     else:
         shutil.copy2(source, target)
 PY
+
+  buddyswitch_workspace_neutralize_project_codex_config
 }
 
 buddyswitch_workspace_install_local_excludes() {

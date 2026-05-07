@@ -1237,6 +1237,12 @@ exec "$real_git" "$@"
             self.assertTrue((instance_root / "browser" / "chrome.log").exists())
             self.assertFalse((shared_root / "chrome" / "shared-browser").exists())
             self.assertFalse((shared_root / "run" / "browser-cockpit.pid").exists())
+            workspace_project_config = workspace_dir / ".codex" / "config.toml"
+            self.assertFalse(
+                workspace_project_config.exists(),
+                "product instance workspace must not keep project .codex/config.toml because it can override launcher-managed CODEX_HOME config",
+            )
+            self.assertTrue((instance_root / "codex-home" / "config.toml").exists())
             config_text = (instance_root / "codex-home" / "config.toml").read_text(encoding="utf-8")
             self._assert_codex_automation_config(config_text, shared_root=shared_root)
             self.assertIn("[mcp_servers.chrome-devtools-cockpit]", config_text)
@@ -2330,6 +2336,16 @@ plugins = false
             instance_id = "inst-pm-existing-config"
             instance_root, workspace_dir = self._write_instance_record(shared_root, instance_id, browser_port=9222)
             self._add_test_worktree(workspace_dir)
+            workspace_project_config = workspace_dir / ".codex" / "config.toml"
+            external_workspace_project_config = temp_root_path / "external-workspace-config.toml"
+            external_workspace_project_config.write_text(
+                'approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n',
+                encoding="utf-8",
+            )
+            workspace_project_config.parent.mkdir(parents=True, exist_ok=True)
+            workspace_project_config.unlink(missing_ok=True)
+            workspace_project_config.symlink_to(external_workspace_project_config)
+            self.assertTrue(workspace_project_config.is_symlink())
 
             source_codex_home = source_home_path / ".codex"
             source_codex_home.mkdir(parents=True, exist_ok=True)
@@ -2400,6 +2416,15 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             self.assertIn('args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]', config_text)
             self.assertIn('default_tools_approval_mode = "approve"', config_text)
             self.assertNotIn("supports_parallel_tool_calls", config_text)
+            self.assertFalse(
+                workspace_project_config.exists(),
+                "instance open must remove stale workspace project config before launching Codex",
+            )
+            self.assertTrue(external_workspace_project_config.exists())
+            self.assertEqual(
+                external_workspace_project_config.read_text(encoding="utf-8"),
+                'approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n',
+            )
 
             second_open_result = subprocess.run(
                 [str(LAUNCHER), "instance", "open", instance_id, "debug", "prompt-input", "continue again"],
@@ -2415,6 +2440,101 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             self._assert_codex_automation_config(repatched_config_text, shared_root=shared_root)
             self.assertEqual(repatched_config_text.count("[mcp_servers.chrome-devtools-cockpit]"), 1)
             self.assertEqual(repatched_config_text.count('default_tools_approval_mode = "approve"'), 1)
+            self.assertFalse(
+                workspace_project_config.exists(),
+                "instance open must keep workspace project config removed on repeated open",
+            )
+            self.assertTrue(external_workspace_project_config.exists())
+
+    def test_instance_open_unlinks_symlinked_workspace_codex_dir_without_touching_external_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_id = "inst-pm-codex-dir-symlink"
+            instance_root, workspace_dir = self._write_instance_record(shared_root, instance_id, browser_port=9222)
+            self._add_test_worktree(workspace_dir)
+
+            workspace_codex_dir = workspace_dir / ".codex"
+            external_codex_dir = temp_root_path / "external-codex-dir"
+            external_codex_dir.mkdir(parents=True, exist_ok=True)
+            external_workspace_project_config = external_codex_dir / "config.toml"
+            external_workspace_project_config.write_text(
+                'approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n',
+                encoding="utf-8",
+            )
+            shutil.rmtree(workspace_codex_dir)
+            workspace_codex_dir.symlink_to(external_codex_dir, target_is_directory=True)
+            self.assertTrue(workspace_codex_dir.is_symlink())
+
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            instance_codex_home = instance_root / "codex-home"
+            instance_codex_home.mkdir(parents=True, exist_ok=True)
+            (instance_codex_home / "config.toml").write_text(
+                """[skills.bundled]
+enabled = false
+
+[features]
+plugins = false
+""",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            ready_file = temp_root_path / "browser-ready.flag"
+            capture_path = temp_root_path / "capture-open-symlink-dir.json"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            open_result = subprocess.run(
+                [str(LAUNCHER), "instance", "open", instance_id, "debug", "prompt-input", "continue"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(open_result.returncode, 0, msg=open_result.stderr)
+            self.assertFalse(workspace_codex_dir.exists(), "instance open must unlink workspace .codex symlink")
+            self.assertFalse(workspace_codex_dir.is_symlink(), "workspace .codex symlink should be removed")
+            self.assertTrue(external_workspace_project_config.exists())
+            self.assertEqual(
+                external_workspace_project_config.read_text(encoding="utf-8"),
+                'approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n',
+            )
+
+            config_text = (instance_root / "codex-home" / "config.toml").read_text(encoding="utf-8")
+            self._assert_codex_automation_config(config_text, shared_root=shared_root)
 
     def test_instance_open_rejects_traversal_instance_id(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -3440,6 +3560,48 @@ exit 1
             )
             self.assertIn("Unknown top-level command: debug", debug_result.stderr)
             self.assertFalse(capture_path.exists(), "unknown top-level command must not invoke codex")
+
+    def test_non_instance_workspace_sync_keeps_repo_project_codex_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            runtime_lock = ROOT / "tools" / "launcher" / "runtime_lock.py"
+            runtime_agents_template = ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md"
+
+            repo_project_config = ROOT / ".codex" / "config.toml"
+            before = repo_project_config.read_text(encoding="utf-8")
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            env["BUDDYSWITCH_START_BUDDY"] = "pm"
+            env["BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE"] = str(runtime_agents_template)
+            env.pop("BUDDYSWITCH_INSTANCE_ID", None)
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(runtime_lock),
+                    "--shared-root",
+                    str(shared_root),
+                    "--",
+                    str(LAUNCHER),
+                    "__locked-workspace-sync",
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertIn("Workspace synced:", completed.stdout)
+            self.assertNotIn("BUDDYSWITCH_INSTANCE_ID", env)
+            self.assertTrue(repo_project_config.exists())
+            self.assertEqual(repo_project_config.read_text(encoding="utf-8"), before)
 
     def test_removed_cleanup_command_fails_closed_without_launching_codex(self) -> None:
         with tempfile.TemporaryDirectory() as source_home, tempfile.TemporaryDirectory() as temp_root:
