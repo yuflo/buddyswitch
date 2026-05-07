@@ -224,8 +224,10 @@ Cases:
    - Setup: existing track id in product session binding.
    - Expected: context contains `active_buddy="market"` and `current_track_id` equal to the PM-created track.
 
-3. Legacy command-shaped request remains rejected.
-   - Expected: prepare fails before reserving run.
+3. Switch-prefixed request text prepares as ordinary text.
+   - Input: `switch market: do competitor scan` in a PM-locked instance.
+   - Expected: context contains `active_buddy="pm"`, exact `request_text`, `current_task_id`, and `run_envelope.status="reserved"`.
+   - Expected: context has no selected skill packet, no switch router, no switch recommendation, and no reference switch field.
 
 4. Task/track binding conflict remains rejected.
    - Expected: prepare fails without creating an inconsistent task binding.

@@ -208,16 +208,79 @@ class TurnRuntimeBuddyRunTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("contributors", run_audit)
         self.assertNotIn("skill_id", run_audit)
 
-    def test_prepare_rejects_legacy_command_shaped_request_without_reservation(self) -> None:
+    def test_prepare_accepts_switch_prefixed_text_as_ordinary_request(self) -> None:
+        request_text = "switch market: do competitor scan"
+
         with patch.object(turn_runtime, "_load_product_mode_session", return_value=self._session(buddy="pm")):
-            payload = turn_runtime.prepare_turn_context(
-                "switch market: do competitor scan",
-                manifest_path=MANIFEST,
-            )
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["error"]["code"], "E_LEGACY_COMMAND_INPUT")
-        reserved = list(turn_runtime._reserved_run_path("placeholder").parent.glob("*.json"))  # type: ignore[attr-defined]
-        self.assertEqual(reserved, [])
+            payload = turn_runtime.prepare_turn_context(request_text, manifest_path=MANIFEST)
+
+        self.assertTrue(payload["ok"], msg=payload)
+        for required_key in (
+            "active_buddy",
+            "request_text",
+            "current_task_id",
+            "current_track_id",
+            "run_envelope",
+            "task_context",
+            "warnings",
+        ):
+            self.assertIn(required_key, payload)
+        self.assertEqual(payload["active_buddy"], "pm")
+        self.assertEqual(payload["request_text"], request_text)
+
+        run_envelope = payload["run_envelope"]
+        self.assertEqual(run_envelope["status"], "reserved")
+        self.assertEqual(run_envelope["turn_identity"]["active_buddy"], "pm")
+        self.assertEqual(run_envelope["turn_identity"]["request_text"], request_text)
+        self.assertEqual(run_envelope["turn_identity"]["instance_id"], "instance-test")
+
+        reservations = self._runtime_state_snapshot()["reservations"]
+        self.assertEqual(len(reservations), 1)
+        reservation = next(iter(reservations.values()))
+        self.assertEqual(reservation["run_id"], run_envelope["run_id"])
+        self.assertEqual(reservation["status"], "reserved")
+        self.assertEqual(reservation["turn_identity"]["active_buddy"], "pm")
+        self.assertEqual(reservation["turn_identity"]["request_text"], request_text)
+
+        turn_identity = run_envelope["turn_identity"]
+        forbidden_router_fields = (
+            "recommended" + "_switch",
+            "reference_" + "switches",
+            "selected_" + "skill",
+            "selected_" + "skill_id",
+            "selected_" + "skill_packet",
+            "command_" + "grammar",
+            "command_" + "name",
+        )
+        for field in forbidden_router_fields:
+            self.assertNotIn(field, payload)
+            self.assertNotIn(field, run_envelope)
+            self.assertNotIn(field, turn_identity)
+
+    def test_prepare_uses_locked_buddy_for_switch_prefixed_text(self) -> None:
+        cases = (
+            ("pm", "switch market: do competitor scan"),
+            ("market", "switch dev: summarize positioning gaps"),
+            ("dev", "switch pm: implement launcher cleanup"),
+        )
+
+        for session_buddy, request_text in cases:
+            with self.subTest(session_buddy=session_buddy, request_text=request_text):
+                before_count = len(self._runtime_state_snapshot()["reservations"])
+                with patch.object(
+                    turn_runtime,
+                    "_load_product_mode_session",
+                    return_value=self._session(buddy=session_buddy),
+                ):
+                    payload = turn_runtime.prepare_turn_context(request_text, manifest_path=MANIFEST)
+
+                self.assertTrue(payload["ok"], msg=payload)
+                self.assertEqual(payload["active_buddy"], session_buddy)
+                self.assertEqual(payload["request_text"], request_text)
+                self.assertEqual(payload["run_envelope"]["turn_identity"]["active_buddy"], session_buddy)
+                self.assertEqual(payload["run_envelope"]["turn_identity"]["request_text"], request_text)
+                self.assertEqual(payload["run_envelope"]["turn_identity"]["instance_id"], "instance-test")
+                self.assertEqual(len(self._runtime_state_snapshot()["reservations"]), before_count + 1)
 
     def test_prepare_rejects_task_track_binding_conflict_without_reservation(self) -> None:
         env_store.create_track(

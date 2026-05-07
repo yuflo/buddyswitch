@@ -327,20 +327,6 @@ def _ensure_no_legacy_outputs(demand: str) -> None:
         if match:
             raise ValueError(f"{LEGACY_OUTPUT_ERROR} Rejecting requested path '{match.group(1)}'.")
 
-
-def _is_legacy_command_shaped_request(request_text: str) -> bool:
-    stripped = request_text.lstrip()
-    if not stripped.lower().startswith("switch "):
-        return False
-    remainder = stripped[len("switch ") :]
-    colon_index = remainder.find(":")
-    if colon_index < 0:
-        return False
-    command_prefix = remainder[:colon_index].strip()
-    command_body = remainder[colon_index + 1 :].strip()
-    return bool(command_prefix and command_body)
-
-
 def _next_unique(base: str, existing: set[str]) -> str:
     if base not in existing:
         return base
@@ -942,11 +928,6 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
         return runtime_error(
             "E_PRODUCT_MODE_REQUIRED",
             "prepare-turn-context requires a launcher-managed buddy instance. Start a buddy instance and use an ordinary request.",
-        )
-    if _is_legacy_command_shaped_request(request_text):
-        return runtime_error(
-            "E_LEGACY_COMMAND_INPUT",
-            "This buddy instance accepts ordinary requests in the current locked buddy. Remove command syntax and submit an ordinary request.",
         )
 
     active_buddy = product_session["active_buddy"]

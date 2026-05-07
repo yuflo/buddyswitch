@@ -142,9 +142,15 @@ class RepoConsistencyTests(unittest.TestCase):
             "persist --skill-id",
             "persist-skill-result",
             "selected skill_id",
-            "selected_skill_packet",
-            "prepare_context.skills",
+            "selected_" + "skill_packet",
+            "prepare_context." + "skills",
             "instruction_path",
+            "recommended" + "_switch",
+            "reference_" + "switches",
+            "switch " + "<buddy>:",
+            "switch " + "pm:",
+            "switch " + "market:",
+            "switch " + "dev:",
         )
         for rel_path in tracked:
             path = ROOT / rel_path
