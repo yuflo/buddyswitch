@@ -3,12 +3,20 @@
 BuddySwitch is a runtime control layer used inside a host Codex session.
 The host executes native skills; BuddySwitch enforces boundaries and persists collaboration state.
 
+Capability source:
+
+- Env profiles under `buddyswitch/env-profiles/*.json` are the machine-readable authority.
+- `framework/contracts/buddy-env-profile.json` defines profile shape and enums.
+- Runtime `AGENTS.md` is context projection only, not permission source.
+
 ## Responsibilities
 
 BuddySwitch:
 
 - prepares turn context from locked instance metadata and ordinary `request_text`
 - loads buddy/skill metadata from `buddyswitch/manifest.toml`
+- loads and validates active buddy env profile from `buddyswitch/env-profiles`
+- compiles profile-derived filesystem/tool boundaries in launcher config
 - reserves one run id per prepared turn
 - validates buddy-run commit shape and write permissions
 - persists canonical task, artifact, track, and run state
@@ -22,9 +30,9 @@ Host Codex session:
 
 ## Canonical Flow
 
-1. `prepare-turn-context` via `scripts/turn_runtime.py prepare`
+1. `prepare-turn-context` via `scripts/turn_runtime.py prepare` (product mode routed through runtime broker)
 2. host execution of needed native skills inside the locked buddy session
-3. `persist-buddy-run` via `scripts/turn_runtime.py persist --context ... --result ...`
+3. `persist-buddy-run` via `scripts/turn_runtime.py persist --context ... --result ...` (product mode routed through runtime broker)
 
 If another turn is needed, use `receipt.next_state` or `receipt.handoff` to compose a new ordinary `request_text`, then run `prepare` again.
 
@@ -32,7 +40,9 @@ If another turn is needed, use `receipt.next_state` or `receipt.handoff` to comp
 
 - Product mode is locked to one buddy instance.
 - User text does not override active buddy binding.
+- Runtime broker is the only product-mode state writer.
 - Runtime writes happen only in canonical BuddySwitch object/run paths.
+- Raw state paths are broker-only from host sandbox perspective.
 - `persist` is the end-of-turn commit boundary.
 
 ## State Model

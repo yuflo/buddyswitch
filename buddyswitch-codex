@@ -8,8 +8,9 @@ WORKSPACE_HELPER="${REPO_ROOT}/tools/launcher/workspace.sh"
 BROWSER_HELPER="${REPO_ROOT}/tools/launcher/browser_cockpit.sh"
 INSTANCE_HELPER="${REPO_ROOT}/tools/launcher/instance.sh"
 CLEANUP_HELPER="${REPO_ROOT}/tools/launcher/cleanup.sh"
+RUNTIME_BROKER_HELPER="${REPO_ROOT}/tools/launcher/runtime_broker.sh"
 
-if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" ]]; then
+if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" ]]; then
   echo "Launcher helpers are missing under tools/launcher." >&2
   exit 1
 fi
@@ -19,6 +20,7 @@ source "${WORKSPACE_HELPER}"
 source "${BROWSER_HELPER}"
 source "${INSTANCE_HELPER}"
 source "${CLEANUP_HELPER}"
+source "${RUNTIME_BROKER_HELPER}"
 
 buddyswitch_env_init
 buddyswitch_browser_init_defaults
@@ -132,9 +134,11 @@ start_codex() {
 
   cd "${BUDDYSWITCH_WORKSPACE_DIR}"
   if [[ -n "${buddy}" ]]; then
+    export BUDDYSWITCH_RUNTIME_BROKER_SOCKET="$(buddyswitch_runtime_broker_socket)"
     BUDDYSWITCH_ACTIVE_BUDDY="${buddy}" \
     BUDDYSWITCH_INSTANCE_ID="${instance_id}" \
     BUDDYSWITCH_INSTANCE_JSON="${instance_json}" \
+    BUDDYSWITCH_RUNTIME_BROKER_SOCKET="${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" \
       buddyswitch_run_codex "$@" || codex_status=$?
 
     if ! buddyswitch_with_runtime_lock \
@@ -174,6 +178,7 @@ start_locked_bootstrap() {
   if [[ -n "${requested_buddy}" ]]; then
     buddyswitch_validate_buddy_id "${requested_buddy}" || return $?
     buddyswitch_validate_instance_id "${requested_instance_id}" || return $?
+    buddyswitch_require_env_profile "${requested_buddy}" || return $?
     buddyswitch_require_buddy_agents_template "${requested_buddy}" || return $?
     buddyswitch_env_bind_instance "${requested_instance_id}" || return $?
     buddyswitch_browser_allocate_instance_port
@@ -182,14 +187,22 @@ start_locked_bootstrap() {
   mkdir -p "${BUDDYSWITCH_RUN_STATE_DIR}"
   marker_path="$(buddyswitch_write_launcher_marker)"
 
+  buddyswitch_ensure_shared_env
   buddyswitch_workspace_prepare_execution_worktree
 
   if [[ -n "${requested_buddy}" ]]; then
     buddyswitch_workspace_ensure_project_worktree
     buddyswitch_workspace_repair_runtime_projects_app_projection
     buddyswitch_instance_activate "${requested_instance_id}" "${requested_buddy}" "inactive" >/dev/null
+    buddyswitch_runtime_broker_ensure
+    buddyswitch_patch_codex_config
   fi
-  buddyswitch_browser_bootstrap
+  if ! buddyswitch_browser_bootstrap; then
+    if [[ -n "${requested_buddy}" ]]; then
+      buddyswitch_runtime_broker_stop
+    fi
+    return 1
+  fi
   if [[ -n "${requested_buddy}" ]]; then
     buddyswitch_instance_set_browser_port "${requested_instance_id}" "${BUDDYSWITCH_BROWSER_PORT}"
     buddyswitch_instance_set_status "${requested_instance_id}" "active"
@@ -204,6 +217,8 @@ instance_set_inactive_locked() {
     return 2
   fi
   buddyswitch_validate_instance_id "${instance_id}" || return $?
+  buddyswitch_env_bind_instance "${instance_id}" || return $?
+  buddyswitch_runtime_broker_stop
   buddyswitch_instance_set_status "${instance_id}" "inactive"
 }
 
@@ -220,6 +235,7 @@ instance_open() {
   buddyswitch_validate_instance_id "${instance_id}" || return $?
   buddy="$(buddyswitch_instance_validate_record "${instance_id}")" || return $?
   buddyswitch_validate_buddy_id "${buddy}" || return 2
+  buddyswitch_require_env_profile "${buddy}" || return $?
   buddyswitch_env_bind_instance "${instance_id}" || return $?
 
   marker_pid="$$"
@@ -232,10 +248,12 @@ instance_open() {
 
   buddy="$(buddyswitch_instance_validate_record "${instance_id}")" || return $?
   buddyswitch_env_bind_instance "${instance_id}" || return $?
+  export BUDDYSWITCH_RUNTIME_BROKER_SOCKET="$(buddyswitch_runtime_broker_socket)"
   cd "${BUDDYSWITCH_WORKSPACE_DIR}"
   BUDDYSWITCH_ACTIVE_BUDDY="${buddy}" \
   BUDDYSWITCH_INSTANCE_ID="${instance_id}" \
   BUDDYSWITCH_INSTANCE_JSON="${BUDDYSWITCH_INSTANCE_JSON}" \
+  BUDDYSWITCH_RUNTIME_BROKER_SOCKET="${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" \
     buddyswitch_run_codex "$@" || codex_status=$?
 
   if ! buddyswitch_with_runtime_lock \
@@ -261,6 +279,7 @@ instance_open_locked_bootstrap() {
   buddyswitch_validate_instance_id "${instance_id}" || return $?
   buddy="$(buddyswitch_instance_validate_record "${instance_id}")" || return $?
   buddyswitch_validate_buddy_id "${buddy}" || return 2
+  buddyswitch_require_env_profile "${buddy}" || return $?
   buddyswitch_require_buddy_agents_template "${buddy}" || return $?
   buddyswitch_env_bind_instance "${instance_id}" || return $?
   browser_port="$(buddyswitch_instance_record_field "${instance_id}" "browser_port" || true)"
@@ -273,6 +292,7 @@ instance_open_locked_bootstrap() {
     echo "Instance open blocked: workspace is missing or invalid for ${instance_id}; delete this instance or start a new one." >&2
     return 3
   fi
+  buddyswitch_workspace_sync_runtime_surface
   if buddyswitch_instance_live_target_launcher_marker_exists "${instance_id}"; then
     echo "Instance open blocked: ${instance_id} is already active." >&2
     return 3
@@ -291,7 +311,12 @@ instance_open_locked_bootstrap() {
   buddyswitch_workspace_install_guardrail_hooks
   buddyswitch_workspace_ensure_project_worktree
   buddyswitch_workspace_repair_runtime_projects_app_projection
-  buddyswitch_browser_bootstrap
+  buddyswitch_runtime_broker_ensure
+  buddyswitch_patch_codex_config
+  if ! buddyswitch_browser_bootstrap; then
+    buddyswitch_runtime_broker_stop
+    return 1
+  fi
   buddyswitch_instance_set_browser_port "${instance_id}" "${BUDDYSWITCH_BROWSER_PORT}"
   buddyswitch_instance_set_status "${instance_id}" "active"
   buddyswitch_write_launcher_marker >/dev/null
@@ -340,6 +365,8 @@ instance_delete_locked() {
     return 2
   fi
   buddyswitch_validate_instance_id "${instance_id}" || return $?
+  buddyswitch_env_bind_instance "${instance_id}" || return $?
+  buddyswitch_runtime_broker_stop
   instance_root="$(buddyswitch_instance_require_safe_delete_root "${instance_id}")" || return $?
   buddyswitch_instance_validate_record "${instance_id}" >/dev/null || return $?
 
@@ -361,7 +388,7 @@ instance_delete_locked() {
   fi
 
   buddyswitch_workspace_remove_registered_worktrees_under_strict "${instance_root}" || return $?
-  rm -rf "${instance_root}"
+  buddyswitch_workspace_force_remove_path "${instance_root}"
   echo "Instance deleted: ${instance_id}"
 }
 
@@ -451,7 +478,7 @@ reset_shared_env_locked() {
 
   if [[ -d "${BUDDYSWITCH_SHARED_ROOT}" ]]; then
     buddyswitch_workspace_remove_registered_worktrees_under "${BUDDYSWITCH_SHARED_ROOT}"
-    rm -rf "${BUDDYSWITCH_SHARED_ROOT}"
+    buddyswitch_workspace_force_remove_path "${BUDDYSWITCH_SHARED_ROOT}"
     echo "Reset complete: removed ${BUDDYSWITCH_SHARED_ROOT}"
   else
     echo "Nothing to reset: ${BUDDYSWITCH_SHARED_ROOT} does not exist"

@@ -61,6 +61,22 @@ Terminal final output must follow `Receipt -> Summary`:
 - This buddy can read track context and write design artifacts through the resolved task.
 - Do not directly mutate track lifecycle state fields.
 
+## Runtime Env Boundary
+
+- Project source access: `project.access=read-only` (`projects/app` is live but not writable).
+- Scratch root: `runs/raw/design/`.
+- Raw state: broker-only (`buddyswitch/objects/**`, `buddyswitch/content/runs/**` are not direct-edit paths).
+- Active skills only: runtime materializes Design skill set only under `.agents/skills`.
+- Rejected runtime writes or persist actions must not be bypassed.
+
+## State Authority
+
+- Artifact kinds are manifest/profile bounded (`from-manifest`).
+- Task effects are limited to `status` and `summary` on the current prepared task.
+- Track lifecycle mutations are not authorized for Design.
+- Handoff targets must be manifest buddies.
+- Design output should hand off source implementation to Dev.
+
 ## Default BuddySwitch State
 
 - `buddyswitch/objects/tasks/<task-id>.json`

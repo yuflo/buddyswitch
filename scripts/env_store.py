@@ -14,11 +14,17 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OBJECTS_ROOT = ROOT / "buddyswitch" / "objects"
+_RAW_STATE_ROOT = os.environ.get("BUDDYSWITCH_STATE_ROOT")
+if isinstance(_RAW_STATE_ROOT, str) and _RAW_STATE_ROOT.strip():
+    STATE_ROOT = Path(_RAW_STATE_ROOT.strip()).expanduser().resolve(strict=False)
+else:
+    STATE_ROOT = ROOT
+
+OBJECTS_ROOT = STATE_ROOT / "buddyswitch" / "objects"
 TRACKS_DIR = OBJECTS_ROOT / "tracks"
 TASKS_DIR = OBJECTS_ROOT / "tasks"
 ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
-CONTENT_ROOT = ROOT / "buddyswitch" / "content"
+CONTENT_ROOT = STATE_ROOT / "buddyswitch" / "content"
 RUN_CONTENT_DIR = CONTENT_ROOT / "runs"
 RUNTIME_WORKSPACE_AGENTS_HEADER = "# BuddySwitch Runtime Workspace"
 VALID_TRACK_STATUS = ("active", "blocked", "done", "archived")
@@ -31,7 +37,12 @@ def now_iso() -> str:
 
 
 def rel(path: Path) -> str:
-    return path.relative_to(ROOT).as_posix()
+    for candidate_root in (ROOT, STATE_ROOT):
+        try:
+            return path.relative_to(candidate_root).as_posix()
+        except ValueError:
+            continue
+    return path.as_posix()
 
 
 def runtime_workspace_agents_file(root: Path | None = None) -> Path:
@@ -889,7 +900,7 @@ def _legacy_delete_all_artifacts(*, delete_files: bool = False, dry_run: bool = 
 
 def _legacy_save_run_content(run_id: str, payload: dict[str, Any]) -> str:
     ensure_runtime_dirs()
-    path = ROOT / run_content_path(run_id)
+    path = STATE_ROOT / run_content_path(run_id)
     _write_json(path, payload)
     return rel(path)
 

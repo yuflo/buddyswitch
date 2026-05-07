@@ -1,0 +1,43 @@
+{
+  "contract_id": "buddy-env-profile",
+  "contract_version": "2026-05-06",
+  "top_level_key_order": [
+    "buddy_id",
+    "contract_path",
+    "project",
+    "scratch",
+    "filesystem_capability",
+    "state_capability",
+    "tool_capability",
+    "context_projection"
+  ],
+  "required_top_level_keys": [
+    "buddy_id",
+    "contract_path",
+    "project",
+    "scratch",
+    "filesystem_capability",
+    "state_capability",
+    "tool_capability",
+    "context_projection"
+  ],
+  "enums": {
+    "project.visibility": ["live"],
+    "project.access": ["read-only", "write"],
+    "filesystem_capability.project_workspace": ["read-only", "write"],
+    "filesystem_capability.raw_state": ["broker-only"],
+    "state_capability.artifact_kinds": ["from-manifest"],
+    "state_capability.handoff_targets": ["manifest-buddies"],
+    "tool_capability.browser_cockpit": ["required", "available", "unavailable"],
+    "tool_capability.market_research_evidence": ["required", "not-required"],
+    "tool_capability.ordinary_web_fallback": ["available", "user-approved-only"],
+    "context_projection.agents_md": ["from-profile-and-contract"],
+    "context_projection.skills": ["active-buddy-only"]
+  },
+  "non_goals": [
+    "generic permission DSL",
+    "workflow engine",
+    "raw state access for host process",
+    "prompt-only permission source"
+  ]
+}

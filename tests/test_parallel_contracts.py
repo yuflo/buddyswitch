@@ -65,6 +65,7 @@ EXPECTED_PERSIST_BUDDY_RUN_CONTRACT = {
         "state_effects",
         "handoff",
         "contributors",
+        "tool_evidence",
     ],
     "receipt_required_keys": [
         "ok",

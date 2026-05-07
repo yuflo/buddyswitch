@@ -75,6 +75,23 @@ Bad example:
 - Do not directly mutate track `status/current_buddy/next_buddy/task_ids`.
 - Use an explicit turn-context track target or existing task binding when test output belongs to a specific track.
 
+## Runtime Env Boundary
+
+- Project source access: `project.access=read-only` (`projects/app` is live but not writable).
+- Test buddy must not edit source, tests, fixtures, snapshots, or generated source under `projects/app`.
+- Scratch root: `runs/raw/test/`.
+- Raw state: broker-only (`buddyswitch/objects/**`, `buddyswitch/content/runs/**` are not direct-edit paths).
+- Active skills only: runtime materializes Test skill set only under `.agents/skills`.
+- Rejected runtime writes or persist actions must not be bypassed.
+
+## State Authority
+
+- Artifact kinds are manifest/profile bounded (`from-manifest`).
+- Task effects are limited to `status` and `summary` on the current prepared task.
+- Track lifecycle mutations are not authorized for Test.
+- Handoff targets must be manifest buddies.
+- Source or test code fixes should hand off to Dev instead of direct edits.
+
 ## Default BuddySwitch State
 
 - `buddyswitch/objects/tasks/<task-id>.json`

@@ -125,6 +125,7 @@ class TurnRuntimeBuddyRunTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         context: dict[str, object],
         result: dict[str, object],
         session_buddy: str,
+        broker_mode: str = "server",
     ) -> tuple[int, dict[str, object]]:
         raw_dir = self._runtime_path("runs/raw")
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -139,12 +140,34 @@ class TurnRuntimeBuddyRunTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         session = self._session(buddy=session_buddy, payload={})
         stdout = io.StringIO()
+        env_patch = {"BUDDYSWITCH_RUNTIME_BROKER_MODE": broker_mode}
         with (
             patch.object(turn_runtime, "_load_product_mode_session", return_value=session),
             patch.object(turn_runtime, "_hold_product_runtime_lock", side_effect=lambda _: contextlib.nullcontext()),
+            patch.dict(os.environ, env_patch, clear=False),
             patch("sys.stdout", new=stdout),
         ):
             exit_code = turn_runtime._cmd_persist(args)
+        payload = json.loads(stdout.getvalue())
+        return exit_code, payload
+
+    def _prepare_via_cmd(
+        self,
+        *,
+        request_text: str,
+        session_buddy: str,
+        broker_mode: str = "server",
+    ) -> tuple[int, dict[str, object]]:
+        args = argparse.Namespace(text=request_text, manifest=MANIFEST)
+        session = self._session(buddy=session_buddy, payload={})
+        stdout = io.StringIO()
+        env_patch = {"BUDDYSWITCH_RUNTIME_BROKER_MODE": broker_mode}
+        with (
+            patch.object(turn_runtime, "_load_product_mode_session", return_value=session),
+            patch.dict(os.environ, env_patch, clear=False),
+            patch("sys.stdout", new=stdout),
+        ):
+            exit_code = turn_runtime._cmd_prepare(args)
         payload = json.loads(stdout.getvalue())
         return exit_code, payload
 
@@ -450,6 +473,62 @@ class TurnRuntimeBuddyRunTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not allowed"):
             turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
 
+    def test_rejects_non_pm_track_lifecycle_actions_before_writes(self) -> None:
+        cases = [
+            (
+                "design",
+                "advance",
+                {
+                    "kind": "design-handoff",
+                    "title": "Design Handoff",
+                    "summary": "Design output.",
+                    "content": {"design_goal": "ship a clear page"},
+                },
+            ),
+            (
+                "dev",
+                "archive",
+                {
+                    "kind": "implementation-report",
+                    "title": "Implementation Report",
+                    "summary": "Dev output.",
+                    "content": {"implementation_notes": ["changed source"]},
+                },
+            ),
+            (
+                "test",
+                "update",
+                {
+                    "kind": "test-report",
+                    "title": "Test Report",
+                    "summary": "Test output.",
+                    "content": {"checks_run": ["smoke"], "readiness": "ready-for-pm-review"},
+                },
+            ),
+        ]
+        for buddy, action, artifact in cases:
+            with self.subTest(buddy=buddy, action=action):
+                context = self._prepare(f"{buddy} request", buddy=buddy)
+                invalid = {
+                    "execution_summary": f"{buddy} attempted unauthorized track lifecycle mutation.",
+                    "artifacts": [artifact],
+                    "state_effects": {
+                        "track": {
+                            "action": action,
+                            "track_id": f"track-{buddy}-illegal",
+                            "title": f"{buddy} Illegal Track",
+                            "status": "active",
+                            "current_buddy": buddy,
+                        }
+                    },
+                }
+                state_before = self._runtime_state_snapshot()
+
+                with self.assertRaisesRegex(ValueError, "not allowed"):
+                    turn_runtime.persist_buddy_run(context, result=invalid, manifest_path=MANIFEST)
+
+                self._assert_runtime_state_unchanged(state_before, self._runtime_state_snapshot())
+
     def test_rejects_handoff_to_unknown_buddy_before_writes(self) -> None:
         context = self._prepare(PM_REQUEST, buddy="pm")
         invalid = _pm_commit()
@@ -535,6 +614,82 @@ class TurnRuntimeBuddyRunTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("buddy mismatch", payload["error"]["message"])
         state_after = self._runtime_state_snapshot()
         self._assert_runtime_state_unchanged(state_before, state_after)
+
+    def test_product_mode_prepare_without_broker_returns_unavailable(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "BUDDYSWITCH_INSTANCE_ID": "instance-test",
+                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "",
+            },
+            clear=False,
+        ):
+            exit_code, payload = self._prepare_via_cmd(
+                request_text=PM_REQUEST,
+                session_buddy="pm",
+                broker_mode="",
+            )
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "E_RUNTIME_BROKER_UNAVAILABLE")
+
+    def test_product_mode_prepare_routes_through_broker_payload(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "BUDDYSWITCH_INSTANCE_ID": "instance-test",
+                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "/tmp/runtime-broker.sock",
+            },
+            clear=False,
+        ):
+            with patch.object(
+                turn_runtime,
+                "request_runtime_broker",
+                return_value={"ok": True, "payload": {"ok": True, "prepared_context": True}},
+            ) as broker_call:
+                exit_code, payload = self._prepare_via_cmd(
+                    request_text=PM_REQUEST,
+                    session_buddy="pm",
+                    broker_mode="",
+                )
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["prepared_context"])
+        self.assertNotIn("payload", payload)
+        broker_call.assert_called_once_with("prepare", {"text": PM_REQUEST})
+
+    def test_product_mode_persist_routes_through_broker_instead_of_direct_write(self) -> None:
+        context = self._prepare(PM_REQUEST, buddy="pm")
+        with patch.dict(
+            os.environ,
+            {
+                "BUDDYSWITCH_INSTANCE_ID": "instance-test",
+                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "/tmp/runtime-broker.sock",
+            },
+            clear=False,
+        ):
+            with (
+                patch.object(
+                    turn_runtime,
+                    "request_runtime_broker",
+                    return_value={"ok": True, "payload": {"ok": True, "delegated": True}},
+                ) as broker_call,
+                patch.object(turn_runtime, "persist_buddy_run", side_effect=AssertionError("direct path should not run")),
+            ):
+                exit_code, payload = self._persist_via_cmd(
+                    context=context,
+                    result=_pm_commit(),
+                    session_buddy="pm",
+                    broker_mode="",
+                )
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["delegated"])
+        self.assertNotIn("payload", payload)
+        broker_call.assert_called_once()
 
     def test_contributor_skill_string_is_persisted_as_audit_metadata(self) -> None:
         context = self._prepare("实现并汇总开发结果", buddy="dev")

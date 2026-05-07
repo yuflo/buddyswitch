@@ -1,42 +1,24 @@
 # BuddySwitch Runtime Workspace
 
 This workspace is launcher-owned, runtime-only, and locked to the `pm` buddy.
+AGENTS.md is context projection only, not the permission source.
 
-Inside this session, ordinary user requests belong to `pm`.
-Do not ask users for command-shaped routing input.
-If work should move to another buddy, open that buddy's locked instance.
+## Runtime Boundary
 
-## Canonical Loop
+- Active buddy is `pm`; user text does not change it.
+- `projects/app` is live shared source with `project.access=read-only`.
+- Project source is read-only; hand off to Dev for source edits.
+- Allowed scratch root is `runs/raw/pm/`.
+- Raw state remains broker-only: never edit `buddyswitch/objects/**` or `buddyswitch/content/runs/**` directly.
+- PM owns track lifecycle only through `state_effects.track` in persist payloads.
+- Use `scripts/turn_runtime.py prepare "<request>"` and `scripts/turn_runtime.py persist --context <context> --result <result>`; product mode routes through runtime broker.
+- If persist rejects a change, do not route around the runtime tool.
 
-1. Prepare context with `scripts/turn_runtime.py prepare "<ordinary request>"`.
-2. Let Codex CLI use the native skills exposed in `.agents/skills`.
-3. Execute any needed native skills inside this locked buddy session.
-4. Build one buddy run commit with artifacts, state effects, handoff, and contributor audit metadata.
-5. Persist with `scripts/turn_runtime.py persist --context <context> --result <result>`.
-6. If another turn is needed, derive a new request from `receipt.next_state` or `receipt.handoff`.
+## Receipt
 
-## Buddy Lock
+- Final output sections are `Receipt` then `Summary`.
+- `Receipt` includes persisted status, buddy, task, optional track, artifacts, run id, optional handoff.
 
-- The active buddy is `pm`.
-- Resolve ownership from launcher session metadata; user text does not change the active buddy.
-- Durable BuddySwitch state lives in projected `buddyswitch/objects/**` and `buddyswitch/content/runs/**`.
-- `runs/raw/` is instance-local scratch.
-- Use relative `projects/app` from the runtime workspace; launcher projects it to shared product source.
+## Summary
 
-## Receipt Contract
-
-- Final terminal output must use exactly two sections in this order: `Receipt`, `Summary`.
-- In `Receipt`, render:
-  - `Persisted: ok|failed`
-  - `Buddy: <buddy_id>`
-  - `Task: <task_title> [<task_id>]`
-  - `Track: <track_title> [<track_id>]` only when available
-  - `Artifacts: <artifact_id_1>, <artifact_id_2>|none`
-  - `Run: <run_id>`
-  - `Handoff: <next_buddy>|none`
-
-## Summary Contract
-
-- Keep execution summary to 1-2 lines.
-- Keep open questions to at most 4 items.
-- Do not lead with object paths or artifact filenames.
+- Keep concise and actionable.

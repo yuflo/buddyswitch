@@ -8,6 +8,11 @@ Runtime instances materialize active buddy skills under `.agents/skills`.
 BuddySwitch does not open browser tools itself; Codex executes native skills while BuddySwitch remains the control layer.
 `prepare` provides context and run envelope only; Codex handles native skill discovery/execution.
 
+Env profile source of truth:
+
+- Market profile (`buddyswitch/env-profiles/market.json`) sets `browser_cockpit=required`.
+- PM/Design/Dev/Test profiles set `browser_cockpit=available` (non-launch-blocking).
+
 ## Per-Run Contract
 
 - The host may execute one or more `market` native skills within one prepared buddy run.
@@ -40,6 +45,13 @@ All six market skills use the same browser runtime contract:
 - `session_continuity = "instance-cockpit"`
 - `evidence_capture_level = "medium"`
 
+## Evidence Gate
+
+- First executable proof loop is broker-issued `browser-cockpit-preflight` token.
+- Market artifact-producing persist requires broker-issued token evidence, or broker-issued `approved-downgrade`.
+- Approved downgrade must include explicit reason and is recorded in run audit `tool_evidence`.
+- Hand-written token strings are rejected by persist validation.
+
 ## Runtime Rules
 
 1. Instance-bound headed cockpit
@@ -65,6 +77,8 @@ All six market skills use the same browser runtime contract:
 
 - Preferred product-mode path: run `./buddyswitch-codex instance start --buddy <buddy>`.
 - Buddy-locked `instance start` bootstraps the active instance home, ensures the instance-bound headed cockpit endpoint, ensures `chrome-devtools-cockpit`, and then launches Codex.
+- Market (`browser_cockpit=required`) treats browser bootstrap failure as launch-blocking.
+- PM/Design/Dev/Test (`browser_cockpit=available`) may continue with warning when browser endpoint is unavailable.
 - The launcher patches all enabled MCP servers with `default_tools_approval_mode = "approve"` to keep product-mode runs moving without per-tool MCP approval prompts.
 - Do not set `supports_parallel_tool_calls = true` for the browser cockpit path; browser pages, active tabs, login state, and DOM reads are shared state and must stay serial.
 - `./buddyswitch-codex env browser status` and `./buddyswitch-codex env browser ensure --instance <instance-id>` are debug or compatibility commands outside the normal buddy-locked product-mode path.

@@ -53,6 +53,7 @@ class RuntimeWorkspaceSandbox:
         content_root = self.root / "buddyswitch" / "content"
         patches = [
             patch.object(env_store, "ROOT", self.root),
+            patch.object(env_store, "STATE_ROOT", self.root),
             patch.object(env_store, "OBJECTS_ROOT", objects_root),
             patch.object(env_store, "TRACKS_DIR", objects_root / "tracks"),
             patch.object(env_store, "TASKS_DIR", objects_root / "tasks"),

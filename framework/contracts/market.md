@@ -162,6 +162,24 @@ Bad example:
 - Do not directly mutate track status/current/next/task_ids.
 - Use an explicit turn-context track target or existing task binding when research output belongs to a specific track.
 
+## Runtime Env Boundary
+
+- Project source access: `project.access=read-only` (`projects/app` is live but not writable).
+- Scratch root: `runs/raw/market/`.
+- Raw state: broker-only (`buddyswitch/objects/**`, `buddyswitch/content/runs/**` are not direct-edit paths).
+- Active skills only: runtime materializes Market skill set only under `.agents/skills`.
+- Browser cockpit is required for Market artifact-producing research commits.
+- Market artifact-producing persists require broker-issued browser evidence token or broker-issued approved downgrade token.
+- Ordinary web fallback is `user-approved-only`; do not silently downgrade.
+- Rejected runtime writes or persist actions must not be bypassed.
+
+## State Authority
+
+- Artifact kinds are manifest/profile bounded (`from-manifest`).
+- Task effects are limited to `status` and `summary` on the current prepared task.
+- Track lifecycle mutations are not authorized for Market.
+- Handoff targets must be manifest buddies.
+
 ## Default BuddySwitch State
 
 - `buddyswitch/objects/tasks/<task-id>.json`

@@ -434,14 +434,82 @@ buddyswitch_browser_ensure_cockpit_endpoint() {
   return 1
 }
 
+buddyswitch_browser_active_buddy() {
+  local buddy
+  buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
+  if [[ -n "${buddy}" ]]; then
+    printf '%s\n' "${buddy}"
+    return 0
+  fi
+  if [[ -n "${BUDDYSWITCH_INSTANCE_JSON:-}" && -f "${BUDDYSWITCH_INSTANCE_JSON}" ]]; then
+    python3 - "${BUDDYSWITCH_INSTANCE_JSON}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+buddy = payload.get("buddy")
+if isinstance(buddy, str) and buddy.strip():
+    print(buddy.strip())
+PY
+    return 0
+  fi
+  return 1
+}
+
+buddyswitch_browser_profile_capability() {
+  local buddy_id="${1:-}"
+  if [[ -z "${buddy_id}" ]]; then
+    return 1
+  fi
+  python3 - "${BUDDYSWITCH_REPO_ROOT}" "${buddy_id}" <<'PY'
+import sys
+from pathlib import Path
+
+repo_root = Path(sys.argv[1])
+buddy_id = sys.argv[2]
+sys.path.insert(0, str(repo_root / "scripts"))
+import env_profiles  # noqa: E402
+
+profile = env_profiles.require_env_profile(
+    buddy_id,
+    manifest_path=repo_root / "buddyswitch" / "manifest.toml",
+    repo_root=repo_root,
+)
+capability = profile["tool_capability"]["browser_cockpit"]
+print(capability)
+PY
+}
+
 buddyswitch_browser_bootstrap() {
+  local strict_mode active_buddy capability require_browser
   buddyswitch_browser_init_defaults
   buddyswitch_ensure_shared_env
   if ! buddyswitch_browser_is_instance_mode; then
     buddyswitch_browser_ensure_general_mcp
   fi
-  buddyswitch_browser_ensure_cockpit_endpoint
-  buddyswitch_browser_ensure_cockpit_mcp
+  strict_mode="${BUDDYSWITCH_BROWSER_ENSURE_STRICT:-0}"
+  require_browser=1
+  if [[ "${strict_mode}" != "1" ]] && buddyswitch_browser_is_instance_mode; then
+    active_buddy="$(buddyswitch_browser_active_buddy || true)"
+    if [[ -n "${active_buddy}" ]]; then
+      capability="$(buddyswitch_browser_profile_capability "${active_buddy}" || true)"
+      if [[ "${capability}" == "available" ]]; then
+        require_browser=0
+      fi
+    fi
+  fi
+
+  if buddyswitch_browser_ensure_cockpit_endpoint; then
+    buddyswitch_browser_ensure_cockpit_mcp
+    return 0
+  fi
+
+  if [[ "${require_browser}" -eq 1 ]]; then
+    return 1
+  fi
+  echo "Warning: browser cockpit unavailable for non-required buddy; continuing without cockpit endpoint." >&2
+  return 0
 }
 
 buddyswitch_browser_main() {
@@ -494,7 +562,7 @@ buddyswitch_browser_main() {
       buddyswitch_browser_status
       ;;
     ensure)
-      buddyswitch_browser_bootstrap
+      BUDDYSWITCH_BROWSER_ENSURE_STRICT=1 buddyswitch_browser_bootstrap
       ;;
     help)
       buddyswitch_browser_usage

@@ -24,6 +24,7 @@ from env_manifest import (
     load_manifest,
     require_buddy,
 )
+import env_profiles
 import env_store
 from env_store import (
     add_run_to_task,
@@ -45,7 +46,9 @@ from env_store import (
     slugify,
     update_track,
 )
+from runtime_kernel.client import RuntimeBrokerError, request_runtime_broker
 ROOT = env_store.ROOT
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 TRACK_ACTIONS = ("create", "update", "advance", "archive")
@@ -475,7 +478,7 @@ def _assert_run_id_unused(run_id: str) -> None:
     normalized_run_id = run_id.strip()
     if any(normalized_run_id in task.get("run_ids", []) for task in list_tasks()):
         raise ValueError(f"run_id already committed: {normalized_run_id}")
-    if (env_store.ROOT / run_content_path(normalized_run_id)).exists():
+    if (env_store.STATE_ROOT / run_content_path(normalized_run_id)).exists():
         raise ValueError(f"run_id already committed: {normalized_run_id}")
 
 
@@ -492,7 +495,7 @@ def _artifact_object_path(artifact_id: str) -> str:
 
 
 def _reserved_run_path(run_id: str) -> Path:
-    return env_store.ROOT / "buddyswitch" / "content" / "runs" / "reserved" / f"{run_id}.json"
+    return env_store.CONTENT_ROOT / "runs" / "reserved" / f"{run_id}.json"
 
 
 def _write_runtime_json(path: Path, payload: dict[str, Any]) -> None:
@@ -502,6 +505,111 @@ def _write_runtime_json(path: Path, payload: dict[str, Any]) -> None:
         handle.write(serialized)
         temp_name = handle.name
     os.replace(temp_name, path)
+
+
+def _runtime_evidence_token_root() -> Path | None:
+    raw_instance_json = os.environ.get("BUDDYSWITCH_INSTANCE_JSON")
+    if not isinstance(raw_instance_json, str) or not raw_instance_json.strip():
+        return None
+    instance_json = Path(raw_instance_json.strip())
+    if not instance_json.exists():
+        return None
+    return instance_json.parent / "runtime" / "evidence-tokens"
+
+
+def _load_evidence_token_record(*, token: str, run_id: str) -> dict[str, Any] | None:
+    root = _runtime_evidence_token_root()
+    if root is None:
+        return None
+    token_path = root / run_id / f"{token}.json"
+    if not token_path.exists():
+        return None
+    payload = json.loads(token_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"invalid evidence token record: {token_path}")
+    return payload
+
+
+def _validate_market_tool_evidence(
+    *,
+    context: dict[str, Any],
+    result: dict[str, Any],
+    env_profile: dict[str, Any],
+    active_buddy: str,
+) -> dict[str, Any] | None:
+    tool_capability = env_profile.get("tool_capability")
+    if not isinstance(tool_capability, dict):
+        raise ValueError("env profile tool_capability must be an object")
+    evidence_required = tool_capability.get("market_research_evidence") == "required"
+    if not evidence_required:
+        return None
+
+    # Evidence gate is enforced in runtime broker-backed product mode.
+    if _runtime_evidence_token_root() is None:
+        return None
+
+    artifacts = result.get("artifacts")
+    has_artifacts = isinstance(artifacts, list) and len(artifacts) > 0
+    if not has_artifacts:
+        return None
+
+    tool_evidence = result.get("tool_evidence")
+    if not isinstance(tool_evidence, dict):
+        raise ValueError("Market persist requires tool_evidence with broker-issued token")
+
+    browser_token = tool_evidence.get("browser_cockpit_token")
+    downgrade_token = tool_evidence.get("approved_downgrade_token")
+    browser_value = browser_token.strip() if isinstance(browser_token, str) and browser_token.strip() else None
+    downgrade_value = downgrade_token.strip() if isinstance(downgrade_token, str) and downgrade_token.strip() else None
+    if bool(browser_value) == bool(downgrade_value):
+        raise ValueError("Market tool_evidence must include exactly one broker-issued token")
+
+    run_envelope = context.get("run_envelope")
+    if not isinstance(run_envelope, dict):
+        raise ValueError("run_envelope is required for market evidence validation")
+    run_id = run_envelope.get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("run_envelope.run_id is required for market evidence validation")
+    run_id = run_id.strip()
+    context_revision = context.get("context_revision")
+    if not isinstance(context_revision, str) or not context_revision.strip():
+        raise ValueError("context_revision is required for market evidence validation")
+    context_revision = context_revision.strip()
+    instance_id = context.get("instance_id")
+    if not isinstance(instance_id, str) or not instance_id.strip():
+        raise ValueError("instance_id is required for market evidence validation")
+    instance_id = instance_id.strip()
+
+    token_value = browser_value or downgrade_value or ""
+    record = _load_evidence_token_record(token=token_value, run_id=run_id)
+    if record is None:
+        raise ValueError("Market tool_evidence token was not issued by runtime broker for this run")
+
+    expected_mode = "browser-cockpit-preflight" if browser_value else "approved-downgrade"
+    if record.get("mode") != expected_mode:
+        raise ValueError("Market tool_evidence token mode mismatch")
+    if record.get("run_id") != run_id:
+        raise ValueError("Market tool_evidence token run_id mismatch")
+    if record.get("context_revision") != context_revision:
+        raise ValueError("Market tool_evidence token context revision mismatch")
+    if record.get("instance_id") != instance_id:
+        raise ValueError("Market tool_evidence token instance id mismatch")
+    if record.get("buddy_id") != active_buddy:
+        raise ValueError("Market tool_evidence token buddy mismatch")
+
+    normalized: dict[str, Any] = {
+        "kind": expected_mode,
+        "token": token_value,
+        "issued_at": record.get("issued_at"),
+    }
+    if expected_mode == "browser-cockpit-preflight" and isinstance(record.get("browser_url"), str):
+        normalized["browser_url"] = record.get("browser_url")
+    if expected_mode == "approved-downgrade":
+        reason = record.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("approved downgrade token record must include non-empty reason")
+        normalized["reason"] = reason.strip()
+    return normalized
 
 
 def _normalize_turn_identity(turn_identity: dict[str, Any]) -> dict[str, Any]:
@@ -520,7 +628,7 @@ def _normalize_turn_identity(turn_identity: dict[str, Any]) -> dict[str, Any]:
 
 
 def _scan_task_recent_runs(task_id: str, *, limit: int = 3) -> list[dict[str, Any]]:
-    run_root = env_store.ROOT / "buddyswitch" / "content" / "runs"
+    run_root = env_store.RUN_CONTENT_DIR
     if not run_root.exists():
         return []
     rows: list[dict[str, Any]] = []
@@ -637,7 +745,7 @@ def _build_track_context(track_id: str | None) -> dict[str, Any] | None:
 
 
 def _scan_track_recent_handoffs(track_id: str, *, limit: int = 5) -> list[dict[str, Any]]:
-    run_root = env_store.ROOT / "buddyswitch" / "content" / "runs"
+    run_root = env_store.RUN_CONTENT_DIR
     if not run_root.exists():
         return []
     rows: list[dict[str, Any]] = []
@@ -1107,6 +1215,7 @@ def _validate_state_effects(
     *,
     state_effects: Any,
     buddy: dict[str, Any],
+    env_profile: dict[str, Any],
     task: dict[str, Any],
     explicit_track_id: str | None,
     known_buddies: set[str],
@@ -1133,10 +1242,13 @@ def _validate_state_effects(
         action = track_effect.get("action")
         if action not in TRACK_ACTIONS:
             raise ValueError("state_effects.track.action must be one of create/update/advance/archive")
-        permission = f"track.{action}"
-        buddy_permissions = set(buddy.get("permissions", []))
-        if permission not in buddy_permissions:
-            raise ValueError(f"buddy '{buddy.get('id')}' is not allowed to perform '{permission}'")
+        allowed_track_effects = env_profile.get("state_capability", {}).get("track_effects")
+        if not isinstance(allowed_track_effects, list):
+            raise ValueError("env profile state_capability.track_effects must be a list")
+        if action not in allowed_track_effects:
+            raise ValueError(
+                f"buddy '{buddy.get('id')}' is not allowed to perform track action '{action}'"
+            )
 
         normalized_track = {"action": action}
         for key in ("track_id", "title", "status", "current_buddy", "next_buddy", "summary"):
@@ -1198,7 +1310,10 @@ def _validate_state_effects(
     if task_effect is not None:
         if not isinstance(task_effect, dict):
             raise ValueError("state_effects.task must be an object")
-        allowed_task_keys = {"status", "summary"}
+        allowed_task_effects = env_profile.get("state_capability", {}).get("task_effects")
+        if not isinstance(allowed_task_effects, list):
+            raise ValueError("env profile state_capability.task_effects must be a list")
+        allowed_task_keys = set(allowed_task_effects)
         unsupported_task_keys = sorted(key for key in task_effect if key not in allowed_task_keys)
         if unsupported_task_keys:
             raise ValueError(
@@ -1332,6 +1447,7 @@ def _validate_buddy_run_commit(
     result: dict[str, Any],
     manifest: dict[str, Any],
     buddy: dict[str, Any],
+    env_profile: dict[str, Any],
     task: dict[str, Any],
     current_track_id: str | None,
 ) -> dict[str, Any]:
@@ -1350,6 +1466,11 @@ def _validate_buddy_run_commit(
         normalized_working_notes = _require_string_list(working_notes, "working_notes")
 
     known_buddies = _known_buddy_ids(manifest)
+    profile_state_capability = env_profile.get("state_capability")
+    if not isinstance(profile_state_capability, dict):
+        raise ValueError("env profile state_capability must be an object")
+    if profile_state_capability.get("artifact_kinds") != "from-manifest":
+        raise ValueError("env profile must declare state_capability.artifact_kinds=from-manifest")
     allowed_kinds = {
         kind
         for kind in buddy.get("artifact_kinds", [])
@@ -1360,6 +1481,7 @@ def _validate_buddy_run_commit(
     normalized_track_effect, normalized_task_effect = _validate_state_effects(
         state_effects=result.get("state_effects"),
         buddy=buddy,
+        env_profile=env_profile,
         task=task,
         explicit_track_id=current_track_id,
         known_buddies=known_buddies,
@@ -1367,6 +1489,8 @@ def _validate_buddy_run_commit(
 
     normalized_handoff: dict[str, Any] | None = None
     if result.get("handoff") is not None:
+        if profile_state_capability.get("handoff_targets") != "manifest-buddies":
+            raise ValueError("env profile must declare state_capability.handoff_targets=manifest-buddies")
         normalized_handoff = _validate_handoff(result.get("handoff"), known_buddies)
 
     if normalized_handoff is not None and normalized_track_effect is not None:
@@ -1384,6 +1508,13 @@ def _validate_buddy_run_commit(
         if "agents" in contributors:
             normalized_contributors["agents"] = _require_string_list(contributors.get("agents"), "contributors.agents")
 
+    normalized_tool_evidence = _validate_market_tool_evidence(
+        context=context,
+        result=result,
+        env_profile=env_profile,
+        active_buddy=str(buddy.get("id") or ""),
+    )
+
     has_state_effects = normalized_track_effect is not None or normalized_task_effect is not None
     if not normalized_artifacts and not has_state_effects and normalized_handoff is None:
         raise ValueError("at least one durable collaboration signal is required (artifacts/state_effects/handoff)")
@@ -1396,6 +1527,7 @@ def _validate_buddy_run_commit(
         "task_effect": normalized_task_effect,
         "handoff": normalized_handoff,
         "contributors": normalized_contributors,
+        "tool_evidence": normalized_tool_evidence,
     }
 
 
@@ -1434,6 +1566,7 @@ def _build_run_audit(
         "state_effects": state_effects,
         "handoff": commit.get("handoff"),
         "contributors": commit.get("contributors", {"skills": [], "agents": []}),
+        "tool_evidence": commit.get("tool_evidence"),
         "next_state": next_state,
         "track_action": track_action,
         "receipt_paths": receipt_paths,
@@ -1493,11 +1626,17 @@ def _persist_buddy_run(
 
     manifest = load_manifest(manifest_path)
     buddy = require_buddy(manifest, active_buddy)
+    env_profile = env_profiles.require_env_profile(
+        active_buddy,
+        manifest_path=manifest_path,
+        repo_root=REPO_ROOT,
+    )
     commit = _validate_buddy_run_commit(
         context=context,
         result=result,
         manifest=manifest,
         buddy=buddy,
+        env_profile=env_profile,
         task=stored_task,
         current_track_id=current_track_id,
     )
@@ -1649,6 +1788,24 @@ def persist_buddy_run(
 def _cmd_prepare(args: argparse.Namespace) -> int:
     try:
         product_session = _load_product_mode_session(args.manifest)
+        if product_session is not None and os.environ.get("BUDDYSWITCH_RUNTIME_BROKER_MODE") != "server":
+            broker_response = request_runtime_broker("prepare", {"text": args.text})
+            if not isinstance(broker_response, dict) or not isinstance(broker_response.get("ok"), bool):
+                raise RuntimeBrokerError(
+                    "E_RUNTIME_BROKER_UNAVAILABLE",
+                    "runtime broker returned invalid response shape for prepare.",
+                )
+            if broker_response["ok"]:
+                payload = broker_response.get("payload")
+                if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
+                    raise RuntimeBrokerError(
+                        "E_RUNTIME_BROKER_UNAVAILABLE",
+                        "runtime broker returned invalid payload shape for prepare.",
+                    )
+            else:
+                payload = broker_response
+            print(json.dumps(payload, ensure_ascii=True, indent=2))
+            return 0 if payload.get("ok") else 1
         if product_session is None:
             payload = prepare_turn_context(args.text, manifest_path=args.manifest)
         else:
@@ -1664,6 +1821,8 @@ def _cmd_prepare(args: argparse.Namespace) -> int:
                     except (OSError, ValueError) as exc:
                         _clear_reservation_from_payload(payload, fail_on_warning=True)
                         raise ValueError(f"instance binding update failed after prepare: {exc}") from exc
+    except RuntimeBrokerError as exc:
+        payload = runtime_error(exc.code, exc.message)
     except (ManifestError, ValueError, OSError) as exc:
         payload = runtime_error("E_RUNTIME_PREPARE", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))
@@ -1722,6 +1881,27 @@ def _cmd_persist(args: argparse.Namespace) -> int:
         context = _read_json_input(args.context, stdin_text=stdin_text if args.context == "-" else None)
         result = _read_json_input(args.result, stdin_text=stdin_text if args.result == "-" else None)
         product_session = _load_product_mode_session(args.manifest)
+        if product_session is not None and os.environ.get("BUDDYSWITCH_RUNTIME_BROKER_MODE") != "server":
+            broker_response = request_runtime_broker(
+                "persist",
+                {"context": context, "result": result},
+            )
+            if not isinstance(broker_response, dict) or not isinstance(broker_response.get("ok"), bool):
+                raise RuntimeBrokerError(
+                    "E_RUNTIME_BROKER_UNAVAILABLE",
+                    "runtime broker returned invalid response shape for persist.",
+                )
+            if broker_response["ok"]:
+                payload = broker_response.get("payload")
+                if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
+                    raise RuntimeBrokerError(
+                        "E_RUNTIME_BROKER_UNAVAILABLE",
+                        "runtime broker returned invalid payload shape for persist.",
+                    )
+            else:
+                payload = broker_response
+            print(json.dumps(payload, ensure_ascii=True, indent=2))
+            return 0 if payload.get("ok") else 1
         if product_session is None:
             payload = persist_buddy_run(
                 context,
@@ -1747,6 +1927,8 @@ def _cmd_persist(args: argparse.Namespace) -> int:
                             _write_product_session_binding(product_session, task_id=task_id, track_id=track_id)
                         except (OSError, ValueError) as exc:
                             _mark_committed_binding_update_failed(payload, product_session, exc)
+    except RuntimeBrokerError as exc:
+        payload = runtime_error(exc.code, exc.message)
     except (ManifestError, ValueError, OSError, json.JSONDecodeError) as exc:
         payload = runtime_error("E_RUNTIME_PERSIST", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))

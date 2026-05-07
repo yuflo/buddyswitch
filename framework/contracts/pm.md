@@ -72,6 +72,21 @@ Terminal final output must follow `Receipt -> Summary`:
 - PM artifact skills can mutate track lifecycle only through `state_effects.track`.
 - Top-level `track_operation` is retired and must not be emitted.
 
+## Runtime Env Boundary
+
+- Project source access: `project.access=read-only` (`projects/app` is live but not writable).
+- Scratch root: `runs/raw/pm/`.
+- Raw state: broker-only (`buddyswitch/objects/**`, `buddyswitch/content/runs/**` are not direct-edit paths).
+- Active skills only: runtime materializes PM skill set only under `.agents/skills`.
+- Rejected runtime writes or persist actions must not be bypassed.
+
+## State Authority
+
+- Artifact kinds are manifest/profile bounded (`from-manifest`).
+- Task effects are limited to `status` and `summary` on the current prepared task.
+- Track lifecycle mutations (`create|update|advance|archive`) are PM-only through `state_effects.track`.
+- Handoff targets must be manifest buddies.
+
 ## Default BuddySwitch State
 
 - `buddyswitch/objects/tasks/<task-id>.json`

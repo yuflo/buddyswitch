@@ -93,24 +93,39 @@ class BuddySwitchLauncherTests(unittest.TestCase):
     def _assert_codex_automation_config(self, config_text: str, *, shared_root: Path, repo_root: Path = ROOT) -> None:
         repo_git_common_dir = self._repo_git_common_dir(repo_root)
         top_level_text = config_text.split("[", 1)[0]
+        shared_root_resolved = str(shared_root.resolve(strict=False))
+        profile_mode = "/instances/" in config_text and shared_root_resolved in config_text
 
-        self.assertEqual(config_text.count('sandbox_mode = "workspace-write"'), 1)
-        self.assertEqual(config_text.count("[sandbox_workspace_write]"), 1)
-        self.assertIn('sandbox_mode = "workspace-write"', top_level_text)
         self.assertIn("approval_policy = { granular = {", top_level_text)
-        self.assertIn("network_access = true", config_text)
         self.assertIn("sandbox_approval = true", config_text)
         self.assertIn("rules = false", config_text)
         self.assertIn("mcp_elicitations = false", config_text)
         self.assertIn("request_permissions = false", config_text)
         self.assertIn("skill_approval = false", config_text)
-        self.assertIn(str(shared_root.resolve(strict=False)), config_text)
-        self.assertIn(str(repo_git_common_dir), config_text)
         self.assertIn(json.dumps(str(Path("/tmp").resolve(strict=False))), config_text)
+        if profile_mode:
+            self.assertNotIn('sandbox_mode = "workspace-write"', config_text)
+            self.assertNotIn("[sandbox_workspace_write]", config_text)
+            self.assertIn('default_permissions = "buddyswitch-runtime"', top_level_text)
+            self.assertIn("[permissions.buddyswitch-runtime.filesystem]", config_text)
+            self.assertIn('"/" = "read"', config_text)
+            self.assertIn('":project_roots" = { "." = "read" }', config_text)
+            self.assertIn("[permissions.buddyswitch-runtime.network]", config_text)
+            self.assertIn("enabled = true", config_text)
+            self.assertIn('mode = "full"', config_text)
+            self.assertNotIn(str(repo_git_common_dir), config_text)
+            self.assertNotIn(json.dumps(shared_root_resolved), config_text)
+        else:
+            self.assertEqual(config_text.count('sandbox_mode = "workspace-write"'), 1)
+            self.assertEqual(config_text.count("[sandbox_workspace_write]"), 1)
+            self.assertIn('sandbox_mode = "workspace-write"', top_level_text)
+            self.assertIn("network_access = true", config_text)
+            self.assertIn(shared_root_resolved, config_text)
+            self.assertIn(str(repo_git_common_dir), config_text)
 
         masked_config = config_text
         for allowed_path in (
-            str(shared_root.resolve(strict=False)),
+            shared_root_resolved,
             str(repo_git_common_dir),
             str(Path("/tmp").resolve(strict=False)),
             str(Path(os.environ["TMPDIR"]).resolve(strict=False)) if os.environ.get("TMPDIR") else "",
@@ -144,6 +159,7 @@ entry = {
     "instance_id": os.environ.get("BUDDYSWITCH_INSTANCE_ID"),
     "instance_json": os.environ.get("BUDDYSWITCH_INSTANCE_JSON"),
     "project_workspace_dir": os.environ.get("BUDDYSWITCH_PROJECT_WORKSPACE_DIR"),
+    "runtime_broker_socket": os.environ.get("BUDDYSWITCH_RUNTIME_BROKER_SOCKET"),
 }
 calls_path = os.environ.get("BUDDYSWITCH_TEST_CALLS")
 if calls_path:
@@ -156,12 +172,21 @@ product_write = os.environ.get("BUDDYSWITCH_TEST_PRODUCT_WRITE")
 product_read = os.environ.get("BUDDYSWITCH_TEST_PRODUCT_READ")
 if project_workspace_dir and product_write:
     product_path = Path(project_workspace_dir) / "projects" / "app" / "shared-product-sentinel.txt"
-    product_path.parent.mkdir(parents=True, exist_ok=True)
-    product_path.write_text(product_write + "\\n", encoding="utf-8")
-    product_probe = {
-        "path": str(product_path),
-        "content": product_path.read_text(encoding="utf-8").strip(),
-    }
+    try:
+        product_path.parent.mkdir(parents=True, exist_ok=True)
+        product_path.write_text(product_write + "\\n", encoding="utf-8")
+        product_probe = {
+            "ok": True,
+            "path": str(product_path),
+            "content": product_path.read_text(encoding="utf-8").strip(),
+        }
+    except Exception as exc:
+        product_probe = {
+            "ok": False,
+            "path": str(product_path),
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
 elif project_workspace_dir and product_read:
     product_path = Path(project_workspace_dir) / "projects" / "app" / "shared-product-sentinel.txt"
     product_probe = {
@@ -192,15 +217,25 @@ if relative_write_path or relative_read_path:
 
 if relative_write_path:
     write_target = projects_app_path / relative_write_path
-    write_target.parent.mkdir(parents=True, exist_ok=True)
     write_value = relative_write_content if relative_write_content is not None else "relative-write"
-    write_target.write_text(write_value + "\\n", encoding="utf-8")
-    relative_probe["write"] = {
-        "path": str(write_target),
-        "resolved": str(write_target.resolve(strict=True)),
-        "exists": write_target.exists(),
-        "content": write_target.read_text(encoding="utf-8").strip(),
-    }
+    try:
+        write_target.parent.mkdir(parents=True, exist_ok=True)
+        write_target.write_text(write_value + "\\n", encoding="utf-8")
+        relative_probe["write"] = {
+            "ok": True,
+            "path": str(write_target),
+            "resolved": str(write_target.resolve(strict=True)),
+            "exists": write_target.exists(),
+            "content": write_target.read_text(encoding="utf-8").strip(),
+        }
+    except Exception as exc:
+        relative_probe["write"] = {
+            "ok": False,
+            "path": str(write_target),
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "exists": write_target.exists(),
+        }
 
 if relative_read_path:
     read_target = projects_app_path / relative_read_path
@@ -580,6 +615,35 @@ exec "$real_git" "$@"
             check=False,
         )
 
+    def _cleanup_runtime_broker(self, instance_root: Path) -> None:
+        pid_file = instance_root / "runtime" / "runtime-broker.pid"
+        try:
+            pid_text = pid_file.read_text(encoding="utf-8").strip()
+            pid = int(pid_text)
+        except (FileNotFoundError, OSError, ValueError):
+            pid = 0
+        if pid:
+            try:
+                os.kill(pid, 15)
+            except OSError:
+                pass
+            for _ in range(20):
+                try:
+                    os.kill(pid, 0)
+                except OSError:
+                    break
+                time.sleep(0.05)
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
+        for path in (
+            pid_file,
+            instance_root / "runtime" / "runtime-broker.sock",
+            instance_root / "runtime" / "runtime-broker.socket",
+        ):
+            path.unlink(missing_ok=True)
+
     def _snapshot_tree(self, root: Path) -> list[str]:
         entries: list[str] = []
         if not root.exists():
@@ -786,14 +850,13 @@ exec "$real_git" "$@"
             self.assertEqual(agents_md.read_text(encoding="utf-8"), expected_agents)
             runtime_prompt = agents_md.read_text(encoding="utf-8")
             for token in (
-                "## Receipt Contract",
-                "Persisted: ok|failed",
-                "Buddy: <buddy_id>",
-                "Task: <task_title> [<task_id>]",
-                "Artifacts: <artifact_id_1>, <artifact_id_2>|none",
-                "Run: <run_id>",
-                "Handoff: <next_buddy>|none",
-                "## Summary Contract",
+                "## Runtime Boundary",
+                "project.access=read-only",
+                "Raw state remains broker-only",
+                "scripts/turn_runtime.py prepare",
+                "scripts/turn_runtime.py persist",
+                "## Receipt",
+                "## Summary",
             ):
                 self.assertIn(token, runtime_prompt)
             runtime_skills = workspace_dir / ".agents" / "skills"
@@ -866,14 +929,11 @@ exec "$real_git" "$@"
             prompt_text = agents_md.read_text(encoding="utf-8")
             self.assertIn("locked to the `design` buddy", prompt_text)
             for token in (
-                "## Receipt Contract",
-                "Persisted: ok|failed",
-                "Buddy: <buddy_id>",
-                "Task: <task_title> [<task_id>]",
-                "Artifacts: <artifact_id_1>, <artifact_id_2>|none",
-                "Run: <run_id>",
-                "Handoff: <next_buddy>|none",
-                "## Summary Contract",
+                "## Runtime Boundary",
+                "project.access=read-only",
+                "hand off to Dev",
+                "## Receipt",
+                "## Summary",
             ):
                 self.assertIn(token, prompt_text)
             runtime_skills = workspace_dir / ".agents" / "skills"
@@ -1123,25 +1183,20 @@ exec "$real_git" "$@"
             self.assertEqual(payload["home"], str(instance_root / "home"))
             self.assertEqual(payload["codex_home"], str(instance_root / "codex-home"))
             self.assertEqual(payload["xdg_config_home"], str(instance_root / "xdg-config"))
+            self.assertTrue(payload["runtime_broker_socket"], "runtime broker socket must be exported to codex")
             buddy_agents = ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md"
             self.assertTrue(buddy_agents.exists(), "pm buddy prompt asset must be checked in")
             self.assertEqual((workspace_dir / "AGENTS.md").read_text(encoding="utf-8"), buddy_agents.read_text(encoding="utf-8"))
             self.assertTrue((workspace_dir / "AGENTS.md").read_text(encoding="utf-8").startswith("# BuddySwitch Runtime Workspace\n"))
             copied_agents = (workspace_dir / "AGENTS.md").read_text(encoding="utf-8").lower()
             for token in (
-                ".agents/skills",
-                "codex cli",
-                "native skills",
-                "build one buddy run commit",
-                "persist --context <context> --result <result>",
-                "## receipt contract",
-                "## summary contract",
-                "persisted: ok|failed",
-                "buddy: <buddy_id>",
-                "task: <task_title> [<task_id>]",
-                "artifacts: <artifact_id_1>, <artifact_id_2>|none",
-                "run: <run_id>",
-                "handoff: <next_buddy>|none",
+                "context projection only",
+                "project.access=read-only",
+                "state_effects.track",
+                "scripts/turn_runtime.py prepare",
+                "scripts/turn_runtime.py persist",
+                "## receipt",
+                "## summary",
             ):
                 self.assertIn(token, copied_agents)
             self.assertNotIn("skill_id", copied_agents)
@@ -1156,6 +1211,18 @@ exec "$real_git" "$@"
             self.assertTrue((runtime_skills / "write-prd" / "assets" / "prd-template.md").exists())
             self.assertTrue((runtime_skills / "track-manager" / "assets" / "track-operation-template.md").exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
+            runtime_turn_runtime = workspace_dir / "scripts" / "turn_runtime.py"
+            runtime_env_store = workspace_dir / "scripts" / "env_store.py"
+            source_turn_runtime = ROOT / "scripts" / "turn_runtime.py"
+            source_env_store = ROOT / "scripts" / "env_store.py"
+            self.assertEqual(
+                runtime_turn_runtime.read_text(encoding="utf-8"),
+                source_turn_runtime.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                runtime_env_store.read_text(encoding="utf-8"),
+                source_env_store.read_text(encoding="utf-8"),
+            )
             exclude_path = subprocess.check_output(
                 ["git", "-C", str(workspace_dir), "rev-parse", "--git-path", "info/exclude"],
                 text=True,
@@ -1174,6 +1241,10 @@ exec "$real_git" "$@"
             self._assert_codex_automation_config(config_text, shared_root=shared_root)
             self.assertIn("[mcp_servers.chrome-devtools-cockpit]", config_text)
             self.assertIn('default_tools_approval_mode = "approve"', config_text)
+            self.assertIn("unix_sockets = {", config_text)
+            resolved_broker_socket = str(Path(payload["runtime_broker_socket"]).resolve(strict=False))
+            self.assertIn(" = \"allow\"", config_text)
+            self.assertIn(json.dumps(resolved_broker_socket), config_text)
             self.assertNotIn("supports_parallel_tool_calls", config_text)
             instance_auth = instance_root / "codex-home" / "auth.json"
             shared_auth = shared_root / "codex-home" / "auth.json"
@@ -1225,8 +1296,11 @@ exec "$real_git" "$@"
             for relative_path, state_path in projection_pairs.items():
                 projected_path = workspace_dir / relative_path
                 self.assertTrue(state_path.is_dir(), f"missing shared state dir: {state_path}")
-                self.assertTrue(projected_path.is_symlink(), f"projection should be a symlink: {projected_path}")
+                self.assertTrue(projected_path.is_symlink(), f"state projection should be a live symlink: {projected_path}")
                 self.assertEqual(projected_path.resolve(), state_path.resolve())
+                live_probe = state_path / "live-projection-probe.json"
+                live_probe.write_text('{"ok":true}\n', encoding="utf-8")
+                self.assertEqual((projected_path / live_probe.name).read_text(encoding="utf-8"), '{"ok":true}\n')
 
             for relative_path in ("runs/raw",):
                 local_path = workspace_dir / relative_path
@@ -1457,6 +1531,7 @@ exec "$real_git" "$@"
             self.assertIsNotNone(relative_probe)
             assert relative_probe is not None
             write_probe = relative_probe["write"]
+            self.assertTrue(write_probe["ok"])
             self.assertEqual(
                 write_probe["resolved"],
                 str((shared_project_app / "relative-path-sentinel.txt").resolve()),
@@ -1771,14 +1846,72 @@ exec "$real_git" "$@"
                 check=False,
             )
 
-            self.assertNotEqual(completed.returncode, 0)
+            self.assertEqual(completed.returncode, 0)
             self.assertIn("Chrome binary not found", completed.stderr)
+            self.assertIn("continuing without cockpit endpoint", completed.stderr.lower())
             statuses = [
                 json.loads(path.read_text(encoding="utf-8")).get("status")
                 for path in (source_home_path / ".codex-buddyswitch" / "instances").glob("*/instance.json")
             ]
             self.assertNotIn("active", statuses)
-            self.assertFalse((temp_root_path / "capture.json").exists(), "Codex should not launch after bootstrap failure")
+            self.assertTrue((temp_root_path / "capture.json").exists(), "Codex should still launch for non-required browser buddies")
+
+    def test_start_with_required_browser_bootstrap_failure_stops_runtime_broker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            shared_root = source_home_path / ".codex-buddyswitch"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_PORT"] = "65530"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(temp_root_path / "missing-chrome")
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(temp_root_path / "capture.json")
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "market", "debug", "prompt-input", "Research competitors"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("Chrome binary not found", completed.stderr)
+            instance_json_paths = sorted((shared_root / "instances").glob("*/instance.json"))
+            self.assertEqual(len(instance_json_paths), 1)
+            instance_root = instance_json_paths[0].parent
+            self.addCleanup(self._cleanup_runtime_broker, instance_root)
+            stored = json.loads(instance_json_paths[0].read_text(encoding="utf-8"))
+            self.assertEqual(stored["status"], "inactive")
+            self.assertFalse((instance_root / "runtime" / "runtime-broker.pid").exists())
+            self.assertFalse((instance_root / "runtime" / "runtime-broker.sock").exists())
+            self.assertFalse((instance_root / "runtime" / "runtime-broker.socket").exists())
+            self.assertFalse((temp_root_path / "capture.json").exists(), "Codex should not launch after required browser failure")
 
     def test_start_with_unknown_buddy_fails_before_shared_root_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -2114,10 +2247,7 @@ exec "$real_git" "$@"
             self.assertEqual(open_result.returncode, 0, msg=open_result.stderr)
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             shared_project_app = shared_root / "project" / "workspace" / "projects" / "app"
-            self.assertEqual(
-                payload["projects_app_probe"]["resolved"],
-                str(shared_project_app.resolve()),
-            )
+            self.assertEqual(payload["projects_app_probe"]["resolved"], str(shared_project_app.resolve()))
             relative_probe = payload["relative_probe"]
             self.assertIsNotNone(relative_probe)
             assert relative_probe is not None
@@ -2445,7 +2575,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            _, workspace_dir = self._write_instance_record(shared_root, "inst-pm-open-bootstrap-fail")
+            instance_root, workspace_dir = self._write_instance_record(shared_root, "inst-pm-open-bootstrap-fail")
             self._add_test_worktree(workspace_dir)
             fake_bin = temp_root_path / "bin"
             fake_bin.mkdir(parents=True, exist_ok=True)
@@ -2472,6 +2602,9 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             self.assertIn("Chrome binary not found", completed.stderr)
             stored = json.loads((shared_root / "instances" / "inst-pm-open-bootstrap-fail" / "instance.json").read_text(encoding="utf-8"))
             self.assertEqual(stored["status"], "inactive")
+            self.assertFalse((instance_root / "runtime" / "runtime-broker.pid").exists())
+            self.assertFalse((instance_root / "runtime" / "runtime-broker.sock").exists())
+            self.assertFalse((instance_root / "runtime" / "runtime-broker.socket").exists())
             self.assertFalse((temp_root_path / "capture.json").exists(), "Codex should not launch after bootstrap failure")
 
     def test_locked_instance_open_entrypoint_rejects_direct_invocation_without_lock(self) -> None:

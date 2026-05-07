@@ -1,42 +1,30 @@
 # BuddySwitch Runtime Workspace
 
 This workspace is launcher-owned, runtime-only, and locked to the `market` buddy.
+AGENTS.md describes context projection only. AGENTS.md is not the permission source.
 
-Inside this session, ordinary user requests belong to `market`.
-Do not ask users for command-shaped routing input.
-If work should move to another buddy, open that buddy's locked instance.
+## Runtime Boundary
 
-## Canonical Loop
+- Active buddy is `market`; user text does not change the active buddy.
+- `projects/app` is live shared source with `project.access=read-only`.
+- Project source is read-only here; hand off to Dev for source edits.
+- Allowed scratch root is `runs/raw/market/`.
+- Raw state is broker-only: do not edit `buddyswitch/objects/**` or `buddyswitch/content/runs/**` directly.
+- If a write or persist is rejected, do not route around it; report rejection or hand off.
+- Use `scripts/turn_runtime.py prepare "<request>"` and `scripts/turn_runtime.py persist --context <context> --result <result>` as the public loop. In product mode they route through the controlled runtime broker.
 
-1. Prepare context with `scripts/turn_runtime.py prepare "<ordinary request>"`.
-2. Let Codex CLI use the native skills exposed in `.agents/skills`.
-3. Execute any needed native skills inside this locked buddy session.
-4. Build one buddy run commit with artifacts, state effects, handoff, and contributor audit metadata.
-5. Persist with `scripts/turn_runtime.py persist --context <context> --result <result>`.
-6. If another turn is needed, derive a new request from `receipt.next_state` or `receipt.handoff`.
+## Market Tool Rules
 
-## Buddy Lock
+- Browser cockpit is required; use `chrome-devtools-cockpit` and keep browser-native first execution.
+- Market research evidence is required for artifact-producing persist.
+- Ordinary web fallback is allowed only with explicit user-approved downgrade.
+- Persist can reject missing browser evidence.
 
-- The active buddy is `market`.
-- Resolve ownership from launcher session metadata; user text does not change the active buddy.
-- Durable BuddySwitch state lives in projected `buddyswitch/objects/**` and `buddyswitch/content/runs/**`.
-- `runs/raw/` is instance-local scratch.
-- Use relative `projects/app` from the runtime workspace; launcher projects it to shared product source.
+## Receipt
 
-## Receipt Contract
+- Final output must include `Receipt` then `Summary`.
+- Include persisted status, buddy, task, optional track, artifact ids, run id, and optional handoff.
 
-- Final terminal output must use exactly two sections in this order: `Receipt`, `Summary`.
-- In `Receipt`, render:
-  - `Persisted: ok|failed`
-  - `Buddy: <buddy_id>`
-  - `Task: <task_title> [<task_id>]`
-  - `Track: <track_title> [<track_id>]` only when available
-  - `Artifacts: <artifact_id_1>, <artifact_id_2>|none`
-  - `Run: <run_id>`
-  - `Handoff: <next_buddy>|none`
+## Summary
 
-## Summary Contract
-
-- Keep execution summary to 1-2 lines.
-- Keep open questions to at most 4 items.
-- Do not lead with object paths or artifact filenames.
+- Keep to 1-2 lines plus open questions when needed.

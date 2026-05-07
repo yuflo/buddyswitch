@@ -702,7 +702,15 @@ class CleanupShellIntegrationTests(unittest.TestCase):
             shutil.copy2(ROOT / "scripts" / name, scripts_dir / name)
         launcher_dir = self.repo_root / "tools" / "launcher"
         launcher_dir.mkdir(parents=True, exist_ok=True)
-        for name in ("env.sh", "workspace.sh", "runtime_lock.py", "browser_cockpit.sh", "instance.sh", "cleanup.sh"):
+        for name in (
+            "env.sh",
+            "workspace.sh",
+            "runtime_lock.py",
+            "browser_cockpit.sh",
+            "instance.sh",
+            "cleanup.sh",
+            "runtime_broker.sh",
+        ):
             shutil.copy2(ROOT / "tools" / "launcher" / name, launcher_dir / name)
 
     def run_cleanup(self, *args: str, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:

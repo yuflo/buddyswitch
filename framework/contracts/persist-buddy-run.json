@@ -15,7 +15,8 @@
     "artifacts",
     "state_effects",
     "handoff",
-    "contributors"
+    "contributors",
+    "tool_evidence"
   ],
   "receipt_required_keys": [
     "ok",

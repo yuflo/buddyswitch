@@ -16,6 +16,9 @@ Define the active runtime contract for launcher-managed buddy instances.
 - Public API:
   - `prepare_turn_context(text, manifest_path=DEFAULT_MANIFEST)`
   - `persist_buddy_run(context, *, result, manifest_path=DEFAULT_MANIFEST)`
+- Product CLI surface (unchanged names):
+  - `python3 scripts/turn_runtime.py prepare "<request>"`
+  - `python3 scripts/turn_runtime.py persist --context <context> --result <result>`
 
 ## Three Runtime Gates
 
@@ -48,6 +51,13 @@ python3 scripts/turn_runtime.py persist \
   --context /tmp/prepare-context.json \
   --result /tmp/result.json
 ```
+
+## Product-Mode Routing
+
+- In product mode, host CLI calls route through the launcher-managed runtime broker (`BUDDYSWITCH_RUNTIME_BROKER_SOCKET`).
+- Broker unavailability returns `ok=false` with `error.code=E_RUNTIME_BROKER_UNAVAILABLE`.
+- Product mode has no direct host state-write fallback.
+- Direct function calls (`prepare_turn_context`, `persist_buddy_run`) remain test/debug internals and broker server dispatch internals.
 
 ## Prepare Contract
 
@@ -92,8 +102,12 @@ Top-level response shape is frozen by `framework/contracts/persist-buddy-run.jso
 - `state_effects.track`, when present, uses `create|update|advance|archive` and is permission-gated;
 - `state_effects.task`, when present, updates only current prepared task;
 - `handoff`, when present, includes `next_buddy`, `reason`, `context`, and known buddy reference;
+- profile state capability is enforced (`artifact_kinds`, `task_effects`, `track_effects`, `handoff_targets`);
+- `tool_evidence` is optional generally and required for Market artifact-producing commits in broker-backed product mode;
 - if both handoff next buddy and track next buddy are present, they must match;
 - at least one durable collaboration signal exists: `artifacts`, `state_effects`, or `handoff`.
+
+State writes in product mode are broker-owned.
 
 ## Receipt Contract
 
@@ -143,4 +157,5 @@ Do not continue a turn through hidden reservation state.
 
 - `framework/contracts/prepare-turn-context.json`
 - `framework/contracts/persist-buddy-run.json`
+- `framework/contracts/buddy-env-profile.json`
 - `framework/contracts/workspace-projection.json`
