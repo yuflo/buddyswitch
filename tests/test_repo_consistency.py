@@ -389,6 +389,47 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("persist --context", text)
                 self.assertIn("--result", text)
 
+    def test_runtime_agents_do_not_duplicate_runtime_context_payload_recipes(self) -> None:
+        forbidden_snippets = (
+            "AI日程工具",
+            "AI calendar",
+            "browser_cockpit_token\":",
+            "approved_downgrade_token\":",
+            "\"state_effects\"",
+            "\"artifact_kinds\"",
+            "instance continue",
+            "open-handoff",
+        )
+        for agents_md in (ROOT / "tools" / "launcher" / "assets" / "buddies").rglob("AGENTS.md"):
+            text = agents_md.read_text(encoding="utf-8")
+            with self.subTest(doc=str(agents_md.relative_to(ROOT))):
+                self.assertIn("prepare.runtime_context", text)
+                for snippet in forbidden_snippets:
+                    self.assertNotIn(snippet, text)
+
+    def test_context_tool_feedback_scope_does_not_touch_peripheral_systems(self) -> None:
+        completed = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD", "--"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        changed_paths = set(completed.stdout.splitlines())
+        forbidden_paths = {
+            "scripts/serve_context_panel.py",
+        }
+        forbidden_prefixes = (
+            "scripts/cleanup",
+            "scripts/debug_objects",
+            "scripts/skill_importer",
+            "tools/launcher/assets/context-panel",
+        )
+        for path in sorted(changed_paths):
+            with self.subTest(path=path):
+                self.assertNotIn(path, forbidden_paths)
+                self.assertFalse(any(path.startswith(prefix) for prefix in forbidden_prefixes))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -68,6 +68,7 @@ python3 scripts/turn_runtime.py persist \
 - `context_revision`
 - `instance_id`
 - `active_buddy`
+- `runtime_context`
 - `request_text`
 - `current_task_id`
 - `current_track_id`
@@ -84,6 +85,21 @@ Behavior:
 - Reserves one run envelope for the turn.
 - Validates context safety, not skill package readiness.
 - Does not gate on `SKILL.md`, package source readiness, or output schema file existence.
+
+## Prepare Runtime Context
+
+`prepare.runtime_context` is the buddy-facing source of truth for allowed actions, forbidden actions, and compact persist payload shape.
+
+Required top-level sections:
+
+- `active_buddy`
+- `active_skill_ids`
+- `capability_boundary`
+- `tool_requirements`
+- `persist_payload_hint`
+- `current_context_summary`
+
+Runtime AGENTS guidance should point to this block instead of duplicating payload recipes or capability matrices.
 
 ## Persist Contract
 
@@ -109,6 +125,18 @@ Top-level response shape is frozen by `framework/contracts/persist-buddy-run.jso
 - at least one durable collaboration signal exists: `artifacts`, `state_effects`, or `handoff`.
 
 State writes in product mode are broker-owned.
+
+## Structured Tool Feedback
+
+When `prepare`, `persist`, or broker-routed evidence tools reject a request, responses keep `ok=false`, `error.code`, and `error.message` and may add structured feedback fields:
+
+- `permission_boundary`
+- `stop_condition`
+- `allowed_next_actions`
+- `command_hint`
+- `persist_payload_hint`
+
+Buddy runtime guidance should follow these fields and must not bypass broker-owned runtime boundaries.
 
 ## Receipt Contract
 

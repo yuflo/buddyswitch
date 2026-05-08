@@ -65,6 +65,14 @@ class RuntimeAgentsValidationTests(unittest.TestCase):
         for buddy_id in ("market", "pm", "design", "dev", "test"):
             self.assertIn(f"{buddy_id}: ok", output)
 
+    def test_runtime_agents_point_to_prepare_runtime_context(self) -> None:
+        for buddy_id in ("market", "pm", "design", "dev", "test"):
+            with self.subTest(buddy=buddy_id):
+                template = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy_id / "AGENTS.md"
+                text = template.read_text(encoding="utf-8")
+                self.assertIn("prepare.runtime_context", text)
+                self.assertIn("structured tool feedback", text.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

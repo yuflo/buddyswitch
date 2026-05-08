@@ -12,8 +12,11 @@ from typing import Any
 from runtime_kernel.client import RuntimeBrokerError, request_runtime_broker
 
 
-def _runtime_error(code: str, message: str) -> dict[str, Any]:
-    return {"ok": False, "error": {"code": code, "message": message}}
+def _runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    error: dict[str, Any] = {"code": code, "message": message}
+    if extra:
+        error.update(extra)
+    return {"ok": False, "error": error}
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:
@@ -74,7 +77,7 @@ def main() -> int:
         else:
             payload = _runtime_error("E_RUNTIME_BROKER", f"unsupported command: {args.command}")
     except RuntimeBrokerError as exc:
-        payload = _runtime_error(exc.code, exc.message)
+        payload = _runtime_error(exc.code, exc.message, exc.details)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         payload = _runtime_error("E_RUNTIME_BROKER", str(exc))
 

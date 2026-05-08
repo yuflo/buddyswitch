@@ -29,8 +29,33 @@ from runtime_kernel.resolve import prepare_turn_context_request
 import turn_runtime
 
 
-def _error(code: str, message: str) -> dict[str, Any]:
-    return {"ok": False, "error": {"code": code, "message": message}}
+def _error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    error: dict[str, Any] = {"code": code, "message": message}
+    if extra:
+        error.update(extra)
+    return {"ok": False, "error": error}
+
+
+def _allowed(*actions: str) -> list[str]:
+    return list(actions)
+
+
+def _boundary_error(code: str, message: str, *, boundary: str, actions: list[str]) -> dict[str, Any]:
+    return _error(
+        code,
+        message,
+        {
+            "permission_boundary": boundary,
+            "allowed_next_actions": actions,
+        },
+    )
+
+
+def _error_from_payload(error: dict[str, Any], *, default_code: str, default_message: str) -> dict[str, Any]:
+    message = error.get("message") if isinstance(error.get("message"), str) else default_message
+    code = error.get("code") if isinstance(error.get("code"), str) else default_code
+    extra = {key: value for key, value in error.items() if key not in {"code", "message"}}
+    return _error(code, message, extra)
 
 
 def _load_instance_record(instance_json_path: Path) -> dict[str, Any]:
@@ -98,9 +123,7 @@ def _prepare_dispatch(
     prepared = prepare_turn_context_request(text, manifest_path=manifest_path)
     if prepared.get("ok") is not True:
         error = prepared.get("error") if isinstance(prepared.get("error"), dict) else {}
-        message = error.get("message") if isinstance(error.get("message"), str) else "prepare rejected"
-        code = error.get("code") if isinstance(error.get("code"), str) else "E_RUNTIME_BROKER"
-        return _error(code, message)
+        return _error_from_payload(error, default_code="E_RUNTIME_BROKER", default_message="prepare rejected")
     session = _product_session(instance_json_path=instance_json_path, instance_record=instance_record)
     try:
         task_id, track_id = turn_runtime._resolve_binding_from_payload(prepared)
@@ -121,16 +144,28 @@ def _persist_dispatch(
     context = payload.get("context")
     result = payload.get("result")
     if not isinstance(context, dict):
-        raise ValueError("persist payload.context must be an object")
+        return _boundary_error(
+            "E_RUNTIME_BROKER",
+            "persist payload.context must be an object",
+            boundary="request-payload",
+            actions=_allowed("Send a persist request with object payload.context and payload.result."),
+        )
     if not isinstance(result, dict):
-        raise ValueError("persist payload.result must be an object")
+        return _boundary_error(
+            "E_RUNTIME_BROKER",
+            "persist payload.result must be an object",
+            boundary="request-payload",
+            actions=_allowed("Send a persist request with object payload.context and payload.result."),
+        )
+    session = _product_session(instance_json_path=instance_json_path, instance_record=instance_record)
+    try:
+        turn_runtime._validate_product_persist_context_binding(context, session)
+    except turn_runtime.RuntimeFeedbackError as exc:
+        return _error(exc.code, exc.message, exc.details)
     persisted = persist_buddy_run_request(context, result=result, manifest_path=manifest_path)
     if persisted.get("ok") is not True:
         error = persisted.get("error") if isinstance(persisted.get("error"), dict) else {}
-        message = error.get("message") if isinstance(error.get("message"), str) else "persist rejected"
-        code = error.get("code") if isinstance(error.get("code"), str) else "E_RUNTIME_BROKER"
-        return _error(code, message)
-    session = _product_session(instance_json_path=instance_json_path, instance_record=instance_record)
+        return _error_from_payload(error, default_code="E_RUNTIME_BROKER", default_message="persist rejected")
     binding = turn_runtime._persist_binding_from_payload(persisted)
     if binding is not None:
         task_id, track_id = binding
@@ -147,11 +182,26 @@ def _now_iso() -> str:
 
 def _context_matches_active_instance(*, context: dict[str, Any], instance_record: dict[str, Any], buddy_id: str) -> None:
     if context.get("ok") is not True:
-        raise ValueError("context must be successful before issuing browser evidence")
+        turn_runtime._raise_runtime_feedback(
+            "E_RUNTIME_BROKER",
+            "context must be successful before issuing browser evidence",
+            permission_boundary="prepare.context_revision",
+            allowed_next_actions=turn_runtime._rerun_prepare_actions(),
+        )
     if context.get("instance_id") != instance_record.get("instance_id"):
-        raise ValueError("context instance_id mismatch for evidence issuance")
+        turn_runtime._raise_runtime_feedback(
+            "E_RUNTIME_BROKER",
+            "context instance_id mismatch for evidence issuance",
+            permission_boundary="active-instance",
+            allowed_next_actions=turn_runtime._rerun_prepare_actions(),
+        )
     if context.get("active_buddy") != buddy_id:
-        raise ValueError("context active_buddy mismatch for evidence issuance")
+        turn_runtime._raise_runtime_feedback(
+            "E_RUNTIME_BROKER",
+            "context active_buddy mismatch for evidence issuance",
+            permission_boundary="active-buddy",
+            allowed_next_actions=turn_runtime._rerun_prepare_actions(),
+        )
 
     task_id = context.get("current_task_id")
     if not isinstance(task_id, str) or not task_id.strip():
@@ -162,11 +212,21 @@ def _context_matches_active_instance(*, context: dict[str, Any], instance_record
 
     bound_task = instance_record.get("current_task_id")
     if isinstance(bound_task, str) and bound_task.strip() and bound_task != task_id:
-        raise ValueError("context task_id does not match active instance binding")
+        turn_runtime._raise_runtime_feedback(
+            "E_RUNTIME_BROKER",
+            "context task_id does not match active instance binding",
+            permission_boundary="active-instance",
+            allowed_next_actions=turn_runtime._rerun_prepare_actions(),
+        )
     bound_track = instance_record.get("current_track_id")
     if isinstance(bound_track, str) and bound_track.strip():
         if not isinstance(context_track_id, str) or context_track_id != bound_track:
-            raise ValueError("context track_id does not match active instance binding")
+            turn_runtime._raise_runtime_feedback(
+                "E_RUNTIME_BROKER",
+                "context track_id does not match active instance binding",
+                permission_boundary="active-instance",
+                allowed_next_actions=turn_runtime._rerun_prepare_actions(),
+            )
 
     context_revision = context.get("context_revision")
     if not isinstance(context_revision, str) or not context_revision.strip():
@@ -240,9 +300,37 @@ def _write_evidence_token(
         payload["reason"] = reason
     token_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
+    token_scope = {
+        "instance_id": instance_id,
+        "buddy_id": buddy_id,
+        "task_id": task_id,
+        "track_id": track_id if isinstance(track_id, str) and track_id else None,
+        "context_revision": context_revision,
+        "run_id": run_id,
+    }
     if mode == "browser-cockpit-preflight":
-        return {"ok": True, "tool_evidence": {"browser_cockpit_token": token}}
-    return {"ok": True, "tool_evidence": {"approved_downgrade_token": token}}
+        return {
+            "ok": True,
+            "tool_evidence": {"browser_cockpit_token": token},
+            "feedback": {
+                "mode": mode,
+                "browser_url": browser_url,
+                "persist_field": "tool_evidence.browser_cockpit_token",
+                "token_scope": token_scope,
+                "next_action": "Include tool_evidence.browser_cockpit_token in the next artifact-producing persist.",
+            },
+        }
+    return {
+        "ok": True,
+        "tool_evidence": {"approved_downgrade_token": token},
+        "feedback": {
+            "mode": mode,
+            "reason": reason,
+            "persist_field": "tool_evidence.approved_downgrade_token",
+            "token_scope": token_scope,
+            "next_action": "Include tool_evidence.approved_downgrade_token in the next artifact-producing persist.",
+        },
+    }
 
 
 def _issue_browser_evidence_dispatch(
@@ -299,7 +387,12 @@ def dispatch_runtime_request(
 ) -> dict[str, Any]:
     try:
         if request.get("protocol") != PROTOCOL:
-            return _error("E_RUNTIME_BROKER", f"unsupported protocol: {request.get('protocol')!r}")
+            return _boundary_error(
+                "E_RUNTIME_BROKER",
+                f"unsupported protocol: {request.get('protocol')!r}",
+                boundary="broker-protocol",
+                actions=_allowed("Use the launcher-managed BuddySwitch runtime tools instead of direct broker calls."),
+            )
         method = request.get("method")
         if not isinstance(method, str) or not method.strip():
             raise ValueError("request.method must be a non-empty string")
@@ -307,7 +400,12 @@ def dispatch_runtime_request(
 
         payload = request.get("payload")
         if not isinstance(payload, dict):
-            raise ValueError("request.payload must be an object")
+            return _boundary_error(
+                "E_RUNTIME_BROKER",
+                "request.payload must be an object",
+                boundary="request-payload",
+                actions=_allowed("Send a broker request with an object payload."),
+            )
 
         instance_record = _load_instance_record(instance_json_path)
         request_instance_id = request.get("instance_id")
@@ -316,18 +414,27 @@ def dispatch_runtime_request(
         instance_id = str(instance_record["instance_id"]).strip()
         active_buddy = str(instance_record["buddy"]).strip()
         if request_instance_id != instance_id:
-            return _error(
+            return _boundary_error(
                 "E_RUNTIME_BROKER",
                 f"instance_id mismatch: expected '{instance_id}', got '{request_instance_id}'",
+                boundary="active-instance",
+                actions=_allowed("Use the active launcher-managed instance id.", "Rerun prepare in the active instance."),
             )
         if request_buddy != active_buddy:
-            return _error(
+            return _boundary_error(
                 "E_RUNTIME_BROKER",
                 f"active_buddy mismatch: expected '{active_buddy}', got '{request_buddy}'",
+                boundary="active-buddy",
+                actions=_allowed("Use the active buddy locked by the launcher.", "Rerun prepare in the active instance."),
             )
         status = instance_record.get("status")
         if status != "active":
-            return _error("E_RUNTIME_BROKER", f"instance is not active: {status!r}")
+            return _boundary_error(
+                "E_RUNTIME_BROKER",
+                f"instance is not active: {status!r}",
+                boundary="active-instance-status",
+                actions=_allowed("Open an active launcher-managed instance before calling runtime tools."),
+            )
 
         profile = env_profiles.require_env_profile(
             active_buddy,
@@ -367,7 +474,14 @@ def dispatch_runtime_request(
                     instance_record=instance_record,
                     instance_json_path=instance_json_path,
                 )
-        return _error("E_RUNTIME_BROKER", f"unsupported method: {method}")
+        return _boundary_error(
+            "E_RUNTIME_BROKER",
+            f"unsupported method: {method}",
+            boundary="broker-protocol",
+            actions=_allowed("Use supported runtime methods: prepare, persist, issue_browser_evidence."),
+        )
+    except turn_runtime.RuntimeFeedbackError as exc:
+        return _error(exc.code, exc.message, exc.details)
     except (ValueError, OSError, json.JSONDecodeError, ManifestError, env_profiles.EnvProfileError) as exc:
         return _error("E_RUNTIME_BROKER", str(exc))
 

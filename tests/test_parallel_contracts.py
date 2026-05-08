@@ -36,6 +36,7 @@ EXPECTED_PREPARE_TURN_CONTEXT_CONTRACT = {
         "context_revision",
         "instance_id",
         "active_buddy",
+        "runtime_context",
         "request_text",
         "current_task_id",
         "current_track_id",

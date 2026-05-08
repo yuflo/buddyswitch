@@ -107,6 +107,29 @@ def validate_runtime_agents_template(
         ],
         message="missing AGENTS context projection wording",
     )
+    _require_contains(
+        text=text,
+        needle="prepare.runtime_context",
+        message="missing prepare.runtime_context reference",
+    )
+    _require_contains_any(
+        text=lowered,
+        needles=[
+            "structured tool feedback",
+            "runtime tool rejects",
+            "runtime tool is rejected",
+        ],
+        message="missing structured tool feedback wording for runtime rejections",
+    )
+    _require_contains_any(
+        text=lowered,
+        needles=[
+            "do not bypass",
+            "do not route around",
+            "do not bypass runtime",
+        ],
+        message="missing do-not-bypass runtime tool wording",
+    )
     _require_contains_any(
         text=lowered,
         needles=["receipt", "## receipt"],
@@ -150,23 +173,10 @@ def validate_runtime_agents_template(
         )
 
     if buddy_id == "market":
-        _require_contains_any(
-            text=lowered,
-            needles=[
-                "browser-native first",
-                "browser cockpit is required",
-                "chrome-devtools-cockpit",
-            ],
-            message="missing market browser-native required wording",
-        )
-        _require_contains_any(
-            text=lowered,
-            needles=[
-                "approved downgrade",
-                "user-approved downgrade",
-                "explicit user-approved downgrade",
-            ],
-            message="missing approved downgrade wording for market",
+        _require_contains(
+            text=text,
+            needle="prepare.runtime_context.tool_requirements",
+            message="missing market tool requirements pointer",
         )
 
     return {"ok": True, "buddy_id": buddy_id, "template_path": str(template_path)}

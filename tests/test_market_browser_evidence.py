@@ -399,6 +399,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(consumed_a["ok"], msg=consumed_a)
         context_b = self._prepare_market(instance_json=instance_json)
+        before_rejected = self._state_snapshot()
         rejected = self._dispatch(
             request={
                 "protocol": "buddyswitch-runtime-broker/v1",
@@ -414,6 +415,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(rejected["ok"])
         self.assertIn("not issued by runtime broker", rejected["error"]["message"])
+        self.assertEqual(self._state_snapshot(), before_rejected)
 
     def test_market_persist_with_handwritten_token_rejects_before_writes(self) -> None:
         instance_json = self._instance_json()

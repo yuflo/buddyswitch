@@ -68,6 +68,58 @@ _PRODUCT_MODE_ENV_KEYS = (
 _RUNTIME_LOCK_TIMEOUT_ENV = "BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"
 _RUNTIME_LOCK_DEFAULT_TIMEOUT_SECONDS = 30.0
 _RUNTIME_LOCK_POLL_SECONDS = 0.05
+_RUNTIME_RAW_STATE_PATHS = (
+    "buddyswitch/objects/tracks/*.json",
+    "buddyswitch/objects/tasks/*.json",
+    "buddyswitch/objects/artifacts/*.json",
+    "buddyswitch/content/runs/*.json",
+)
+
+
+class RuntimeFeedbackError(ValueError):
+    """Structured runtime feedback for buddy-facing validation failures."""
+
+    def __init__(self, code: str, message: str, *, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.details = details or {}
+
+
+def _raise_runtime_feedback(code: str, message: str, **details: Any) -> None:
+    raise RuntimeFeedbackError(code, message, details=details)
+
+
+def _rerun_prepare_actions() -> list[str]:
+    return [
+        "Rerun scripts/turn_runtime.py prepare for the current request.",
+        "Use the new prepared context for the next persist attempt.",
+        "Do not write raw BuddySwitch state directly.",
+    ]
+
+
+def _market_evidence_command_hint() -> str:
+    return (
+        "python3 scripts/browser_evidence.py issue --context <prepare-context.json> "
+        "--mode browser-cockpit-preflight"
+    )
+
+
+def _market_evidence_feedback() -> dict[str, Any]:
+    return {
+        "permission_boundary": "market.browser_evidence",
+        "allowed_next_actions": [
+            "Issue broker-backed browser evidence for the current prepared run.",
+            "Include the returned token in tool_evidence on the next artifact-producing persist.",
+            "Use an approved downgrade token only when the user explicitly approves the fallback.",
+        ],
+        "command_hint": _market_evidence_command_hint(),
+        "persist_payload_hint": {
+            "tool_evidence": {
+                "accepted_fields": ["browser_cockpit_token", "approved_downgrade_token"],
+            }
+        },
+    }
 
 
 def runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -439,13 +491,21 @@ def _validate_context_revision(context: dict[str, Any]) -> dict[str, Any]:
 
     stored_task = get_task(task_id)
     if stored_task is None:
-        raise ValueError(f"task not found: {task_id}")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            f"task not found: {task_id}",
+            permission_boundary="prepare.context_revision",
+            allowed_next_actions=_rerun_prepare_actions(),
+        )
 
     expected_sequence = _derive_context_sequence(stored_task)
     expected_revision = _derive_context_revision(stored_task, expected_sequence)
     if context_revision != expected_revision:
-        raise ValueError(
-            f"context_revision mismatch: expected '{expected_revision}', received '{context_revision}'"
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            f"context_revision mismatch: expected '{expected_revision}', received '{context_revision}'",
+            permission_boundary="prepare.context_revision",
+            allowed_next_actions=_rerun_prepare_actions(),
         )
 
     run_envelope = context.get("run_envelope")
@@ -453,8 +513,11 @@ def _validate_context_revision(context: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("run_envelope is required")
     sequence = run_envelope.get("sequence")
     if isinstance(sequence, int) and sequence != expected_sequence:
-        raise ValueError(
-            f"context_revision mismatch: expected sequence {expected_sequence}, received {sequence}"
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            f"context_revision mismatch: expected sequence {expected_sequence}, received {sequence}",
+            permission_boundary="prepare.context_revision",
+            allowed_next_actions=_rerun_prepare_actions(),
         )
 
     return stored_task
@@ -463,9 +526,19 @@ def _validate_context_revision(context: dict[str, Any]) -> dict[str, Any]:
 def _assert_run_id_unused(run_id: str) -> None:
     normalized_run_id = run_id.strip()
     if any(normalized_run_id in task.get("run_ids", []) for task in list_tasks()):
-        raise ValueError(f"run_id already committed: {normalized_run_id}")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            f"run_id already committed: {normalized_run_id}",
+            permission_boundary="prepare.context_revision",
+            allowed_next_actions=_rerun_prepare_actions(),
+        )
     if (env_store.STATE_ROOT / run_content_path(normalized_run_id)).exists():
-        raise ValueError(f"run_id already committed: {normalized_run_id}")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            f"run_id already committed: {normalized_run_id}",
+            permission_boundary="prepare.context_revision",
+            allowed_next_actions=_rerun_prepare_actions(),
+        )
 
 
 def _track_object_path(track_id: str) -> str:
@@ -541,14 +614,22 @@ def _validate_market_tool_evidence(
 
     tool_evidence = result.get("tool_evidence")
     if not isinstance(tool_evidence, dict):
-        raise ValueError("Market persist requires tool_evidence with broker-issued token")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            "Market persist requires tool_evidence with broker-issued token",
+            **_market_evidence_feedback(),
+        )
 
     browser_token = tool_evidence.get("browser_cockpit_token")
     downgrade_token = tool_evidence.get("approved_downgrade_token")
     browser_value = browser_token.strip() if isinstance(browser_token, str) and browser_token.strip() else None
     downgrade_value = downgrade_token.strip() if isinstance(downgrade_token, str) and downgrade_token.strip() else None
     if bool(browser_value) == bool(downgrade_value):
-        raise ValueError("Market tool_evidence must include exactly one broker-issued token")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            "Market tool_evidence must include exactly one broker-issued token",
+            **_market_evidence_feedback(),
+        )
 
     run_envelope = context.get("run_envelope")
     if not isinstance(run_envelope, dict):
@@ -569,19 +650,27 @@ def _validate_market_tool_evidence(
     token_value = browser_value or downgrade_value or ""
     record = _load_evidence_token_record(token=token_value, run_id=run_id)
     if record is None:
-        raise ValueError("Market tool_evidence token was not issued by runtime broker for this run")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            "Market tool_evidence token was not issued by runtime broker for this run",
+            **_market_evidence_feedback(),
+        )
 
     expected_mode = "browser-cockpit-preflight" if browser_value else "approved-downgrade"
     if record.get("mode") != expected_mode:
-        raise ValueError("Market tool_evidence token mode mismatch")
+        _raise_runtime_feedback("E_RUNTIME_PERSIST", "Market tool_evidence token mode mismatch", **_market_evidence_feedback())
     if record.get("run_id") != run_id:
-        raise ValueError("Market tool_evidence token run_id mismatch")
+        _raise_runtime_feedback("E_RUNTIME_PERSIST", "Market tool_evidence token run_id mismatch", **_market_evidence_feedback())
     if record.get("context_revision") != context_revision:
-        raise ValueError("Market tool_evidence token context revision mismatch")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            "Market tool_evidence token context revision mismatch",
+            **_market_evidence_feedback(),
+        )
     if record.get("instance_id") != instance_id:
-        raise ValueError("Market tool_evidence token instance id mismatch")
+        _raise_runtime_feedback("E_RUNTIME_PERSIST", "Market tool_evidence token instance id mismatch", **_market_evidence_feedback())
     if record.get("buddy_id") != active_buddy:
-        raise ValueError("Market tool_evidence token buddy mismatch")
+        _raise_runtime_feedback("E_RUNTIME_PERSIST", "Market tool_evidence token buddy mismatch", **_market_evidence_feedback())
 
     normalized: dict[str, Any] = {
         "kind": expected_mode,
@@ -774,6 +863,193 @@ def _scan_track_recent_handoffs(track_id: str, *, limit: int = 5) -> list[dict[s
     return rows[:limit]
 
 
+def _manifest_buddy_order(manifest: dict[str, Any]) -> list[str]:
+    ordered: list[str] = []
+    for row in manifest.get("buddies", []):
+        if isinstance(row, dict) and isinstance(row.get("id"), str):
+            ordered.append(row["id"])
+    return ordered
+
+
+def _project_write_rule(access: str) -> str:
+    if access == "write":
+        return "Active buddy can write project source under projects/app."
+    return "Project source is read-only for this buddy; hand source edits to Dev."
+
+
+def _summarize_runtime_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": artifact.get("id"),
+        "kind": artifact.get("kind"),
+        "title": artifact.get("title"),
+        "summary": artifact.get("summary", ""),
+        "buddy": artifact.get("buddy"),
+        "task_id": artifact.get("task_id"),
+        "source_run_id": artifact.get("source_run_id"),
+        "updated_at": artifact.get("updated_at"),
+    }
+
+
+def _build_runtime_context(
+    *,
+    manifest: dict[str, Any],
+    buddy: dict[str, Any],
+    env_profile: dict[str, Any],
+    task_context: dict[str, Any],
+    track_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    state_capability = env_profile.get("state_capability")
+    if not isinstance(state_capability, dict):
+        raise ValueError("env profile state_capability must be an object")
+    tool_capability = env_profile.get("tool_capability")
+    if not isinstance(tool_capability, dict):
+        raise ValueError("env profile tool_capability must be an object")
+    project = env_profile.get("project")
+    if not isinstance(project, dict):
+        raise ValueError("env profile project must be an object")
+    scratch = env_profile.get("scratch")
+    if not isinstance(scratch, dict):
+        raise ValueError("env profile scratch must be an object")
+
+    project_path = project.get("path")
+    if not isinstance(project_path, str) or not project_path:
+        raise ValueError("env profile project.path must be a non-empty string")
+    project_access = project.get("access")
+    if not isinstance(project_access, str) or not project_access:
+        raise ValueError("env profile project.access must be a non-empty string")
+
+    allowed_task_effects = state_capability.get("task_effects")
+    if not isinstance(allowed_task_effects, list):
+        raise ValueError("env profile state_capability.task_effects must be a list")
+    allowed_track_effects = state_capability.get("track_effects")
+    if not isinstance(allowed_track_effects, list):
+        raise ValueError("env profile state_capability.track_effects must be a list")
+
+    tool_requirements = {
+        "browser_cockpit": tool_capability.get("browser_cockpit"),
+        "market_research_evidence": tool_capability.get("market_research_evidence"),
+        "ordinary_web_fallback": tool_capability.get("ordinary_web_fallback"),
+    }
+    if buddy.get("id") == "market":
+        tool_requirements["evidence_next_action"] = (
+            "Use scripts/browser_evidence.py issue --context <prepare-context.json> "
+            "--mode browser-cockpit-preflight before artifact-producing persist."
+        )
+
+    persist_payload_hint: dict[str, Any] = {
+        "required": ["execution_summary"],
+        "optional": [
+            "working_notes",
+            "artifacts",
+            "state_effects",
+            "handoff",
+            "contributors",
+            "tool_evidence",
+        ],
+        "durable_signal_rule": "include at least one of artifacts/state_effects/handoff",
+        "artifact_kind_source": "runtime_context.capability_boundary.allowed_artifact_kinds",
+        "state_effect_source": "runtime_context.capability_boundary.allowed_state_effects",
+        "handoff_target_source": "runtime_context.capability_boundary.handoff_targets",
+    }
+    if buddy.get("id") == "market":
+        persist_payload_hint["tool_evidence"] = {
+            "required_when": "Market artifact-producing commit",
+            "accepted_fields": ["browser_cockpit_token", "approved_downgrade_token"],
+            "source": "broker-issued evidence response for current run",
+        }
+
+    task_payload = task_context.get("task")
+    summarized_task: dict[str, Any] | None
+    if isinstance(task_payload, dict):
+        summarized_task = {
+            "id": task_payload.get("id"),
+            "buddy": task_payload.get("buddy"),
+            "status": task_payload.get("status"),
+            "summary": task_payload.get("summary", ""),
+            "track_id": task_payload.get("track_id"),
+            "latest_run_id": task_payload.get("latest_run_id"),
+        }
+    else:
+        summarized_task = None
+
+    track_payload = track_context.get("track") if isinstance(track_context, dict) else None
+    summarized_track: dict[str, Any] | None
+    if isinstance(track_payload, dict):
+        summarized_track = {
+            "id": track_payload.get("id"),
+            "title": track_payload.get("title"),
+            "status": track_payload.get("status"),
+            "current_buddy": track_payload.get("current_buddy"),
+            "next_buddy": track_payload.get("next_buddy"),
+            "summary": track_payload.get("summary", ""),
+        }
+    else:
+        summarized_track = None
+
+    task_artifacts = task_context.get("artifacts")
+    summarized_artifacts: list[dict[str, Any]] = []
+    if isinstance(task_artifacts, list):
+        for artifact in task_artifacts:
+            if isinstance(artifact, dict):
+                summarized_artifacts.append(_summarize_runtime_artifact(artifact))
+
+    handoff_rows = track_context.get("recent_handoffs") if isinstance(track_context, dict) else None
+    summarized_handoffs: list[dict[str, Any]] = []
+    if isinstance(handoff_rows, list):
+        for row in handoff_rows:
+            if not isinstance(row, dict):
+                continue
+            summarized_handoffs.append(
+                {
+                    "run_id": row.get("run_id"),
+                    "task_id": row.get("task_id"),
+                    "buddy_id": row.get("buddy_id"),
+                    "next_buddy": row.get("next_buddy"),
+                    "reason": row.get("reason"),
+                    "context": row.get("context"),
+                    "timestamp": row.get("timestamp"),
+                }
+            )
+
+    return {
+        "active_buddy": {
+            "id": buddy.get("id"),
+            "label": buddy.get("label"),
+            "scope": buddy.get("scope"),
+        },
+        "active_skill_ids": list(buddy.get("skills", [])),
+        "capability_boundary": {
+            "allowed_artifact_kinds": list(buddy.get("artifact_kinds", [])),
+            "allowed_state_effects": {
+                "task": list(allowed_task_effects),
+                "track": list(allowed_track_effects),
+            },
+            "handoff_targets": _manifest_buddy_order(manifest),
+            "project": {
+                "path": project_path,
+                "access": project_access,
+                "write_rule": _project_write_rule(project_access),
+            },
+            "scratch": {
+                "root": scratch.get("root"),
+                "access": "write",
+            },
+            "raw_state": {
+                "access": "broker-only",
+                "paths": list(_RUNTIME_RAW_STATE_PATHS),
+            },
+        },
+        "tool_requirements": tool_requirements,
+        "persist_payload_hint": persist_payload_hint,
+        "current_context_summary": {
+            "task": summarized_task,
+            "track": summarized_track,
+            "artifacts": summarized_artifacts,
+            "recent_handoffs": summarized_handoffs,
+        },
+    }
+
+
 def _derive_context_revision(task: dict[str, Any], sequence: int) -> str:
     task_id = task.get("id") if isinstance(task, dict) else None
     if not isinstance(task_id, str) or not task_id:
@@ -943,6 +1219,11 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
     _ensure_no_legacy_outputs(demand)
 
     buddy = require_buddy(manifest, active_buddy)
+    env_profile = env_profiles.require_env_profile(
+        active_buddy,
+        manifest_path=manifest_path,
+        repo_root=REPO_ROOT,
+    )
 
     existing_task: dict[str, Any] | None = None
     if explicit_task_id:
@@ -965,10 +1246,6 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
                 status="active",
                 summary="",
                 initial_run_id=None,
-            )
-        if existing_task["buddy"] != active_buddy:
-            raise ValueError(
-                f"Task '{explicit_task_id}' belongs to buddy '{existing_task['buddy']}', not '{active_buddy}'."
             )
         if explicit_track_id and existing_task.get("track_id") not in {None, explicit_track_id}:
             raise ValueError(
@@ -1050,12 +1327,20 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
 
     current_task_id = resolved_task["id"]
     current_track_id = effective_track_id
+    runtime_context = _build_runtime_context(
+        manifest=manifest,
+        buddy=buddy,
+        env_profile=env_profile,
+        task_context=task_context,
+        track_context=track_context,
+    )
 
     return {
         "ok": True,
         "context_revision": context_revision,
         "instance_id": instance_id,
         "active_buddy": buddy["id"],
+        "runtime_context": runtime_context,
         "request_text": request_text,
         "current_task_id": current_task_id,
         "current_track_id": current_track_id,
@@ -1180,7 +1465,16 @@ def _validate_handoff(handoff: Any, known_buddies: set[str]) -> dict[str, Any]:
     if not isinstance(next_buddy, str) or not next_buddy.strip():
         raise ValueError("handoff.next_buddy must be a non-empty string")
     if next_buddy.strip() not in known_buddies:
-        raise ValueError(f"handoff.next_buddy must reference a manifest buddy id; got '{next_buddy}'")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            f"handoff.next_buddy must reference a manifest buddy id; got '{next_buddy}'",
+            permission_boundary="manifest.buddies",
+            allowed_next_actions=[
+                "Use one of the manifest buddy ids as handoff.next_buddy.",
+                "Remove handoff if no valid target exists.",
+            ],
+            persist_payload_hint={"handoff_targets": sorted(known_buddies)},
+        )
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("handoff.reason must be a non-empty string")
     if not isinstance(context, str) or not context.strip():
@@ -1227,8 +1521,20 @@ def _validate_state_effects(
         if not isinstance(allowed_track_effects, list):
             raise ValueError("env profile state_capability.track_effects must be a list")
         if action not in allowed_track_effects:
-            raise ValueError(
-                f"buddy '{buddy.get('id')}' is not allowed to perform track action '{action}'"
+            allowed_state_effects = {
+                "task": list(env_profile.get("state_capability", {}).get("task_effects", [])),
+                "track": list(allowed_track_effects),
+            }
+            _raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                f"buddy '{buddy.get('id')}' is not allowed to perform track action '{action}'",
+                permission_boundary="env-profile.state_capability.track_effects",
+                allowed_next_actions=[
+                    f"Remove state_effects.track from the {buddy.get('id')} commit.",
+                    "Persist an artifact or handoff instead when appropriate.",
+                    "Hand off track lifecycle changes to PM.",
+                ],
+                persist_payload_hint={"allowed_state_effects": allowed_state_effects},
             )
 
         normalized_track = {"action": action}
@@ -1297,9 +1603,15 @@ def _validate_state_effects(
         allowed_task_keys = set(allowed_task_effects)
         unsupported_task_keys = sorted(key for key in task_effect if key not in allowed_task_keys)
         if unsupported_task_keys:
-            raise ValueError(
-                "state_effects.task has unsupported keys: "
-                + ", ".join(unsupported_task_keys)
+            _raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                "state_effects.task has unsupported keys: " + ", ".join(unsupported_task_keys),
+                permission_boundary="env-profile.state_capability.task_effects",
+                allowed_next_actions=[
+                    "Remove unsupported state_effects.task fields.",
+                    "Use only status and summary for task updates.",
+                ],
+                persist_payload_hint={"allowed_state_effects": {"task": sorted(allowed_task_keys)}},
             )
         normalized_task = {}
         if "status" in task_effect:
@@ -1322,6 +1634,7 @@ def _validate_artifacts(
     *,
     artifacts: Any,
     allowed_kinds: set[str],
+    active_buddy: str,
 ) -> list[dict[str, Any]]:
     if artifacts is None:
         return []
@@ -1342,7 +1655,16 @@ def _validate_artifacts(
         if normalized_kind in seen_kinds:
             raise ValueError("duplicate artifact kind in one commit")
         if normalized_kind not in allowed_kinds:
-            raise ValueError(f"artifact kind '{normalized_kind}' is not allowed for this buddy")
+            _raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                f"artifact kind '{normalized_kind}' is not allowed for this buddy",
+                permission_boundary="manifest.artifact_kinds",
+                allowed_next_actions=[
+                    f"Use one of the artifact kinds allowed for buddy '{active_buddy}'.",
+                    "Hand off work to a buddy that owns the requested artifact kind.",
+                ],
+                persist_payload_hint={"allowed_artifact_kinds": sorted(allowed_kinds)},
+            )
         if not isinstance(title, str) or not title.strip():
             raise ValueError(f"artifacts[{index}].title must be a non-empty string")
         if not isinstance(content, dict):
@@ -1457,7 +1779,11 @@ def _validate_buddy_run_commit(
         for kind in buddy.get("artifact_kinds", [])
         if isinstance(kind, str) and kind
     }
-    normalized_artifacts = _validate_artifacts(artifacts=result.get("artifacts"), allowed_kinds=allowed_kinds)
+    normalized_artifacts = _validate_artifacts(
+        artifacts=result.get("artifacts"),
+        allowed_kinds=allowed_kinds,
+        active_buddy=str(buddy.get("id") or ""),
+    )
 
     normalized_track_effect, normalized_task_effect = _validate_state_effects(
         state_effects=result.get("state_effects"),
@@ -1802,7 +2128,9 @@ def _cmd_prepare(args: argparse.Namespace) -> int:
                         _clear_reservation_from_payload(payload, fail_on_warning=True)
                         raise ValueError(f"instance binding update failed after prepare: {exc}") from exc
     except RuntimeBrokerError as exc:
-        payload = runtime_error(exc.code, exc.message)
+        payload = runtime_error(exc.code, exc.message, exc.details)
+    except RuntimeFeedbackError as exc:
+        payload = runtime_error(exc.code, exc.message, exc.details)
     except (ManifestError, ValueError, OSError) as exc:
         payload = runtime_error("E_RUNTIME_PREPARE", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))
@@ -1825,16 +2153,22 @@ def _validate_product_persist_context_binding(context: dict[str, Any], product_s
 
     context_instance_id = context.get("instance_id")
     if context_instance_id != session_instance_id:
-        raise ValueError(
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
             "product-mode context instance mismatch: "
-            f"expected '{session_instance_id}', received '{context_instance_id}'"
+            f"expected '{session_instance_id}', received '{context_instance_id}'",
+            permission_boundary="active-instance",
+            allowed_next_actions=_rerun_prepare_actions(),
         )
 
     context_buddy = context.get("active_buddy")
     if context_buddy != session_buddy:
-        raise ValueError(
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
             "product-mode context buddy mismatch: "
-            f"expected '{session_buddy}', received '{context_buddy}'"
+            f"expected '{session_buddy}', received '{context_buddy}'",
+            permission_boundary="active-buddy",
+            allowed_next_actions=_rerun_prepare_actions(),
         )
 
     run_envelope = context.get("run_envelope")
@@ -1842,14 +2176,20 @@ def _validate_product_persist_context_binding(context: dict[str, Any], product_s
     if not isinstance(turn_identity, dict):
         raise ValueError("product-mode context turn_identity is required")
     if turn_identity.get("instance_id") != session_instance_id:
-        raise ValueError(
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
             "product-mode turn_identity instance mismatch: "
-            f"expected '{session_instance_id}', received '{turn_identity.get('instance_id')}'"
+            f"expected '{session_instance_id}', received '{turn_identity.get('instance_id')}'",
+            permission_boundary="active-instance",
+            allowed_next_actions=_rerun_prepare_actions(),
         )
     if turn_identity.get("active_buddy") != session_buddy:
-        raise ValueError(
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
             "product-mode turn_identity buddy mismatch: "
-            f"expected '{session_buddy}', received '{turn_identity.get('active_buddy')}'"
+            f"expected '{session_buddy}', received '{turn_identity.get('active_buddy')}'",
+            permission_boundary="active-buddy",
+            allowed_next_actions=_rerun_prepare_actions(),
         )
 
 
@@ -1908,7 +2248,9 @@ def _cmd_persist(args: argparse.Namespace) -> int:
                         except (OSError, ValueError) as exc:
                             _mark_committed_binding_update_failed(payload, product_session, exc)
     except RuntimeBrokerError as exc:
-        payload = runtime_error(exc.code, exc.message)
+        payload = runtime_error(exc.code, exc.message, exc.details)
+    except RuntimeFeedbackError as exc:
+        payload = runtime_error(exc.code, exc.message, exc.details)
     except (ManifestError, ValueError, OSError, json.JSONDecodeError) as exc:
         payload = runtime_error("E_RUNTIME_PERSIST", str(exc))
     print(json.dumps(payload, ensure_ascii=True, indent=2))

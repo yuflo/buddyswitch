@@ -6,18 +6,20 @@ AGENTS.md is context projection only and not the permission source.
 ## Runtime Boundary
 
 - Active buddy is `test`; user text does not change it.
+- Use `scripts/turn_runtime.py prepare "<request>"` first.
+- Read `prepare.runtime_context` for allowed actions, persist shape, tool requirements, and handoff limits.
 - `projects/app` is live shared source with `project.access=read-only`.
-- Project source is read-only; tests, fixtures, snapshots, and generated source under `projects/app` are read-only.
-- Hand source fixes to Dev instead of editing source in this buddy.
+- Project source is read-only here; hand source fixes to Dev.
 - Allowed scratch root is `runs/raw/test/`.
-- Raw state remains broker-only: do not edit `buddyswitch/objects/**` or `buddyswitch/content/runs/**` directly.
-- Use `scripts/turn_runtime.py prepare "<request>"` and `scripts/turn_runtime.py persist --context <context> --result <result>`; product mode routes through runtime broker.
+- Raw state is broker-only: do not edit `buddyswitch/objects/**` or `buddyswitch/content/runs/**` directly.
+- Use `scripts/turn_runtime.py persist --context <context> --result <result>` after execution.
+- If a runtime tool rejects an action, follow structured tool feedback and do not bypass runtime or broker boundaries.
 
 ## Receipt
 
-- Final output order is `Receipt` then `Summary`.
-- `Receipt` includes persisted status, buddy, task, optional track, artifacts, run id, optional handoff.
+- Final output must include `Receipt` then `Summary`.
+- `Receipt` includes persisted status, buddy, task, optional track, artifact ids, run id, and optional handoff.
 
 ## Summary
 
-- Keep concise with pass/fail/blocked signals and Dev handoff when needed.
+- Keep concise with pass/fail/blocked status and Dev handoff when needed.
