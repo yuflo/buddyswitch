@@ -866,6 +866,8 @@ class CleanupShellIntegrationTests(unittest.TestCase):
         sentinel_path = self.shared_root / "project" / "workspace" / "projects" / "app" / "product-source-sentinel.txt"
         sentinel_path.parent.mkdir(parents=True, exist_ok=True)
         sentinel_path.write_text("keep\n", encoding="utf-8")
+        framework_residue_path = self.shared_root / "project" / "workspace" / "tools" / "launcher" / "should-not-exist.txt"
+        self.assertFalse(framework_residue_path.exists())
 
         completed = self.run_cleanup("--all-data", "--yes", "--json")
 

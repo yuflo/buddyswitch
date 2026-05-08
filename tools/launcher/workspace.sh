@@ -173,6 +173,82 @@ buddyswitch_workspace_is_valid_project_worktree() {
   [[ "${project_common}" == "${repo_common}" ]]
 }
 
+buddyswitch_workspace_project_sparse_paths() {
+  cat <<'EOF'
+projects/app/
+EOF
+}
+
+buddyswitch_workspace_project_worktree_has_sparse_boundary() {
+  local project_workspace="$1"
+  local sparse_paths forbidden_entry expected
+
+  git -C "${project_workspace}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  sparse_paths="$(git -C "${project_workspace}" sparse-checkout list 2>/dev/null || true)"
+  expected="$(buddyswitch_workspace_project_sparse_paths)"
+  [[ "${sparse_paths}" == "${expected}" ]] || return 1
+
+  for forbidden_entry in \
+    buddyswitch \
+    tools \
+    scripts \
+    tests \
+    framework \
+    docs \
+    AGENTS.md \
+    README.md \
+    buddyswitch-codex; do
+    if [[ -e "${project_workspace}/${forbidden_entry}" || -L "${project_workspace}/${forbidden_entry}" ]]; then
+      return 1
+    fi
+  done
+
+  [[ -d "${project_workspace}/projects/app" ]]
+}
+
+buddyswitch_workspace_project_worktree_has_dirty_non_project_changes() {
+  local project_workspace="$1"
+  local status_output
+
+  status_output="$(
+    git -C "${project_workspace}" status --porcelain --untracked-files=all -- . ':(exclude)projects/app/**'
+  )"
+  [[ -n "${status_output}" ]]
+}
+
+buddyswitch_workspace_report_dirty_non_project_changes() {
+  local project_workspace="$1"
+
+  echo "project workspace has local changes outside projects/app; refusing to narrow sparse checkout" >&2
+  echo "project workspace: ${project_workspace}" >&2
+  git -C "${project_workspace}" status --short --untracked-files=all -- . ':(exclude)projects/app/**' >&2 || true
+}
+
+buddyswitch_workspace_configure_project_sparse_checkout() {
+  local project_workspace="$1"
+  local mode="${2:-existing}"
+
+  if [[ "${mode}" != "fresh" && "${mode}" != "existing" ]]; then
+    echo "unsupported project sparse checkout mode: ${mode}" >&2
+    return 2
+  fi
+
+  if [[ "${mode}" != "fresh" ]] && buddyswitch_workspace_project_worktree_has_dirty_non_project_changes "${project_workspace}"; then
+    buddyswitch_workspace_report_dirty_non_project_changes "${project_workspace}"
+    return 3
+  fi
+
+  git -C "${project_workspace}" sparse-checkout init --no-cone >/dev/null
+  git -C "${project_workspace}" sparse-checkout set --no-cone projects/app/ >/dev/null
+  git -C "${project_workspace}" checkout HEAD >/dev/null
+
+  if ! buddyswitch_workspace_project_worktree_has_sparse_boundary "${project_workspace}"; then
+    echo "project workspace sparse checkout did not reach expected projects/app boundary" >&2
+    echo "project workspace: ${project_workspace}" >&2
+    return 1
+  fi
+}
+
 buddyswitch_workspace_force_rebuild_project_worktree() {
   local project_workspace repo_root
 
@@ -194,14 +270,23 @@ buddyswitch_workspace_force_rebuild_project_worktree() {
     fi
   fi
   git -C "${repo_root}" worktree prune >/dev/null 2>&1 || true
-  git -C "${repo_root}" worktree add --detach "${project_workspace}" HEAD >/dev/null
+  git -C "${repo_root}" worktree add --detach --no-checkout "${project_workspace}" HEAD >/dev/null
+  buddyswitch_workspace_configure_project_sparse_checkout "${project_workspace}" fresh
 }
 
 buddyswitch_workspace_ensure_project_worktree() {
   buddyswitch_workspace_init_defaults
   buddyswitch_workspace_validate_project_workspace_dir
   if buddyswitch_workspace_is_valid_project_worktree; then
-    return 0
+    if buddyswitch_workspace_project_worktree_has_dirty_non_project_changes "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}"; then
+      buddyswitch_workspace_report_dirty_non_project_changes "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}"
+      return 3
+    fi
+    if buddyswitch_workspace_project_worktree_has_sparse_boundary "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}"; then
+      return 0
+    fi
+    buddyswitch_workspace_configure_project_sparse_checkout "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}"
+    return $?
   fi
 
   buddyswitch_workspace_force_rebuild_project_worktree

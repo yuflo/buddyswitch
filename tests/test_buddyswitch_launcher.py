@@ -1464,6 +1464,29 @@ exec "$real_git" "$@"
             )
             for sample_file in ("index.html", "main.js", "styles.css"):
                 self.assertFalse((project_app_dir / sample_file).exists(), msg=sample_file)
+
+            forbidden_project_workspace_entries = (
+                "buddyswitch",
+                "tools",
+                "scripts",
+                "tests",
+                "framework",
+                "docs",
+                "AGENTS.md",
+                "README.md",
+                "buddyswitch-codex",
+            )
+            for entry_name in forbidden_project_workspace_entries:
+                self.assertFalse(
+                    (project_workspace_dir / entry_name).exists(),
+                    msg=f"project workspace must not expose framework entry: {entry_name}",
+                )
+
+            sparse_list = subprocess.check_output(
+                ["git", "-C", str(project_workspace_dir), "sparse-checkout", "list"],
+                text=True,
+            ).splitlines()
+            self.assertEqual(sparse_list, ["projects/app/"])
             projects_app_probe = payload["projects_app_probe"]
             self.assertTrue(projects_app_probe["exists"])
             self.assertEqual(
@@ -1474,6 +1497,251 @@ exec "$real_git" "$@"
 
             source_git_common_dir = self._repo_git_common_dir(ROOT)
             self.assertEqual(self._repo_git_common_dir(project_workspace_dir), source_git_common_dir)
+
+    def test_start_narrows_existing_full_project_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            shared_root = source_home_path / ".codex-buddyswitch"
+            project_workspace_dir = shared_root / "project" / "workspace"
+            project_workspace_dir.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                ["git", "-C", str(ROOT), "worktree", "add", "--detach", str(project_workspace_dir), "HEAD"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.addCleanup(
+                subprocess.run,
+                ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(project_workspace_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertTrue((project_workspace_dir / "tools").exists())
+            product_sentinel = project_workspace_dir / "projects" / "app" / "migration-sentinel.txt"
+            product_sentinel.write_text("preserve\n", encoding="utf-8")
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            self.assertFalse((project_workspace_dir / "tools").exists())
+            self.assertFalse((project_workspace_dir / "buddyswitch").exists())
+            self.assertTrue((project_workspace_dir / "projects" / "app").is_dir())
+            self.assertEqual(product_sentinel.read_text(encoding="utf-8"), "preserve\n")
+            sparse_list = subprocess.check_output(
+                ["git", "-C", str(project_workspace_dir), "sparse-checkout", "list"],
+                text=True,
+            ).splitlines()
+            self.assertEqual(sparse_list, ["projects/app/"])
+
+    def test_start_rejects_dirty_non_project_project_worktree_before_sparse_narrowing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            shared_root = source_home_path / ".codex-buddyswitch"
+            project_workspace_dir = shared_root / "project" / "workspace"
+            project_workspace_dir.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                ["git", "-C", str(ROOT), "worktree", "add", "--detach", str(project_workspace_dir), "HEAD"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.addCleanup(
+                subprocess.run,
+                ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(project_workspace_dir)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            dirty_file = project_workspace_dir / "tools" / "launcher" / "dirty-non-project-change.txt"
+            dirty_file.write_text("do not delete silently\n", encoding="utf-8")
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            ready_file = temp_root_path / "browser-ready.flag"
+            capture_path = temp_root_path / "capture.json"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("local changes outside projects/app", completed.stderr)
+            self.assertTrue(dirty_file.exists())
+            self.assertTrue((project_workspace_dir / "tools").exists())
+            self.assertFalse(capture_path.exists())
+
+    def test_start_rejects_dirty_non_project_file_in_existing_sparse_project_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            ready_file = temp_root_path / "browser-ready.flag"
+            first_capture_path = temp_root_path / "capture-first.json"
+            second_capture_path = temp_root_path / "capture-second.json"
+
+            base_env = os.environ.copy()
+            base_env["HOME"] = str(source_home_path)
+            base_env.pop("CODEX_HOME", None)
+            base_env["PATH"] = f"{fake_bin}{os.pathsep}{base_env.get('PATH', '')}"
+            base_env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            base_env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            base_env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+
+            first_env = base_env.copy()
+            first_env["BUDDYSWITCH_TEST_CAPTURE"] = str(first_capture_path)
+            first_start = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
+                cwd=ROOT,
+                env=first_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(first_start.returncode, 0, msg=first_start.stderr)
+            self.assertTrue(first_capture_path.exists())
+
+            shared_root = source_home_path / ".codex-buddyswitch"
+            project_workspace_dir = shared_root / "project" / "workspace"
+            sparse_list = subprocess.check_output(
+                ["git", "-C", str(project_workspace_dir), "sparse-checkout", "list"],
+                text=True,
+            ).splitlines()
+            self.assertEqual(sparse_list, ["projects/app/"])
+
+            root_stray = project_workspace_dir / "root-stray.txt"
+            root_stray.write_text("do not ignore sparse stray\n", encoding="utf-8")
+
+            second_env = base_env.copy()
+            second_env["BUDDYSWITCH_TEST_CAPTURE"] = str(second_capture_path)
+            second_start = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
+                cwd=ROOT,
+                env=second_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(second_start.returncode, 0)
+            self.assertIn("local changes outside projects/app", second_start.stderr)
+            self.assertTrue(root_stray.exists())
+            self.assertFalse(second_capture_path.exists())
+            sparse_list_after_failure = subprocess.check_output(
+                ["git", "-C", str(project_workspace_dir), "sparse-checkout", "list"],
+                text=True,
+            ).splitlines()
+            self.assertEqual(sparse_list_after_failure, ["projects/app/"])
 
     def test_product_mode_projects_app_resolves_to_shared_project_app(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
