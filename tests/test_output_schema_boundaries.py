@@ -81,7 +81,7 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
             },
             "dev": {
                 "task_summary": "Implemented onboarding banner behavior.",
-                "changed_files": ["projects/app/main.js"],
+                "changed_files": ["projects/app/README.md"],
                 "implementation_notes": ["Kept state mutation local."],
                 "verification": {
                     "checks_run": ["python3 -m pytest tests/test_turn_runtime.py -q"],
