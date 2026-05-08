@@ -1454,9 +1454,16 @@ exec "$real_git" "$@"
             )
 
             self.assertTrue(project_workspace_dir.is_dir())
-            self.assertTrue((project_workspace_dir / "projects" / "app" / "index.html").is_file())
-            self.assertTrue((project_workspace_dir / "projects" / "app" / "main.js").is_file())
-            self.assertTrue((project_workspace_dir / "projects" / "app" / "styles.css").is_file())
+            project_app_dir = project_workspace_dir / "projects" / "app"
+            placeholder_path = project_app_dir / "README.md"
+            self.assertTrue(project_app_dir.is_dir())
+            self.assertTrue(placeholder_path.is_file())
+            self.assertIn(
+                "BuddySwitch runtime mount point",
+                placeholder_path.read_text(encoding="utf-8"),
+            )
+            for sample_file in ("index.html", "main.js", "styles.css"):
+                self.assertFalse((project_app_dir / sample_file).exists(), msg=sample_file)
             projects_app_probe = payload["projects_app_probe"]
             self.assertTrue(projects_app_probe["exists"])
             self.assertEqual(

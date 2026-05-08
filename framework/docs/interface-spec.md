@@ -35,10 +35,12 @@ Task and track projections are slot-aware:
 
 ## UI Surface Boundary
 
-UI surfaces:
+UI surface:
 
 - `framework/console/app.js`
-- `projects/app/main.js`
+
+`projects/app` is shared product source projected into runtime workspaces. It is
+not a framework context panel UI surface.
 
 These browser entrypoints must not reference runtime internals.
 Runtime internals that must not be referenced from UI surfaces include:

@@ -428,7 +428,7 @@ The SHARP guidance above is the default workflow for this repository. The notes 
   - `buddyswitch/content/runs/*.json`
   - `runs/raw/`
 - Read-only context panel server: `python3 scripts/serve_context_panel.py`
-- Main app code: `projects/app/`
+- Shared product-source mount point: `projects/app/`
 
 ## Development Notes
 

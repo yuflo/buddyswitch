@@ -108,7 +108,6 @@ class RepoConsistencyTests(unittest.TestCase):
     def test_browser_ui_does_not_import_runtime_internals(self) -> None:
         ui_surfaces = (
             ROOT / "framework" / "console" / "app.js",
-            ROOT / "projects" / "app" / "main.js",
         )
         forbidden_runtime_internals = (
             "env_store",
@@ -125,6 +124,40 @@ class RepoConsistencyTests(unittest.TestCase):
 
         console_app_js = (ROOT / "framework" / "console" / "app.js").read_text(encoding="utf-8")
         self.assertIn("/api/workspace", console_app_js)
+
+        interface_spec = (ROOT / "framework" / "docs" / "interface-spec.md").read_text(encoding="utf-8")
+        self.assertIn("`framework/console/app.js`", interface_spec)
+        self.assertNotIn("`projects/app/" + "main.js`", interface_spec)
+
+        agents_doc = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("Shared product-source mount point: `projects/app/`", agents_doc)
+        self.assertNotIn("Main app " + "code: `projects/app/`", agents_doc)
+
+    def test_projects_app_is_framework_placeholder_only(self) -> None:
+        tracked = self._git_ls_files("projects/app")
+        self.assertEqual(tracked, ["projects/app/README.md"])
+
+        placeholder = ROOT / "projects" / "app" / "README.md"
+        text = placeholder.read_text(encoding="utf-8")
+        self.assertIn("runtime mount point", text)
+        self.assertIn("does not ship a concrete", text)
+
+        forbidden_suffixes = {".html", ".js", ".css", ".jsx", ".tsx", ".vue", ".svelte"}
+        concrete_files = [path for path in tracked if Path(path).suffix in forbidden_suffixes]
+        self.assertEqual(concrete_files, [])
+
+        forbidden_product_tokens = (
+            "Day" + "Flow",
+            "AI " + "Scheduler",
+            "onboarding" + "-demo",
+            "sample landing page",
+            "Personal Schedule " + "Manager",
+        )
+        for path in tracked:
+            content = (ROOT / path).read_text(encoding="utf-8")
+            for token in forbidden_product_tokens:
+                with self.subTest(path=path, token=token):
+                    self.assertNotIn(token, content)
 
     def test_importer_does_not_reintroduce_retired_runtime_paths(self) -> None:
         importer_text = (ROOT / "scripts" / "skill_creator_importer.py").read_text(encoding="utf-8")
