@@ -76,9 +76,12 @@ All six market skills use the same browser runtime contract:
 ## Cockpit Bootstrap
 
 - Preferred product-mode path: run `./buddyswitch-codex instance start --buddy <buddy>`.
-- Buddy-locked `instance start` bootstraps the active instance home, ensures the instance-bound headed cockpit endpoint, ensures `chrome-devtools-cockpit`, and then launches Codex.
-- Market (`browser_cockpit=required`) treats browser bootstrap failure as launch-blocking.
-- PM/Design/Dev/Test (`browser_cockpit=available`) may continue with warning when browser endpoint is unavailable.
+- Buddy-locked `instance start` bootstraps the active instance home, ensures the instance-bound headed cockpit ready page, ensures `chrome-devtools-cockpit`, and then launches Codex.
+- Ready page means `/json/version` is reachable and `/json/list` contains at least one usable `type=page` target.
+- Usable page targets are `about:blank` (canonical) or normal `http(s)` pages; `chrome://*`, `chrome-untrusted://*`, and `devtools://*` targets (for example `chrome://intro/`) are not ready.
+- If the endpoint is reachable but no usable page exists, launcher/runtime performs one `PUT /json/new?about:blank` repair attempt and re-checks `/json/list`.
+- Market (`browser_cockpit=required`) treats browser bootstrap failure as launch-blocking when no ready page can be verified.
+- PM/Design/Dev/Test (`browser_cockpit=available`) may continue with warning only when browser cockpit cannot be made ready.
 - The launcher patches all enabled MCP servers with `default_tools_approval_mode = "approve"` to keep product-mode runs moving without per-tool MCP approval prompts.
 - Do not set `supports_parallel_tool_calls = true` for the browser cockpit path; browser pages, active tabs, login state, and DOM reads are shared state and must stay serial.
 - `./buddyswitch-codex env browser status` and `./buddyswitch-codex env browser ensure --instance <instance-id>` are debug or compatibility commands outside the normal buddy-locked product-mode path.

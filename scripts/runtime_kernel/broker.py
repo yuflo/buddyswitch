@@ -13,7 +13,7 @@ import socket
 import threading
 import sys
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 import uuid
 from typing import Any, Iterator
 
@@ -258,6 +258,72 @@ def _require_browser_endpoint(url: str) -> None:
         raise ValueError(f"browser cockpit endpoint is unreachable: {probe_url}: {exc}") from exc
 
 
+def _browser_target_is_usable_page(target: Any) -> bool:
+    if not isinstance(target, dict):
+        return False
+    if target.get("type") != "page":
+        return False
+    url = target.get("url")
+    if not isinstance(url, str):
+        return False
+    normalized = url.strip().lower()
+    if not normalized:
+        return False
+    if normalized == "about:blank":
+        return True
+    if normalized.startswith("chrome://"):
+        return False
+    if normalized.startswith("chrome-untrusted://"):
+        return False
+    if normalized.startswith("devtools://"):
+        return False
+    return True
+
+
+def _browser_has_usable_page(url: str) -> bool:
+    targets_url = f"{url}/json/list"
+    try:
+        with urlopen(targets_url, timeout=3.0) as response:
+            if response.status < 200 or response.status >= 300:
+                return False
+            payload = json.loads(response.read().decode("utf-8"))
+    except (URLError, OSError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, list):
+        return False
+    return any(_browser_target_is_usable_page(target) for target in payload)
+
+
+def _browser_create_blank_page(url: str) -> bool:
+    create_url = f"{url}/json/new?about:blank"
+    request = Request(create_url, method="PUT")
+    try:
+        with urlopen(request, timeout=3.0) as response:
+            return 200 <= response.status < 300
+    except (URLError, OSError, ValueError):
+        return False
+
+
+def _require_browser_ready_page(url: str, *, instance_id: str) -> None:
+    _require_browser_endpoint(url)
+    if _browser_has_usable_page(url):
+        return
+    _browser_create_blank_page(url)
+    if _browser_has_usable_page(url):
+        return
+    turn_runtime._raise_runtime_feedback(
+        "E_RUNTIME_BROKER",
+        "browser cockpit ready page is required before issuing browser evidence",
+        permission_boundary="browser-cockpit-ready",
+        stop_condition="browser cockpit is not ready for MCP page operations",
+        allowed_next_actions=_allowed(
+            "Restart or open the launcher-managed instance to rebuild browser cockpit readiness.",
+            "Rerun browser ensure for the active launcher-managed instance.",
+        ),
+        command_hint=f"./buddyswitch-codex env browser ensure --instance {instance_id}",
+    )
+
+
 def _evidence_root(instance_json_path: Path) -> Path:
     return instance_json_path.parent / "runtime" / "evidence-tokens"
 
@@ -367,7 +433,7 @@ def _issue_browser_evidence_dispatch(
     browser_url: str | None = None
     if normalized_mode == "browser-cockpit-preflight":
         browser_url = _instance_browser_url(instance_record)
-        _require_browser_endpoint(browser_url)
+        _require_browser_ready_page(browser_url, instance_id=str(instance_record["instance_id"]).strip())
 
     payload_out = _write_evidence_token(
         instance_json_path=instance_json_path,

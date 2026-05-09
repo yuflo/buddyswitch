@@ -128,21 +128,114 @@ def _test_commit() -> dict[str, object]:
     }
 
 
-class _VersionHandler(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:  # noqa: N802
-        if self.path == "/json/version":
-            body = b'{"Browser":"test"}'
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        self.send_response(404)
-        self.end_headers()
+class _CDPState:
+    def __init__(
+        self,
+        *,
+        version_ok: bool,
+        pages: list[dict[str, object]] | None = None,
+        allow_put_new_about_blank: bool = False,
+        allow_get_new_about_blank: bool = False,
+    ) -> None:
+        self.version_ok = version_ok
+        self.pages = list(pages or [])
+        self.allow_put_new_about_blank = allow_put_new_about_blank
+        self.allow_get_new_about_blank = allow_get_new_about_blank
+        self.calls: list[dict[str, str]] = []
+        self._lock = threading.Lock()
 
-    def log_message(self, *_args: object) -> None:
-        return
+    def record_call(self, *, method: str, path: str, query: str) -> None:
+        with self._lock:
+            self.calls.append({"method": method, "path": path, "query": query})
+
+    def snapshot_calls(self) -> list[dict[str, str]]:
+        with self._lock:
+            return list(self.calls)
+
+    def has_usable_page(self) -> bool:
+        for page in self.pages:
+            if not isinstance(page, dict):
+                continue
+            if page.get("type") != "page":
+                continue
+            url = page.get("url")
+            if not isinstance(url, str):
+                continue
+            normalized = url.strip().lower()
+            if normalized == "about:blank":
+                return True
+            if not normalized.startswith("chrome://") and not normalized.startswith("chrome-untrusted://") and not normalized.startswith("devtools://"):
+                return True
+        return False
+
+
+def _make_cdp_handler(state: _CDPState) -> type[BaseHTTPRequestHandler]:
+    class _CDPHandler(BaseHTTPRequestHandler):
+        def _handle(self, method: str) -> None:
+            path = self.path
+            query = ""
+            if "?" in self.path:
+                path, query = self.path.split("?", 1)
+            state.record_call(method=method, path=path, query=query)
+
+            if path == "/json/version":
+                if state.version_ok:
+                    body = b'{"Browser":"test"}'
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                self.send_response(503)
+                self.end_headers()
+                return
+
+            if path == "/json/list":
+                body = json.dumps(state.pages, ensure_ascii=True).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            if path == "/json/new" and query == "about:blank":
+                if method == "PUT" and state.allow_put_new_about_blank:
+                    if not state.has_usable_page():
+                        state.pages.append({"id": "target-about-blank", "type": "page", "url": "about:blank"})
+                    body = b'{"id":"target-about-blank"}'
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                if method == "GET" and state.allow_get_new_about_blank:
+                    body = b'{"id":"target-about-blank"}'
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                self.send_response(405)
+                self.end_headers()
+                return
+
+            self.send_response(404)
+            self.end_headers()
+
+        def do_GET(self) -> None:  # noqa: N802
+            self._handle("GET")
+
+        def do_PUT(self) -> None:  # noqa: N802
+            self._handle("PUT")
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    return _CDPHandler
 
 
 class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -212,6 +305,18 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "artifacts": sorted(path.name for path in self._runtime_path("buddyswitch/objects/artifacts").glob("*.json")),
             "runs": sorted(path.name for path in self._runtime_path("buddyswitch/content/runs").glob("*.json")),
         }
+
+    def _start_cdp_server(self, state: _CDPState) -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        server = HTTPServer(("127.0.0.1", port), _make_cdp_handler(state))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 1.0)
+        return port
 
     def test_market_profile_requires_browser_evidence(self) -> None:
         profile = env_profiles.require_env_profile("market", manifest_path=MANIFEST, repo_root=ROOT)
@@ -306,16 +411,59 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("browser cockpit endpoint is unreachable", issue["error"]["message"])
         self.assertEqual(self._evidence_token_paths(instance_json), [])
 
+    def test_browser_preflight_rejects_endpoint_only_without_token(self) -> None:
+        state = _CDPState(version_ok=True, pages=[], allow_put_new_about_blank=False, allow_get_new_about_blank=False)
+        port = self._start_cdp_server(state)
+        instance_json = self._instance_json(browser_port=port)
+        context = self._prepare_market(instance_json=instance_json)
+        issue = self._dispatch(
+            request={
+                "protocol": "buddyswitch-runtime-broker/v1",
+                "instance_id": "inst-market-example",
+                "active_buddy": "market",
+                "method": "issue_browser_evidence",
+                "payload": {"context": context, "mode": "browser-cockpit-preflight", "reason": None},
+            },
+            instance_json=instance_json,
+        )
+        self.assertFalse(issue["ok"])
+        error = issue["error"]
+        self.assertEqual(error["permission_boundary"], "browser-cockpit-ready")
+        self.assertEqual(error["stop_condition"], "browser cockpit is not ready for MCP page operations")
+        self.assertIn("env browser ensure", error["command_hint"])
+        self.assertEqual(self._evidence_token_paths(instance_json), [])
+
+    def test_browser_preflight_repairs_intro_only_with_put_json_new(self) -> None:
+        state = _CDPState(
+            version_ok=True,
+            pages=[{"id": "intro", "type": "page", "url": "chrome://intro/"}],
+            allow_put_new_about_blank=True,
+            allow_get_new_about_blank=False,
+        )
+        port = self._start_cdp_server(state)
+        instance_json = self._instance_json(browser_port=port)
+        context = self._prepare_market(instance_json=instance_json)
+        issue = self._dispatch(
+            request={
+                "protocol": "buddyswitch-runtime-broker/v1",
+                "instance_id": "inst-market-example",
+                "active_buddy": "market",
+                "method": "issue_browser_evidence",
+                "payload": {"context": context, "mode": "browser-cockpit-preflight", "reason": None},
+            },
+            instance_json=instance_json,
+        )
+        self.assertTrue(issue["ok"], msg=issue)
+        calls = state.snapshot_calls()
+        self.assertTrue(any(call["method"] == "PUT" and call["path"] == "/json/new" and call["query"] == "about:blank" for call in calls))
+        self.assertFalse(any(call["method"] == "GET" and call["path"] == "/json/new" and call["query"] == "about:blank" for call in calls))
+
     def test_market_persist_with_browser_token_succeeds_and_records_audit(self) -> None:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.bind(("127.0.0.1", 0))
-            port = sock.getsockname()[1]
-        server = HTTPServer(("127.0.0.1", port), _VersionHandler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        self.addCleanup(server.shutdown)
-        self.addCleanup(server.server_close)
-        self.addCleanup(thread.join, 1.0)
+        state = _CDPState(
+            version_ok=True,
+            pages=[{"id": "target-about-blank", "type": "page", "url": "about:blank"}],
+        )
+        port = self._start_cdp_server(state)
 
         instance_json = self._instance_json(browser_port=port)
         context = self._prepare_market(instance_json=instance_json)
@@ -354,15 +502,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(run_payload["tool_evidence"]["token"], token)
 
     def test_market_persist_with_token_for_other_run_rejects(self) -> None:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.bind(("127.0.0.1", 0))
-            port = sock.getsockname()[1]
-        server = HTTPServer(("127.0.0.1", port), _VersionHandler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        self.addCleanup(server.shutdown)
-        self.addCleanup(server.server_close)
-        self.addCleanup(thread.join, 1.0)
+        state = _CDPState(
+            version_ok=True,
+            pages=[{"id": "target-about-blank", "type": "page", "url": "about:blank"}],
+        )
+        port = self._start_cdp_server(state)
 
         instance_json = self._instance_json(browser_port=port)
         context_a = self._prepare_market(instance_json=instance_json)

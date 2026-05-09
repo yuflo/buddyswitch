@@ -116,6 +116,56 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn(".agents/skills/<skill-id>", runtime_doc)
         self.assertIn("persist --context <context> --result <result>", runtime_doc)
 
+    def test_browser_cockpit_public_contract_requires_ready_page_not_endpoint_only(self) -> None:
+        cockpit_doc = (ROOT / "framework" / "docs" / "browser-cockpit.md").read_text(encoding="utf-8")
+        lowered = cockpit_doc.lower()
+        self.assertIn("ready page", lowered)
+        self.assertIn("about:blank", lowered)
+        self.assertIn("chrome://intro", lowered)
+        self.assertNotIn("ensures the instance-bound headed cockpit endpoint", cockpit_doc)
+
+        browser_launcher = (ROOT / "tools" / "launcher" / "browser_cockpit.sh").read_text(encoding="utf-8").lower()
+        self.assertIn("usable ready page", browser_launcher)
+        self.assertNotIn("endpoint is reachable", browser_launcher)
+
+    def test_tg07_ready_gate_assets_keep_browser_diagnosis_out_of_prompts_and_compat_migration_out_of_active_surfaces(self) -> None:
+        prompt_paths = sorted((ROOT / "tools" / "launcher" / "assets" / "buddies").rglob("AGENTS.md"))
+        prompt_paths.extend(sorted((ROOT / "buddyswitch" / "skills" / "market").rglob("SKILL.md")))
+        forbidden_prompt_terms = (
+            "chrome://intro",
+            "put /json/new",
+            "no page selected",
+            "first-run chrome",
+            "no-first-run",
+            "about:blank",
+        )
+        for path in prompt_paths:
+            text = path.read_text(encoding="utf-8").lower()
+            for token in forbidden_prompt_terms:
+                with self.subTest(path=str(path.relative_to(ROOT)), token=token):
+                    self.assertNotIn(token, text)
+
+        active_launcher_docs_paths = [
+            ROOT / "buddyswitch-codex",
+            ROOT / "tools" / "launcher" / "browser_cockpit.sh",
+            ROOT / "framework" / "docs" / "browser-cockpit.md",
+            ROOT / "README.md",
+        ]
+        forbidden_transition_terms = (
+            "old-instance migration",
+            "old instance migration",
+            "compatibility transition",
+            "transition marker",
+            "migration marker",
+            "old-profile migration",
+            "old profile migration",
+        )
+        for path in active_launcher_docs_paths:
+            text = path.read_text(encoding="utf-8").lower()
+            for token in forbidden_transition_terms:
+                with self.subTest(path=str(path.relative_to(ROOT)), token=token):
+                    self.assertNotIn(token, text)
+
     def test_console_boundary_uses_workspace_api(self) -> None:
         app_js = (ROOT / "framework" / "console" / "app.js").read_text(encoding="utf-8")
         self.assertIn("/api/workspace", app_js)
