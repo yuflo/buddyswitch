@@ -76,6 +76,68 @@ _RUNTIME_RAW_STATE_PATHS = (
 )
 _CANONICAL_PREPARE_COMMAND = 'python3 scripts/turn_runtime.py prepare "<request>"'
 _CANONICAL_PERSIST_COMMAND = "python3 scripts/turn_runtime.py persist --context <context> --result <result>"
+_ARTIFACT_KIND_DESC: dict[str, dict[str, str]] = {
+    "market-scan": {
+        "label": "Market scan",
+        "use_when": "Market summarizes demand, competition, audience, and positioning evidence for downstream product decisions.",
+    },
+    "pmf-report": {
+        "label": "PMF report",
+        "use_when": "Market evaluates product-market-fit signals, ICP hypotheses, confidence, and interview angles.",
+    },
+    "customer-discovery": {
+        "label": "Customer discovery",
+        "use_when": "Market prepares or summarizes customer interview hypotheses, guides, and learning points.",
+    },
+    "positioning-brief": {
+        "label": "Positioning brief",
+        "use_when": "Market defines message house, homepage angles, competitive contrast, and copy direction.",
+    },
+    "channel-plan": {
+        "label": "Channel plan",
+        "use_when": "Market proposes acquisition channels, experiment plans, and channel scoring.",
+    },
+    "launch-prep": {
+        "label": "Launch prep",
+        "use_when": "Market prepares launch assets, instrumentation, feedback collection, and release readiness notes.",
+    },
+    "prd": {
+        "label": "PRD",
+        "use_when": "PM defines product requirements, scope, decisions, acceptance criteria, and implementation-ready constraints.",
+    },
+    "pm-decision": {
+        "label": "PM decision",
+        "use_when": "PM records a product decision, tradeoff, or scope clarification that downstream buddies should follow.",
+    },
+    "track-note": {
+        "label": "Track note",
+        "use_when": "PM records cross-buddy track status, next buddy direction, blockers, or lifecycle rationale.",
+    },
+    "design-handoff": {
+        "label": "Design handoff",
+        "use_when": "Design provides interaction decisions, visual direction, handoff notes, and implementation constraints.",
+    },
+    "prototype-brief": {
+        "label": "Prototype brief",
+        "use_when": "Design captures prototype goals, flows, interaction states, preview references, and open UX questions.",
+    },
+    "implementation-report": {
+        "label": "Implementation report",
+        "use_when": "Dev reports changed files, implementation notes, verification evidence, risks, and follow-up work.",
+    },
+    "skill-import-report": {
+        "label": "Skill import report",
+        "use_when": "Dev reports skill import or conversion work, changed skill files, validation, and remaining risks.",
+    },
+    "smoke-test": {
+        "label": "Smoke test",
+        "use_when": "Test records focused smoke checks, pass/fail/blocked results, reproduction notes, and readiness.",
+    },
+    "test-report": {
+        "label": "Test report",
+        "use_when": "Test records broader regression scope, commands, evidence, failures, and release readiness judgment.",
+    },
+}
 
 
 class RuntimeFeedbackError(ValueError):
@@ -97,6 +159,30 @@ def _runtime_command_hints() -> dict[str, str]:
         "prepare": _CANONICAL_PREPARE_COMMAND,
         "persist": _CANONICAL_PERSIST_COMMAND,
     }
+
+
+def _context_save_path(active_buddy: str, run_id: str) -> str:
+    normalized_buddy = active_buddy.strip()
+    normalized_run_id = run_id.strip()
+    if not normalized_buddy:
+        raise ValueError("active_buddy is required to derive context_save_path")
+    if not normalized_run_id:
+        raise ValueError("run_id is required to derive context_save_path")
+    return f"runs/raw/{normalized_buddy}/prepare-context-{normalized_run_id}.json"
+
+
+def _persist_command_hint_for_context(context_save_path: str, active_buddy: str) -> str:
+    normalized_context_path = context_save_path.strip()
+    normalized_buddy = active_buddy.strip()
+    if not normalized_context_path:
+        raise ValueError("context_save_path is required to derive persist command hint")
+    if not normalized_buddy:
+        raise ValueError("active_buddy is required to derive persist command hint")
+    return (
+        "python3 scripts/turn_runtime.py persist "
+        f"--context {normalized_context_path} "
+        f"--result runs/raw/{normalized_buddy}/persist-result.json"
+    )
 
 
 def _rerun_prepare_actions() -> list[str]:
@@ -901,6 +987,97 @@ def _summarize_runtime_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_persist_field_desc(active_buddy: str, tool_capability: dict[str, Any]) -> dict[str, Any]:
+    tool_evidence_required: bool | str = False
+    if active_buddy == "market" and tool_capability.get("market_research_evidence") == "required":
+        tool_evidence_required = "Market artifact-producing commits require broker-issued evidence."
+    return {
+        "execution_summary": {
+            "required": True,
+            "purpose": "Short durable summary of what this buddy completed in this turn.",
+        },
+        "artifacts": {
+            "required": False,
+            "purpose": "Durable work products owned by the active buddy.",
+            "item_fields": ["kind", "title", "summary", "content"],
+            "kind_source": "runtime_context.artifact_kind_desc",
+        },
+        "state_effects.task": {
+            "required": False,
+            "purpose": "Update status or summary for the current prepared task only.",
+            "allowed_fields": ["status", "summary"],
+        },
+        "state_effects.track": {
+            "required": False,
+            "purpose": "PM-owned track lifecycle mutations.",
+            "rule_source": "runtime_context.track_lifecycle_desc",
+        },
+        "handoff": {
+            "required": False,
+            "purpose": "Ask another manifest buddy to continue with explicit reason and context.",
+            "does_not_mutate_track": True,
+        },
+        "contributors": {
+            "required": False,
+            "purpose": "Record skill ids or agent labels that contributed to the run.",
+        },
+        "tool_evidence": {
+            "required": tool_evidence_required,
+            "purpose": "Attach broker-issued evidence tokens; do not hand-write tokens.",
+        },
+    }
+
+
+def _build_track_lifecycle_desc(active_buddy: str, allowed_track_effects: list[str]) -> dict[str, Any]:
+    if active_buddy == "pm":
+        return {
+            "owner": "pm",
+            "allowed_actions": list(allowed_track_effects),
+            "create": "Creates a track and binds the current prepared task.",
+            "non_create_requires_existing_track": True,
+            "handoff_does_not_mutate_track": True,
+            "current_track_source": "current_track_id",
+        }
+    return {
+        "owner": "pm",
+        "allowed_actions": [],
+        "handoff_does_not_mutate_track": True,
+        "allowed_next_action": "Persist an artifact/task update or hand off track lifecycle changes to PM.",
+    }
+
+
+def _build_artifact_kind_desc(buddy: dict[str, Any]) -> dict[str, Any]:
+    rows: dict[str, Any] = {}
+    for kind in buddy.get("artifact_kinds", []):
+        if not isinstance(kind, str) or not kind:
+            continue
+        row = _ARTIFACT_KIND_DESC.get(kind)
+        if row is None:
+            raise ValueError(f"missing runtime artifact kind description for '{kind}'")
+        label = row.get("label", "")
+        use_when = row.get("use_when", "")
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError(f"artifact kind description '{kind}' must include non-empty label")
+        if not isinstance(use_when, str) or not use_when.strip():
+            raise ValueError(f"artifact kind description '{kind}' must include non-empty use_when")
+        rows[kind] = {
+            "label": label.strip(),
+            "use_when": use_when.strip(),
+        }
+    return rows
+
+
+def _build_context_sources_desc() -> dict[str, str]:
+    return {
+        "request_text": "Original user request for this turn.",
+        "task_context.task": "Current task metadata and summary.",
+        "task_context.artifacts": "Full prior artifact content for the current task when available.",
+        "track_context.track": "Current track title, status, buddies, and summary when bound.",
+        "track_context.recent_handoffs": "Recent handoff reason and context.",
+        "current_context_summary": "Compact scan-friendly summary; use full task_context artifacts when content detail is needed.",
+    }
+
+
 def _build_runtime_context(
     *,
     manifest: dict[str, Any],
@@ -935,6 +1112,8 @@ def _build_runtime_context(
     allowed_track_effects = state_capability.get("track_effects")
     if not isinstance(allowed_track_effects, list):
         raise ValueError("env profile state_capability.track_effects must be a list")
+    normalized_allowed_task_effects = [item for item in allowed_task_effects if isinstance(item, str)]
+    normalized_allowed_track_effects = [item for item in allowed_track_effects if isinstance(item, str)]
 
     tool_requirements = {
         "browser_cockpit": tool_capability.get("browser_cockpit"),
@@ -1033,8 +1212,8 @@ def _build_runtime_context(
         "capability_boundary": {
             "allowed_artifact_kinds": list(buddy.get("artifact_kinds", [])),
             "allowed_state_effects": {
-                "task": list(allowed_task_effects),
-                "track": list(allowed_track_effects),
+                "task": list(normalized_allowed_task_effects),
+                "track": list(normalized_allowed_track_effects),
             },
             "handoff_targets": _manifest_buddy_order(manifest),
             "project": {
@@ -1053,6 +1232,13 @@ def _build_runtime_context(
         },
         "tool_requirements": tool_requirements,
         "persist_payload_hint": persist_payload_hint,
+        "desc": _build_persist_field_desc(str(buddy.get("id") or ""), tool_capability),
+        "track_lifecycle_desc": _build_track_lifecycle_desc(
+            str(buddy.get("id") or ""),
+            normalized_allowed_track_effects,
+        ),
+        "artifact_kind_desc": _build_artifact_kind_desc(buddy),
+        "context_sources_desc": _build_context_sources_desc(),
         "current_context_summary": {
             "task": summarized_task,
             "track": summarized_track,
@@ -1346,13 +1532,17 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
         task_context=task_context,
         track_context=track_context,
     )
+    context_save_path = _context_save_path(buddy["id"], run_id)
+    persist_command_hint = _persist_command_hint_for_context(context_save_path, buddy["id"])
 
-    return {
+    prepared_payload = {
         "ok": True,
         "context_revision": context_revision,
         "instance_id": instance_id,
         "active_buddy": buddy["id"],
         "runtime_context": runtime_context,
+        "context_save_path": context_save_path,
+        "persist_command_hint": persist_command_hint,
         "request_text": request_text,
         "current_task_id": current_task_id,
         "current_track_id": current_track_id,
@@ -1367,6 +1557,16 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
         },
         "warnings": [],
     }
+    context_path = ROOT / context_save_path
+    try:
+        _write_runtime_json(context_path, prepared_payload)
+    except (ValueError, OSError) as exc:
+        warning = _clear_run_reservation(run_id)
+        if warning is not None:
+            _raise_reservation_clear_failure(warning)
+        raise ValueError(f"failed to write prepare context to {context_save_path}: {exc}") from exc
+
+    return prepared_payload
 
 
 def prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
@@ -1468,14 +1668,48 @@ def _known_buddy_ids(manifest: dict[str, Any]) -> set[str]:
     }
 
 
+def _allowed_state_effects_hint(env_profile: dict[str, Any]) -> dict[str, Any]:
+    state_capability = env_profile.get("state_capability")
+    if not isinstance(state_capability, dict):
+        raise ValueError("env profile state_capability must be an object")
+    task_effects = state_capability.get("task_effects")
+    track_effects = state_capability.get("track_effects")
+    if not isinstance(task_effects, list):
+        raise ValueError("env profile state_capability.task_effects must be a list")
+    if not isinstance(track_effects, list):
+        raise ValueError("env profile state_capability.track_effects must be a list")
+    return {
+        "task": [item for item in task_effects if isinstance(item, str)],
+        "track": [item for item in track_effects if isinstance(item, str)],
+    }
+
+
 def _validate_handoff(handoff: Any, known_buddies: set[str]) -> dict[str, Any]:
     if not isinstance(handoff, dict):
-        raise ValueError("handoff must be an object")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            "handoff must be an object",
+            permission_boundary="persist.handoff",
+            allowed_next_actions=[
+                "Provide handoff as an object with next_buddy, reason, and context.",
+                "Remove handoff when no transfer is needed.",
+            ],
+            persist_payload_hint={"handoff_fields": ["next_buddy", "reason", "context"]},
+        )
     next_buddy = handoff.get("next_buddy")
     reason = handoff.get("reason")
     context = handoff.get("context")
     if not isinstance(next_buddy, str) or not next_buddy.strip():
-        raise ValueError("handoff.next_buddy must be a non-empty string")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            "handoff.next_buddy must be a non-empty string",
+            permission_boundary="persist.handoff",
+            allowed_next_actions=[
+                "Set handoff.next_buddy to a manifest buddy id.",
+                "Remove handoff when no transfer is needed.",
+            ],
+            persist_payload_hint={"handoff_fields": ["next_buddy", "reason", "context"]},
+        )
     if next_buddy.strip() not in known_buddies:
         _raise_runtime_feedback(
             "E_RUNTIME_PERSIST",
@@ -1488,9 +1722,27 @@ def _validate_handoff(handoff: Any, known_buddies: set[str]) -> dict[str, Any]:
             persist_payload_hint={"handoff_targets": sorted(known_buddies)},
         )
     if not isinstance(reason, str) or not reason.strip():
-        raise ValueError("handoff.reason must be a non-empty string")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            "handoff.reason must be a non-empty string",
+            permission_boundary="persist.handoff",
+            allowed_next_actions=[
+                "Add a concise handoff.reason that explains why the next buddy is needed.",
+                "Remove handoff when no transfer is needed.",
+            ],
+            persist_payload_hint={"handoff_fields": ["next_buddy", "reason", "context"]},
+        )
     if not isinstance(context, str) or not context.strip():
-        raise ValueError("handoff.context must be a non-empty string")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            "handoff.context must be a non-empty string",
+            permission_boundary="persist.handoff",
+            allowed_next_actions=[
+                "Add handoff.context with the minimum task context the next buddy needs.",
+                "Remove handoff when no transfer is needed.",
+            ],
+            persist_payload_hint={"handoff_fields": ["next_buddy", "reason", "context"]},
+        )
     return {
         "next_buddy": next_buddy.strip(),
         "reason": reason.strip(),
@@ -1527,16 +1779,22 @@ def _validate_state_effects(
                 + ", ".join(unsupported_track_keys)
             )
         action = track_effect.get("action")
+        allowed_state_effects = _allowed_state_effects_hint(env_profile)
         if action not in TRACK_ACTIONS:
-            raise ValueError("state_effects.track.action must be one of create/update/advance/archive")
+            _raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                "state_effects.track.action must be one of create/update/advance/archive",
+                permission_boundary="env-profile.state_capability.track_effects",
+                allowed_next_actions=[
+                    "Use one of create, update, advance, or archive for state_effects.track.action.",
+                    "Remove state_effects.track when no track lifecycle mutation is needed.",
+                ],
+                persist_payload_hint={"allowed_state_effects": allowed_state_effects},
+            )
         allowed_track_effects = env_profile.get("state_capability", {}).get("track_effects")
         if not isinstance(allowed_track_effects, list):
             raise ValueError("env profile state_capability.track_effects must be a list")
         if action not in allowed_track_effects:
-            allowed_state_effects = {
-                "task": list(env_profile.get("state_capability", {}).get("task_effects", [])),
-                "track": list(allowed_track_effects),
-            }
             _raise_runtime_feedback(
                 "E_RUNTIME_PERSIST",
                 f"buddy '{buddy.get('id')}' is not allowed to perform track action '{action}'",
@@ -1585,17 +1843,42 @@ def _validate_state_effects(
         if action == "create":
             existing_bound_track = explicit_track_id or task.get("track_id")
             if isinstance(existing_bound_track, str) and existing_bound_track:
-                raise ValueError(
+                _raise_runtime_feedback(
+                    "E_RUNTIME_PERSIST",
                     "state_effects.track.create cannot be used when the prepared task is already bound "
-                    f"to track '{existing_bound_track}'."
+                    f"to track '{existing_bound_track}'.",
+                    permission_boundary="state_effects.track.create",
+                    allowed_next_actions=[
+                        "Use update, advance, or archive for the existing track.",
+                        "Remove state_effects.track when no lifecycle change is needed.",
+                    ],
+                    persist_payload_hint={"allowed_state_effects": allowed_state_effects},
                 )
 
         target_track_id = normalized_requested_track_id or explicit_track_id or task.get("track_id")
         if action != "create":
             if not isinstance(target_track_id, str) or not target_track_id:
-                raise ValueError("state_effects.track requires track_id for non-create actions")
+                _raise_runtime_feedback(
+                    "E_RUNTIME_PERSIST",
+                    "state_effects.track requires track_id for non-create actions",
+                    permission_boundary="state_effects.track.track_id",
+                    allowed_next_actions=[
+                        "Provide state_effects.track.track_id for update, advance, or archive.",
+                        "Create a track first in PM when no current track exists.",
+                    ],
+                    persist_payload_hint={"allowed_state_effects": allowed_state_effects},
+                )
             if get_track(target_track_id) is None:
-                raise ValueError(f"Track not found: {target_track_id}")
+                _raise_runtime_feedback(
+                    "E_RUNTIME_PERSIST",
+                    f"Track not found: {target_track_id}",
+                    permission_boundary="state_effects.track.track_id",
+                    allowed_next_actions=[
+                        "Use a valid existing track_id from current context.",
+                        "Rerun prepare and confirm current_track_id before persisting.",
+                    ],
+                    persist_payload_hint={"allowed_state_effects": allowed_state_effects},
+                )
             if action in {"update", "advance"}:
                 mutable = {
                     key: normalized_track.get(key)
@@ -1603,7 +1886,18 @@ def _validate_state_effects(
                     if key in normalized_track and normalized_track.get(key) is not None
                 }
                 if not mutable:
-                    raise ValueError("state_effects.track for update/advance must include at least one mutable field")
+                    _raise_runtime_feedback(
+                        "E_RUNTIME_PERSIST",
+                        "state_effects.track for update/advance must include at least one mutable field",
+                        permission_boundary="state_effects.track",
+                        allowed_next_actions=[
+                            "Add at least one of title, status, current_buddy, next_buddy, or summary.",
+                            "Remove state_effects.track when no track change is needed.",
+                        ],
+                        persist_payload_hint={
+                            "mutable_fields": ["title", "status", "current_buddy", "next_buddy", "summary"]
+                        },
+                    )
 
     normalized_task: dict[str, Any] | None = None
     if task_effect is not None:
@@ -1662,10 +1956,28 @@ def _validate_artifacts(
         content = artifact.get("content")
         summary = artifact.get("summary", "")
         if not isinstance(kind, str) or not kind.strip():
-            raise ValueError(f"artifacts[{index}].kind must be a non-empty string")
+            _raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                f"artifacts[{index}].kind must be a non-empty string",
+                permission_boundary="persist.artifacts",
+                allowed_next_actions=[
+                    "Provide artifacts as objects with kind, title, summary, and content.",
+                    "Remove malformed artifacts entries before persisting.",
+                ],
+                persist_payload_hint={"artifact_fields": ["kind", "title", "summary", "content"]},
+            )
         normalized_kind = kind.strip()
         if normalized_kind in seen_kinds:
-            raise ValueError("duplicate artifact kind in one commit")
+            _raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                "duplicate artifact kind in one commit",
+                permission_boundary="persist.artifacts.kind",
+                allowed_next_actions=[
+                    "Keep only one artifact per kind in a single persist commit.",
+                    "Split additional artifacts into later turns when needed.",
+                ],
+                persist_payload_hint={"one_artifact_per_kind": True},
+            )
         if normalized_kind not in allowed_kinds:
             _raise_runtime_feedback(
                 "E_RUNTIME_PERSIST",
@@ -1678,9 +1990,27 @@ def _validate_artifacts(
                 persist_payload_hint={"allowed_artifact_kinds": sorted(allowed_kinds)},
             )
         if not isinstance(title, str) or not title.strip():
-            raise ValueError(f"artifacts[{index}].title must be a non-empty string")
+            _raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                f"artifacts[{index}].title must be a non-empty string",
+                permission_boundary="persist.artifacts",
+                allowed_next_actions=[
+                    "Provide artifacts as objects with kind, title, summary, and content.",
+                    "Remove malformed artifacts entries before persisting.",
+                ],
+                persist_payload_hint={"artifact_fields": ["kind", "title", "summary", "content"]},
+            )
         if not isinstance(content, dict):
-            raise ValueError(f"artifacts[{index}].content must be an object")
+            _raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                f"artifacts[{index}].content must be an object",
+                permission_boundary="persist.artifacts",
+                allowed_next_actions=[
+                    "Provide artifacts as objects with kind, title, summary, and content.",
+                    "Remove malformed artifacts entries before persisting.",
+                ],
+                persist_payload_hint={"artifact_fields": ["kind", "title", "summary", "content"]},
+            )
         if summary is not None and not isinstance(summary, str):
             raise ValueError(f"artifacts[{index}].summary must be a string when provided")
         seen_kinds.add(normalized_kind)
@@ -1771,7 +2101,16 @@ def _validate_buddy_run_commit(
 
     execution_summary = result.get("execution_summary")
     if not isinstance(execution_summary, str) or not execution_summary.strip():
-        raise ValueError("execution_summary must be a non-empty string")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            "execution_summary must be a non-empty string",
+            permission_boundary="persist.execution_summary",
+            allowed_next_actions=[
+                "Add execution_summary with a short durable summary of completed work.",
+                "Keep execution_summary concise and specific to this turn.",
+            ],
+            persist_payload_hint={"required": ["execution_summary"]},
+        )
 
     working_notes = result.get("working_notes")
     normalized_working_notes: list[str]
@@ -1815,7 +2154,16 @@ def _validate_buddy_run_commit(
     if normalized_handoff is not None and normalized_track_effect is not None:
         track_next_buddy = normalized_track_effect.get("next_buddy")
         if isinstance(track_next_buddy, str) and track_next_buddy and track_next_buddy != normalized_handoff["next_buddy"]:
-            raise ValueError("handoff.next_buddy and state_effects.track.next_buddy must match")
+            _raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                "handoff.next_buddy and state_effects.track.next_buddy must match",
+                permission_boundary="persist.handoff",
+                allowed_next_actions=[
+                    "Make handoff.next_buddy and state_effects.track.next_buddy the same value.",
+                    "Remove one of the fields when only one transition target is needed.",
+                ],
+                persist_payload_hint={"handoff_fields": ["next_buddy", "reason", "context"]},
+            )
 
     contributors = result.get("contributors")
     normalized_contributors = {"skills": [], "agents": []}
@@ -1836,7 +2184,18 @@ def _validate_buddy_run_commit(
 
     has_state_effects = normalized_track_effect is not None or normalized_task_effect is not None
     if not normalized_artifacts and not has_state_effects and normalized_handoff is None:
-        raise ValueError("at least one durable collaboration signal is required (artifacts/state_effects/handoff)")
+        _raise_runtime_feedback(
+            "E_RUNTIME_PERSIST",
+            "at least one durable collaboration signal is required (artifacts/state_effects/handoff)",
+            permission_boundary="persist.durable_signal",
+            allowed_next_actions=[
+                "Provide at least one artifact, state_effects entry, or handoff.",
+                "Do not submit summary-only commits with no durable state change.",
+            ],
+            persist_payload_hint={
+                "durable_signal_options": ["artifacts", "state_effects", "handoff"],
+            },
+        )
 
     return {
         "execution_summary": execution_summary.strip(),

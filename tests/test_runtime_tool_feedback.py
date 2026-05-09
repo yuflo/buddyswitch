@@ -449,8 +449,305 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 )
                 self.assertFalse(rejected["ok"], msg=rejected)
                 error = rejected["error"]
+                self.assertEqual(error["code"], "E_RUNTIME_PERSIST")
                 self.assertEqual(error["permission_boundary"], boundary)
                 self.assertIn("allowed_next_actions", error)
+                self.assertIsInstance(error["allowed_next_actions"], list)
+                self.assertGreaterEqual(len(error["allowed_next_actions"]), 1)
+                self.assertIn("persist_payload_hint", error)
+                self.assertEqual(self._state_snapshot(), before)
+
+    def test_persist_common_validation_failures_return_structured_feedback_and_keep_state_atomic(self) -> None:
+        unbound_pm_json = self._instance_json(instance_id="inst-pm-unbound")
+        base_context = self._prepare(
+            buddy="pm",
+            instance_id="inst-pm-unbound",
+            request_text=PM_REQUEST,
+            instance_json=unbound_pm_json,
+        )
+
+        bound_pm_json = self._instance_json(instance_id="inst-pm-bound")
+        seed_context = self._prepare(
+            buddy="pm",
+            instance_id="inst-pm-bound",
+            request_text=PM_REQUEST,
+            instance_json=bound_pm_json,
+        )
+        track_create_commit = {
+            "execution_summary": "PM created a track for follow-up lifecycle checks.",
+            "state_effects": {
+                "track": {
+                    "action": "create",
+                    "track_id": "track-pm-validation",
+                    "title": "PM Validation Track",
+                    "status": "active",
+                    "current_buddy": "pm",
+                    "next_buddy": "market",
+                }
+            },
+        }
+        seeded = self._dispatch(
+            method="persist",
+            payload={"context": seed_context, "result": track_create_commit},
+            instance_json=bound_pm_json,
+            instance_id="inst-pm-bound",
+            buddy="pm",
+        )
+        self.assertTrue(seeded["ok"], msg=seeded)
+        seed_receipt = seeded["payload"]["receipt"]
+        bound_context = self._prepare(
+            buddy="pm",
+            instance_id="inst-pm-bound",
+            request_text="继续当前track",
+            instance_json=bound_pm_json,
+        )
+        self.assertEqual(bound_context["current_task_id"], seed_receipt["task_id"])
+        self.assertEqual(bound_context["current_track_id"], seed_receipt["track_id"])
+
+        missing_execution_summary = _pm_commit()
+        missing_execution_summary.pop("execution_summary", None)
+
+        empty_execution_summary = _pm_commit()
+        empty_execution_summary["execution_summary"] = "   "
+
+        duplicate_kind = _pm_commit()
+        duplicate_kind["artifacts"] = [
+            duplicate_kind["artifacts"][0],  # type: ignore[index]
+            {
+                "kind": "prd",
+                "title": "Duplicate kind",
+                "content": {"note": "duplicate"},
+            },
+        ]
+
+        artifact_missing_fields = {
+            "execution_summary": "PM attempted malformed artifact payload.",
+            "artifacts": [{"kind": "prd", "summary": "missing title and content"}],
+        }
+
+        artifact_missing_kind = {
+            "execution_summary": "PM attempted artifact payload without a kind.",
+            "artifacts": [{"title": "Missing Kind", "content": {"note": "missing kind"}}],
+        }
+
+        invalid_artifact_kind = {
+            "execution_summary": "PM attempted to persist a Dev-owned artifact kind.",
+            "artifacts": [
+                {
+                    "kind": "implementation-report",
+                    "title": "Wrong Owner",
+                    "summary": "Invalid kind for PM.",
+                    "content": {"note": "wrong owner"},
+                }
+            ],
+        }
+
+        unsupported_task_key = {
+            "execution_summary": "PM attempted unsupported task field.",
+            "state_effects": {"task": {"owner": "pm"}},
+        }
+
+        cases = (
+            (
+                "missing-execution-summary",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                missing_execution_summary,
+                "persist.execution_summary",
+            ),
+            (
+                "empty-execution-summary",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                empty_execution_summary,
+                "persist.execution_summary",
+            ),
+            (
+                "missing-durable-signal",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                {"execution_summary": "PM provided no durable signal."},
+                "persist.durable_signal",
+            ),
+            (
+                "duplicate-artifact-kind",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                duplicate_kind,
+                "persist.artifacts.kind",
+            ),
+            (
+                "artifact-missing-fields",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                artifact_missing_fields,
+                "persist.artifacts",
+            ),
+            (
+                "artifact-missing-kind",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                artifact_missing_kind,
+                "persist.artifacts",
+            ),
+            (
+                "invalid-artifact-kind-for-active-buddy",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                invalid_artifact_kind,
+                "manifest.artifact_kinds",
+            ),
+            (
+                "invalid-track-action",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                {
+                    "execution_summary": "PM attempted unsupported track action.",
+                    "state_effects": {"track": {"action": "pause"}},
+                },
+                "env-profile.state_capability.track_effects",
+            ),
+            (
+                "track-create-when-already-bound",
+                bound_pm_json,
+                "inst-pm-bound",
+                bound_context,
+                {
+                    "execution_summary": "PM attempted duplicate track create.",
+                    "state_effects": {"track": {"action": "create"}},
+                },
+                "state_effects.track.create",
+            ),
+            (
+                "non-create-without-track-id",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                {
+                    "execution_summary": "PM attempted track update without existing track binding.",
+                    "state_effects": {"track": {"action": "update", "summary": "missing target"}},
+                },
+                "state_effects.track.track_id",
+            ),
+            (
+                "track-update-references-missing-track",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                {
+                    "execution_summary": "PM attempted track update for a missing track.",
+                    "state_effects": {
+                        "track": {
+                            "action": "update",
+                            "track_id": "track-missing-feedback",
+                            "summary": "missing target",
+                        }
+                    },
+                },
+                "state_effects.track.track_id",
+            ),
+            (
+                "track-update-without-mutable-fields",
+                bound_pm_json,
+                "inst-pm-bound",
+                bound_context,
+                {
+                    "execution_summary": "PM attempted track update without mutable fields.",
+                    "state_effects": {"track": {"action": "update", "track_id": seed_receipt["track_id"]}},
+                },
+                "state_effects.track",
+            ),
+            (
+                "handoff-missing-reason-context",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                {
+                    "execution_summary": "PM attempted handoff without reason/context.",
+                    "handoff": {"next_buddy": "market"},
+                },
+                "persist.handoff",
+            ),
+            (
+                "handoff-missing-next-buddy",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                {
+                    "execution_summary": "PM attempted handoff without next buddy.",
+                    "handoff": {"reason": "Need another buddy.", "context": "Continue with context."},
+                },
+                "persist.handoff",
+            ),
+            (
+                "handoff-target-unknown",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                {
+                    "execution_summary": "PM attempted handoff to an unknown buddy.",
+                    "handoff": {"next_buddy": "sales", "reason": "Need sales.", "context": "Continue."},
+                },
+                "manifest.buddies",
+            ),
+            (
+                "handoff-target-conflicts-with-track-next-buddy",
+                bound_pm_json,
+                "inst-pm-bound",
+                bound_context,
+                {
+                    "execution_summary": "PM submitted conflicting handoff and track next buddy.",
+                    "state_effects": {
+                        "track": {
+                            "action": "advance",
+                            "track_id": seed_receipt["track_id"],
+                            "next_buddy": "design",
+                        }
+                    },
+                    "handoff": {
+                        "next_buddy": "market",
+                        "reason": "handoff conflict check",
+                        "context": "conflicting target",
+                    },
+                },
+                "persist.handoff",
+            ),
+            (
+                "unsupported-task-key",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                unsupported_task_key,
+                "env-profile.state_capability.task_effects",
+            ),
+        )
+
+        for label, instance_json, instance_id, context, result, boundary in cases:
+            with self.subTest(label=label):
+                before = self._state_snapshot()
+                rejected = self._dispatch(
+                    method="persist",
+                    payload={"context": context, "result": result},
+                    instance_json=instance_json,
+                    instance_id=instance_id,
+                    buddy="pm",
+                )
+                self.assertFalse(rejected["ok"], msg=rejected)
+                error = rejected["error"]
+                self.assertEqual(error["code"], "E_RUNTIME_PERSIST")
+                self.assertEqual(error["permission_boundary"], boundary)
+                self.assertIn("allowed_next_actions", error)
+                self.assertIsInstance(error["allowed_next_actions"], list)
+                self.assertGreaterEqual(len(error["allowed_next_actions"]), 1)
+                self.assertIn("persist_payload_hint", error)
                 self.assertEqual(self._state_snapshot(), before)
 
     def test_stale_context_and_buddy_mismatch_feedback_tell_buddy_to_prepare_again(self) -> None:
@@ -494,7 +791,10 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_market_evidence_rejection_and_success_feedback(self) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.bind(("127.0.0.1", 0))
+            try:
+                sock.bind(("127.0.0.1", 0))
+            except PermissionError as exc:
+                self.skipTest(f"socket bind is not permitted in this execution environment: {exc}")
             port = sock.getsockname()[1]
         server = HTTPServer(("127.0.0.1", port), _VersionHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

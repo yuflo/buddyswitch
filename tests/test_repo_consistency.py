@@ -16,6 +16,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_manifest  # noqa: E402
+import turn_runtime  # noqa: E402
 
 
 class RepoConsistencyTests(unittest.TestCase):
@@ -381,6 +382,37 @@ class RepoConsistencyTests(unittest.TestCase):
                         kind in allowed_without_asset or kind in active_skill_text,
                         f"{kind} must be documented by an active skill asset or explicit non-template allowlist",
                     )
+
+    def test_runtime_artifact_kind_desc_covers_manifest_kinds(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        expected_kinds = {
+            kind
+            for buddy in manifest.get("buddies", [])
+            if isinstance(buddy, dict)
+            for kind in buddy.get("artifact_kinds", [])
+            if isinstance(kind, str) and kind
+        }
+        runtime_desc = getattr(turn_runtime, "_ARTIFACT_KIND_DESC")
+        self.assertEqual(set(runtime_desc.keys()), expected_kinds)
+        for kind in expected_kinds:
+            with self.subTest(kind=kind):
+                row = runtime_desc[kind]
+                self.assertTrue(str(row.get("label", "")).strip())
+                self.assertTrue(str(row.get("use_when", "")).strip())
+
+    def test_turn_runtime_spec_documents_prepare_desc_and_context_save_surfaces(self) -> None:
+        runtime_doc = (ROOT / "framework" / "docs" / "turn-runtime-spec.md").read_text(encoding="utf-8")
+        for token in (
+            "context_save_path",
+            "persist_command_hint",
+            "runtime_context.desc",
+            "runtime_context.track_lifecycle_desc",
+            "runtime_context.artifact_kind_desc",
+            "runtime_context.context_sources_desc",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, runtime_doc)
+        self.assertIn("structured feedback", runtime_doc.lower())
 
     def test_persist_contract_is_buddy_run_and_legacy_contract_removed(self) -> None:
         contract_path = ROOT / "framework" / "contracts" / "persist-buddy-run.json"

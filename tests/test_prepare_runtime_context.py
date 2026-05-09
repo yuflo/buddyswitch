@@ -138,6 +138,10 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "capability_boundary",
                     "tool_requirements",
                     "persist_payload_hint",
+                    "desc",
+                    "track_lifecycle_desc",
+                    "artifact_kind_desc",
+                    "context_sources_desc",
                     "current_context_summary",
                 ):
                     self.assertIn(key, runtime_context)
@@ -260,6 +264,218 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                         set(tool_evidence_hint["accepted_fields"]),
                         {"browser_cockpit_token", "approved_downgrade_token"},
                     )
+
+    def test_prepare_runtime_context_exposes_desc_for_commit_fields(self) -> None:
+        payload = self._prepare(buddy="pm", request_text=PM_REQUEST)
+        desc = payload["runtime_context"]["desc"]
+
+        required_keys = (
+            "execution_summary",
+            "artifacts",
+            "state_effects.task",
+            "state_effects.track",
+            "handoff",
+            "contributors",
+            "tool_evidence",
+        )
+        for key in required_keys:
+            with self.subTest(key=key):
+                self.assertIn(key, desc)
+                self.assertTrue(str(desc[key].get("purpose", "")).strip())
+
+        self.assertTrue(desc["execution_summary"]["required"])
+        self.assertEqual(
+            desc["artifacts"]["item_fields"],
+            ["kind", "title", "summary", "content"],
+        )
+        self.assertEqual(
+            desc["state_effects.task"]["allowed_fields"],
+            ["status", "summary"],
+        )
+        self.assertTrue(desc["handoff"]["does_not_mutate_track"])
+
+    def test_prepare_runtime_context_desc_is_present_for_each_buddy(self) -> None:
+        required_keys = {
+            "execution_summary",
+            "artifacts",
+            "state_effects.task",
+            "state_effects.track",
+            "handoff",
+            "contributors",
+            "tool_evidence",
+        }
+        for buddy in self._manifest_buddy_order():
+            with self.subTest(buddy=buddy):
+                payload = self._prepare(buddy=buddy, request_text=REQUESTS_BY_BUDDY[buddy])
+                desc = payload["runtime_context"]["desc"]
+                self.assertTrue(required_keys.issubset(set(desc)))
+                self.assertTrue(all(str(desc[key].get("purpose", "")).strip() for key in required_keys))
+
+                tool_evidence_required = desc["tool_evidence"].get("required")
+                if buddy == "market":
+                    self.assertIn("Market", str(tool_evidence_required))
+                else:
+                    self.assertFalse(tool_evidence_required)
+
+    def test_prepare_writes_context_file_and_exposes_persist_hint(self) -> None:
+        for buddy in self._manifest_buddy_order():
+            with self.subTest(buddy=buddy):
+                payload = self._prepare(buddy=buddy, request_text=REQUESTS_BY_BUDDY[buddy])
+                context_save_path = payload["context_save_path"]
+                self.assertIsInstance(context_save_path, str)
+                self.assertTrue(context_save_path.startswith(f"runs/raw/{buddy}/"))
+                self.assertFalse(Path(context_save_path).is_absolute())
+
+                context_path = self._runtime_path(context_save_path)
+                self.assertTrue(context_path.exists())
+
+                persisted_context = json.loads(context_path.read_text(encoding="utf-8"))
+                self.assertEqual(persisted_context["context_revision"], payload["context_revision"])
+                self.assertEqual(persisted_context["active_buddy"], payload["active_buddy"])
+                self.assertEqual(persisted_context["request_text"], payload["request_text"])
+                self.assertEqual(
+                    persisted_context["run_envelope"]["run_id"],
+                    payload["run_envelope"]["run_id"],
+                )
+                self.assertEqual(persisted_context["context_save_path"], context_save_path)
+                self.assertEqual(
+                    persisted_context["persist_command_hint"],
+                    payload["persist_command_hint"],
+                )
+
+                persist_command_hint = payload["persist_command_hint"]
+                self.assertIn("python3 scripts/turn_runtime.py persist", persist_command_hint)
+                self.assertIn(f"--context {context_save_path}", persist_command_hint)
+                self.assertIn(f"--result runs/raw/{buddy}/persist-result.json", persist_command_hint)
+
+                self.assertTrue(str(context_path).startswith(str(self._runtime_path(f"runs/raw/{buddy}"))))
+                for forbidden_rel in ("projects/app", "buddyswitch/objects", "buddyswitch/content/runs"):
+                    forbidden_root = self._runtime_path(forbidden_rel)
+                    self.assertFalse(
+                        context_path.resolve(strict=False).is_relative_to(forbidden_root.resolve(strict=False))
+                    )
+                    if forbidden_root.exists():
+                        self.assertEqual(list(forbidden_root.rglob("prepare-context-*.json")), [])
+
+    def test_prepare_exposes_track_lifecycle_desc_for_pm_and_non_pm(self) -> None:
+        pm_payload = self._prepare(buddy="pm", request_text=REQUESTS_BY_BUDDY["pm"])
+        pm_desc = pm_payload["runtime_context"]["track_lifecycle_desc"]
+        self.assertEqual(pm_desc["owner"], "pm")
+        self.assertEqual(pm_desc["allowed_actions"], ["create", "update", "advance", "archive"])
+        self.assertTrue(pm_desc["non_create_requires_existing_track"])
+        self.assertTrue(pm_desc["handoff_does_not_mutate_track"])
+        self.assertEqual(pm_desc["current_track_source"], "current_track_id")
+        self.assertIn("bind", str(pm_desc["create"]).lower())
+
+        for buddy in ("market", "design", "dev", "test"):
+            with self.subTest(buddy=buddy):
+                payload = self._prepare(buddy=buddy, request_text=REQUESTS_BY_BUDDY[buddy])
+                lifecycle_desc = payload["runtime_context"]["track_lifecycle_desc"]
+                self.assertEqual(lifecycle_desc["owner"], "pm")
+                self.assertEqual(lifecycle_desc["allowed_actions"], [])
+                self.assertTrue(lifecycle_desc["handoff_does_not_mutate_track"])
+                self.assertIn("PM", str(lifecycle_desc["allowed_next_action"]))
+                self.assertEqual(
+                    lifecycle_desc["allowed_actions"],
+                    payload["runtime_context"]["capability_boundary"]["allowed_state_effects"]["track"],
+                )
+
+    def test_prepare_exposes_artifact_kind_desc_for_active_buddy(self) -> None:
+        buddies = self._buddies_by_id()
+        all_manifest_kinds = {
+            kind
+            for buddy in buddies.values()
+            for kind in buddy.get("artifact_kinds", [])
+        }
+        for buddy in self._manifest_buddy_order():
+            with self.subTest(buddy=buddy):
+                payload = self._prepare(buddy=buddy, request_text=REQUESTS_BY_BUDDY[buddy])
+                runtime_context = payload["runtime_context"]
+                allowed_kinds = runtime_context["capability_boundary"]["allowed_artifact_kinds"]
+                artifact_kind_desc = runtime_context["artifact_kind_desc"]
+                self.assertEqual(set(artifact_kind_desc), set(allowed_kinds))
+
+                for kind, desc in artifact_kind_desc.items():
+                    self.assertIn(kind, all_manifest_kinds)
+                    self.assertTrue(str(desc.get("label", "")).strip())
+                    self.assertTrue(str(desc.get("use_when", "")).strip())
+
+    def test_prepare_exposes_context_sources_for_product_work(self) -> None:
+        pm_context = self._prepare(buddy="pm", request_text=PM_REQUEST)
+        persisted = turn_runtime.persist_buddy_run(
+            pm_context,
+            result=_pm_commit_with_track_and_handoff(),
+            manifest_path=MANIFEST,
+        )
+        self.assertTrue(persisted["ok"], msg=persisted)
+        receipt = persisted["receipt"]
+
+        market_context = self._prepare(
+            buddy="market",
+            request_text=MARKET_REQUEST,
+            payload={
+                "current_task_id": receipt["task_id"],
+                "current_track_id": receipt["track_id"],
+            },
+        )
+
+        source_desc = market_context["runtime_context"]["context_sources_desc"]
+        for key in (
+            "request_text",
+            "task_context.task",
+            "task_context.artifacts",
+            "track_context.track",
+            "track_context.recent_handoffs",
+            "current_context_summary",
+        ):
+            with self.subTest(key=key):
+                self.assertIn(key, source_desc)
+                self.assertTrue(str(source_desc[key]).strip())
+
+        task_artifacts = market_context["task_context"]["artifacts"]
+        self.assertGreaterEqual(len(task_artifacts), 1)
+        prd_artifact = next(row for row in task_artifacts if row["kind"] == "prd")
+        self.assertIn("problem", prd_artifact["content"])
+
+        compact_summary = market_context["runtime_context"]["current_context_summary"]["artifacts"]
+        compact_row = next(row for row in compact_summary if row["id"] == prd_artifact["id"])
+        self.assertNotIn("problem", json.dumps(compact_row, ensure_ascii=True))
+
+    def test_design_prepare_can_consume_prior_product_context(self) -> None:
+        pm_context = self._prepare(buddy="pm", request_text=PM_REQUEST)
+        persisted = turn_runtime.persist_buddy_run(
+            pm_context,
+            result=_pm_commit_with_track_and_handoff(),
+            manifest_path=MANIFEST,
+        )
+        self.assertTrue(persisted["ok"], msg=persisted)
+        receipt = persisted["receipt"]
+
+        design_context = self._prepare(
+            buddy="design",
+            request_text=DESIGN_REQUEST,
+            payload={
+                "current_task_id": receipt["task_id"],
+                "current_track_id": receipt["track_id"],
+            },
+        )
+
+        source_desc = design_context["runtime_context"]["context_sources_desc"]
+        self.assertIn("task_context.artifacts", source_desc)
+        self.assertIn("track_context.track", source_desc)
+        self.assertIn("current_context_summary", source_desc)
+
+        task_artifacts = design_context["task_context"]["artifacts"]
+        prd_artifact = next(row for row in task_artifacts if row["kind"] == "prd")
+        self.assertIn("problem", prd_artifact["content"])
+
+        track = design_context["track_context"]["track"]
+        self.assertEqual(track["id"], receipt["track_id"])
+        self.assertIn("Cross-buddy", track["summary"])
+
+        compact_summary = design_context["runtime_context"]["current_context_summary"]
+        compact_artifact = next(row for row in compact_summary["artifacts"] if row["id"] == prd_artifact["id"])
+        self.assertNotIn("problem", json.dumps(compact_artifact, ensure_ascii=True))
 
     def test_market_prepare_summarizes_track_artifact_and_recent_handoff_after_pm_persist(self) -> None:
         pm_context = self._prepare(buddy="pm", request_text=PM_REQUEST)

@@ -7,6 +7,8 @@
     "instance_id",
     "active_buddy",
     "runtime_context",
+    "context_save_path",
+    "persist_command_hint",
     "request_text",
     "current_task_id",
     "current_track_id",
@@ -23,6 +25,10 @@
     "capability_boundary",
     "tool_requirements",
     "persist_payload_hint",
+    "desc",
+    "track_lifecycle_desc",
+    "artifact_kind_desc",
+    "context_sources_desc",
     "current_context_summary"
   ]
 }

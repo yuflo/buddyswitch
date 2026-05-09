@@ -71,6 +71,8 @@ python3 scripts/turn_runtime.py persist \
 - `instance_id`
 - `active_buddy`
 - `runtime_context`
+- `context_save_path`
+- `persist_command_hint`
 - `request_text`
 - `current_task_id`
 - `current_track_id`
@@ -85,6 +87,8 @@ Behavior:
 - Uses locked buddy from instance metadata.
 - Resolves or reuses active task and optional track binding.
 - Reserves one run envelope for the turn.
+- Returns `context_save_path` and `persist_command_hint` for immediate host use.
+- Writes the canonical successful prepare payload to `context_save_path` under `runs/raw/<buddy>/`.
 - Validates context safety, not skill package readiness.
 - Does not gate on `SKILL.md`, package source readiness, or output schema file existence.
 
@@ -100,9 +104,24 @@ Required top-level sections:
 - `capability_boundary`
 - `tool_requirements`
 - `persist_payload_hint`
+- `desc`
+- `track_lifecycle_desc`
+- `artifact_kind_desc`
+- `context_sources_desc`
 - `current_context_summary`
 
-Runtime AGENTS guidance should point to this block instead of duplicating payload recipes or capability matrices.
+`runtime_context.desc` provides compact persist field guidance for `execution_summary`, `artifacts`, `state_effects.task`, `state_effects.track`, `handoff`, `contributors`, and `tool_evidence`.
+
+`runtime_context.track_lifecycle_desc` is the source of truth for PM-owned lifecycle rules:
+
+- PM: `create`, `update`, `advance`, `archive`; create binds current prepared task; non-create requires existing track.
+- Non-PM buddies: lifecycle actions are empty and PM handoff guidance is explicit.
+
+`runtime_context.artifact_kind_desc` describes only the active buddy's allowed artifact kinds, each with compact `label` and `use_when`.
+
+`runtime_context.context_sources_desc` tells hosts where to read request/task/artifact/track/handoff context from the prepare payload without source inference.
+
+Runtime AGENTS guidance should point to these runtime context surfaces instead of duplicating payload recipes or capability matrices.
 
 ## Persist Contract
 
@@ -138,6 +157,8 @@ When `prepare`, `persist`, or broker-routed evidence tools reject a request, res
 - `allowed_next_actions`
 - `command_hint`
 - `persist_payload_hint`
+
+Common persist validation failures should return structured `E_RUNTIME_PERSIST` feedback with actionable `permission_boundary` and `allowed_next_actions` (for example `persist.execution_summary`, `persist.durable_signal`, `persist.artifacts`, `state_effects.track.track_id`, `persist.handoff`).
 
 Buddy runtime guidance should follow these fields and must not bypass broker-owned runtime boundaries.
 

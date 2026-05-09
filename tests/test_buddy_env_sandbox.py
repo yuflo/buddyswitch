@@ -6,9 +6,13 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - python<3.11 fallback
+    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 CODEX_CONFIG = ROOT / "tools" / "launcher" / "codex_config.py"
