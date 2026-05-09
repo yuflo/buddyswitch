@@ -33,8 +33,8 @@ class RuntimeAgentsValidationTests(unittest.TestCase):
                     [
                         "# BuddySwitch Runtime Workspace",
                         "Active buddy is `pm`.",
-                        "Use scripts/turn_runtime.py prepare before each run.",
-                        "Use scripts/turn_runtime.py persist after execution.",
+                        "Use python3 scripts/turn_runtime.py prepare \"<request>\" before each run.",
+                        "Use python3 scripts/turn_runtime.py persist --context <context> --result <result> after execution.",
                         "project.access=readonly",
                     ]
                 )
@@ -72,6 +72,13 @@ class RuntimeAgentsValidationTests(unittest.TestCase):
                 text = template.read_text(encoding="utf-8")
                 self.assertIn("prepare.runtime_context", text)
                 self.assertIn("structured tool feedback", text.lower())
+                self.assertIn('python3 scripts/turn_runtime.py prepare "<request>"', text)
+                self.assertIn(
+                    "python3 scripts/turn_runtime.py persist --context <context> --result <result>",
+                    text,
+                )
+                self.assertNotIn("scripts/turn_runtime.py prepare", text.replace("python3 scripts/turn_runtime.py prepare", ""))
+                self.assertNotIn("scripts/turn_runtime.py persist", text.replace("python3 scripts/turn_runtime.py persist", ""))
 
 
 if __name__ == "__main__":

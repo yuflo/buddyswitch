@@ -27,6 +27,8 @@ Define the active runtime contract for launcher-managed buddy instances.
 2. `prepare` validates turn context and reservation safety only.
 3. `persist` validates write safety only.
 
+`prepare` is runtime preflight and does not execute user task work. Task execution stays with the host/skill step between `prepare` and `persist`.
+
 Codex CLI owns skill package acceptance after runtime materialization into `.agents/skills/<skill-id>`.
 
 Persist commits one active buddy run result. Native skills may contribute to that result, but native skill ids do not own the persist boundary, artifact identity, receipt identity, or write permissions.
@@ -35,7 +37,7 @@ Persist commits one active buddy run result. Native skills may contribute to tha
 
 1. Codex runs needed native skills from runtime `.agents/skills/<skill-id>`.
 2. The locked buddy session integrates outputs into one buddy run commit.
-3. Persist with `scripts/turn_runtime.py persist --context <context> --result <result>`.
+3. Persist with `python3 scripts/turn_runtime.py persist --context <context> --result <result>`.
 
 ## CLI Contract
 
@@ -94,6 +96,7 @@ Required top-level sections:
 
 - `active_buddy`
 - `active_skill_ids`
+- `runtime_commands`
 - `capability_boundary`
 - `tool_requirements`
 - `persist_payload_hint`

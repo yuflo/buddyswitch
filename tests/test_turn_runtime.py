@@ -27,6 +27,8 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
+PREPARE_COMMAND_HINT = 'python3 scripts/turn_runtime.py prepare "<request>"'
+PERSIST_COMMAND_HINT = "python3 scripts/turn_runtime.py persist --context <context> --result <result>"
 
 
 def _pm_commit() -> dict[str, object]:
@@ -281,6 +283,17 @@ class TurnRuntimeBuddyRunTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertEqual(payload["run_envelope"]["turn_identity"]["request_text"], request_text)
                 self.assertEqual(payload["run_envelope"]["turn_identity"]["instance_id"], "instance-test")
                 self.assertEqual(len(self._runtime_state_snapshot()["reservations"]), before_count + 1)
+
+    def test_prepare_runtime_context_exposes_canonical_runtime_commands(self) -> None:
+        request_text = "simple ordinary request"
+        payload = self._prepare(request_text, buddy="pm")
+
+        self.assertEqual(payload["request_text"], request_text)
+        runtime_context = payload["runtime_context"]
+        runtime_commands = runtime_context["runtime_commands"]
+        self.assertEqual(runtime_commands["prepare"], PREPARE_COMMAND_HINT)
+        self.assertEqual(runtime_commands["persist"], PERSIST_COMMAND_HINT)
+        self.assertEqual(self._runtime_state_snapshot()["runs"], {})
 
     def test_prepare_rejects_task_track_binding_conflict_without_reservation(self) -> None:
         env_store.create_track(
@@ -675,6 +688,9 @@ class TurnRuntimeBuddyRunTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertFalse(payload["ok"])
         self.assertIn("buddy mismatch", payload["error"]["message"])
+        self.assertEqual(payload["error"]["permission_boundary"], "active-buddy")
+        self.assertIn(PREPARE_COMMAND_HINT, payload["error"]["allowed_next_actions"])
+        self.assertNotIn("Rerun scripts/turn_runtime.py prepare", " ".join(payload["error"]["allowed_next_actions"]))
         state_after = self._runtime_state_snapshot()
         self._assert_runtime_state_unchanged(state_before, state_after)
 

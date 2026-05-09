@@ -30,9 +30,9 @@ Host Codex session:
 
 ## Canonical Flow
 
-1. `prepare-turn-context` via `scripts/turn_runtime.py prepare` (product mode routed through runtime broker)
+1. `prepare-turn-context` via `python3 scripts/turn_runtime.py prepare "<request>"` (product mode routed through runtime broker)
 2. host execution of needed native skills inside the locked buddy session
-3. `persist-buddy-run` via `scripts/turn_runtime.py persist --context ... --result ...` (product mode routed through runtime broker)
+3. `persist-buddy-run` via `python3 scripts/turn_runtime.py persist --context ... --result ...` (product mode routed through runtime broker)
 
 If another turn is needed, use `receipt.next_state` or `receipt.handoff` to compose a new ordinary `request_text`, then run `prepare` again.
 

@@ -15,5 +15,14 @@
     "track_artifact_index",
     "run_envelope",
     "warnings"
+  ],
+  "runtime_context_required_sections": [
+    "active_buddy",
+    "active_skill_ids",
+    "runtime_commands",
+    "capability_boundary",
+    "tool_requirements",
+    "persist_payload_hint",
+    "current_context_summary"
   ]
 }

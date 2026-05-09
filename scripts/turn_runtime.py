@@ -74,6 +74,8 @@ _RUNTIME_RAW_STATE_PATHS = (
     "buddyswitch/objects/artifacts/*.json",
     "buddyswitch/content/runs/*.json",
 )
+_CANONICAL_PREPARE_COMMAND = 'python3 scripts/turn_runtime.py prepare "<request>"'
+_CANONICAL_PERSIST_COMMAND = "python3 scripts/turn_runtime.py persist --context <context> --result <result>"
 
 
 class RuntimeFeedbackError(ValueError):
@@ -90,10 +92,19 @@ def _raise_runtime_feedback(code: str, message: str, **details: Any) -> None:
     raise RuntimeFeedbackError(code, message, details=details)
 
 
+def _runtime_command_hints() -> dict[str, str]:
+    return {
+        "prepare": _CANONICAL_PREPARE_COMMAND,
+        "persist": _CANONICAL_PERSIST_COMMAND,
+    }
+
+
 def _rerun_prepare_actions() -> list[str]:
+    commands = _runtime_command_hints()
     return [
-        "Rerun scripts/turn_runtime.py prepare for the current request.",
-        "Use the new prepared context for the next persist attempt.",
+        commands["prepare"],
+        commands["persist"],
+        "Use the refreshed context from prepare for the next persist attempt.",
         "Do not write raw BuddySwitch state directly.",
     ]
 
@@ -1018,6 +1029,7 @@ def _build_runtime_context(
             "scope": buddy.get("scope"),
         },
         "active_skill_ids": list(buddy.get("skills", [])),
+        "runtime_commands": _runtime_command_hints(),
         "capability_boundary": {
             "allowed_artifact_kinds": list(buddy.get("artifact_kinds", [])),
             "allowed_state_effects": {

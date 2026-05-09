@@ -853,8 +853,8 @@ exec "$real_git" "$@"
                 "## Runtime Boundary",
                 "project.access=read-only",
                 "Raw state remains broker-only",
-                "scripts/turn_runtime.py prepare",
-                "scripts/turn_runtime.py persist",
+                "python3 scripts/turn_runtime.py prepare",
+                "python3 scripts/turn_runtime.py persist",
                 "## Receipt",
                 "## Summary",
             ):
@@ -1193,8 +1193,8 @@ exec "$real_git" "$@"
                 "context projection only",
                 "project.access=read-only",
                 "state_effects.track",
-                "scripts/turn_runtime.py prepare",
-                "scripts/turn_runtime.py persist",
+                "python3 scripts/turn_runtime.py prepare",
+                "python3 scripts/turn_runtime.py persist",
                 "## receipt",
                 "## summary",
             ):

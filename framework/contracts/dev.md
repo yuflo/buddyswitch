@@ -53,7 +53,7 @@ If a human-readable final response is needed, use plain sections such as `summar
 Do not treat chat-return headings as result-payload keys.
 
 Native Dev skill output contributes content to one buddy run commit.
-Persist once per turn with `scripts/turn_runtime.py persist --context <context> --result <result>`.
+Persist once per turn with `python3 scripts/turn_runtime.py persist --context <context> --result <result>`.
 
 Terminal final output must follow `Receipt -> Summary`:
 - `Receipt` shows IDs first (`Task` with `[task-id]`, optional `Track`, `Artifacts`, `Run`, optional `Handoff`)

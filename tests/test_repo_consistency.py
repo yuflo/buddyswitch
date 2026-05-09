@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import unittest
@@ -38,6 +39,22 @@ class RepoConsistencyTests(unittest.TestCase):
                 if path.is_file() and path.suffix in {".md", ".json"}:
                     chunks.append(path.read_text(encoding="utf-8"))
         return "\n".join(chunks)
+
+    def _active_runtime_contract_paths(self) -> list[Path]:
+        paths = [
+            ROOT / "README.md",
+            ROOT / "framework" / "docs" / "architecture-overview.md",
+            ROOT / "framework" / "docs" / "turn-runtime-spec.md",
+            ROOT / "framework" / "docs" / "skill-runtime-shared-rules.md",
+            ROOT / "framework" / "contracts" / "pm.md",
+            ROOT / "framework" / "contracts" / "market.md",
+            ROOT / "framework" / "contracts" / "design.md",
+            ROOT / "framework" / "contracts" / "dev.md",
+            ROOT / "framework" / "contracts" / "test.md",
+            ROOT / "scripts" / "turn_runtime.py",
+        ]
+        paths.extend(sorted((ROOT / "tools" / "launcher" / "assets" / "buddies").rglob("AGENTS.md")))
+        return paths
 
     def test_runtime_agents_skills_are_instance_only_in_active_docs(self) -> None:
         self.assertFalse((ROOT / ".agents").exists())
@@ -419,8 +436,18 @@ class RepoConsistencyTests(unittest.TestCase):
             with self.subTest(doc=str(agents_md.relative_to(ROOT))):
                 text = agents_md.read_text(encoding="utf-8")
                 self.assertNotIn("persist --skill-id", text)
-                self.assertIn("persist --context", text)
-                self.assertIn("--result", text)
+                self.assertIn('python3 scripts/turn_runtime.py prepare "<request>"', text)
+                self.assertIn("python3 scripts/turn_runtime.py persist --context <context> --result <result>", text)
+
+    def test_active_host_runtime_contract_has_no_bare_turn_runtime_commands(self) -> None:
+        bare_pattern = re.compile(r"(?<!python3 )scripts/turn_runtime\.py (prepare|persist)")
+        for path in self._active_runtime_contract_paths():
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                text = path.read_text(encoding="utf-8")
+                self.assertIsNone(
+                    bare_pattern.search(text),
+                    msg=f"{path.relative_to(ROOT)} contains bare turn_runtime command; use canonical python3 form.",
+                )
 
     def test_runtime_agents_do_not_duplicate_runtime_context_payload_recipes(self) -> None:
         forbidden_snippets = (

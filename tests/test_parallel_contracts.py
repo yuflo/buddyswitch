@@ -46,6 +46,15 @@ EXPECTED_PREPARE_TURN_CONTEXT_CONTRACT = {
         "run_envelope",
         "warnings",
     ],
+    "runtime_context_required_sections": [
+        "active_buddy",
+        "active_skill_ids",
+        "runtime_commands",
+        "capability_boundary",
+        "tool_requirements",
+        "persist_payload_hint",
+        "current_context_summary",
+    ],
 }
 
 EXPECTED_PERSIST_BUDDY_RUN_CONTRACT = {

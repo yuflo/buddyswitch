@@ -67,14 +67,20 @@ def validate_runtime_agents_template(
     )
     _require_contains(
         text=text,
-        needle="scripts/turn_runtime.py prepare",
-        message="missing prepare command reference",
+        needle='python3 scripts/turn_runtime.py prepare "<request>"',
+        message="missing canonical prepare command reference",
     )
     _require_contains(
         text=text,
-        needle="scripts/turn_runtime.py persist",
-        message="missing persist command reference",
+        needle="python3 scripts/turn_runtime.py persist --context <context> --result <result>",
+        message="missing canonical persist command reference",
     )
+    prepare_tail = "scripts/turn_runtime.py" + " prepare"
+    persist_tail = "scripts/turn_runtime.py" + " persist"
+    if prepare_tail in text.replace("python3 " + prepare_tail, ""):
+        raise RuntimeAgentsError("template contains bare prepare command reference")
+    if persist_tail in text.replace("python3 " + persist_tail, ""):
+        raise RuntimeAgentsError("template contains bare persist command reference")
 
     project_access = profile["project"]["access"]
     scratch_root = profile["scratch"]["root"]

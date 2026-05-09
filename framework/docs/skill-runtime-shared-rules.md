@@ -17,7 +17,7 @@ Persist commits one active buddy run result. Native skills may contribute to tha
 - Native skills contribute content to the current buddy run.
 - Do not call persist from a skill perspective.
 - The locked buddy session persists once per turn with:
-  - `scripts/turn_runtime.py persist --context <context> --result <result>`
+  - `python3 scripts/turn_runtime.py persist --context <context> --result <result>`
 
 ## Runtime Write-Safety Minimums
 
