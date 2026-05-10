@@ -1078,6 +1078,35 @@ def _build_context_sources_desc() -> dict[str, str]:
     }
 
 
+def _build_env_tools_desc() -> dict[str, Any]:
+    return {
+        "task_manager": {
+            "command": "python3 scripts/env/client.py task <operation>",
+            "scope": "active-buddy runtime-enforced",
+            "operations": [
+                "create",
+                "list",
+                "get",
+                "get_current",
+                "set_current",
+                "update",
+                "archive",
+            ],
+            "payload_fields": {
+                "create": ["title", "summary"],
+                "list": [],
+                "get": ["task_id"],
+                "get_current": [],
+                "set_current": ["task_id"],
+                "update": ["task_id", "title", "summary", "status"],
+                "archive": ["task_id"],
+            },
+            "feedback_source": "runtime/tool response fields",
+            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
+        }
+    }
+
+
 def _build_runtime_context(
     *,
     manifest: dict[str, Any],
@@ -1230,6 +1259,7 @@ def _build_runtime_context(
                 "paths": list(_RUNTIME_RAW_STATE_PATHS),
             },
         },
+        "env_tools": _build_env_tools_desc(),
         "tool_requirements": tool_requirements,
         "persist_payload_hint": persist_payload_hint,
         "desc": _build_persist_field_desc(str(buddy.get("id") or ""), tool_capability),

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Task read/update operations for BuddySwitch env debug/manual APIs."""
+"""Manual/debug task helper.
+
+This script is not the product task-manager path. Product task operations
+must use broker-routed env tools through `scripts/env/client.py task ...`.
+"""
 
 from __future__ import annotations
 
@@ -64,7 +68,10 @@ def cmd_archive(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Manage BuddySwitch task objects through manual/debug APIs."
+        description=(
+            "Manual/debug task helper only. "
+            "For product task operations use scripts/env/client.py task <operation>."
+        )
     )
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     subparsers = parser.add_subparsers(dest="command", required=True)

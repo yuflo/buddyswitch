@@ -549,6 +549,48 @@ class RepoConsistencyTests(unittest.TestCase):
                 for snippet in forbidden_snippets:
                     self.assertNotIn(snippet, text)
 
+    def test_manifest_declares_shared_task_manager_for_every_buddy(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        skills = {
+            row["id"]: row
+            for row in manifest.get("skills", [])
+            if isinstance(row, dict) and isinstance(row.get("id"), str)
+        }
+        self.assertIn("task-manager", skills)
+        self.assertEqual(
+            skills["task-manager"].get("path"),
+            "buddyswitch/skills/shared/task-manager",
+        )
+        for buddy in manifest.get("buddies", []):
+            if not isinstance(buddy, dict):
+                continue
+            buddy_id = buddy.get("id")
+            skill_ids = [item for item in buddy.get("skills", []) if isinstance(item, str)]
+            with self.subTest(buddy=buddy_id):
+                self.assertEqual(skill_ids.count("task-manager"), 1)
+
+    def test_task_manager_skill_keeps_permissions_in_runtime_code(self) -> None:
+        skill_md = ROOT / "buddyswitch" / "skills" / "shared" / "task-manager" / "SKILL.md"
+        self.assertTrue(skill_md.exists())
+        text = skill_md.read_text(encoding="utf-8")
+        lowered = text.lower()
+        self.assertIn("runtime/tool feedback", lowered)
+        self.assertIn("active buddy", lowered)
+        for token in (
+            "buddyswitch/objects/tasks",
+            "buddyswitch/content/runs",
+            "write raw state",
+            "permission matrix",
+        ):
+            with self.subTest(token=token):
+                self.assertNotIn(token, lowered)
+
+    def test_task_manager_product_tests_use_env_tool_path_not_manual_debug_script(self) -> None:
+        env_tool_tests = (ROOT / "tests" / "test_task_manager_env_tool.py").read_text(encoding="utf-8")
+        self.assertIn("method\": \"env.task\"", env_tool_tests)
+        self.assertIn('ENV_CLIENT = ROOT / "scripts" / "env" / "client.py"', env_tool_tests)
+        self.assertNotIn("scripts/env_tasks.py", env_tool_tests)
+
     def test_context_tool_feedback_scope_does_not_touch_peripheral_systems(self) -> None:
         completed = subprocess.run(
             ["git", "diff", "--name-only", "HEAD", "--"],

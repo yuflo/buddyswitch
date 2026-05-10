@@ -841,6 +841,27 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             self.assertTrue((workspace / ".agents" / "skills" / "write-prd" / "SKILL.md").exists())
             self.assertFalse((workspace / ".agents" / "skills" / "dev-summary").exists())
 
+    def test_repo_manifest_declares_shared_task_manager_for_every_buddy(self) -> None:
+        manifest = load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        skills = {
+            row["id"]: row
+            for row in manifest.get("skills", [])
+            if isinstance(row, dict) and isinstance(row.get("id"), str)
+        }
+        self.assertIn("task-manager", skills)
+        self.assertEqual(
+            skills["task-manager"].get("path"),
+            "buddyswitch/skills/shared/task-manager",
+        )
+
+        buddies = [row for row in manifest.get("buddies", []) if isinstance(row, dict)]
+        self.assertTrue(buddies)
+        for buddy in buddies:
+            buddy_id = buddy.get("id")
+            skill_ids = [item for item in buddy.get("skills", []) if isinstance(item, str)]
+            with self.subTest(buddy=buddy_id):
+                self.assertEqual(skill_ids.count("task-manager"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1200,6 +1200,7 @@ exec "$real_git" "$@"
                 installed_skill_ids = sorted(path.name for path in runtime_skills.iterdir() if path.is_dir())
                 expected_skill_ids = sorted(skill_id for skill_id in buddy_skills if isinstance(skill_id, str))
                 self.assertEqual(installed_skill_ids, expected_skill_ids, msg=f"buddy={buddy_id}")
+                self.assertIn("task-manager", installed_skill_ids, msg=f"buddy={buddy_id}")
 
                 for skill_id in expected_skill_ids:
                     source_dir = ROOT / skill_sources[skill_id]
@@ -1378,6 +1379,7 @@ exec "$real_git" "$@"
             self.assertNotIn("read and execute the selected buddyswitch skill.md", copied_agents)
             self.assertNotIn("instruction_path", copied_agents)
             runtime_skills = workspace_dir / ".agents" / "skills"
+            self.assertTrue((runtime_skills / "task-manager" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "track-manager" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "write-prd" / "assets" / "prd-template.md").exists())
@@ -1385,8 +1387,10 @@ exec "$real_git" "$@"
             self.assertFalse((runtime_skills / "shape-prototype").exists())
             runtime_turn_runtime = workspace_dir / "scripts" / "turn_runtime.py"
             runtime_env_store = workspace_dir / "scripts" / "env_store.py"
+            runtime_env_client = workspace_dir / "scripts" / "env" / "client.py"
             source_turn_runtime = ROOT / "scripts" / "turn_runtime.py"
             source_env_store = ROOT / "scripts" / "env_store.py"
+            source_env_client = ROOT / "scripts" / "env" / "client.py"
             self.assertEqual(
                 runtime_turn_runtime.read_text(encoding="utf-8"),
                 source_turn_runtime.read_text(encoding="utf-8"),
@@ -1394,6 +1398,10 @@ exec "$real_git" "$@"
             self.assertEqual(
                 runtime_env_store.read_text(encoding="utf-8"),
                 source_env_store.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                runtime_env_client.read_text(encoding="utf-8"),
+                source_env_client.read_text(encoding="utf-8"),
             )
             exclude_path = subprocess.check_output(
                 ["git", "-C", str(workspace_dir), "rev-parse", "--git-path", "info/exclude"],

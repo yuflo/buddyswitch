@@ -202,6 +202,49 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response["error"]["code"], "E_RUNTIME_BROKER")
         self.assertIn("instance is not active", response["error"]["message"])
 
+    def test_env_task_supports_active_instance_and_identity_checks(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-example", buddy="dev", status="active")
+
+        supported = self._dispatch(
+            method="env.task",
+            payload={"action": "list", "args": {}},
+            instance_json=instance_json,
+            instance_id="inst-dev-example",
+            buddy="dev",
+        )
+        self.assertTrue(supported["ok"], msg=supported)
+
+        wrong_instance = self._dispatch(
+            method="env.task",
+            payload={"action": "list", "args": {}},
+            instance_json=instance_json,
+            instance_id="inst-other",
+            buddy="dev",
+        )
+        self.assertFalse(wrong_instance["ok"])
+        self.assertEqual(wrong_instance["error"]["permission_boundary"], "active-instance")
+
+        wrong_buddy = self._dispatch(
+            method="env.task",
+            payload={"action": "list", "args": {}},
+            instance_json=instance_json,
+            instance_id="inst-dev-example",
+            buddy="pm",
+        )
+        self.assertFalse(wrong_buddy["ok"])
+        self.assertEqual(wrong_buddy["error"]["permission_boundary"], "active-buddy")
+
+        inactive_instance_json = self._instance_json(instance_id="inst-dev-inactive", buddy="dev", status="inactive")
+        inactive = self._dispatch(
+            method="env.task",
+            payload={"action": "list", "args": {}},
+            instance_json=inactive_instance_json,
+            instance_id="inst-dev-inactive",
+            buddy="dev",
+        )
+        self.assertFalse(inactive["ok"])
+        self.assertEqual(inactive["error"]["permission_boundary"], "active-instance-status")
+
     def test_runtime_broker_client_missing_socket_raises_unavailable(self) -> None:
         with patch.dict(
             os.environ,

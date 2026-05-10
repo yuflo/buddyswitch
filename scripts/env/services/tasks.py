@@ -1,0 +1,554 @@
+#!/usr/bin/env python3
+"""Active-buddy scoped task manager service for broker-routed env.task operations."""
+
+from __future__ import annotations
+
+import uuid
+from pathlib import Path
+from typing import Any, TypedDict
+
+import env_store
+from env_manifest import buddy_permissions
+import turn_runtime
+
+_TASK_PUBLIC_FIELDS = (
+    "id",
+    "buddy",
+    "title",
+    "summary",
+    "status",
+    "track_id",
+    "latest_run_id",
+    "updated_at",
+)
+_TASK_STATUSES = set(env_store.VALID_TASK_STATUS)
+_UPDATE_FIELDS = {"title", "summary", "status"}
+_CREATE_ALLOWED_FIELDS = {"title", "summary", "task_id", "buddy", "active_buddy"}
+_GET_ALLOWED_FIELDS = {"task_id"}
+_SET_CURRENT_ALLOWED_FIELDS = {"task_id"}
+_ARCHIVE_ALLOWED_FIELDS = {"task_id"}
+_READ_PERMISSION = "task.read"
+_CREATE_PERMISSION = "task.create"
+_UPDATE_PERMISSION = "task.update"
+_ARCHIVE_PERMISSION = "task.archive"
+
+
+class TaskServiceContext(TypedDict):
+    active_buddy: str
+    instance_id: str
+    instance_json: Path
+    instance_payload: dict[str, Any]
+    manifest: dict[str, Any]
+
+
+def _error_payload(
+    *,
+    action: str,
+    active_buddy: str,
+    code: str,
+    message: str,
+    permission_boundary: str,
+    allowed_next_actions: list[str],
+    task_id: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "ok": False,
+        "action": action,
+        "error": {
+            "code": code,
+            "message": message,
+        },
+        "permission_boundary": permission_boundary,
+        "active_buddy": active_buddy,
+        "allowed_next_actions": allowed_next_actions,
+    }
+    if isinstance(task_id, str) and task_id.strip():
+        payload["task_id"] = task_id.strip()
+    return payload
+
+
+def _permission_error(*, action: str, active_buddy: str, permission: str) -> dict[str, Any]:
+    return _error_payload(
+        action=action,
+        active_buddy=active_buddy,
+        code="E_TASK_PERMISSION",
+        message=f"active buddy '{active_buddy}' is missing required permission '{permission}'",
+        permission_boundary="manifest.permission",
+        allowed_next_actions=[
+            "Use only task actions allowed by the active buddy manifest permissions.",
+            "Switch to a buddy that owns this task action before retrying.",
+        ],
+    )
+
+
+def _payload_error(*, action: str, active_buddy: str, message: str, task_id: str | None = None) -> dict[str, Any]:
+    return _error_payload(
+        action=action,
+        active_buddy=active_buddy,
+        code="E_TASK_PAYLOAD",
+        message=message,
+        permission_boundary="request-payload",
+        task_id=task_id,
+        allowed_next_actions=[
+            "Fix the env.task payload fields and retry.",
+            "Use task.list to inspect candidate task ids before retrying.",
+        ],
+    )
+
+
+def _scope_error(*, action: str, active_buddy: str, task_id: str, task_buddy: str) -> dict[str, Any]:
+    return _error_payload(
+        action=action,
+        active_buddy=active_buddy,
+        code="E_TASK_BUDDY_SCOPE",
+        message=f"task belongs to buddy '{task_buddy}', not active buddy '{active_buddy}'",
+        permission_boundary="task.buddy_scope",
+        task_id=task_id,
+        allowed_next_actions=[
+            "Choose a task owned by the active buddy.",
+            "List active-buddy tasks before changing the current task.",
+            "Use handoff or track context instead of cross-buddy task mutation.",
+        ],
+    )
+
+
+def _lookup_error(*, action: str, active_buddy: str, task_id: str) -> dict[str, Any]:
+    return _error_payload(
+        action=action,
+        active_buddy=active_buddy,
+        code="E_TASK_NOT_FOUND",
+        message=f"task not found: {task_id}",
+        permission_boundary="task.lookup",
+        task_id=task_id,
+        allowed_next_actions=[
+            "Use task.list to get active-buddy task ids.",
+            "Create a new task when no active-buddy task matches.",
+        ],
+    )
+
+
+def _task_summary(task: dict[str, Any]) -> dict[str, Any]:
+    return {field: task.get(field) for field in _TASK_PUBLIC_FIELDS}
+
+
+def _current_binding(context: TaskServiceContext) -> dict[str, Any]:
+    payload = context["instance_payload"]
+    return {
+        "instance_id": context["instance_id"],
+        "current_task_id": payload.get("current_task_id"),
+        "current_track_id": payload.get("current_track_id"),
+    }
+
+
+def _require_permission(context: TaskServiceContext, permission: str, action: str) -> dict[str, Any] | None:
+    permissions = buddy_permissions(context["manifest"], context["active_buddy"])
+    if permission in permissions:
+        return None
+    return _permission_error(action=action, active_buddy=context["active_buddy"], permission=permission)
+
+
+def _normalize_task_id(value: Any) -> tuple[str | None, dict[str, Any] | None]:
+    if not isinstance(value, str) or not value.strip():
+        return None, None
+    candidate = value.strip()
+    try:
+        env_store.require_id(candidate, "task id")
+    except ValueError as exc:
+        return None, {"message": str(exc)}
+    return candidate, None
+
+
+def _ensure_allowed_fields(
+    *,
+    action: str,
+    active_buddy: str,
+    args: dict[str, Any],
+    allowed_fields: set[str],
+) -> dict[str, Any] | None:
+    unknown = sorted(key for key in args.keys() if key not in allowed_fields)
+    if not unknown:
+        return None
+    return _payload_error(
+        action=action,
+        active_buddy=active_buddy,
+        message=f"unsupported payload fields: {', '.join(unknown)}",
+    )
+
+
+def _owned_task(
+    *,
+    context: TaskServiceContext,
+    action: str,
+    args: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    task_id, parse_error = _normalize_task_id(args.get("task_id"))
+    if parse_error is not None:
+        return None, _payload_error(
+            action=action,
+            active_buddy=context["active_buddy"],
+            message=parse_error["message"],
+        )
+    if task_id is None:
+        return None, _payload_error(
+            action=action,
+            active_buddy=context["active_buddy"],
+            message="task_id is required",
+        )
+
+    task = env_store.get_task(task_id)
+    if task is None:
+        return None, _lookup_error(action=action, active_buddy=context["active_buddy"], task_id=task_id)
+    task_buddy = task.get("buddy")
+    if not isinstance(task_buddy, str) or task_buddy != context["active_buddy"]:
+        return None, _scope_error(
+            action=action,
+            active_buddy=context["active_buddy"],
+            task_id=task_id,
+            task_buddy=str(task_buddy or ""),
+        )
+    return task, None
+
+
+def _next_task_id(*, active_buddy: str, title: str) -> str:
+    seed = env_store.slugify(title)
+    while True:
+        candidate = f"task-{active_buddy}-{seed}-{uuid.uuid4().hex[:8]}"
+        if env_store.get_task(candidate) is None:
+            return candidate
+
+
+def create_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
+    action = "task.create"
+    permission_error = _require_permission(context, _CREATE_PERMISSION, action)
+    if permission_error is not None:
+        return permission_error
+    fields_error = _ensure_allowed_fields(
+        action=action,
+        active_buddy=context["active_buddy"],
+        args=args,
+        allowed_fields=_CREATE_ALLOWED_FIELDS,
+    )
+    if fields_error is not None:
+        return fields_error
+
+    title = args.get("title")
+    if not isinstance(title, str) or not title.strip():
+        return _payload_error(action=action, active_buddy=context["active_buddy"], message="title is required")
+
+    summary = args.get("summary", "")
+    if summary is None:
+        summary = ""
+    if not isinstance(summary, str):
+        return _payload_error(action=action, active_buddy=context["active_buddy"], message="summary must be a string")
+
+    explicit_task_id = args.get("task_id")
+    if explicit_task_id is None:
+        task_id = _next_task_id(active_buddy=context["active_buddy"], title=title.strip())
+    else:
+        task_id, parse_error = _normalize_task_id(explicit_task_id)
+        if parse_error is not None:
+            return _payload_error(action=action, active_buddy=context["active_buddy"], message=parse_error["message"])
+        if not isinstance(task_id, str):
+            return _payload_error(
+                action=action,
+                active_buddy=context["active_buddy"],
+                message="task_id must be a non-empty string when provided",
+            )
+        if env_store.get_task(task_id) is not None:
+            return _payload_error(
+                action=action,
+                active_buddy=context["active_buddy"],
+                message=f"task already exists: {task_id}",
+                task_id=task_id,
+            )
+
+    task = env_store.create_task(
+        task_id,
+        title.strip(),
+        buddy=context["active_buddy"],
+        status="active",
+        summary=summary,
+        initial_run_id=None,
+    )
+    return {
+        "ok": True,
+        "action": action,
+        "active_buddy": context["active_buddy"],
+        "task_id": task["id"],
+        "task": _task_summary(task),
+        "current_binding": _current_binding(context),
+        "allowed_next_actions": [
+            "Use task.update to change title, summary, or status.",
+            "Use task.set_current to bind this task to the active instance.",
+        ],
+    }
+
+
+def list_tasks_for_active_buddy(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
+    action = "task.list"
+    permission_error = _require_permission(context, _READ_PERMISSION, action)
+    if permission_error is not None:
+        return permission_error
+    if args:
+        fields_error = _ensure_allowed_fields(
+            action=action,
+            active_buddy=context["active_buddy"],
+            args=args,
+            allowed_fields=set(),
+        )
+        if fields_error is not None:
+            return fields_error
+
+    tasks = [_task_summary(task) for task in env_store.list_tasks() if task.get("buddy") == context["active_buddy"]]
+    return {
+        "ok": True,
+        "action": action,
+        "active_buddy": context["active_buddy"],
+        "tasks": tasks,
+        "current_binding": _current_binding(context),
+        "allowed_next_actions": [
+            "Use task.get with a returned task_id to inspect one task.",
+            "Use task.create to add a new task for the active buddy.",
+        ],
+    }
+
+
+def get_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
+    action = "task.get"
+    permission_error = _require_permission(context, _READ_PERMISSION, action)
+    if permission_error is not None:
+        return permission_error
+    fields_error = _ensure_allowed_fields(
+        action=action,
+        active_buddy=context["active_buddy"],
+        args=args,
+        allowed_fields=_GET_ALLOWED_FIELDS,
+    )
+    if fields_error is not None:
+        return fields_error
+    task, error = _owned_task(context=context, action=action, args=args)
+    if error is not None:
+        return error
+    assert task is not None
+    return {
+        "ok": True,
+        "action": action,
+        "active_buddy": context["active_buddy"],
+        "task_id": task["id"],
+        "task": _task_summary(task),
+        "current_binding": _current_binding(context),
+        "allowed_next_actions": [
+            "Use task.update to change title, summary, or status.",
+            "Use task.set_current to bind this task to the active instance.",
+        ],
+    }
+
+
+def get_current_task(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
+    action = "task.get_current"
+    permission_error = _require_permission(context, _READ_PERMISSION, action)
+    if permission_error is not None:
+        return permission_error
+    if args:
+        fields_error = _ensure_allowed_fields(
+            action=action,
+            active_buddy=context["active_buddy"],
+            args=args,
+            allowed_fields=set(),
+        )
+        if fields_error is not None:
+            return fields_error
+
+    binding = _current_binding(context)
+    task_id = binding.get("current_task_id")
+    if not isinstance(task_id, str) or not task_id.strip():
+        return {
+            "ok": True,
+            "action": action,
+            "active_buddy": context["active_buddy"],
+            "task": None,
+            "current_binding": binding,
+            "allowed_next_actions": [
+                "Use task.list to inspect active-buddy tasks.",
+                "Use task.set_current with an active-buddy task_id.",
+            ],
+        }
+
+    task = env_store.get_task(task_id.strip())
+    if task is None:
+        return _lookup_error(action=action, active_buddy=context["active_buddy"], task_id=task_id.strip())
+    task_buddy = task.get("buddy")
+    if not isinstance(task_buddy, str) or task_buddy != context["active_buddy"]:
+        return _scope_error(
+            action=action,
+            active_buddy=context["active_buddy"],
+            task_id=task_id.strip(),
+            task_buddy=str(task_buddy or ""),
+        )
+    return {
+        "ok": True,
+        "action": action,
+        "active_buddy": context["active_buddy"],
+        "task_id": task["id"],
+        "task": _task_summary(task),
+        "current_binding": binding,
+        "allowed_next_actions": [
+            "Use task.update to adjust this task status or summary.",
+            "Use task.set_current to switch to another active-buddy task.",
+        ],
+    }
+
+
+def set_current_task(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
+    action = "task.set_current"
+    permission_error = _require_permission(context, _UPDATE_PERMISSION, action)
+    if permission_error is not None:
+        return permission_error
+    fields_error = _ensure_allowed_fields(
+        action=action,
+        active_buddy=context["active_buddy"],
+        args=args,
+        allowed_fields=_SET_CURRENT_ALLOWED_FIELDS,
+    )
+    if fields_error is not None:
+        return fields_error
+    task, error = _owned_task(context=context, action=action, args=args)
+    if error is not None:
+        return error
+    assert task is not None
+
+    task_id = str(task["id"])
+    track_id = task.get("track_id")
+    normalized_track_id = track_id if isinstance(track_id, str) and track_id.strip() else None
+    session = {
+        "instance_json": context["instance_json"],
+        "payload": context["instance_payload"],
+    }
+    turn_runtime._write_product_session_binding(
+        session,
+        task_id=task_id,
+        track_id=normalized_track_id,
+    )
+    payload = session.get("payload")
+    if isinstance(payload, dict):
+        context["instance_payload"] = payload
+
+    return {
+        "ok": True,
+        "action": action,
+        "active_buddy": context["active_buddy"],
+        "task_id": task_id,
+        "task": _task_summary(task),
+        "current_binding": _current_binding(context),
+        "allowed_next_actions": [
+            "Use task.get_current to confirm active instance binding.",
+            "Continue task work using the current binding context.",
+        ],
+    }
+
+
+def update_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
+    action = "task.update"
+    permission_error = _require_permission(context, _UPDATE_PERMISSION, action)
+    if permission_error is not None:
+        return permission_error
+
+    fields_error = _ensure_allowed_fields(
+        action=action,
+        active_buddy=context["active_buddy"],
+        args=args,
+        allowed_fields=_UPDATE_FIELDS | {"task_id"},
+    )
+    if fields_error is not None:
+        return fields_error
+    task, error = _owned_task(context=context, action=action, args=args)
+    if error is not None:
+        return error
+    assert task is not None
+
+    patch: dict[str, Any] = {}
+    if "title" in args:
+        title = args.get("title")
+        if not isinstance(title, str) or not title.strip():
+            return _payload_error(
+                action=action,
+                active_buddy=context["active_buddy"],
+                message="title must be a non-empty string when provided",
+                task_id=task["id"],
+            )
+        patch["title"] = title.strip()
+    if "summary" in args:
+        summary = args.get("summary")
+        if summary is None:
+            summary = ""
+        if not isinstance(summary, str):
+            return _payload_error(
+                action=action,
+                active_buddy=context["active_buddy"],
+                message="summary must be a string when provided",
+                task_id=task["id"],
+            )
+        patch["summary"] = summary
+    if "status" in args:
+        status = args.get("status")
+        if not isinstance(status, str) or status not in _TASK_STATUSES:
+            return _payload_error(
+                action=action,
+                active_buddy=context["active_buddy"],
+                message=f"status must be one of {', '.join(sorted(_TASK_STATUSES))}",
+                task_id=task["id"],
+            )
+        patch["status"] = status
+    if not patch:
+        return _payload_error(
+            action=action,
+            active_buddy=context["active_buddy"],
+            message="update requires at least one of title, summary, or status",
+            task_id=task["id"],
+        )
+
+    updated = env_store.update_task(task["id"], patch)
+    return {
+        "ok": True,
+        "action": action,
+        "active_buddy": context["active_buddy"],
+        "task_id": updated["id"],
+        "task": _task_summary(updated),
+        "current_binding": _current_binding(context),
+        "allowed_next_actions": [
+            "Use task.get to confirm the persisted task fields.",
+            "Use task.archive when this task should be closed without deletion.",
+        ],
+    }
+
+
+def archive_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
+    action = "task.archive"
+    permission_error = _require_permission(context, _ARCHIVE_PERMISSION, action)
+    if permission_error is not None:
+        return permission_error
+    fields_error = _ensure_allowed_fields(
+        action=action,
+        active_buddy=context["active_buddy"],
+        args=args,
+        allowed_fields=_ARCHIVE_ALLOWED_FIELDS,
+    )
+    if fields_error is not None:
+        return fields_error
+    task, error = _owned_task(context=context, action=action, args=args)
+    if error is not None:
+        return error
+    assert task is not None
+    archived = env_store.update_task(task["id"], {"status": "archived"})
+    return {
+        "ok": True,
+        "action": action,
+        "active_buddy": context["active_buddy"],
+        "task_id": archived["id"],
+        "task": _task_summary(archived),
+        "current_binding": _current_binding(context),
+        "allowed_next_actions": [
+            "Use task.get to inspect archived task context.",
+            "Use task.list to continue with another active-buddy task.",
+        ],
+    }

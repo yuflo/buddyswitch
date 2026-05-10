@@ -53,6 +53,7 @@ EXPECTED_PREPARE_TURN_CONTEXT_CONTRACT = {
         "active_skill_ids",
         "runtime_commands",
         "capability_boundary",
+        "env_tools",
         "tool_requirements",
         "persist_payload_hint",
         "desc",

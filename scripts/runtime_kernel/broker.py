@@ -21,12 +21,13 @@ SCRIPTS_ROOT = Path(__file__).resolve().parents[1]
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
-from env_manifest import ManifestError
+from env_manifest import ManifestError, load_manifest
 import env_profiles
 from runtime_kernel.client import PROTOCOL
 from runtime_kernel.persist import persist_buddy_run_request
 from runtime_kernel.resolve import prepare_turn_context_request
 import turn_runtime
+from env.tools.task_manager import dispatch_task_manager_request
 
 
 def _error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -445,6 +446,26 @@ def _issue_browser_evidence_dispatch(
     return {"ok": True, "payload": payload_out}
 
 
+def _env_task_dispatch(
+    *,
+    payload: dict[str, Any],
+    manifest_path: Path,
+    instance_json_path: Path,
+    instance_record: dict[str, Any],
+) -> dict[str, Any]:
+    manifest = load_manifest(manifest_path)
+    instance_id = str(instance_record["instance_id"]).strip()
+    active_buddy = str(instance_record["buddy"]).strip()
+    return dispatch_task_manager_request(
+        payload=payload,
+        active_buddy=active_buddy,
+        instance_id=instance_id,
+        instance_json=instance_json_path,
+        instance_payload=dict(instance_record),
+        manifest=manifest,
+    )
+
+
 def dispatch_runtime_request(
     *,
     request: dict[str, Any],
@@ -533,6 +554,16 @@ def dispatch_runtime_request(
                         instance_json_path=instance_json_path,
                         instance_record=locked_instance_record,
                     )
+            if method == "env.task":
+                lock_session = _product_session(instance_json_path=instance_json_path, instance_record=instance_record)
+                with turn_runtime._hold_product_runtime_lock(lock_session):
+                    locked_instance_record = _load_instance_record(instance_json_path)
+                    return _env_task_dispatch(
+                        payload=payload,
+                        manifest_path=manifest_path,
+                        instance_json_path=instance_json_path,
+                        instance_record=locked_instance_record,
+                    )
             if method == "issue_browser_evidence":
                 return _issue_browser_evidence_dispatch(
                     payload=payload,
@@ -544,7 +575,7 @@ def dispatch_runtime_request(
             "E_RUNTIME_BROKER",
             f"unsupported method: {method}",
             boundary="broker-protocol",
-            actions=_allowed("Use supported runtime methods: prepare, persist, issue_browser_evidence."),
+            actions=_allowed("Use supported runtime methods: prepare, persist, env.task, issue_browser_evidence."),
         )
     except turn_runtime.RuntimeFeedbackError as exc:
         return _error(exc.code, exc.message, exc.details)

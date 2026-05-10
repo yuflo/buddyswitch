@@ -136,6 +136,7 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "active_buddy",
                     "active_skill_ids",
                     "capability_boundary",
+                    "env_tools",
                     "tool_requirements",
                     "persist_payload_hint",
                     "desc",
@@ -264,6 +265,23 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                         set(tool_evidence_hint["accepted_fields"]),
                         {"browser_cockpit_token", "approved_downgrade_token"},
                     )
+
+    def test_prepare_exposes_task_manager_env_tool_hints(self) -> None:
+        payload = self._prepare(buddy="dev", request_text=DEV_REQUEST)
+        env_tools = payload["runtime_context"]["env_tools"]
+        self.assertIn("task_manager", env_tools)
+        task_manager = env_tools["task_manager"]
+        self.assertEqual(task_manager["command"], "python3 scripts/env/client.py task <operation>")
+        self.assertEqual(task_manager["scope"], "active-buddy runtime-enforced")
+        operations = task_manager["operations"]
+        self.assertEqual(
+            operations,
+            ["create", "list", "get", "get_current", "set_current", "update", "archive"],
+        )
+        payload_fields = task_manager["payload_fields"]
+        self.assertEqual(payload_fields["create"], ["title", "summary"])
+        self.assertEqual(payload_fields["get"], ["task_id"])
+        self.assertEqual(payload_fields["set_current"], ["task_id"])
 
     def test_prepare_runtime_context_exposes_desc_for_commit_fields(self) -> None:
         payload = self._prepare(buddy="pm", request_text=PM_REQUEST)

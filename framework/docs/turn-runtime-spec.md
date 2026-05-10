@@ -102,6 +102,7 @@ Required top-level sections:
 - `active_skill_ids`
 - `runtime_commands`
 - `capability_boundary`
+- `env_tools`
 - `tool_requirements`
 - `persist_payload_hint`
 - `desc`
@@ -122,6 +123,8 @@ Required top-level sections:
 `runtime_context.context_sources_desc` tells hosts where to read request/task/artifact/track/handoff context from the prepare payload without source inference.
 
 Runtime AGENTS guidance should point to these runtime context surfaces instead of duplicating payload recipes or capability matrices.
+
+`runtime_context.env_tools` is the compact source for broker-routed env tool operations. The first shared env slice is `task-manager`, executed through `python3 scripts/env/client.py task <operation>`. Permission enforcement and active-buddy ownership checks are implemented in runtime tool/service code, not in prompt wording.
 
 ## Persist Contract
 
