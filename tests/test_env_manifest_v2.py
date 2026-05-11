@@ -138,7 +138,7 @@ class EnvManifestV2Tests(unittest.TestCase):
                     },
                     {
                         "id": "duplicate",
-                        "path": "buddyswitch/skills/pm/track-manager",
+                        "path": "buddyswitch/skills/shared/track-manager",
                     },
                 ],
                 buddies={"pm": ["duplicate"]},
@@ -235,7 +235,10 @@ class EnvManifestV2Tests(unittest.TestCase):
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         authority = env_manifest.buddy_authority_profile(manifest, "pm")
 
-        self.assertEqual(authority["routing_skills"], ["write-prd", "track-manager"])
+        self.assertEqual(
+            authority["routing_skills"],
+            ["write-prd", "track-manager", "artifact-manager", "task-manager"],
+        )
         self.assertIn("materialized", authority["runtime_note"])
         self.assertIn("buddy run", authority["runtime_note"].lower())
 

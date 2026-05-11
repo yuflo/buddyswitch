@@ -133,6 +133,12 @@ DEV_COMMIT = {
             },
         }
     ],
+    "state_effects": {
+        "task": {
+            "status": "done",
+            "summary": "Dev implementation is ready for Test smoke validation.",
+        },
+    },
     "handoff": {
         "next_buddy": "test",
         "reason": "Test can validate the implemented landing page behavior.",
@@ -356,6 +362,9 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest_path=MANIFEST,
         )
 
+    def _evidence_payload(self, *, context: dict[str, object]) -> dict[str, object]:
+        return {"tool": "evidence", "action": "issue_browser", "args": {"context": context}}
+
     def _broker_prepare(
         self,
         *,
@@ -402,13 +411,13 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     ) -> dict[str, str]:
         response = self._dispatch(
             buddy="market",
-            method="issue_browser_evidence",
-            payload={"context": context, "mode": "browser-cockpit-preflight", "reason": None},
+            method="env.tool",
+            payload=self._evidence_payload(context=context),
             instance_json=instance_json,
             instance_id=instance_id,
         )
         self.assertTrue(response["ok"], msg=response)
-        payload = response["payload"]
+        payload = response
         self.assertIsInstance(payload, dict)
         tool_evidence = payload["tool_evidence"]
         self.assertIsInstance(tool_evidence, dict)
@@ -444,8 +453,8 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         issue = self._dispatch(
             buddy="market",
-            method="issue_browser_evidence",
-            payload={"context": market_context, "mode": "browser-cockpit-preflight", "reason": None},
+            method="env.tool",
+            payload=self._evidence_payload(context=market_context),
             instance_json=market_instance,
             instance_id=market_instance_id,
         )
@@ -472,8 +481,8 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         issue = self._dispatch(
             buddy="market",
-            method="issue_browser_evidence",
-            payload={"context": market_context, "mode": "browser-cockpit-preflight", "reason": None},
+            method="env.tool",
+            payload=self._evidence_payload(context=market_context),
             instance_json=market_instance,
             instance_id="inst-other",
         )
@@ -709,6 +718,25 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.assertEqual(run["buddy_id"], buddy)
             if buddy == "market":
                 self.assertEqual(run["tool_evidence"]["kind"], "browser-cockpit-preflight")
+
+        expected_handoffs = {
+            "pm": "market",
+            "market": "design",
+            "design": "dev",
+            "dev": "test",
+            "test": "pm",
+        }
+        for buddy, receipt in receipts:
+            handoff = receipt.get("handoff")
+            self.assertIsInstance(handoff, dict, msg=receipt)
+            assert isinstance(handoff, dict)
+            self.assertEqual(handoff.get("next_buddy"), expected_handoffs[buddy])
+
+        dev_task = env_store.get_task(dev_persisted["receipt"]["task_id"])
+        self.assertIsNotNone(dev_task)
+        assert dev_task is not None
+        self.assertEqual(dev_task["status"], "done")
+        self.assertEqual(dev_task["summary"], "Dev implementation is ready for Test smoke validation.")
 
         self.assertEqual(project_source.read_text(encoding="utf-8"), "dev-only-change\n")
 

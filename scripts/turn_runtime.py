@@ -26,13 +26,14 @@ from env_manifest import (
 )
 import env_profiles
 import env_store
+from env.services import bindings as binding_service
+from env.services import context as context_service
 from env_store import (
     add_run_to_task,
     build_track_artifact_index,
     create_artifact,
     create_task,
     create_track,
-    get_artifact,
     get_task,
     get_track,
     list_artifacts,
@@ -197,8 +198,8 @@ def _rerun_prepare_actions() -> list[str]:
 
 def _market_evidence_command_hint() -> str:
     return (
-        "python3 scripts/browser_evidence.py issue --context <prepare-context.json> "
-        "--mode browser-cockpit-preflight"
+        "python3 scripts/env/client.py evidence issue-browser "
+        "--context <prepare-context.json>"
     )
 
 
@@ -348,41 +349,6 @@ def _hold_product_runtime_lock(product_session: dict[str, Any]):
         os.close(lock_fd)
 
 
-def _write_product_session_binding(
-    product_session: dict[str, Any],
-    *,
-    task_id: str,
-    track_id: str | None,
-) -> None:
-    instance_json = product_session.get("instance_json")
-    payload = product_session.get("payload")
-    if not isinstance(instance_json, Path):
-        raise ValueError("product session instance_json is required")
-    if not isinstance(payload, dict):
-        raise ValueError("product session payload is required")
-    if not isinstance(task_id, str) or not task_id.strip():
-        raise ValueError("resolved task_id is required for product session binding")
-    if track_id is not None and (not isinstance(track_id, str) or not track_id.strip()):
-        track_id = None
-
-    updated = dict(payload)
-    updated["current_task_id"] = task_id.strip()
-    updated["current_track_id"] = track_id.strip() if isinstance(track_id, str) and track_id.strip() else None
-    updated["updated_at"] = now_iso()
-    _write_runtime_json(instance_json, updated)
-    product_session["payload"] = updated
-
-
-def _resolve_binding_from_payload(payload: dict[str, Any]) -> tuple[str, str | None]:
-    task_id = payload.get("current_task_id")
-    track_id = payload.get("current_track_id")
-    if not isinstance(task_id, str) or not task_id.strip():
-        raise ValueError("prepare payload current_task_id is required for product session binding")
-    if not isinstance(track_id, str) or not track_id.strip():
-        track_id = None
-    return task_id.strip(), track_id.strip() if isinstance(track_id, str) else None
-
-
 def _raise_reservation_clear_failure(warning: dict[str, Any]) -> None:
     message = warning.get("message")
     run_id = warning.get("run_id")
@@ -404,45 +370,6 @@ def _clear_reservation_from_payload(payload: dict[str, Any], *, fail_on_warning:
     refreshed_context = payload.get("refreshed_context")
     if isinstance(refreshed_context, dict):
         _clear_reservation_from_payload(refreshed_context, fail_on_warning=fail_on_warning)
-
-
-def _receipt_has_binding_update_warning(receipt: dict[str, Any]) -> bool:
-    warnings = receipt.get("warnings")
-    if not isinstance(warnings, list):
-        return False
-    return any(
-        isinstance(item, dict) and item.get("code") == "W_INSTANCE_BINDING_UPDATE_FAILED"
-        for item in warnings
-    )
-
-
-def _persist_binding_from_payload(payload: dict[str, Any]) -> tuple[str, str | None] | None:
-    refreshed_context = payload.get("refreshed_context")
-    if isinstance(refreshed_context, dict) and refreshed_context.get("ok") is True:
-        return _resolve_binding_from_payload(refreshed_context)
-
-    receipt = payload.get("receipt")
-    if not isinstance(receipt, dict):
-        return None
-    refreshed_error = refreshed_context.get("error") if isinstance(refreshed_context, dict) else None
-    if (
-        isinstance(refreshed_error, dict)
-        and refreshed_error.get("code") == "E_RUNTIME_REFRESH_CONTEXT"
-        and not _receipt_has_binding_update_warning(receipt)
-    ):
-        next_state = receipt.get("next_state")
-        if isinstance(next_state, dict):
-            task_id = next_state.get("task_id")
-            track_id = next_state.get("track_id")
-        else:
-            task_id = receipt.get("task_id")
-            track_id = receipt.get("track_id")
-        if not isinstance(task_id, str) or not task_id.strip():
-            return None
-        if not isinstance(track_id, str) or not track_id.strip():
-            track_id = None
-        return task_id.strip(), track_id.strip() if isinstance(track_id, str) else None
-    return None
 
 
 def _mark_committed_binding_update_failed(payload: dict[str, Any], product_session: dict[str, Any], exc: Exception) -> None:
@@ -651,7 +578,9 @@ def _artifact_object_path(artifact_id: str) -> str:
 
 
 def _reserved_run_path(run_id: str) -> Path:
-    return env_store.CONTENT_ROOT / "runs" / "reserved" / f"{run_id}.json"
+    from env.services import runs as run_service
+
+    return run_service.reserved_run_path(run_id)
 
 
 def _write_runtime_json(path: Path, payload: dict[str, Any]) -> None:
@@ -842,124 +771,6 @@ def _related_run_ids_for_task(task_id: str, current_run_id: str, *, limit: int =
     return related_run_ids
 
 
-def _build_task_context(task: dict[str, Any] | None) -> dict[str, Any]:
-    if not task:
-        return {
-            "task": None,
-            "artifacts": [],
-            "recent_runs": [],
-        }
-
-    artifact_map = {artifact["id"]: artifact for artifact in list_artifacts()}
-    artifacts = [artifact_map[item] for item in task.get("artifact_ids", []) if item in artifact_map]
-    artifacts.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
-    return {
-        "task": {
-            "id": task["id"],
-            "buddy": task["buddy"],
-            "status": task["status"],
-            "summary": task.get("summary", ""),
-            "track_id": task.get("track_id"),
-            "latest_run_id": task.get("latest_run_id"),
-            "artifact_slots": task.get("artifact_slots", {}),
-        },
-        "artifacts": artifacts[:5],
-        "recent_runs": _scan_task_recent_runs(task["id"], limit=3),
-    }
-
-
-def _build_track_context(track_id: str | None) -> dict[str, Any] | None:
-    if not track_id:
-        return None
-    track = get_track(track_id)
-    if track is None:
-        return None
-
-    rows: list[dict[str, Any]] = []
-    for task_id in track.get("task_ids", []):
-        task = get_task(task_id)
-        if task is None:
-            continue
-        current_artifacts: dict[str, dict[str, Any]] = {}
-        artifact_slots = task.get("artifact_slots", {})
-        if isinstance(artifact_slots, dict):
-            for kind, row in artifact_slots.items():
-                if not isinstance(row, dict):
-                    continue
-                artifact_id = row.get("current_artifact_id")
-                if not isinstance(artifact_id, str) or not artifact_id:
-                    continue
-                artifact = get_artifact(artifact_id)
-                if artifact is not None:
-                    current_artifacts[kind] = artifact
-        rows.append(
-            {
-                "task_id": task["id"],
-                "buddy": task["buddy"],
-                "status": task["status"],
-                "summary": task.get("summary", ""),
-                "current_artifacts": current_artifacts,
-            }
-        )
-
-    return {
-        "track": {
-            "id": track["id"],
-            "title": track["title"],
-            "status": track["status"],
-            "current_buddy": track["current_buddy"],
-            "next_buddy": track.get("next_buddy"),
-            "summary": track.get("summary", ""),
-        },
-        "tasks": rows,
-        "recent_handoffs": _scan_track_recent_handoffs(track["id"], limit=5),
-    }
-
-
-def _scan_track_recent_handoffs(track_id: str, *, limit: int = 5) -> list[dict[str, Any]]:
-    run_root = env_store.RUN_CONTENT_DIR
-    if not run_root.exists():
-        return []
-    rows: list[dict[str, Any]] = []
-    for path in run_root.glob("*.json"):
-        if path.name == ".gitkeep":
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-        if not isinstance(payload, dict):
-            continue
-        payload_track_id = payload.get("track_id")
-        if not isinstance(payload_track_id, str) or payload_track_id != track_id:
-            continue
-        handoff = payload.get("handoff")
-        if not isinstance(handoff, dict):
-            continue
-        next_buddy = handoff.get("next_buddy")
-        reason = handoff.get("reason")
-        context = handoff.get("context")
-        if not isinstance(next_buddy, str) or not next_buddy.strip():
-            continue
-        if not isinstance(reason, str) or not reason.strip():
-            continue
-        if not isinstance(context, str) or not context.strip():
-            continue
-        rows.append(
-            {
-                "run_id": payload.get("run_id", path.stem),
-                "task_id": payload.get("task_id"),
-                "buddy_id": payload.get("buddy_id"),
-                "next_buddy": next_buddy.strip(),
-                "reason": reason.strip(),
-                "context": context.strip(),
-                "timestamp": payload.get("timestamp"),
-            }
-        )
-    rows.sort(key=lambda row: (row.get("timestamp") or "", row.get("run_id") or ""), reverse=True)
-    return rows[:limit]
-
-
 def _manifest_buddy_order(manifest: dict[str, Any]) -> list[str]:
     ordered: list[str] = []
     for row in manifest.get("buddies", []):
@@ -972,19 +783,6 @@ def _project_write_rule(access: str) -> str:
     if access == "write":
         return "Active buddy can write project source under projects/app."
     return "Project source is read-only for this buddy; hand source edits to Dev."
-
-
-def _summarize_runtime_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": artifact.get("id"),
-        "kind": artifact.get("kind"),
-        "title": artifact.get("title"),
-        "summary": artifact.get("summary", ""),
-        "buddy": artifact.get("buddy"),
-        "task_id": artifact.get("task_id"),
-        "source_run_id": artifact.get("source_run_id"),
-        "updated_at": artifact.get("updated_at"),
-    }
 
 
 def _build_persist_field_desc(active_buddy: str, tool_capability: dict[str, Any]) -> dict[str, Any]:
@@ -1067,22 +865,18 @@ def _build_artifact_kind_desc(buddy: dict[str, Any]) -> dict[str, Any]:
     return rows
 
 
-def _build_context_sources_desc() -> dict[str, str]:
-    return {
-        "request_text": "Original user request for this turn.",
-        "task_context.task": "Current task metadata and summary.",
-        "task_context.artifacts": "Full prior artifact content for the current task when available.",
-        "track_context.track": "Current track title, status, buddies, and summary when bound.",
-        "track_context.recent_handoffs": "Recent handoff reason and context.",
-        "current_context_summary": "Compact scan-friendly summary; use full task_context artifacts when content detail is needed.",
-    }
-
-
 def _build_env_tools_desc() -> dict[str, Any]:
     return {
         "task_manager": {
             "command": "python3 scripts/env/client.py task <operation>",
             "scope": "active-buddy runtime-enforced",
+            "broker_method": "env.tool",
+            "envelope": {
+                "tool": "task",
+                "action": "<action>",
+                "args": "<object>",
+            },
+            "cli_resource": "task",
             "operations": [
                 "create",
                 "list",
@@ -1103,7 +897,181 @@ def _build_env_tools_desc() -> dict[str, Any]:
             },
             "feedback_source": "runtime/tool response fields",
             "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
-        }
+        },
+        "track_manager": {
+            "command": "python3 scripts/env/client.py track <operation>",
+            "scope": "readable tracks; PM-only lifecycle mutation; active-buddy task linkage",
+            "broker_method": "env.tool",
+            "envelope": {
+                "tool": "track",
+                "action": "<action>",
+                "args": "<object>",
+            },
+            "cli_resource": "track",
+            "operations": [
+                "list",
+                "get",
+                "get_current",
+                "create",
+                "update",
+                "advance",
+                "archive",
+                "attach_task",
+                "detach_task",
+            ],
+            "payload_fields": {
+                "list": [],
+                "get": ["track_id"],
+                "get_current": [],
+                "create": ["track_id", "title", "status", "current_buddy", "next_buddy", "summary"],
+                "update": ["track_id", "title", "status", "current_buddy", "next_buddy", "summary"],
+                "advance": ["track_id", "status", "current_buddy", "next_buddy", "summary"],
+                "archive": ["track_id"],
+                "attach_task": ["track_id", "task_id"],
+                "detach_task": ["track_id", "task_id"],
+            },
+            "feedback_source": "runtime/tool response fields",
+            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
+        },
+        "artifact_manager": {
+            "command": "python3 scripts/env/client.py artifact <operation>",
+            "scope": "active current task listing; active-buddy task artifact reads and revision writes",
+            "broker_method": "env.tool",
+            "envelope": {
+                "tool": "artifact",
+                "action": "<action>",
+                "args": "<object>",
+            },
+            "cli_resource": "artifact",
+            "operations": [
+                "list",
+                "get",
+                "get_current",
+                "validate_payload",
+                "create_revision",
+                "update_metadata",
+            ],
+            "payload_fields": {
+                "list": [],
+                "get": ["artifact_id"],
+                "get_current": ["kind"],
+                "validate_payload": [
+                    "artifact_id",
+                    "task_id",
+                    "kind",
+                    "title",
+                    "summary",
+                    "content",
+                    "source_run_id",
+                ],
+                "create_revision": [
+                    "artifact_id",
+                    "task_id",
+                    "kind",
+                    "title",
+                    "summary",
+                    "content",
+                    "source_run_id",
+                ],
+                "update_metadata": ["artifact_id", "title", "summary", "source_run_id"],
+            },
+            "feedback_source": "runtime/tool response fields",
+            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
+        },
+        "context_manager": {
+            "command": "python3 scripts/env/client.py context <operation>",
+            "scope": "active instance binding context reads and prepared context validation",
+            "broker_method": "env.tool",
+            "envelope": {
+                "tool": "context",
+                "action": "<action>",
+                "args": "<object>",
+            },
+            "cli_resource": "context",
+            "operations": ["get", "summarize", "list_sources"],
+            "payload_fields": {
+                "get": ["context"],
+                "summarize": [],
+                "list_sources": [],
+            },
+            "feedback_source": "runtime/tool response fields",
+            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
+        },
+        "binding_manager": {
+            "command": "python3 scripts/env/client.py binding <operation>",
+            "scope": "active launcher instance binding; runtime-owned instance JSON writes",
+            "broker_method": "env.tool",
+            "envelope": {
+                "tool": "binding",
+                "action": "<action>",
+                "args": "<object>",
+            },
+            "cli_resource": "binding",
+            "operations": ["get", "set_task", "set_track", "clear"],
+            "payload_fields": {
+                "get": [],
+                "set_task": ["task_id"],
+                "set_track": ["track_id"],
+                "clear": [],
+            },
+            "feedback_source": "runtime/tool response fields",
+            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
+        },
+        "handoff_manager": {
+            "command": "python3 scripts/env/client.py handoff <operation>",
+            "scope": "manifest target and active track transition validation; no state mutation",
+            "broker_method": "env.tool",
+            "envelope": {
+                "tool": "handoff",
+                "action": "<action>",
+                "args": "<object>",
+            },
+            "cli_resource": "handoff",
+            "operations": ["validate"],
+            "payload_fields": {
+                "validate": ["next_buddy", "reason", "context", "track_id"],
+            },
+            "feedback_source": "runtime/tool response fields",
+            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
+        },
+        "run_manager": {
+            "command": "python3 scripts/env/client.py run <operation>",
+            "scope": "reserved run validation, commit, receipt reads, and refreshed context feedback",
+            "broker_method": "env.tool",
+            "envelope": {
+                "tool": "run",
+                "action": "<action>",
+                "args": "<object>",
+            },
+            "cli_resource": "run",
+            "operations": ["commit", "get_receipt", "get_raw", "validate_result"],
+            "payload_fields": {
+                "commit": ["context", "result"],
+                "validate_result": ["context", "result"],
+                "get_receipt": ["run_id"],
+                "get_raw": ["run_id"],
+            },
+            "feedback_source": "runtime/tool response fields",
+            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
+        },
+        "evidence_manager": {
+            "command": "python3 scripts/env/client.py evidence <operation>",
+            "scope": "Market browser evidence issuance for the active prepared run",
+            "broker_method": "env.tool",
+            "envelope": {
+                "tool": "evidence",
+                "action": "<action>",
+                "args": "<object>",
+            },
+            "cli_resource": "evidence",
+            "operations": ["issue_browser", "approve_downgrade"],
+            "payload_fields": {
+                "issue_browser": ["context"],
+                "approve_downgrade": ["context", "reason"],
+            },
+            "feedback_source": "runtime/tool response fields",
+            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
+        },
     }
 
 
@@ -1151,8 +1119,8 @@ def _build_runtime_context(
     }
     if buddy.get("id") == "market":
         tool_requirements["evidence_next_action"] = (
-            "Use scripts/browser_evidence.py issue --context <prepare-context.json> "
-            "--mode browser-cockpit-preflight before artifact-producing persist."
+            "Use scripts/env/client.py evidence issue-browser --context <prepare-context.json> "
+            "before artifact-producing persist."
         )
 
     persist_payload_hint: dict[str, Any] = {
@@ -1176,59 +1144,6 @@ def _build_runtime_context(
             "accepted_fields": ["browser_cockpit_token", "approved_downgrade_token"],
             "source": "broker-issued evidence response for current run",
         }
-
-    task_payload = task_context.get("task")
-    summarized_task: dict[str, Any] | None
-    if isinstance(task_payload, dict):
-        summarized_task = {
-            "id": task_payload.get("id"),
-            "buddy": task_payload.get("buddy"),
-            "status": task_payload.get("status"),
-            "summary": task_payload.get("summary", ""),
-            "track_id": task_payload.get("track_id"),
-            "latest_run_id": task_payload.get("latest_run_id"),
-        }
-    else:
-        summarized_task = None
-
-    track_payload = track_context.get("track") if isinstance(track_context, dict) else None
-    summarized_track: dict[str, Any] | None
-    if isinstance(track_payload, dict):
-        summarized_track = {
-            "id": track_payload.get("id"),
-            "title": track_payload.get("title"),
-            "status": track_payload.get("status"),
-            "current_buddy": track_payload.get("current_buddy"),
-            "next_buddy": track_payload.get("next_buddy"),
-            "summary": track_payload.get("summary", ""),
-        }
-    else:
-        summarized_track = None
-
-    task_artifacts = task_context.get("artifacts")
-    summarized_artifacts: list[dict[str, Any]] = []
-    if isinstance(task_artifacts, list):
-        for artifact in task_artifacts:
-            if isinstance(artifact, dict):
-                summarized_artifacts.append(_summarize_runtime_artifact(artifact))
-
-    handoff_rows = track_context.get("recent_handoffs") if isinstance(track_context, dict) else None
-    summarized_handoffs: list[dict[str, Any]] = []
-    if isinstance(handoff_rows, list):
-        for row in handoff_rows:
-            if not isinstance(row, dict):
-                continue
-            summarized_handoffs.append(
-                {
-                    "run_id": row.get("run_id"),
-                    "task_id": row.get("task_id"),
-                    "buddy_id": row.get("buddy_id"),
-                    "next_buddy": row.get("next_buddy"),
-                    "reason": row.get("reason"),
-                    "context": row.get("context"),
-                    "timestamp": row.get("timestamp"),
-                }
-            )
 
     return {
         "active_buddy": {
@@ -1268,13 +1183,11 @@ def _build_runtime_context(
             normalized_allowed_track_effects,
         ),
         "artifact_kind_desc": _build_artifact_kind_desc(buddy),
-        "context_sources_desc": _build_context_sources_desc(),
-        "current_context_summary": {
-            "task": summarized_task,
-            "track": summarized_track,
-            "artifacts": summarized_artifacts,
-            "recent_handoffs": summarized_handoffs,
-        },
+        "context_sources_desc": context_service.context_sources_desc(),
+        "current_context_summary": context_service.summarize_current_context(
+            task_context=task_context,
+            track_context=track_context,
+        ),
     }
 
 
@@ -1318,21 +1231,9 @@ def _current_product_instance_id() -> str | None:
 
 
 def _find_active_task_reservation(task_id: str) -> dict[str, Any] | None:
-    reserved_dir = _reserved_run_path("placeholder").parent
-    if not reserved_dir.exists():
-        return None
-    for path in sorted(reserved_dir.glob("*.json")):
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
-            raise ValueError(f"run reservation is invalid: {path.name}") from exc
-        if not isinstance(payload, dict):
-            raise ValueError(f"run reservation is invalid: {path.name}")
-        if payload.get("status") != "reserved":
-            continue
-        if payload.get("task_id") == task_id:
-            return payload
-    return None
+    from env.services import runs as run_service
+
+    return run_service.find_active_task_reservation(task_id)
 
 
 def _save_run_reservation(
@@ -1344,61 +1245,28 @@ def _save_run_reservation(
     turn_identity: dict[str, Any],
     instance_id: str | None,
 ) -> None:
-    require_runtime_workspace_write_root()
-    if instance_id is not None:
-        existing = _find_active_task_reservation(task_id)
-        if existing is not None:
-            existing_run_id = existing.get("run_id")
-            existing_instance_id = existing.get("instance_id")
-            raise ValueError(
-                f"Task '{task_id}' already has an active run reservation"
-                f" '{existing_run_id}' for instance '{existing_instance_id or 'unknown'}'."
-            )
-    reservation = {
-        "run_id": run_id,
-        "status": "reserved",
-        "context_revision": context_revision,
-        "sequence": sequence,
-        "task_id": task_id,
-        "turn_identity": _normalize_turn_identity(turn_identity),
-        "reserved_at": now_iso(),
-    }
-    if instance_id is not None:
-        reservation["instance_id"] = instance_id
-    _write_runtime_json(
-        _reserved_run_path(run_id),
-        reservation,
+    from env.services import runs as run_service
+
+    run_service.save_run_reservation(
+        run_id=run_id,
+        context_revision=context_revision,
+        sequence=sequence,
+        task_id=task_id,
+        turn_identity=turn_identity,
+        instance_id=instance_id,
     )
 
 
 def _load_run_reservation(run_id: str) -> dict[str, Any]:
-    path = _reserved_run_path(run_id)
-    if not path.exists():
-        raise ValueError(f"run reservation not found: {run_id}")
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        raise ValueError(f"run reservation is invalid: {run_id}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError(f"run reservation is invalid: {run_id}")
-    if payload.get("status") != "reserved":
-        raise ValueError(f"run reservation is invalid: {run_id}")
-    return payload
+    from env.services import runs as run_service
+
+    return run_service.load_run_reservation(run_id)
 
 
 def _clear_run_reservation(run_id: str) -> dict[str, Any] | None:
-    path = _reserved_run_path(run_id)
-    try:
-        if path.exists():
-            path.unlink()
-    except OSError as exc:
-        return {
-            "code": "W_RUN_RESERVATION_CLEAR_FAILED",
-            "message": f"run reservation could not be cleared: {exc}",
-            "run_id": run_id,
-            "reservation_path": str(path),
-        }
-    return None
+    from env.services import runs as run_service
+
+    return run_service.clear_run_reservation(run_id)
 
 
 def _post_persist_refreshed_context_unavailable(receipt: dict[str, Any]) -> dict[str, Any]:
@@ -1493,7 +1361,7 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
     effective_track_id = explicit_track_id or (existing_task.get("track_id") if existing_task else None)
     if existing_task:
         resolved_task = existing_task
-        task_context = _build_task_context(existing_task)
+        task_context = context_service.build_task_context(existing_task)
     else:
         create_token = _derive_create_token(demand)
         task_id = _derive_task_id(
@@ -1526,9 +1394,9 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
                 resolved_task = register_task_to_track(effective_track_id, task_id)
         if effective_track_id is None:
             effective_track_id = resolved_task.get("track_id")
-        task_context = _build_task_context(resolved_task)
+        task_context = context_service.build_task_context(resolved_task)
 
-    track_context = _build_track_context(effective_track_id)
+    track_context = context_service.build_track_context(effective_track_id)
     track_artifact_index = build_track_artifact_index(effective_track_id)
 
     sequence = _derive_context_sequence(resolved_task)
@@ -2284,208 +2152,15 @@ def _build_run_audit(
     return audit
 
 
-def _persist_buddy_run(
-    context: dict[str, Any],
-    *,
-    result: dict[str, Any],
-    manifest_path: Path = DEFAULT_MANIFEST,
-) -> dict[str, Any]:
-    if not context.get("ok"):
-        raise ValueError("context payload must be successful before persist_buddy_run")
-    if not isinstance(result, dict):
-        raise ValueError("result payload must be a JSON object")
-
-    early_run_envelope = context.get("run_envelope")
-    if not isinstance(early_run_envelope, dict):
-        raise ValueError("run_envelope is required")
-    early_run_id = early_run_envelope.get("run_id")
-    if not isinstance(early_run_id, str) or not early_run_id.strip():
-        raise ValueError("run_envelope.run_id is required")
-    _assert_run_id_unused(early_run_id.strip())
-
-    stored_task = _validate_context_revision(context)
-
-    active_buddy = context.get("active_buddy")
-    if not isinstance(active_buddy, str) or not active_buddy.strip():
-        raise ValueError("active_buddy is required")
-    active_buddy = active_buddy.strip()
-
-    request_text = context.get("request_text")
-    if not isinstance(request_text, str) or not request_text.strip():
-        raise ValueError("request_text is required")
-
-    current_task_id = context.get("current_task_id")
-    if not isinstance(current_task_id, str) or not current_task_id.strip():
-        raise ValueError("current_task_id is required")
-    current_task_id = current_task_id.strip()
-    if current_task_id != stored_task["id"]:
-        raise ValueError(f"current_task_id mismatch: expected '{stored_task['id']}', received '{current_task_id}'")
-
-    raw_current_track_id = context.get("current_track_id")
-    current_track_id = raw_current_track_id.strip() if isinstance(raw_current_track_id, str) and raw_current_track_id.strip() else None
-
-    run_id, _ = _validate_run_envelope(
-        context=context,
-        active_buddy=active_buddy,
-        request_text=request_text,
-        task_id=current_task_id,
-        track_id=current_track_id,
-    )
-
-    manifest = load_manifest(manifest_path)
-    buddy = require_buddy(manifest, active_buddy)
-    env_profile = env_profiles.require_env_profile(
-        active_buddy,
-        manifest_path=manifest_path,
-        repo_root=REPO_ROOT,
-    )
-    commit = _validate_buddy_run_commit(
-        context=context,
-        result=result,
-        manifest=manifest,
-        buddy=buddy,
-        env_profile=env_profile,
-        task=stored_task,
-        current_track_id=current_track_id,
-    )
-
-    _validate_task_binding(task=stored_task, explicit_track_id=current_track_id)
-    effective_track_id = current_track_id or stored_task.get("track_id")
-
-    task_after_track, effective_track_id, track_title, track_next_buddy, track_action, track_writes = _apply_track_effect(
-        track_effect=commit.get("track_effect"),
-        active_buddy=active_buddy,
-        request_text=request_text,
-        task=stored_task,
-        effective_track_id=effective_track_id,
-    )
-
-    task = task_after_track
-    if effective_track_id:
-        task = register_task_to_track(effective_track_id, task["id"])
-
-    if commit.get("task_effect") is not None:
-        task_patch: dict[str, Any] = {}
-        task_effect = commit["task_effect"]
-        if "status" in task_effect:
-            task_patch["status"] = task_effect["status"]
-        if "summary" in task_effect:
-            task_patch["summary"] = task_effect["summary"]
-        if task_patch:
-            task = env_store.update_task(task["id"], task_patch)
-
-    artifact_ids: list[str] = []
-    for artifact_payload in commit["artifacts"]:
-        artifact = create_artifact(
-            artifact_id=_derive_artifact_id(task["id"], artifact_payload["kind"]),
-            title=artifact_payload["title"],
-            buddy=active_buddy,
-            kind=artifact_payload["kind"],
-            task_id=task["id"],
-            source_run_id=run_id,
-            summary=artifact_payload.get("summary", ""),
-            content=artifact_payload["content"],
-        )
-        artifact_ids.append(artifact["id"])
-
-    summary_for_task_run = commit["execution_summary"]
-    task_effect = commit.get("task_effect")
-    if isinstance(task_effect, dict) and isinstance(task_effect.get("summary"), str):
-        summary_for_task_run = task_effect.get("summary") or summary_for_task_run
-    add_run_to_task(task["id"], run_id, summary=summary_for_task_run)
-
-    if effective_track_id:
-        track = get_track(effective_track_id)
-        if track is not None:
-            if track_title is None:
-                track_title = track.get("title")
-            if track_next_buddy is None:
-                track_next_buddy = track.get("next_buddy")
-
-    handoff = commit.get("handoff")
-    next_buddy = handoff.get("next_buddy") if isinstance(handoff, dict) else track_next_buddy
-    next_state = _build_next_state(
-        task_id=task["id"],
-        track_id=effective_track_id,
-        current_buddy=active_buddy,
-        next_buddy=next_buddy,
-        track_action=track_action,
-    )
-
-    run_content_path_value = run_content_path(run_id)
-    related_run_ids = _related_run_ids_for_task(task["id"], run_id, limit=2)
-    receipt_paths = _receipt_paths(
-        run_content_path_value=run_content_path_value,
-        task_id=task["id"],
-        artifact_ids=artifact_ids,
-        track_id=effective_track_id,
-    )
-
-    writes = list(track_writes)
-    writes.append(_task_object_path(task["id"]))
-    writes.extend(_artifact_object_path(artifact_id) for artifact_id in artifact_ids)
-    writes.append(run_content_path_value)
-    if effective_track_id:
-        writes.append(_track_object_path(effective_track_id))
-    writes = list(dict.fromkeys(writes))
-
-    run_audit = _build_run_audit(
-        run_id=run_id,
-        active_buddy=active_buddy,
-        task=task,
-        track_id=effective_track_id,
-        track_title=track_title,
-        artifact_ids=artifact_ids,
-        track_action=track_action,
-        writes=writes,
-        receipt_paths=receipt_paths,
-        related_run_ids=related_run_ids,
-        next_state=next_state,
-        commit=commit,
-    )
-    save_run_content(run_id, run_audit)
-
-    receipt: dict[str, Any] = {
-        "ok": True,
-        "buddy_id": active_buddy,
-        "task_id": task["id"],
-        "task_title": task["title"],
-        "artifact_ids": artifact_ids,
-        "run_id": run_id,
-        "next_state": next_state,
-        "receipt_paths": receipt_paths,
-        "related_run_ids": related_run_ids,
-    }
-    if effective_track_id:
-        receipt["track_id"] = effective_track_id
-        if track_title is not None:
-            receipt["track_title"] = track_title
-    if track_action is not None:
-        receipt["track_action"] = track_action
-    if handoff is not None:
-        receipt["handoff"] = handoff
-
-    reservation_clear_warning = _clear_run_reservation(run_id)
-    if reservation_clear_warning is not None:
-        warnings = receipt.setdefault("warnings", [])
-        if isinstance(warnings, list):
-            warnings.append(reservation_clear_warning)
-
-    refreshed_context = _post_persist_refreshed_context_unavailable(receipt)
-    return {
-        "ok": True,
-        "receipt": receipt,
-        "refreshed_context": refreshed_context,
-    }
-
-
 def persist_buddy_run(
     context: dict[str, Any],
     *,
     result: dict[str, Any],
     manifest_path: Path = DEFAULT_MANIFEST,
 ) -> dict[str, Any]:
-    return _persist_buddy_run(
+    from env.services import runs as run_service
+
+    return run_service.commit_buddy_run(
         context,
         result=result,
         manifest_path=manifest_path,
@@ -2522,9 +2197,13 @@ def _cmd_prepare(args: argparse.Namespace) -> int:
                     raise ValueError("product-mode env disappeared while acquiring runtime lock")
                 payload = prepare_turn_context(args.text, manifest_path=args.manifest)
                 if payload.get("ok"):
-                    task_id, track_id = _resolve_binding_from_payload(payload)
+                    task_id, track_id = binding_service.resolve_binding_from_payload(payload)
                     try:
-                        _write_product_session_binding(product_session, task_id=task_id, track_id=track_id)
+                        binding_service.write_product_session_binding(
+                            product_session,
+                            task_id=task_id,
+                            track_id=track_id,
+                        )
                     except (OSError, ValueError) as exc:
                         _clear_reservation_from_payload(payload, fail_on_warning=True)
                         raise ValueError(f"instance binding update failed after prepare: {exc}") from exc
@@ -2641,11 +2320,15 @@ def _cmd_persist(args: argparse.Namespace) -> int:
                     manifest_path=args.manifest,
                 )
                 if payload.get("ok"):
-                    binding = _persist_binding_from_payload(payload)
+                    binding = binding_service.persist_binding_from_payload(payload)
                     if binding is not None:
                         task_id, track_id = binding
                         try:
-                            _write_product_session_binding(product_session, task_id=task_id, track_id=track_id)
+                            binding_service.write_product_session_binding(
+                                product_session,
+                                task_id=task_id,
+                                track_id=track_id,
+                            )
                         except (OSError, ValueError) as exc:
                             _mark_committed_binding_update_failed(payload, product_session, exc)
     except RuntimeBrokerError as exc:

@@ -202,12 +202,12 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response["error"]["code"], "E_RUNTIME_BROKER")
         self.assertIn("instance is not active", response["error"]["message"])
 
-    def test_env_task_supports_active_instance_and_identity_checks(self) -> None:
+    def test_env_tool_supports_active_instance_and_identity_checks(self) -> None:
         instance_json = self._instance_json(instance_id="inst-dev-example", buddy="dev", status="active")
 
         supported = self._dispatch(
-            method="env.task",
-            payload={"action": "list", "args": {}},
+            method="env.tool",
+            payload={"tool": "task", "action": "list", "args": {}},
             instance_json=instance_json,
             instance_id="inst-dev-example",
             buddy="dev",
@@ -215,8 +215,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(supported["ok"], msg=supported)
 
         wrong_instance = self._dispatch(
-            method="env.task",
-            payload={"action": "list", "args": {}},
+            method="env.tool",
+            payload={"tool": "task", "action": "list", "args": {}},
             instance_json=instance_json,
             instance_id="inst-other",
             buddy="dev",
@@ -225,8 +225,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(wrong_instance["error"]["permission_boundary"], "active-instance")
 
         wrong_buddy = self._dispatch(
-            method="env.task",
-            payload={"action": "list", "args": {}},
+            method="env.tool",
+            payload={"tool": "task", "action": "list", "args": {}},
             instance_json=instance_json,
             instance_id="inst-dev-example",
             buddy="pm",
@@ -236,14 +236,27 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         inactive_instance_json = self._instance_json(instance_id="inst-dev-inactive", buddy="dev", status="inactive")
         inactive = self._dispatch(
-            method="env.task",
-            payload={"action": "list", "args": {}},
+            method="env.tool",
+            payload={"tool": "task", "action": "list", "args": {}},
             instance_json=inactive_instance_json,
             instance_id="inst-dev-inactive",
             buddy="dev",
         )
         self.assertFalse(inactive["ok"])
         self.assertEqual(inactive["error"]["permission_boundary"], "active-instance-status")
+
+    def test_legacy_env_task_method_is_rejected(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-example", buddy="dev", status="active")
+        legacy_method = "env" + ".task"
+        rejected_legacy = self._dispatch(
+            method=legacy_method,
+            payload={"action": "list", "args": {}},
+            instance_json=instance_json,
+            instance_id="inst-dev-example",
+            buddy="dev",
+        )
+        self.assertFalse(rejected_legacy["ok"])
+        self.assertEqual(rejected_legacy["error"]["permission_boundary"], "broker-protocol")
 
     def test_runtime_broker_client_missing_socket_raises_unavailable(self) -> None:
         with patch.dict(

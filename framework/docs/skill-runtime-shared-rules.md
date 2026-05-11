@@ -6,6 +6,7 @@ These rules apply to native BuddySwitch skills in launcher-managed runtime sessi
 
 - Materialization validates copy boundaries only.
 - `prepare` validates turn context and reservation safety only.
+- Env manager tools route through `env.tool` using `python3 scripts/env/client.py ...`.
 - `persist` validates write safety only.
 
 Codex CLI owns package acceptance after `.agents/skills/<skill-id>` is materialized.

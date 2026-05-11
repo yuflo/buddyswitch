@@ -12,11 +12,13 @@ def persist_buddy_run_request(
     result: dict[str, Any],
     manifest_path: "Path | None" = None,
 ) -> dict[str, Any]:
-    import turn_runtime
+    from env.services import runs as run_service
 
     if manifest_path is None:
+        import turn_runtime
+
         manifest_path = turn_runtime.DEFAULT_MANIFEST
-    return turn_runtime.persist_buddy_run(
+    return run_service.commit_buddy_run(
         context,
         result=result,
         manifest_path=manifest_path,

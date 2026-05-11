@@ -124,7 +124,7 @@ Required top-level sections:
 
 Runtime AGENTS guidance should point to these runtime context surfaces instead of duplicating payload recipes or capability matrices.
 
-`runtime_context.env_tools` is the compact source for broker-routed env tool operations. The first shared env slice is `task-manager`, executed through `python3 scripts/env/client.py task <operation>`. Permission enforcement and active-buddy ownership checks are implemented in runtime tool/service code, not in prompt wording.
+`runtime_context.env_tools` is the compact source for broker-routed env tool operations. Shared env slices are executed through `python3 scripts/env/client.py <resource> <operation>` and routed through broker method `env.tool` with envelope `{tool, action, args}`. Active slices include `task-manager`, `track-manager`, `artifact-manager`, `context-manager`, `binding-manager`, `handoff-manager`, `run-manager`, and `evidence-manager`. Permission enforcement, active-buddy ownership checks, PM-only track lifecycle authority, artifact-kind scope, artifact source-run validation, instance binding writes, context validation, handoff target validation, run reservation validation, run commit persistence, Market evidence issuance, browser ready-page enforcement, and evidence token scope are implemented in runtime tool/service code, not in prompt wording.
 
 ## Persist Contract
 
@@ -149,7 +149,7 @@ Top-level response shape is frozen by `framework/contracts/persist-buddy-run.jso
 - if both handoff next buddy and track next buddy are present, they must match;
 - at least one durable collaboration signal exists: `artifacts`, `state_effects`, or `handoff`.
 
-State writes in product mode are broker-owned.
+State writes in product mode are broker-owned. Run reservation and commit writes are owned by `scripts/env/services/runs.py`; the host `persist` command and broker `persist` method call the same service path as `env.tool` `run.commit`. Browser evidence tokens are issued by `scripts/env/services/evidence.py` through `env.tool` `evidence.issue_browser` and `evidence.approve_downgrade`; the host browser evidence CLI remains a wrapper over the same env tool path.
 
 ## Structured Tool Feedback
 

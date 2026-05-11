@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from runtime_kernel.client import RuntimeBrokerError, request_runtime_broker
+from runtime_kernel.client import RuntimeBrokerError, broker_unavailable_feedback, request_runtime_broker
 
 
 def _runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -41,24 +41,38 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _dispatch_issue(*, context: dict[str, Any], mode: str, reason: str | None) -> dict[str, Any]:
-    response = request_runtime_broker(
-        "issue_browser_evidence",
-        {"context": context, "mode": mode, "reason": reason},
-    )
+    if mode == "browser-cockpit-preflight":
+        action = "issue_browser"
+        args: dict[str, Any] = {"context": context}
+    elif mode == "approved-downgrade":
+        action = "approve_downgrade"
+        args = {"context": context, "reason": reason}
+    else:
+        raise RuntimeBrokerError(
+            "E_RUNTIME_BROKER_UNAVAILABLE",
+            f"unsupported evidence mode: {mode}",
+            details=broker_unavailable_feedback(),
+        )
+    response = request_runtime_broker("env.tool", {"tool": "evidence", "action": action, "args": args})
     if not isinstance(response, dict) or not isinstance(response.get("ok"), bool):
         raise RuntimeBrokerError(
             "E_RUNTIME_BROKER_UNAVAILABLE",
             "runtime broker response for evidence issuance is invalid.",
+            details=broker_unavailable_feedback(),
         )
     if response.get("ok") is not True:
         return response
-    payload = response.get("payload")
-    if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
+    if not isinstance(response.get("tool_evidence"), dict) or not isinstance(response.get("feedback"), dict):
         raise RuntimeBrokerError(
             "E_RUNTIME_BROKER_UNAVAILABLE",
             "runtime broker evidence payload is invalid.",
+            details=broker_unavailable_feedback(),
         )
-    return payload
+    return {
+        "ok": True,
+        "tool_evidence": response["tool_evidence"],
+        "feedback": response["feedback"],
+    }
 
 
 def main() -> int:

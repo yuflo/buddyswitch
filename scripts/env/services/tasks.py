@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Active-buddy scoped task manager service for broker-routed env.task operations."""
+"""Active-buddy scoped task manager service for broker-routed env.tool operations."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any, TypedDict
 
 import env_store
 from env_manifest import buddy_permissions
-import turn_runtime
+from env.services import bindings as binding_service
 
 _TASK_PUBLIC_FIELDS = (
     "id",
@@ -53,6 +53,7 @@ def _error_payload(
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "ok": False,
+        "tool": "task",
         "action": action,
         "error": {
             "code": code,
@@ -90,7 +91,7 @@ def _payload_error(*, action: str, active_buddy: str, message: str, task_id: str
         permission_boundary="request-payload",
         task_id=task_id,
         allowed_next_actions=[
-            "Fix the env.task payload fields and retry.",
+            'Fix the env.tool envelope fields (`tool`, `action`, `args`) and retry.',
             "Use task.list to inspect candidate task ids before retrying.",
         ],
     )
@@ -132,12 +133,7 @@ def _task_summary(task: dict[str, Any]) -> dict[str, Any]:
 
 
 def _current_binding(context: TaskServiceContext) -> dict[str, Any]:
-    payload = context["instance_payload"]
-    return {
-        "instance_id": context["instance_id"],
-        "current_task_id": payload.get("current_task_id"),
-        "current_track_id": payload.get("current_track_id"),
-    }
+    return binding_service.current_binding(context)
 
 
 def _require_permission(context: TaskServiceContext, permission: str, action: str) -> dict[str, Any] | None:
@@ -272,6 +268,7 @@ def create_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCo
     )
     return {
         "ok": True,
+        "tool": "task",
         "action": action,
         "active_buddy": context["active_buddy"],
         "task_id": task["id"],
@@ -302,6 +299,7 @@ def list_tasks_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCon
     tasks = [_task_summary(task) for task in env_store.list_tasks() if task.get("buddy") == context["active_buddy"]]
     return {
         "ok": True,
+        "tool": "task",
         "action": action,
         "active_buddy": context["active_buddy"],
         "tasks": tasks,
@@ -332,6 +330,7 @@ def get_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceConte
     assert task is not None
     return {
         "ok": True,
+        "tool": "task",
         "action": action,
         "active_buddy": context["active_buddy"],
         "task_id": task["id"],
@@ -364,6 +363,7 @@ def get_current_task(*, args: dict[str, Any], context: TaskServiceContext) -> di
     if not isinstance(task_id, str) or not task_id.strip():
         return {
             "ok": True,
+            "tool": "task",
             "action": action,
             "active_buddy": context["active_buddy"],
             "task": None,
@@ -387,6 +387,7 @@ def get_current_task(*, args: dict[str, Any], context: TaskServiceContext) -> di
         )
     return {
         "ok": True,
+        "tool": "task",
         "action": action,
         "active_buddy": context["active_buddy"],
         "task_id": task["id"],
@@ -420,21 +421,15 @@ def set_current_task(*, args: dict[str, Any], context: TaskServiceContext) -> di
     task_id = str(task["id"])
     track_id = task.get("track_id")
     normalized_track_id = track_id if isinstance(track_id, str) and track_id.strip() else None
-    session = {
-        "instance_json": context["instance_json"],
-        "payload": context["instance_payload"],
-    }
-    turn_runtime._write_product_session_binding(
-        session,
+    binding_service.write_instance_binding(
+        context=context,
         task_id=task_id,
         track_id=normalized_track_id,
     )
-    payload = session.get("payload")
-    if isinstance(payload, dict):
-        context["instance_payload"] = payload
 
     return {
         "ok": True,
+        "tool": "task",
         "action": action,
         "active_buddy": context["active_buddy"],
         "task_id": task_id,
@@ -510,6 +505,7 @@ def update_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCo
     updated = env_store.update_task(task["id"], patch)
     return {
         "ok": True,
+        "tool": "task",
         "action": action,
         "active_buddy": context["active_buddy"],
         "task_id": updated["id"],
@@ -542,6 +538,7 @@ def archive_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceC
     archived = env_store.update_task(task["id"], {"status": "archived"})
     return {
         "ok": True,
+        "tool": "task",
         "action": action,
         "active_buddy": context["active_buddy"],
         "task_id": archived["id"],

@@ -1034,6 +1034,7 @@ exec "$real_git" "$@"
             runtime_skills = workspace_dir / ".agents" / "skills"
             self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "track-manager" / "SKILL.md").exists())
+            self.assertTrue((runtime_skills / "artifact-manager" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "track-manager" / "assets" / "track-operation-template.md").exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
 
@@ -1111,7 +1112,7 @@ exec "$real_git" "$@"
             runtime_skills = workspace_dir / ".agents" / "skills"
             self.assertTrue((runtime_skills / "shape-prototype" / "SKILL.md").exists())
             self.assertFalse((runtime_skills / "write-prd").exists())
-            self.assertFalse((runtime_skills / "track-manager").exists())
+            self.assertTrue((runtime_skills / "track-manager" / "SKILL.md").exists())
 
     def test_instance_start_materializes_runtime_skills_from_manifest_for_each_buddy(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -1201,6 +1202,8 @@ exec "$real_git" "$@"
                 expected_skill_ids = sorted(skill_id for skill_id in buddy_skills if isinstance(skill_id, str))
                 self.assertEqual(installed_skill_ids, expected_skill_ids, msg=f"buddy={buddy_id}")
                 self.assertIn("task-manager", installed_skill_ids, msg=f"buddy={buddy_id}")
+                self.assertIn("track-manager", installed_skill_ids, msg=f"buddy={buddy_id}")
+                self.assertIn("artifact-manager", installed_skill_ids, msg=f"buddy={buddy_id}")
 
                 for skill_id in expected_skill_ids:
                     source_dir = ROOT / skill_sources[skill_id]
@@ -1382,6 +1385,7 @@ exec "$real_git" "$@"
             self.assertTrue((runtime_skills / "task-manager" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "track-manager" / "SKILL.md").exists())
+            self.assertTrue((runtime_skills / "artifact-manager" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "write-prd" / "assets" / "prd-template.md").exists())
             self.assertTrue((runtime_skills / "track-manager" / "assets" / "track-operation-template.md").exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
@@ -1403,6 +1407,31 @@ exec "$real_git" "$@"
                 runtime_env_client.read_text(encoding="utf-8"),
                 source_env_client.read_text(encoding="utf-8"),
             )
+            for relative in (
+                "scripts/env/tools/router.py",
+                "scripts/env/tools/task_manager.py",
+                "scripts/env/tools/track_manager.py",
+                "scripts/env/tools/artifact_manager.py",
+                "scripts/env/tools/context_manager.py",
+                "scripts/env/tools/binding_manager.py",
+                "scripts/env/tools/handoff_manager.py",
+                "scripts/env/tools/run_manager.py",
+                "scripts/env/tools/evidence_manager.py",
+                "scripts/env/services/tasks.py",
+                "scripts/env/services/tracks.py",
+                "scripts/env/services/artifacts.py",
+                "scripts/env/services/context.py",
+                "scripts/env/services/bindings.py",
+                "scripts/env/services/handoffs.py",
+                "scripts/env/services/runs.py",
+                "scripts/env/services/evidence.py",
+            ):
+                with self.subTest(runtime_surface=relative):
+                    self.assertTrue((workspace_dir / relative).exists())
+                    self.assertEqual(
+                        (workspace_dir / relative).read_text(encoding="utf-8"),
+                        (ROOT / relative).read_text(encoding="utf-8"),
+                    )
             exclude_path = subprocess.check_output(
                 ["git", "-C", str(workspace_dir), "rev-parse", "--git-path", "info/exclude"],
                 text=True,
@@ -3427,6 +3456,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             self.assertFalse((runtime_skills / "stale-skill").exists())
             self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "track-manager" / "SKILL.md").exists())
+            self.assertTrue((runtime_skills / "artifact-manager" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "track-manager" / "assets" / "track-operation-template.md").exists())
             source_write_prd = ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "SKILL.md"
             self.assertEqual(

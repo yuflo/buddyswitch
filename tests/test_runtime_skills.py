@@ -841,7 +841,7 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             self.assertTrue((workspace / ".agents" / "skills" / "write-prd" / "SKILL.md").exists())
             self.assertFalse((workspace / ".agents" / "skills" / "dev-summary").exists())
 
-    def test_repo_manifest_declares_shared_task_manager_for_every_buddy(self) -> None:
+    def test_repo_manifest_declares_shared_managers_for_every_buddy(self) -> None:
         manifest = load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         skills = {
             row["id"]: row
@@ -853,6 +853,16 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             skills["task-manager"].get("path"),
             "buddyswitch/skills/shared/task-manager",
         )
+        self.assertIn("track-manager", skills)
+        self.assertEqual(
+            skills["track-manager"].get("path"),
+            "buddyswitch/skills/shared/track-manager",
+        )
+        self.assertIn("artifact-manager", skills)
+        self.assertEqual(
+            skills["artifact-manager"].get("path"),
+            "buddyswitch/skills/shared/artifact-manager",
+        )
 
         buddies = [row for row in manifest.get("buddies", []) if isinstance(row, dict)]
         self.assertTrue(buddies)
@@ -861,6 +871,8 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             skill_ids = [item for item in buddy.get("skills", []) if isinstance(item, str)]
             with self.subTest(buddy=buddy_id):
                 self.assertEqual(skill_ids.count("task-manager"), 1)
+                self.assertEqual(skill_ids.count("track-manager"), 1)
+                self.assertEqual(skill_ids.count("artifact-manager"), 1)
 
 
 if __name__ == "__main__":

@@ -286,6 +286,22 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(prepared["ok"], msg=prepared)
         return prepared["payload"]
 
+    def _evidence_payload(
+        self,
+        *,
+        context: dict[str, object],
+        mode: str,
+        reason: str | None = None,
+    ) -> dict[str, object]:
+        if mode == "browser-cockpit-preflight":
+            return {"tool": "evidence", "action": "issue_browser", "args": {"context": context}}
+        if mode == "approved-downgrade":
+            args: dict[str, object] = {"context": context}
+            if reason is not None:
+                args["reason"] = reason
+            return {"tool": "evidence", "action": "approve_downgrade", "args": args}
+        raise AssertionError(f"unsupported test evidence mode: {mode}")
+
     def _state_snapshot(self) -> dict[str, object]:
         def _load_dir(path: Path) -> dict[str, object]:
             if not path.exists():
@@ -910,8 +926,8 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         issue = self._dispatch(
-            method="issue_browser_evidence",
-            payload={"context": context, "mode": "browser-cockpit-preflight", "reason": None},
+            method="env.tool",
+            payload=self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
             instance_json=market_json,
             instance_id="inst-market-example",
             buddy="market",
@@ -979,14 +995,14 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(self._state_snapshot(), before)
 
         browser_issue = self._dispatch(
-            method="issue_browser_evidence",
-            payload={"context": context, "mode": "browser-cockpit-preflight", "reason": None},
+            method="env.tool",
+            payload=self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
             instance_json=market_json,
             instance_id="inst-market-example",
             buddy="market",
         )
         self.assertTrue(browser_issue["ok"], msg=browser_issue)
-        payload = browser_issue["payload"]
+        payload = browser_issue
         self.assertIn("browser_cockpit_token", payload["tool_evidence"])
         feedback = payload["feedback"]
         self.assertEqual(feedback["mode"], "browser-cockpit-preflight")
@@ -1022,18 +1038,18 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(self._state_snapshot(), before_wrong_instance)
 
         downgrade_issue = self._dispatch(
-            method="issue_browser_evidence",
-            payload={
-                "context": context,
-                "mode": "approved-downgrade",
-                "reason": "Browser cockpit is unavailable and user approved a fallback.",
-            },
+            method="env.tool",
+            payload=self._evidence_payload(
+                context=context,
+                mode="approved-downgrade",
+                reason="Browser cockpit is unavailable and user approved a fallback.",
+            ),
             instance_json=market_json,
             instance_id="inst-market-example",
             buddy="market",
         )
         self.assertTrue(downgrade_issue["ok"], msg=downgrade_issue)
-        downgrade_payload = downgrade_issue["payload"]
+        downgrade_payload = downgrade_issue
         self.assertIn("approved_downgrade_token", downgrade_payload["tool_evidence"])
         self.assertEqual(downgrade_payload["feedback"]["mode"], "approved-downgrade")
         self.assertEqual(downgrade_payload["feedback"]["persist_field"], "tool_evidence.approved_downgrade_token")

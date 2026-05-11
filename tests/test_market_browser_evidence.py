@@ -280,6 +280,22 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest_path=MANIFEST,
         )
 
+    def _evidence_payload(
+        self,
+        *,
+        context: dict[str, object],
+        mode: str,
+        reason: str | None = None,
+    ) -> dict[str, object]:
+        if mode == "browser-cockpit-preflight":
+            return {"tool": "evidence", "action": "issue_browser", "args": {"context": context}}
+        if mode == "approved-downgrade":
+            args: dict[str, object] = {"context": context}
+            if reason is not None:
+                args["reason"] = reason
+            return {"tool": "evidence", "action": "approve_downgrade", "args": args}
+        raise AssertionError(f"unsupported test evidence mode: {mode}")
+
     def _prepare_market(self, *, instance_json: Path, instance_id: str = "inst-market-example") -> dict[str, object]:
         response = self._dispatch(
             request={
@@ -360,12 +376,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "protocol": "buddyswitch-runtime-broker/v1",
                 "instance_id": "inst-pm-example",
                 "active_buddy": "pm",
-                "method": "issue_browser_evidence",
-                "payload": {
-                    "context": prepared["payload"],
-                    "mode": "browser-cockpit-preflight",
-                    "reason": None,
-                },
+                "method": "env.tool",
+                "payload": self._evidence_payload(
+                    context=prepared["payload"],
+                    mode="browser-cockpit-preflight",
+                ),
             },
             instance_json=instance_json,
         )
@@ -382,8 +397,8 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "protocol": "buddyswitch-runtime-broker/v1",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
-                "method": "issue_browser_evidence",
-                "payload": {"context": context, "mode": "browser-cockpit-preflight", "reason": None},
+                "method": "env.tool",
+                "payload": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
             },
             instance_json=instance_json,
         )
@@ -402,8 +417,8 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "protocol": "buddyswitch-runtime-broker/v1",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
-                "method": "issue_browser_evidence",
-                "payload": {"context": context, "mode": "browser-cockpit-preflight", "reason": None},
+                "method": "env.tool",
+                "payload": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
             },
             instance_json=instance_json,
         )
@@ -421,8 +436,8 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "protocol": "buddyswitch-runtime-broker/v1",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
-                "method": "issue_browser_evidence",
-                "payload": {"context": context, "mode": "browser-cockpit-preflight", "reason": None},
+                "method": "env.tool",
+                "payload": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
             },
             instance_json=instance_json,
         )
@@ -448,8 +463,8 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "protocol": "buddyswitch-runtime-broker/v1",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
-                "method": "issue_browser_evidence",
-                "payload": {"context": context, "mode": "browser-cockpit-preflight", "reason": None},
+                "method": "env.tool",
+                "payload": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
             },
             instance_json=instance_json,
         )
@@ -472,13 +487,13 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "protocol": "buddyswitch-runtime-broker/v1",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
-                "method": "issue_browser_evidence",
-                "payload": {"context": context, "mode": "browser-cockpit-preflight", "reason": None},
+                "method": "env.tool",
+                "payload": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
             },
             instance_json=instance_json,
         )
         self.assertTrue(issue["ok"], msg=issue)
-        token = issue["payload"]["tool_evidence"]["browser_cockpit_token"]
+        token = issue["tool_evidence"]["browser_cockpit_token"]
 
         persisted = self._dispatch(
             request={
@@ -515,12 +530,12 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "protocol": "buddyswitch-runtime-broker/v1",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
-                "method": "issue_browser_evidence",
-                "payload": {"context": context_a, "mode": "browser-cockpit-preflight", "reason": None},
+                "method": "env.tool",
+                "payload": self._evidence_payload(context=context_a, mode="browser-cockpit-preflight"),
             },
             instance_json=instance_json,
         )
-        token = issue["payload"]["tool_evidence"]["browser_cockpit_token"]
+        token = issue["tool_evidence"]["browser_cockpit_token"]
         consumed_a = self._dispatch(
             request={
                 "protocol": "buddyswitch-runtime-broker/v1",
@@ -590,8 +605,8 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "protocol": "buddyswitch-runtime-broker/v1",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
-                "method": "issue_browser_evidence",
-                "payload": {"context": context, "mode": "approved-downgrade", "reason": " "},
+                "method": "env.tool",
+                "payload": self._evidence_payload(context=context, mode="approved-downgrade", reason=" "),
             },
             instance_json=instance_json,
         )
@@ -607,17 +622,17 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "protocol": "buddyswitch-runtime-broker/v1",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
-                "method": "issue_browser_evidence",
-                "payload": {
-                    "context": context,
-                    "mode": "approved-downgrade",
-                    "reason": "Browser-native cockpit blocked; user approved one-off downgrade.",
-                },
+                "method": "env.tool",
+                "payload": self._evidence_payload(
+                    context=context,
+                    mode="approved-downgrade",
+                    reason="Browser-native cockpit blocked; user approved one-off downgrade.",
+                ),
             },
             instance_json=instance_json,
         )
         self.assertTrue(issue["ok"], msg=issue)
-        token = issue["payload"]["tool_evidence"]["approved_downgrade_token"]
+        token = issue["tool_evidence"]["approved_downgrade_token"]
         persisted = self._dispatch(
             request={
                 "protocol": "buddyswitch-runtime-broker/v1",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Broker request dispatcher for env.task task-manager operations."""
+"""Task tool dispatcher for env.tool broker envelope requests."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ _ACTION_MAP = {
 def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
     return {
         "ok": False,
+        "tool": "task",
         "action": action,
         "error": {
             "code": "E_TASK_PAYLOAD",
@@ -30,7 +31,7 @@ def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str,
         "permission_boundary": "request-payload",
         "active_buddy": active_buddy,
         "allowed_next_actions": [
-            "Send env.task payload as {action, args}.",
+            'Send env.tool payload as {"tool":"task","action":"<action>","args":{...}}.',
             "Use one supported action: create, list, get, get_current, set_current, update, archive.",
         ],
     }
@@ -39,6 +40,7 @@ def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str,
 def _unknown_action_error(*, action: str, active_buddy: str) -> dict[str, Any]:
     return {
         "ok": False,
+        "tool": "task",
         "action": action,
         "error": {
             "code": "E_TASK_ACTION",
@@ -67,7 +69,7 @@ def dispatch_task_manager_request(
         return _payload_error(
             action="task.unknown",
             active_buddy=active_buddy,
-            message="env.task payload.action must be a non-empty string",
+            message="env.tool payload.action must be a non-empty string",
         )
     action_name = raw_action.strip().replace("-", "_")
     action = f"task.{action_name}"
@@ -77,7 +79,7 @@ def dispatch_task_manager_request(
         return _payload_error(
             action=action,
             active_buddy=active_buddy,
-            message="env.task payload.args must be an object",
+            message="env.tool payload.args must be an object",
         )
 
     handler = _ACTION_MAP.get(action_name)
@@ -91,4 +93,7 @@ def dispatch_task_manager_request(
         "instance_payload": instance_payload,
         "manifest": manifest,
     }
-    return handler(args=args, context=context)
+    response = handler(args=args, context=context)
+    if isinstance(response, dict):
+        response.setdefault("tool", "task")
+    return response

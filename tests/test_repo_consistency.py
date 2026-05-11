@@ -28,7 +28,7 @@ class RepoConsistencyTests(unittest.TestCase):
             capture_output=True,
             check=True,
         )
-        return [line for line in completed.stdout.splitlines() if line]
+        return [line for line in completed.stdout.splitlines() if line and (ROOT / line).exists()]
 
     def _active_skill_asset_text(self) -> str:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
@@ -251,7 +251,7 @@ class RepoConsistencyTests(unittest.TestCase):
     def test_template_assets_exist(self) -> None:
         required_templates = [
             ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "assets" / "prd-template.md",
-            ROOT / "buddyswitch" / "skills" / "pm" / "track-manager" / "assets" / "track-operation-template.md",
+            ROOT / "buddyswitch" / "skills" / "shared" / "track-manager" / "assets" / "track-operation-template.md",
             ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "assets" / "design-handoff-template.md",
             ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "assets" / "implementation-report-template.md",
             ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "assets" / "test-report-template.md",
@@ -549,7 +549,7 @@ class RepoConsistencyTests(unittest.TestCase):
                 for snippet in forbidden_snippets:
                     self.assertNotIn(snippet, text)
 
-    def test_manifest_declares_shared_task_manager_for_every_buddy(self) -> None:
+    def test_manifest_declares_shared_managers_for_every_buddy(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         skills = {
             row["id"]: row
@@ -561,6 +561,11 @@ class RepoConsistencyTests(unittest.TestCase):
             skills["task-manager"].get("path"),
             "buddyswitch/skills/shared/task-manager",
         )
+        self.assertIn("track-manager", skills)
+        self.assertEqual(
+            skills["track-manager"].get("path"),
+            "buddyswitch/skills/shared/track-manager",
+        )
         for buddy in manifest.get("buddies", []):
             if not isinstance(buddy, dict):
                 continue
@@ -568,6 +573,7 @@ class RepoConsistencyTests(unittest.TestCase):
             skill_ids = [item for item in buddy.get("skills", []) if isinstance(item, str)]
             with self.subTest(buddy=buddy_id):
                 self.assertEqual(skill_ids.count("task-manager"), 1)
+                self.assertEqual(skill_ids.count("track-manager"), 1)
 
     def test_task_manager_skill_keeps_permissions_in_runtime_code(self) -> None:
         skill_md = ROOT / "buddyswitch" / "skills" / "shared" / "task-manager" / "SKILL.md"
@@ -580,16 +586,119 @@ class RepoConsistencyTests(unittest.TestCase):
             "buddyswitch/objects/tasks",
             "buddyswitch/content/runs",
             "write raw state",
-            "permission matrix",
+            "permission " + "matrix",
         ):
             with self.subTest(token=token):
                 self.assertNotIn(token, lowered)
 
-    def test_task_manager_product_tests_use_env_tool_path_not_manual_debug_script(self) -> None:
-        env_tool_tests = (ROOT / "tests" / "test_task_manager_env_tool.py").read_text(encoding="utf-8")
-        self.assertIn("method\": \"env.task\"", env_tool_tests)
-        self.assertIn('ENV_CLIENT = ROOT / "scripts" / "env" / "client.py"', env_tool_tests)
-        self.assertNotIn("scripts/env_tasks.py", env_tool_tests)
+    def test_track_manager_skill_keeps_permissions_in_runtime_code(self) -> None:
+        skill_md = ROOT / "buddyswitch" / "skills" / "shared" / "track-manager" / "SKILL.md"
+        self.assertTrue(skill_md.exists())
+        text = skill_md.read_text(encoding="utf-8")
+        lowered = text.lower()
+        self.assertIn("runtime/tool feedback", lowered)
+        self.assertIn("active buddy", lowered)
+        for token in (
+            "buddyswitch/objects/tracks",
+            "buddyswitch/content/runs",
+            "write raw state",
+            "permission " + "matrix",
+            "state_effects.track",
+        ):
+            with self.subTest(token=token):
+                self.assertNotIn(token, lowered)
+
+    def test_active_surfaces_do_not_advertise_legacy_task_env_method(self) -> None:
+        legacy_method = "env" + "." + "task"
+        legacy_broker_branch = "method == " + repr(legacy_method)
+        legacy_client_call = "request_runtime_broker(" + repr(legacy_method)
+        for path_text in self._git_ls_files("scripts", "tests", "framework", "buddyswitch", "tools"):
+            path = ROOT / path_text
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=path_text, token="legacy_method"):
+                self.assertNotIn(legacy_method, text)
+            with self.subTest(path=path_text, token="legacy_broker_branch"):
+                self.assertNotIn(legacy_broker_branch, text)
+            with self.subTest(path=path_text, token="legacy_client_call"):
+                self.assertNotIn(legacy_client_call, text)
+
+        env_tools = turn_runtime._build_env_tools_desc()
+        task_manager = env_tools.get("task_manager")
+        self.assertIsInstance(task_manager, dict)
+        assert isinstance(task_manager, dict)
+        self.assertEqual(task_manager.get("broker_method"), "env.tool")
+        self.assertEqual(task_manager.get("command"), "python3 scripts/env/client.py task <operation>")
+
+    def test_browser_evidence_issuance_uses_env_tool_surface(self) -> None:
+        legacy_method = "issue_browser" + "_evidence"
+        legacy_broker_branch = "method == " + repr(legacy_method)
+        legacy_client_call = "request_runtime_broker(" + repr(legacy_method)
+        for path_text in self._git_ls_files("scripts", "tests", "framework", "buddyswitch", "tools"):
+            path = ROOT / path_text
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=path_text, token="legacy_evidence_method"):
+                self.assertNotIn(legacy_method, text)
+            with self.subTest(path=path_text, token="legacy_evidence_broker_branch"):
+                self.assertNotIn(legacy_broker_branch, text)
+            with self.subTest(path=path_text, token="legacy_evidence_client_call"):
+                self.assertNotIn(legacy_client_call, text)
+
+        env_tools = turn_runtime._build_env_tools_desc()
+        evidence_manager = env_tools.get("evidence_manager")
+        self.assertIsInstance(evidence_manager, dict)
+        assert isinstance(evidence_manager, dict)
+        self.assertEqual(evidence_manager.get("broker_method"), "env.tool")
+        self.assertEqual(evidence_manager.get("command"), "python3 scripts/env/client.py evidence <operation>")
+
+    def test_phase8_active_surfaces_agree_on_env_tool_contract(self) -> None:
+        env_tools = turn_runtime._build_env_tools_desc()
+        expected_tool_names = {
+            "artifact_manager": "artifact",
+            "binding_manager": "binding",
+            "context_manager": "context",
+            "evidence_manager": "evidence",
+            "handoff_manager": "handoff",
+            "run_manager": "run",
+            "task_manager": "task",
+            "track_manager": "track",
+        }
+        self.assertEqual(set(env_tools), set(expected_tool_names))
+        for manager_name, tool_name in expected_tool_names.items():
+            with self.subTest(manager=manager_name):
+                desc = env_tools[manager_name]
+                self.assertEqual(desc["broker_method"], "env.tool")
+                self.assertEqual(desc["envelope"], {"tool": tool_name, "action": "<action>", "args": "<object>"})
+                self.assertIn("python3 scripts/env/client.py", desc["command"])
+
+        active_contract_paths = self._active_runtime_contract_paths()
+        active_contract_paths.extend(
+            [
+                ROOT / "buddyswitch" / "skills" / "shared" / "task-manager" / "SKILL.md",
+                ROOT / "buddyswitch" / "skills" / "shared" / "track-manager" / "SKILL.md",
+                ROOT / "buddyswitch" / "skills" / "shared" / "artifact-manager" / "SKILL.md",
+            ]
+        )
+        for path in active_contract_paths:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertIn("env.tool", text)
+                self.assertNotIn("env" + "." + "task", text)
+
+    def test_phase8_retired_product_overlap_scripts_are_not_active_files(self) -> None:
+        retired_product_scripts = (
+            ROOT / "scripts" / ("env" + "_tasks.py"),
+            ROOT / "scripts" / ("env" + "_tracks.py"),
+            ROOT / "scripts" / ("env" + "_artifacts.py"),
+        )
+        for path in retired_product_scripts:
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertFalse(path.exists(), msg=f"{path.relative_to(ROOT)} must not remain as an active product path")
+
+        browser_wrapper = ROOT / "scripts" / "browser_evidence.py"
+        self.assertTrue(browser_wrapper.exists())
+        wrapper_text = browser_wrapper.read_text(encoding="utf-8")
+        self.assertIn('"env.tool"', wrapper_text)
+        self.assertNotIn("issue_browser" + "_evidence", wrapper_text)
 
     def test_context_tool_feedback_scope_does_not_touch_peripheral_systems(self) -> None:
         completed = subprocess.run(

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Functional coverage for broker-routed env.task task-manager operations."""
+"""Functional coverage for broker-routed env.tool task-manager operations."""
 
 from __future__ import annotations
 
@@ -62,19 +62,17 @@ class TaskManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self,
         *,
         action: str,
-        args: dict[str, object] | None,
+        args: dict[str, object],
         instance_json: Path,
         instance_id: str = "inst-dev-example",
         buddy: str = "dev",
     ) -> dict[str, object]:
-        payload: dict[str, object] = {"action": action}
-        if args is not None:
-            payload["args"] = args
+        payload: dict[str, object] = {"tool": "task", "action": action, "args": args}
         request = {
             "protocol": PROTOCOL,
             "instance_id": instance_id,
             "active_buddy": buddy,
-            "method": "env.task",
+            "method": "env.tool",
             "payload": payload,
         }
         return runtime_broker.dispatch_runtime_request(
@@ -372,8 +370,8 @@ class TaskManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "protocol": PROTOCOL,
             "instance_id": "inst-dev-example",
             "active_buddy": "dev",
-            "method": "env.task",
-            "payload": {"action": "update", "args": "bad"},
+            "method": "env.tool",
+            "payload": {"tool": "task", "action": "update", "args": "bad"},
         }
         bad_payload = runtime_broker.dispatch_runtime_request(
             request=bad_payload_request,

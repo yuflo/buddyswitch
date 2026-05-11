@@ -17,8 +17,13 @@ description: Use when you need to create, inspect, update, archive, or bind the 
 - `python3 scripts/env/client.py task set-current --task-id <task-id>`
 - `python3 scripts/env/client.py task update --payload <json-file>`
 - `python3 scripts/env/client.py task archive --task-id <task-id>`
+- Broker contract: method `env.tool` with envelope `{"tool":"task","action":"<action>","args":{...}}`
 
 ## Payload Hints
+- Envelope fields:
+  - `tool`: `task`
+  - `action`: one of `create|list|get|get_current|set_current|update|archive`
+  - `args`: object payload for the selected action
 - `create`: `{"title":"...", "summary":"..."}`
 - `update`: `{"task_id":"...", "title":"...", "summary":"...", "status":"active|blocked|done|archived"}`
 

@@ -30,6 +30,8 @@ Draft the MVP PRD for onboarding rewrite
 3. Integrate outputs into one buddy run commit payload
 4. `persist-buddy-run` with `--context` and `--result`
 
+Runtime env manager actions use `python3 scripts/env/client.py ...` through broker method `env.tool`.
+
 Runtime CLI:
 
 ```bash
