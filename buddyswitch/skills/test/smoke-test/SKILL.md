@@ -1,3 +1,8 @@
+---
+name: smoke-test
+description: Use when the task is running smoke checks, regression verification, or readiness testing for a change.
+---
+
 # smoke-test
 
 ## Purpose
@@ -20,9 +25,9 @@
 - Optional track context or summary hint.
 
 ## Outputs
-- A smoke-test artifact with passed, failed, and blocked items plus reproduction notes.
-- Runtime outputs under `runs/raw/` when needed.
-- A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
+- A contribution to the current compact buddy-run commit.
+- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
+- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
 
 ## Steps
 
@@ -41,15 +46,26 @@
 ## Shared Runtime Rules
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
+- This native skill contributes content to the current buddy run.
+- Do not call persist from the skill perspective.
+- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
 
-## Required Output Fields
+## BuddySwitch Commit Output
 
-- `test_scope`
-- `passed_items`
-- `failed_items`
-- `blocked_items`
-- `reproduction_steps`
-- `overall_readiness_summary`
+Contribute to one buddy-run commit. Do not call persist from inside the skill.
+
+Required top-level field:
+- `execution_summary`
+
+Use `artifacts` when this skill produces a durable artifact:
+- `kind`: `smoke-test`
+- `title`: concise artifact title
+- `summary`: short downstream selection summary
+- `content`: include `test_scope`, `checks_run`, `passed_items`, `failed_items`, `blocked_items`, `reproduction_notes`, and `readiness`
+
+Use optional `working_notes` for concise reasoning or verification notes.
+Use optional `state_effects.task` only for the current prepared task.
+Use optional `handoff` when another manifest buddy should continue.
 
 ## Guardrails
 

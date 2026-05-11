@@ -1,0 +1,101 @@
+{
+  "type": "object",
+  "required": [
+    "execution_summary"
+  ],
+  "properties": {
+    "execution_summary": {"type": "string"},
+    "working_notes": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "title",
+          "content"
+        ],
+        "properties": {
+          "kind": {"type": "string"},
+          "title": {"type": "string"},
+          "summary": {"type": "string"},
+          "content": {"type": "object"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "state_effects": {
+      "type": "object",
+      "properties": {
+        "track": {
+          "type": "object",
+          "required": ["action"],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": ["create", "update", "advance", "archive"]
+            },
+            "track_id": {"type": ["string", "null"]},
+            "title": {"type": ["string", "null"]},
+            "status": {
+              "type": ["string", "null"],
+              "enum": ["active", "blocked", "done", "archived", null]
+            },
+            "current_buddy": {"type": ["string", "null"]},
+            "next_buddy": {"type": ["string", "null"]},
+            "summary": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        },
+        "task": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["active", "blocked", "done", "archived"]
+            },
+            "summary": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "handoff": {
+      "type": "object",
+      "required": ["next_buddy", "reason", "context"],
+      "properties": {
+        "next_buddy": {"type": "string"},
+        "reason": {"type": "string"},
+        "context": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "contributors": {
+      "type": "object",
+      "properties": {
+        "skills": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "agents": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "tool_evidence": {
+      "type": "object",
+      "properties": {
+        "browser_cockpit_token": {"type": "string"},
+        "approved_downgrade_token": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

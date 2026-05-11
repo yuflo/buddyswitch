@@ -1,54 +1,28 @@
-# Research Report Template
-
-```markdown
-# Research Report
-
-## Research Question
-research_question:
-
-## Research Strategy
-- complexity_tier: quick / standard / deep
-- rationale:
-- collection_mode:
-- inclusion_notes:
-  -
-
-## Channel Plan
--
--
-
-## Iteration Log
-1.
-- round:
-- query_planning:
-- candidate_discovery:
-- browser_evidence_capture:
-- round_synthesis:
-- query_refinement:
-
-## Evidence
-1.
-- source_id:
-- url:
-- source_type:
-- accessed_at:
-- claim_excerpt:
-- page_title:
-- auth_state: public / logged_in / paywalled / unknown
-- query_or_filter_used:
-
-## Source Traceability
-1.
-- conclusion:
-- source_ids:
-  - src-1
-
-## Patterns And Insights
--
-
-## Risks And Caveats
--
-
-## Conclusion
-conclusion:
-```
+{
+  "execution_summary": "Market evidence summary for the requested research question.",
+  "working_notes": [
+    "Browser evidence was captured through the instance cockpit."
+  ],
+  "artifacts": [
+    {
+      "kind": "market-scan",
+      "title": "Market Scan: Requested Question",
+      "summary": "Selection-ready market scan summary for PM/design.",
+      "content": {
+        "research_question": "",
+        "evidence": [],
+        "insights": [],
+        "assumptions": [],
+        "risks": [],
+        "conclusion": "",
+        "recommended_next_step": "",
+        "source_traceability": [],
+        "research_scan": {
+          "research_strategy": {},
+          "channel_plan": [],
+          "iteration_log": []
+        }
+      }
+    }
+  ]
+}

@@ -7,8 +7,9 @@ This document defines active track behavior in BuddySwitch.
 - Tracks: `buddyswitch/objects/tracks/*.json`
 - Tasks: `buddyswitch/objects/tasks/*.json`
 - Artifacts: `buddyswitch/objects/artifacts/*.json`
-- Runtime (primary): `scripts/turn_runtime.py`
-- Manual/debug object APIs: `scripts/env_tracks.py`, `scripts/env_tasks.py`, `scripts/env_artifacts.py`
+- Runtime tool service: `scripts/env/services/tracks.py`
+- Broker tool dispatch: `scripts/env/tools/track_manager.py`
+- Skill-facing command: `python3 scripts/env/client.py track <operation>`
 
 ## Track Schema (v1)
 
@@ -54,7 +55,10 @@ Required fields:
 - `title`
 - `task_id`
 - `buddy`
-- `skill_id`
+- `kind`
+- `revision`
+- `supersedes_artifact_id`
+- `is_current`
 - `source_run_id`
 - `summary`
 - `content`
@@ -65,11 +69,14 @@ Artifacts participate in track flow through `artifact.task_id -> task.track_id`.
 
 ## Permission Model
 
-- `pm` `track-manager` controls track lifecycle operations (`create`, `update`, `advance`, `archive`).
-- Non-PM buddies do not directly mutate track lifecycle fields.
-- Track inspection should come from prepared task/track context and workspace projection.
+- `pm` controls track lifecycle operations (`create`, `update`, `advance`, `archive`) through broker-routed `env.tool` track commands.
+- Non-PM buddies do not mutate track lifecycle fields.
+- Buddies with `track.read` may inspect track summaries.
+- Active buddies may attach or detach their own tasks to an existing track through the track tool.
+- Track inspection should come from prepared task/track context, workspace projection, or `python3 scripts/env/client.py track get`.
+- Retired top-level `track_operation` payloads are not accepted by runtime persist.
 
 ## Auto-Register Rule
 
 When a task is bound to a track, runtime registers the task id in that track's `task_ids`.
-Artifact creation updates task `artifact_ids` and per-slot `artifact_slots` revision state.
+Artifact creation updates task `artifact_ids` and per-kind `artifact_slots` revision state.

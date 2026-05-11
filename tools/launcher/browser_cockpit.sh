@@ -15,7 +15,8 @@ buddyswitch_browser_default_profile_dir() {
     printf '%s/browser/profile\n' "${instance_root}"
     return 0
   fi
-  printf '%s/chrome/shared-browser\n' "${BUDDYSWITCH_SHARED_ROOT}"
+  echo "Browser profile default requires an instance-scoped root." >&2
+  return 2
 }
 
 buddyswitch_browser_default_log_file() {
@@ -24,7 +25,8 @@ buddyswitch_browser_default_log_file() {
     printf '%s/browser/chrome.log\n' "${instance_root}"
     return 0
   fi
-  printf '%s/log/chrome-cockpit.log\n' "${BUDDYSWITCH_SHARED_ROOT}"
+  echo "Browser log default requires an instance-scoped root." >&2
+  return 2
 }
 
 buddyswitch_browser_is_instance_mode() {
@@ -47,21 +49,20 @@ buddyswitch_browser_init_defaults() {
     export BUDDYSWITCH_BROWSER_DEFAULTS_INITIALIZED=1
   fi
 
-  default_profile_dir="$(buddyswitch_browser_default_profile_dir)"
-  default_log_file="$(buddyswitch_browser_default_log_file)"
-
   export BUDDYSWITCH_BROWSER_PORT="${BUDDYSWITCH_BROWSER_PORT:-9222}"
   export BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME="${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME:-chrome-devtools-cockpit}"
 
   if [[ "${BUDDYSWITCH_BROWSER_PROFILE_DIR_EXPLICIT:-0}" == "1" ]]; then
     export BUDDYSWITCH_BROWSER_PROFILE_DIR
   else
+    default_profile_dir="$(buddyswitch_browser_default_profile_dir)"
     export BUDDYSWITCH_BROWSER_PROFILE_DIR="${default_profile_dir}"
   fi
 
   if [[ "${BUDDYSWITCH_BROWSER_LOG_FILE_EXPLICIT:-0}" == "1" ]]; then
     export BUDDYSWITCH_BROWSER_LOG_FILE
   else
+    default_log_file="$(buddyswitch_browser_default_log_file)"
     export BUDDYSWITCH_BROWSER_LOG_FILE="${default_log_file}"
   fi
 }
@@ -74,15 +75,15 @@ Usage:
   buddyswitch-codex env browser help
 
 Commands:
-  status  Check whether the browser cockpit endpoint is reachable.
-  ensure  Ensure the instance browser cockpit and BuddySwitch browser MCPs are ready.
+  status  Check whether the browser cockpit has a usable ready page for MCP operations.
+  ensure  Ensure the instance browser cockpit has a usable ready page and BuddySwitch browser MCPs are ready.
   help    Show this help message.
 
 Environment:
-  BUDDYSWITCH_BROWSER_PORT              Remote debugging port (default: ${BUDDYSWITCH_BROWSER_PORT})
-  BUDDYSWITCH_BROWSER_PROFILE_DIR       Shared Chrome profile dir (default: ${BUDDYSWITCH_BROWSER_PROFILE_DIR})
-  BUDDYSWITCH_BROWSER_LOG_FILE          Chrome log file (default: ${BUDDYSWITCH_BROWSER_LOG_FILE})
-  BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME  MCP server name (default: ${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME})
+  BUDDYSWITCH_BROWSER_PORT              Remote debugging port (default: ${BUDDYSWITCH_BROWSER_PORT:-9222})
+  BUDDYSWITCH_BROWSER_PROFILE_DIR       Chrome profile dir (default: ${BUDDYSWITCH_BROWSER_PROFILE_DIR:-<instance>/browser/profile})
+  BUDDYSWITCH_BROWSER_LOG_FILE          Chrome log file (default: ${BUDDYSWITCH_BROWSER_LOG_FILE:-<instance>/browser/chrome.log})
+  BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME  MCP server name (default: ${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME:-chrome-devtools-cockpit})
   BUDDYSWITCH_BROWSER_CHROME_BIN        Override Chrome binary path.
 EOF
 }
@@ -113,6 +114,16 @@ buddyswitch_browser_validate_env_or_default_port() {
 
 buddyswitch_browser_url() {
   printf 'http://127.0.0.1:%s' "${BUDDYSWITCH_BROWSER_PORT}"
+}
+
+buddyswitch_browser_cdp_curl() {
+  curl \
+    --silent \
+    --show-error \
+    --fail \
+    --connect-timeout "${BUDDYSWITCH_BROWSER_CDP_CONNECT_TIMEOUT:-0.5}" \
+    --max-time "${BUDDYSWITCH_BROWSER_CDP_MAX_TIME:-1.5}" \
+    "$@"
 }
 
 buddyswitch_browser_pid_marker() {
@@ -161,7 +172,52 @@ buddyswitch_browser_allocate_instance_port() {
 }
 
 buddyswitch_browser_check_endpoint() {
-  curl --silent --show-error --fail "$(buddyswitch_browser_url)/json/version" >/dev/null
+  buddyswitch_browser_cdp_curl "$(buddyswitch_browser_url)/json/version" >/dev/null
+}
+
+buddyswitch_browser_has_usable_page() {
+  local page_targets
+
+  page_targets="$(buddyswitch_browser_cdp_curl "$(buddyswitch_browser_url)/json/list")" || return 1
+  python3 - "${page_targets}" <<'PY'
+import json
+import sys
+
+try:
+    payload = json.loads(sys.argv[1])
+except (IndexError, json.JSONDecodeError):
+    raise SystemExit(1)
+
+if not isinstance(payload, list):
+    raise SystemExit(1)
+
+for target in payload:
+    if not isinstance(target, dict):
+        continue
+    if target.get("type") != "page":
+        continue
+    url = target.get("url")
+    if not isinstance(url, str):
+        continue
+    normalized = url.strip().lower()
+    if not normalized:
+        continue
+    if normalized == "about:blank":
+        raise SystemExit(0)
+    if normalized.startswith("chrome://"):
+        continue
+    if normalized.startswith("chrome-untrusted://"):
+        continue
+    if normalized.startswith("devtools://"):
+        continue
+    raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
+buddyswitch_browser_create_blank_page() {
+  buddyswitch_browser_cdp_curl --request PUT "$(buddyswitch_browser_url)/json/new?about:blank" >/dev/null
 }
 
 buddyswitch_browser_find_chrome_bin() {
@@ -202,14 +258,28 @@ buddyswitch_browser_has_mcp_server() {
 
 buddyswitch_browser_add_mcp_server() {
   local server_name="$1"
+  local status
   shift
-  buddyswitch_run_codex mcp add "${server_name}" -- "$@"
+  buddyswitch_run_codex mcp add "${server_name}" -- "$@" || {
+    status=$?
+    return "${status}"
+  }
   buddyswitch_patch_codex_config
 }
 
 buddyswitch_browser_remove_mcp_server() {
   local server_name="$1"
   buddyswitch_run_codex mcp remove "${server_name}"
+}
+
+buddyswitch_browser_disable_cockpit_mcp() {
+  local server_name
+  server_name="${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME}"
+
+  if buddyswitch_browser_has_mcp_server "${server_name}"; then
+    buddyswitch_browser_remove_mcp_server "${server_name}" || return $?
+  fi
+  return 0
 }
 
 buddyswitch_browser_mcp_browser_url() {
@@ -234,14 +304,6 @@ buddyswitch_browser_mcp_browser_url() {
       }
     }
   ' "${config_path}"
-}
-
-buddyswitch_browser_ensure_general_mcp() {
-  if buddyswitch_browser_has_mcp_server "chrome-devtools"; then
-    return 0
-  fi
-
-  buddyswitch_browser_add_mcp_server chrome-devtools npx chrome-devtools-mcp@latest
 }
 
 buddyswitch_browser_ensure_cockpit_mcp() {
@@ -324,7 +386,7 @@ if isinstance(port, int):
 PY
   )"
   [[ -n "${browser_port}" ]] || return 1
-  curl --silent --show-error --fail "http://127.0.0.1:${browser_port}/json/version" >/dev/null 2>&1
+  buddyswitch_browser_cdp_curl "http://127.0.0.1:${browser_port}/json/version" >/dev/null 2>&1
 }
 
 buddyswitch_browser_any_recorded_instance_endpoint_is_active() {
@@ -350,7 +412,7 @@ if isinstance(port, int):
     print(port)
 PY
     )"
-    if [[ -n "${browser_port}" ]] && curl --silent --show-error --fail "http://127.0.0.1:${browser_port}/json/version" >/dev/null 2>&1; then
+    if [[ -n "${browser_port}" ]] && buddyswitch_browser_cdp_curl "http://127.0.0.1:${browser_port}/json/version" >/dev/null 2>&1; then
       return 0
     fi
   done
@@ -383,13 +445,18 @@ buddyswitch_browser_is_active() {
 }
 
 buddyswitch_browser_status() {
-  if buddyswitch_browser_check_endpoint; then
-    echo "Browser cockpit reachable: $(buddyswitch_browser_url)"
+  if buddyswitch_browser_check_endpoint 2>/dev/null; then
+    if buddyswitch_browser_has_usable_page 2>/dev/null; then
+      echo "Browser cockpit ready: $(buddyswitch_browser_url)"
+      echo "Profile: ${BUDDYSWITCH_BROWSER_PROFILE_DIR}"
+      return 0
+    fi
+    echo "Browser cockpit not ready: $(buddyswitch_browser_url) (endpoint reachable but no usable page target)" >&2
     echo "Profile: ${BUDDYSWITCH_BROWSER_PROFILE_DIR}"
-    return 0
+    return 1
   fi
 
-  echo "Browser cockpit not reachable: $(buddyswitch_browser_url)" >&2
+  echo "Browser cockpit not ready: $(buddyswitch_browser_url) (endpoint unreachable)" >&2
   echo "Profile: ${BUDDYSWITCH_BROWSER_PROFILE_DIR}" >&2
   return 1
 }
@@ -400,9 +467,17 @@ buddyswitch_browser_ensure_cockpit_endpoint() {
   mkdir -p "${BUDDYSWITCH_BROWSER_PROFILE_DIR}" "$(dirname "${BUDDYSWITCH_BROWSER_LOG_FILE}")"
 
   if buddyswitch_browser_check_endpoint 2>/dev/null; then
-    echo "Browser cockpit already reachable: $(buddyswitch_browser_url)"
-    echo "Profile: ${BUDDYSWITCH_BROWSER_PROFILE_DIR}"
-    return 0
+    if buddyswitch_browser_has_usable_page 2>/dev/null; then
+      echo "Browser cockpit already ready: $(buddyswitch_browser_url)"
+      echo "Profile: ${BUDDYSWITCH_BROWSER_PROFILE_DIR}"
+      return 0
+    fi
+    buddyswitch_browser_create_blank_page >/dev/null 2>&1 || true
+    if buddyswitch_browser_has_usable_page 2>/dev/null; then
+      echo "Browser cockpit ready: $(buddyswitch_browser_url)"
+      echo "Profile: ${BUDDYSWITCH_BROWSER_PROFILE_DIR}"
+      return 0
+    fi
   fi
 
   chrome_bin="$(buddyswitch_browser_find_chrome_bin)" || {
@@ -413,6 +488,9 @@ buddyswitch_browser_ensure_cockpit_endpoint() {
   "${chrome_bin}" \
     --remote-debugging-port="${BUDDYSWITCH_BROWSER_PORT}" \
     --user-data-dir="${BUDDYSWITCH_BROWSER_PROFILE_DIR}" \
+    --no-first-run \
+    --no-default-browser-check \
+    about:blank \
     >"${BUDDYSWITCH_BROWSER_LOG_FILE}" 2>&1 &
   chrome_pid=$!
   marker_file="$(buddyswitch_browser_pid_marker)"
@@ -421,33 +499,124 @@ buddyswitch_browser_ensure_cockpit_endpoint() {
 
   for attempt in {1..20}; do
     if buddyswitch_browser_check_endpoint 2>/dev/null; then
-      echo "Browser cockpit ready: $(buddyswitch_browser_url)"
-      echo "Profile: ${BUDDYSWITCH_BROWSER_PROFILE_DIR}"
-      return 0
+      if buddyswitch_browser_has_usable_page 2>/dev/null; then
+        echo "Browser cockpit ready: $(buddyswitch_browser_url)"
+        echo "Profile: ${BUDDYSWITCH_BROWSER_PROFILE_DIR}"
+        return 0
+      fi
+      buddyswitch_browser_create_blank_page >/dev/null 2>&1 || true
+      if buddyswitch_browser_has_usable_page 2>/dev/null; then
+        echo "Browser cockpit ready: $(buddyswitch_browser_url)"
+        echo "Profile: ${BUDDYSWITCH_BROWSER_PROFILE_DIR}"
+        return 0
+      fi
+      break
     fi
     sleep 1
   done
 
   rm -f "${marker_file}"
-  echo "Browser cockpit did not become reachable: $(buddyswitch_browser_url)" >&2
+  if buddyswitch_browser_check_endpoint 2>/dev/null; then
+    echo "Browser cockpit not ready: $(buddyswitch_browser_url) (endpoint reachable but no usable page target)" >&2
+  else
+    echo "Browser cockpit not ready: $(buddyswitch_browser_url) (endpoint unreachable)" >&2
+  fi
   echo "See log: ${BUDDYSWITCH_BROWSER_LOG_FILE}" >&2
   return 1
 }
 
+buddyswitch_browser_active_buddy() {
+  local buddy
+  buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
+  if [[ -n "${buddy}" ]]; then
+    printf '%s\n' "${buddy}"
+    return 0
+  fi
+  if [[ -n "${BUDDYSWITCH_INSTANCE_JSON:-}" && -f "${BUDDYSWITCH_INSTANCE_JSON}" ]]; then
+    python3 - "${BUDDYSWITCH_INSTANCE_JSON}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+buddy = payload.get("buddy")
+if isinstance(buddy, str) and buddy.strip():
+    print(buddy.strip())
+PY
+    return 0
+  fi
+  return 1
+}
+
+buddyswitch_browser_profile_capability() {
+  local buddy_id="${1:-}"
+  if [[ -z "${buddy_id}" ]]; then
+    return 1
+  fi
+  python3 - "${BUDDYSWITCH_REPO_ROOT}" "${buddy_id}" <<'PY'
+import sys
+from pathlib import Path
+
+repo_root = Path(sys.argv[1])
+buddy_id = sys.argv[2]
+sys.path.insert(0, str(repo_root / "scripts"))
+import env_profiles  # noqa: E402
+
+profile = env_profiles.require_env_profile(
+    buddy_id,
+    manifest_path=repo_root / "buddyswitch" / "manifest.toml",
+    repo_root=repo_root,
+)
+capability = profile["tool_capability"]["browser_cockpit"]
+print(capability)
+PY
+}
+
 buddyswitch_browser_bootstrap() {
+  local strict_mode active_buddy capability require_browser
   buddyswitch_browser_init_defaults
   buddyswitch_ensure_shared_env
-  if ! buddyswitch_browser_is_instance_mode; then
-    buddyswitch_browser_ensure_general_mcp
+  strict_mode="${BUDDYSWITCH_BROWSER_ENSURE_STRICT:-0}"
+  require_browser=1
+  if [[ "${strict_mode}" != "1" ]] && buddyswitch_browser_is_instance_mode; then
+    active_buddy="$(buddyswitch_browser_active_buddy || true)"
+    if [[ -n "${active_buddy}" ]]; then
+      capability="$(buddyswitch_browser_profile_capability "${active_buddy}" || true)"
+      if [[ "${capability}" == "available" ]]; then
+        require_browser=0
+      fi
+    fi
   fi
-  buddyswitch_browser_ensure_cockpit_endpoint
-  buddyswitch_browser_ensure_cockpit_mcp
+
+  if buddyswitch_browser_ensure_cockpit_endpoint; then
+    if buddyswitch_browser_ensure_cockpit_mcp; then
+      return 0
+    fi
+    if [[ "${require_browser}" -eq 1 ]]; then
+      return 1
+    fi
+    if ! buddyswitch_browser_disable_cockpit_mcp; then
+      echo "Warning: browser cockpit MCP setup failed and stale cockpit MCP could not be removed; stopping optional-browser launch." >&2
+      return 1
+    fi
+    echo "Warning: browser cockpit MCP setup failed for non-required buddy; continuing without browser cockpit MCP." >&2
+    return 0
+  fi
+
+  if [[ "${require_browser}" -eq 1 ]]; then
+    return 1
+  fi
+  if ! buddyswitch_browser_disable_cockpit_mcp; then
+    echo "Warning: browser cockpit unavailable and stale cockpit MCP could not be removed; stopping optional-browser launch." >&2
+    return 1
+  fi
+  echo "Warning: browser cockpit unavailable for non-required buddy; continuing without cockpit endpoint." >&2
+  return 0
 }
 
 buddyswitch_browser_main() {
   local command arg
 
-  buddyswitch_browser_init_defaults
   command="${1:-status}"
   if [[ $# -gt 0 ]]; then
     shift
@@ -485,16 +654,17 @@ buddyswitch_browser_main() {
         echo "Unknown browser option: ${arg}" >&2
         buddyswitch_browser_usage >&2
         return 2
-        ;;
+      ;;
     esac
   done
+  buddyswitch_browser_init_defaults
 
   case "${command}" in
     status)
       buddyswitch_browser_status
       ;;
     ensure)
-      buddyswitch_browser_bootstrap
+      BUDDYSWITCH_BROWSER_ENSURE_STRICT=1 buddyswitch_browser_bootstrap
       ;;
     help)
       buddyswitch_browser_usage

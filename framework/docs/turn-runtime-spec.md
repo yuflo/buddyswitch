@@ -8,14 +8,36 @@ Define the active runtime contract for launcher-managed buddy instances.
 
 - Users submit ordinary request text.
 - Active buddy comes from launcher metadata (`BUDDYSWITCH_ACTIVE_BUDDY`, `BUDDYSWITCH_INSTANCE_ID`, `BUDDYSWITCH_INSTANCE_JSON`).
-- Command-shaped routing input is rejected before any task, artifact, run, or reservation writes.
+- User text never routes or changes the active buddy. Text that resembles retired switch-prefixed buddy syntax is preserved as ordinary `request_text`.
+- Retired top-level launcher commands still fail closed at the launcher boundary; that is separate from runtime request text handling.
 
 ## Runtime Entry
 
 - `scripts/turn_runtime.py`
 - Public API:
   - `prepare_turn_context(text, manifest_path=DEFAULT_MANIFEST)`
-  - `persist_skill_result(context, *, skill_id, result, manifest_path=DEFAULT_MANIFEST)`
+  - `persist_buddy_run(context, *, result, manifest_path=DEFAULT_MANIFEST)`
+- Product CLI surface (unchanged names):
+  - `python3 scripts/turn_runtime.py prepare "<request>"`
+  - `python3 scripts/turn_runtime.py persist --context <context> --result <result>`
+
+## Three Runtime Gates
+
+1. Materialization validates copy boundaries only.
+2. `prepare` validates turn context and reservation safety only.
+3. `persist` validates write safety only.
+
+`prepare` is runtime preflight and does not execute user task work. Task execution stays with the host/skill step between `prepare` and `persist`.
+
+Codex CLI owns skill package acceptance after runtime materialization into `.agents/skills/<skill-id>`.
+
+Persist commits one active buddy run result. Native skills may contribute to that result, but native skill ids do not own the persist boundary, artifact identity, receipt identity, or write permissions.
+
+## Native Output Flow
+
+1. Codex runs needed native skills from runtime `.agents/skills/<skill-id>`.
+2. The locked buddy session integrates outputs into one buddy run commit.
+3. Persist with `python3 scripts/turn_runtime.py persist --context <context> --result <result>`.
 
 ## CLI Contract
 
@@ -30,9 +52,15 @@ Persist:
 ```bash
 python3 scripts/turn_runtime.py persist \
   --context /tmp/prepare-context.json \
-  --skill-id write-prd \
   --result /tmp/result.json
 ```
+
+## Product-Mode Routing
+
+- In product mode, host CLI calls route through the launcher-managed runtime broker (`BUDDYSWITCH_RUNTIME_BROKER_SOCKET`).
+- Broker unavailability returns `ok=false` with `error.code=E_RUNTIME_BROKER_UNAVAILABLE`.
+- Product mode has no direct host state-write fallback.
+- Direct function calls (`prepare_turn_context`, `persist_buddy_run`) remain test/debug internals and broker server dispatch internals.
 
 ## Prepare Contract
 
@@ -42,31 +70,100 @@ python3 scripts/turn_runtime.py persist \
 - `context_revision`
 - `instance_id`
 - `active_buddy`
+- `runtime_context`
+- `context_save_path`
+- `persist_command_hint`
 - `request_text`
 - `current_task_id`
 - `current_track_id`
 - `task_context`
 - `track_context`
-- `skills`
-- `inputs_by_skill`
+- `track_artifact_index`
 - `run_envelope`
 - `warnings`
 
 Behavior:
 
 - Uses locked buddy from instance metadata.
-- Resolves/reuses active task and optional track binding.
+- Resolves or reuses active task and optional track binding.
 - Reserves one run envelope for the turn.
-- Returns selected input bundles per skill.
+- Returns `context_save_path` and `persist_command_hint` for immediate host use.
+- Writes the canonical successful prepare payload to `context_save_path` under `runs/raw/<buddy>/`.
+- Validates context safety, not skill package readiness.
+- Does not gate on `SKILL.md`, package source readiness, or output schema file existence.
+
+## Prepare Runtime Context
+
+`prepare.runtime_context` is the buddy-facing source of truth for allowed actions, forbidden actions, and compact persist payload shape.
+
+Required top-level sections:
+
+- `active_buddy`
+- `active_skill_ids`
+- `runtime_commands`
+- `capability_boundary`
+- `env_tools`
+- `tool_requirements`
+- `persist_payload_hint`
+- `desc`
+- `track_lifecycle_desc`
+- `artifact_kind_desc`
+- `context_sources_desc`
+- `current_context_summary`
+
+`runtime_context.desc` provides compact persist field guidance for `execution_summary`, `artifacts`, `state_effects.task`, `state_effects.track`, `handoff`, `contributors`, and `tool_evidence`.
+
+`runtime_context.track_lifecycle_desc` is the source of truth for PM-owned lifecycle rules:
+
+- PM: `create`, `update`, `advance`, `archive`; create binds current prepared task; non-create requires existing track.
+- Non-PM buddies: lifecycle actions are empty and PM handoff guidance is explicit.
+
+`runtime_context.artifact_kind_desc` describes only the active buddy's allowed artifact kinds, each with compact `label` and `use_when`.
+
+`runtime_context.context_sources_desc` tells hosts where to read request/task/artifact/track/handoff context from the prepare payload without source inference.
+
+Runtime AGENTS guidance should point to these runtime context surfaces instead of duplicating payload recipes or capability matrices.
+
+`runtime_context.env_tools` is the compact source for broker-routed env tool operations. Shared env slices are executed through `python3 scripts/env/client.py <resource> <operation>` and routed through broker method `env.tool` with envelope `{tool, action, args}`. Active slices include `task-manager`, `track-manager`, `artifact-manager`, `context-manager`, `binding-manager`, `handoff-manager`, `run-manager`, and `evidence-manager`. Permission enforcement, active-buddy ownership checks, PM-only track lifecycle authority, artifact-kind scope, artifact source-run validation, instance binding writes, context validation, handoff target validation, run reservation validation, run commit persistence, Market evidence issuance, browser ready-page enforcement, and evidence token scope are implemented in runtime tool/service code, not in prompt wording.
 
 ## Persist Contract
 
-`persist` validates and commits exactly one selected skill output.
-Top-level response shape is frozen by `framework/contracts/persist-skill-result.json`:
+Top-level response shape is frozen by `framework/contracts/persist-buddy-run.json`:
 
 - `ok`
 - `receipt`
 - `refreshed_context`
+
+`persist` write-safety checks include:
+
+- context and reservation identity integrity;
+- reserved run id exists and has not already been committed;
+- commit includes non-empty `execution_summary`;
+- `artifacts`, when present, are validated objects with non-empty `kind`/`title` and object `content`;
+- artifact kinds are unique within one commit and authorized by active buddy `artifact_kinds`;
+- `state_effects.track`, when present, uses `create|update|advance|archive` and is permission-gated;
+- `state_effects.task`, when present, updates only current prepared task;
+- `handoff`, when present, includes `next_buddy`, `reason`, `context`, and known buddy reference;
+- profile state capability is enforced (`artifact_kinds`, `task_effects`, `track_effects`, `handoff_targets`);
+- `tool_evidence` is optional generally and required for Market artifact-producing commits in broker-backed product mode;
+- if both handoff next buddy and track next buddy are present, they must match;
+- at least one durable collaboration signal exists: `artifacts`, `state_effects`, or `handoff`.
+
+State writes in product mode are broker-owned. Run reservation and commit writes are owned by `scripts/env/services/runs.py`; the host `persist` command and broker `persist` method call the same service path as `env.tool` `run.commit`. Browser evidence tokens are issued by `scripts/env/services/evidence.py` through `env.tool` `evidence.issue_browser` and `evidence.approve_downgrade`; the host browser evidence CLI remains a wrapper over the same env tool path.
+
+## Structured Tool Feedback
+
+When `prepare`, `persist`, or broker-routed evidence tools reject a request, responses keep `ok=false`, `error.code`, and `error.message` and may add structured feedback fields:
+
+- `permission_boundary`
+- `stop_condition`
+- `allowed_next_actions`
+- `command_hint`
+- `persist_payload_hint`
+
+Common persist validation failures should return structured `E_RUNTIME_PERSIST` feedback with actionable `permission_boundary` and `allowed_next_actions` (for example `persist.execution_summary`, `persist.durable_signal`, `persist.artifacts`, `state_effects.track.track_id`, `persist.handoff`).
+
+Buddy runtime guidance should follow these fields and must not bypass broker-owned runtime boundaries.
 
 ## Receipt Contract
 
@@ -75,7 +172,7 @@ Top-level response shape is frozen by `framework/contracts/persist-skill-result.
 Required `receipt` keys:
 
 - `ok`
-- `skill_id`
+- `buddy_id`
 - `task_id`
 - `task_title`
 - `artifact_ids`
@@ -86,29 +183,19 @@ Required `receipt` keys:
 
 Optional `receipt` keys:
 
-- `artifact_id`
 - `track_id`
 - `track_title`
 - `track_action`
+- `handoff`
 - `warnings`
 
-Terminal output must render user-facing IDs and titles from `receipt`, not from debug path strings.
-Legacy command-style follow-up keys must not be present in `receipt`.
-
-Behavior:
-
-- Rejects missing, array, or out-of-context skill ids.
-- Rejects tampered context identity (buddy/task/run/request mismatch).
-- Validates skill output payload against schema.
-- Writes canonical task/artifact/track/run state.
-- Clears consumed reservation.
-- Does not auto-reserve a follow-up run.
+Terminal output must render user-facing IDs and titles from `receipt`, not debug path strings.
 
 ## Follow-up Turn Rule
 
 After successful persist:
 
-1. Read `receipt.next_state`.
+1. Read `receipt.next_state` and optional `receipt.handoff`.
 2. Draft next ordinary `request_text`.
 3. Run `prepare` again.
 
@@ -125,5 +212,6 @@ Do not continue a turn through hidden reservation state.
 ## Contracts
 
 - `framework/contracts/prepare-turn-context.json`
-- `framework/contracts/persist-skill-result.json`
+- `framework/contracts/persist-buddy-run.json`
+- `framework/contracts/buddy-env-profile.json`
 - `framework/contracts/workspace-projection.json`

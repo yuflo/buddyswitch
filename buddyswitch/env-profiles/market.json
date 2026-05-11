@@ -1,0 +1,32 @@
+{
+  "buddy_id": "market",
+  "contract_path": "framework/contracts/market.md",
+  "project": {
+    "visibility": "live",
+    "access": "read-only",
+    "path": "projects/app"
+  },
+  "scratch": {
+    "root": "runs/raw/market"
+  },
+  "filesystem_capability": {
+    "host_writable": ["home", "codex-home", "xdg-config", "scratch", "temp"],
+    "project_workspace": "read-only",
+    "raw_state": "broker-only"
+  },
+  "state_capability": {
+    "artifact_kinds": "from-manifest",
+    "task_effects": ["status", "summary"],
+    "track_effects": [],
+    "handoff_targets": "manifest-buddies"
+  },
+  "tool_capability": {
+    "browser_cockpit": "required",
+    "market_research_evidence": "required",
+    "ordinary_web_fallback": "user-approved-only"
+  },
+  "context_projection": {
+    "agents_md": "from-profile-and-contract",
+    "skills": "active-buddy-only"
+  }
+}

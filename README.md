@@ -26,8 +26,11 @@ Draft the MVP PRD for onboarding rewrite
 ## Product Runtime Loop
 
 1. `prepare-turn-context`
-2. host runs exactly one selected skill
-3. `persist-skill-result`
+2. Codex CLI discovers native runtime skills from `.agents/skills` and runs needed skills inside the locked buddy session
+3. Integrate outputs into one buddy run commit payload
+4. `persist-buddy-run` with `--context` and `--result`
+
+Runtime env manager actions use `python3 scripts/env/client.py ...` through broker method `env.tool`.
 
 Runtime CLI:
 
@@ -38,7 +41,6 @@ python3 scripts/turn_runtime.py prepare "Draft onboarding PRD"
 ```bash
 python3 scripts/turn_runtime.py persist \
   --context /tmp/prepare-context.json \
-  --skill-id write-prd \
   --result /tmp/result.json
 ```
 
@@ -53,6 +55,7 @@ Launcher product mode:
 - `${BUDDYSWITCH_SHARED_ROOT}/state` canonical BuddySwitch state
 - `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace` runtime worktree per locked buddy
 - `${BUDDYSWITCH_SHARED_ROOT}/project/workspace` shared product source
+- `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace/.agents/skills` instance-only runtime skills
 
 Canonical state paths:
 

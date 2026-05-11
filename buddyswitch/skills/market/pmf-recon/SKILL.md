@@ -1,3 +1,8 @@
+---
+name: pmf-recon
+description: Use when the task is testing whether a product idea has credible demand, narrowing the sharpest ICP, or deciding whether the market is worth pursuing.
+---
+
 # pmf-recon
 
 ## Execution Order
@@ -31,9 +36,9 @@
 - Optional links, prior artifacts, or track context.
 
 ## Outputs
-- A research artifact object with PMF evidence, ICP synthesis, alternatives analysis, confidence, and recommended next step.
-- A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
-- Explicit notes when login, paywall, or anti-bot constraints degrade evidence quality.
+- A contribution to the current compact buddy-run commit.
+- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
+- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
 
 ## Research Defaults
 
@@ -83,25 +88,28 @@
 ## Shared Runtime Rules
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
+- This native skill contributes content to the current buddy run.
+- Do not call persist from the skill perspective.
+- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
 
-## Required Output Fields
+## BuddySwitch Commit Output
 
-- `research_question`
-- `research_strategy`
-- `channel_plan`
-- `iteration_log`
-- `evidence`
-- `source_traceability`
-- `assumptions_used`
-- `candidate_icps`
-- `strongest_pain_signals`
-- `existing_alternatives`
-- `why_current_solutions_fall_short`
-- `pmf_confidence`
-- `recommended_next_step`
-- `suggested_interview_angles`
-- `risks_and_unknowns`
-- `conclusion`
+Contribute to one buddy-run commit. Do not call persist from inside the skill.
+
+Required top-level field:
+- `execution_summary`
+
+Use `artifacts` when this skill produces a durable artifact:
+- `kind`: `pmf-report`
+- `title`: concise artifact title
+- `summary`: short downstream selection summary
+- `content`: include `research_question`, `evidence`, `insights`, `assumptions`, `risks`, `conclusion`, `recommended_next_step`, and PMF-specific structured detail
+
+Use optional `working_notes` for concise reasoning or verification notes.
+Use optional `state_effects.task` only for the current prepared task.
+Use optional `handoff` when another manifest buddy should continue.
+
+Market artifact commits require broker-issued `tool_evidence` from the browser evidence gate. Do not invent token strings.
 
 ## Guardrails
 

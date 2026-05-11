@@ -20,8 +20,6 @@ except ModuleNotFoundError:  # pragma: no cover - Windows fallback
 import env_store
 from env_manifest import DEFAULT_MANIFEST, load_manifest
 
-from .repositories import list_artifacts, list_tasks, list_tracks
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LOCK_WAIT_POLL_SECONDS = 0.05
@@ -166,7 +164,7 @@ def build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]
     current_artifacts: dict[str, dict[str, Any]] = {}
     artifact_slots = task.get("artifact_slots", {})
     if isinstance(artifact_slots, dict):
-        for slot, row in artifact_slots.items():
+        for kind, row in artifact_slots.items():
             if not isinstance(row, dict):
                 continue
             artifact_id = row.get("current_artifact_id")
@@ -174,7 +172,7 @@ def build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]
                 continue
             artifact = artifact_map.get(artifact_id)
             if artifact is not None:
-                current_artifacts[slot] = artifact
+                current_artifacts[kind] = artifact
     return {
         **task,
         "object_path": task_object_path(task["id"]),
@@ -282,13 +280,15 @@ def scan_run_audits() -> list[dict[str, Any]]:
                 return None
             return buddy
 
-        buddy = _known_buddy(payload.get("active_buddy"))
+        buddy = _known_buddy(payload.get("buddy_id")) or _known_buddy(payload.get("active_buddy"))
         task_id = (
-            _clean(payload.get("current_task_id"))
+            _clean(payload.get("task_id"))
+            or _clean(payload.get("current_task_id"))
             or _clean(payload.get("resolved_task_id"))
         )
         track_id = (
-            _clean(payload.get("current_track_id"))
+            _clean(payload.get("track_id"))
+            or _clean(payload.get("current_track_id"))
             or _clean(payload.get("effective_track_id"))
         )
         demand = _clean(payload.get("request_text"))
@@ -315,12 +315,14 @@ def scan_run_audits() -> list[dict[str, Any]]:
                 "task_id": task_id,
                 "task_title": payload.get("task_title"),
                 "demand": demand,
-                "skill_id": payload.get("skill_id"),
                 "artifact_ids": payload.get("artifact_ids") or [],
                 "track_id": track_id,
                 "track_title": payload.get("track_title"),
                 "track_action": payload.get("track_action"),
                 "execution_summary": payload.get("execution_summary"),
+                "handoff": payload.get("handoff") if isinstance(payload.get("handoff"), dict) else {},
+                "contributors": payload.get("contributors") if isinstance(payload.get("contributors"), dict) else {},
+                "state_effects": payload.get("state_effects") if isinstance(payload.get("state_effects"), dict) else {},
                 "next_state": next_state,
                 "receipt_paths": receipt_paths,
                 "related_run_ids": payload.get("related_run_ids")
@@ -336,11 +338,11 @@ def scan_run_audits() -> list[dict[str, Any]]:
 
 def build_workspace_projection() -> dict[str, Any]:
     manifest = load_manifest(DEFAULT_MANIFEST)
-    artifacts = [build_artifact_view(artifact) for artifact in list_artifacts()]
+    artifacts = [build_artifact_view(artifact) for artifact in env_store.list_artifacts()]
     artifact_map = {artifact["id"]: artifact for artifact in artifacts}
-    tasks = [build_task_view(task, artifact_map) for task in list_tasks()]
+    tasks = [build_task_view(task, artifact_map) for task in env_store.list_tasks()]
     task_map = {task["id"]: task for task in tasks}
-    tracks = build_track_views(list_tracks(), task_map, artifact_map)
+    tracks = build_track_views(env_store.list_tracks(), task_map, artifact_map)
     tracked_task_ids = {
         task_id
         for track in tracks

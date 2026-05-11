@@ -1,81 +1,70 @@
+---
+name: write-prd
+description: Use when the task is drafting a PRD, defining MVP scope, or turning validated requirements into product requirements.
+---
+
 # write-prd
 
 ## Purpose
-- Produce a scoped MVP PRD that turns explicit market evidence and requirements into a concrete product definition anchored to a track.
+- Produce a scoped MVP PRD that turns explicit market evidence and requirements into concrete product definition.
 
 ## Use when
 - The task is about drafting a PRD, defining MVP scope, clarifying acceptance criteria, or writing product requirements.
-- The user wants PM output that becomes the source artifact for downstream design or implementation.
-- The task references product goals, non-goals, users, scenarios, scope, dependencies, risks, or open questions.
+- The user wants PM output that becomes source artifact for downstream design or implementation.
 
 ## Do Not Use When
-- The task is primarily about track lifecycle administration such as create, advance, update, or archive.
-- The user wants design structure, implementation work, market research, or smoke testing as the main outcome.
-- There is no clear product-definition demand and the user is only asking for track lifecycle administration.
+- The task is primarily track lifecycle administration (`create`, `update`, `advance`, `archive`).
+- The user wants design structure, implementation work, market research, or smoke testing as main outcome.
 
 ## Inputs
-- Explicit market evidence artifacts when they exist: `market-scan`, `pmf-report`, `customer-discovery`, `positioning-brief`, `channel-plan`, and `launch-prep`.
-- Track context and existing task/artifact context when relevant.
-- Constraints, assumptions, and requirements.
-- Optional track context or summary hint.
+- Market evidence artifacts when available: `market-scan`, `pmf-report`, `customer-discovery`, `positioning-brief`, `channel-plan`, `launch-prep`.
+- Track/task/artifact context when relevant.
+- Constraints, assumptions, requirements.
 
 ## Outputs
-- A PRD artifact object in `buddyswitch/objects/artifacts/`.
-- A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
-- Structured sections covering problem, goals, scenarios, scope, acceptance criteria, risks, and open questions.
+- A contribution to the current compact buddy-run commit.
+- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
+- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
 
 ## Steps
-
-1. Define problem and user value from the available market evidence and requirements.
-2. Draft goals and non-goals with clear boundaries.
-3. Define users and scenarios.
-4. Split scope into P0 and P1.
-5. Add acceptance criteria, risks, and open questions.
-6. Write the PRD using the PRD template.
+1. Define the PRD summary and key decisions.
+2. Capture risks, open questions, and one concrete suggested next step.
+3. Put PRD-specific detail under `artifacts[].content.prd` (problem, user_value, requirements, scope).
+4. If an explicit PM track lifecycle mutation is required, include `state_effects.track` explicitly.
 
 ## Verification
-- Use track context when available, but keep the PRD demand clear enough to stand on its own.
-- Prefer explicit market artifacts over a generic research summary so PM can trace the problem statement back to actual market evidence.
-- Confirm the output is product-definition content rather than design or implementation detail.
-- Confirm scope is split clearly enough for downstream buddies to act on it.
+- Keep the result product-definition centered.
+- Keep PRD detail in `artifacts[].content.prd`, not top-level PM fields.
+- Use `state_effects.track` only for explicit PM lifecycle intent.
 
 ## Shared Runtime Rules
+- See `framework/docs/skill-runtime-shared-rules.md`.
+- This native skill contributes content to the current buddy run.
+- Do not call persist from the skill perspective.
+- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
 
-- See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
+## BuddySwitch Commit Output
 
-## PM Track Handling
+Contribute to one buddy-run commit. Do not call persist from inside the skill.
 
-- A PRD task that references `track-*` may use the track as context, but the core deliverable is still product-definition output.
-- If the user is actually asking to create, update, advance, archive, or hand off a track, use `track-manager` for that lifecycle change.
-- Keep track progression or buddy handoff explicit in demand text or in a separate `track-manager` result; do not silently turn PRD work into track mutation.
+Required top-level field:
+- `execution_summary`
 
-## Required Output Fields
+Use `artifacts` when this skill produces a durable artifact:
+- `kind`: `prd`
+- `title`: concise artifact title
+- `summary`: short downstream selection summary
+- `content`: include `prd`, `decisions`, `risks`, `open_questions`, and `suggested_next_step`
 
-- `problem`
-- `goals`
-- `non_goals`
-- `users_and_scenarios`
-- `scope_p0_p1`
-- `acceptance_criteria`
-- `risks`
-- `open_questions`
-
-## Guardrails
-
-- Do not produce visual design specs.
-- Do not implement code.
-- Do not expand scope without calling it out explicitly.
+Use optional `working_notes` for concise reasoning or verification notes.
+Use optional `state_effects.task` only for the current prepared task.
+Use optional `state_effects.track` for PM lifecycle actions (`create|update|advance|archive`).
+Use optional `handoff` when another manifest buddy should continue.
 
 ## Examples
 - `Draft the MVP PRD for onboarding rewrite track`
 - `Continue product definition and define P0/P1 scope`
-- `Write acceptance criteria and risks for the creator livestream MVP`
 
 ## Counterexamples
 - `create track and set next_buddy design`
-- `refine the onboarding prototype and flow`
-- `research competitor positioning for creator livestream tools`
-
-## Gotchas
-- Tasks mentioning a track are not automatically track-management tasks; PRD work often references a track as context.
-- Avoid drifting into implementation detail or design specification when the user asked for product definition.
+- `implement the approved onboarding rewrite scope`

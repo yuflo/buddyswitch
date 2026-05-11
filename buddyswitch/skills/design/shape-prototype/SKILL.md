@@ -1,3 +1,8 @@
+---
+name: shape-prototype
+description: Use when the task is shaping a visible UI/UX prototype and producing a design handoff artifact.
+---
+
 # shape-prototype
 
 ## Purpose
@@ -19,9 +24,9 @@
 - Constraints about target screens, CTA flow, navigation, or preview environment.
 
 ## Outputs
-- A design-handoff artifact describing prototype kind, page map, user flow, preview path, handoff notes, and open questions.
-- Preview-oriented runtime outputs under `.sandbox/design/` when needed.
-- A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
+- A contribution to the current compact buddy-run commit.
+- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
+- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
 
 ## Steps
 
@@ -40,15 +45,26 @@
 ## Shared Runtime Rules
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
+- This native skill contributes content to the current buddy run.
+- Do not call persist from the skill perspective.
+- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
 
-## Required Output Fields
+## BuddySwitch Commit Output
 
-- `prototype_kind`
-- `page_map`
-- `primary_user_flow`
-- `preview`
-- `handoff`
-- `open_questions`
+Contribute to one buddy-run commit. Do not call persist from inside the skill.
+
+Required top-level field:
+- `execution_summary`
+
+Use `artifacts` when this skill produces a durable artifact:
+- `kind`: `design-handoff`
+- `title`: concise artifact title
+- `summary`: short downstream selection summary
+- `content`: include `design_goal`, `flow_or_screen_summary`, `interaction_notes`, `assets_or_preview_refs`, `handoff_notes`, and `open_questions`
+
+Use optional `working_notes` for concise reasoning or verification notes.
+Use optional `state_effects.task` only for the current prepared task.
+Use optional `handoff` when another manifest buddy should continue.
 
 ## Guardrails
 

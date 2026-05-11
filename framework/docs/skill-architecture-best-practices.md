@@ -2,58 +2,42 @@
 
 ## Runtime Model
 
-BuddySwitch is not a standalone agent runtime.
-It is a deterministic control layer around host execution.
+BuddySwitch is a deterministic control layer around host execution.
 
-- Host Codex chooses and executes one skill.
+- Codex discovers and executes native skills from `.agents/skills`.
 - BuddySwitch prepares context and persists validated state.
-- Skill packages live under `buddyswitch/skills/**/`.
+- Native artifact-producing skills emit buddy-level result JSON directly before persist.
+- Source skill packages live under `buddyswitch/skills/**`.
 
 ## Package Contract
 
-Each skill package includes:
+BuddySwitch runtime treats source skill packages as opaque during materialization.
+Codex CLI owns package acceptance after install into runtime `.agents/skills/<skill-id>`.
+Do not treat package file style as a runtime gate.
 
-- `skill.toml` metadata
-- `SKILL.md` workflow instructions
-
-Required metadata:
+Skill registry contract lives in `buddyswitch/manifest.toml` per `[[skills]]` entry:
 
 - `id`
-- `buddy`
-- `description` (activation-style text beginning with `Use when`)
-- `objects`
-- `produces_artifact`
-- `input_slots`
-- `output_schema`
+- `path`
 
-Conditional metadata:
+Buddy-level persistence contract lives in `[[buddies]]` entries:
 
-- `output_slot` when `produces_artifact = true`
+- `artifact_kinds`
 
-Recommended metadata:
+## Runtime Materialization Rules
 
-- `side_effect_level`
-- `required_tools`
-- `required_env`
-- `produces`
-- `consumes`
-- `allowed_task_kinds`
+- Launcher materializes only the active buddy membership into runtime `.agents/skills`.
+- Runtime `.agents/skills` is instance-only and must not be tracked at repo root.
+- Installer must validate source/target safety before deleting and copying runtime skills.
 
-## Selection Rules
+## Prepare And Persist Rules
 
-- `prepare-turn-context` returns candidate skills.
-- Host selects exactly one `skill_id`.
-- Multi-skill buddies are never auto-selected by runtime.
-
-## Persistence Rules
-
-`persist-skill-result` validates only technical boundaries:
-
-- selected skill identity
-- schema conformance
-- task/track/run identity integrity
-
-Business-quality review stays in host workflow, not persistence gate logic.
+- `prepare-turn-context` returns context/state/run envelope only.
+- `prepare` does not return skill candidates, instruction paths, or custom skill packets.
+- `prepare` validates context/reservation safety only; it does not gate on package/source/schema readiness.
+- `persist-buddy-run` validates active buddy ownership, reserved run usage, and write-safety minimums.
+- Native `skill_id` values are contributor audit metadata only (`contributors.skills`), not artifact/receipt/run ownership.
+- `persist-buddy-run` validates collaboration-safe shape (`execution_summary`, optional `artifacts`, `state_effects`, `handoff`, `contributors`) and requires at least one durable signal.
 
 ## Output Discipline
 

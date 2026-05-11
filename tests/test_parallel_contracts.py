@@ -24,7 +24,7 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 CONTRACTS_DIR = ROOT / "framework" / "contracts"
 PREPARE_TURN_CONTEXT_CONTRACT = CONTRACTS_DIR / "prepare-turn-context.json"
-PERSIST_SKILL_RESULT_CONTRACT = CONTRACTS_DIR / "persist-skill-result.json"
+PERSIST_BUDDY_RUN_CONTRACT = CONTRACTS_DIR / "persist-buddy-run.json"
 SELECTED_SKILL_PACKET_CONTRACT = CONTRACTS_DIR / "selected-skill-packet.json"
 WORKSPACE_PROJECTION_CONTRACT = CONTRACTS_DIR / "workspace-projection.json"
 
@@ -36,29 +36,57 @@ EXPECTED_PREPARE_TURN_CONTEXT_CONTRACT = {
         "context_revision",
         "instance_id",
         "active_buddy",
+        "runtime_context",
+        "context_save_path",
+        "persist_command_hint",
         "request_text",
         "current_task_id",
         "current_track_id",
         "task_context",
         "track_context",
-        "skills",
-        "inputs_by_skill",
+        "track_artifact_index",
         "run_envelope",
         "warnings",
     ],
+    "runtime_context_required_sections": [
+        "active_buddy",
+        "active_skill_ids",
+        "runtime_commands",
+        "capability_boundary",
+        "env_tools",
+        "tool_requirements",
+        "persist_payload_hint",
+        "desc",
+        "track_lifecycle_desc",
+        "artifact_kind_desc",
+        "context_sources_desc",
+        "current_context_summary",
+    ],
 }
 
-EXPECTED_PERSIST_SKILL_RESULT_CONTRACT = {
-    "contract_id": "persist-skill-result",
-    "contract_version": "2026-05-03",
+EXPECTED_PERSIST_BUDDY_RUN_CONTRACT = {
+    "contract_id": "persist-buddy-run",
+    "contract_version": "2026-05-06",
+    "request_boundary": "active_buddy + reserved run_id + current task/track context",
     "response_key_order": [
         "ok",
         "receipt",
         "refreshed_context",
     ],
+    "commit_required_keys": [
+        "execution_summary",
+    ],
+    "commit_optional_keys": [
+        "working_notes",
+        "artifacts",
+        "state_effects",
+        "handoff",
+        "contributors",
+        "tool_evidence",
+    ],
     "receipt_required_keys": [
         "ok",
-        "skill_id",
+        "buddy_id",
         "task_id",
         "task_title",
         "artifact_ids",
@@ -68,10 +96,10 @@ EXPECTED_PERSIST_SKILL_RESULT_CONTRACT = {
         "related_run_ids",
     ],
     "receipt_optional_keys": [
-        "artifact_id",
         "track_id",
         "track_title",
         "track_action",
+        "handoff",
         "warnings",
     ],
 }
@@ -82,12 +110,18 @@ def _load_json(path: Path) -> dict[str, object]:
 
 
 def _contains_key_recursive(payload: object, forbidden_key: str) -> bool:
+    forbidden_lower = forbidden_key.lower()
     if isinstance(payload, dict):
-        if forbidden_key in payload:
-            return True
-        return any(_contains_key_recursive(value, forbidden_key) for value in payload.values())
+        for key, value in payload.items():
+            if isinstance(key, str) and forbidden_lower in key.lower():
+                return True
+            if _contains_key_recursive(value, forbidden_key):
+                return True
+        return False
     if isinstance(payload, list):
         return any(_contains_key_recursive(item, forbidden_key) for item in payload)
+    if isinstance(payload, str):
+        return forbidden_lower in payload.lower()
     return False
 
 
@@ -98,8 +132,6 @@ def _assert_type_case(test: unittest.TestCase, value: object, expected_type: str
         test.assertTrue(value is None or isinstance(value, str))
     elif expected_type == "integer":
         test.assertIsInstance(value, int)
-    elif expected_type == "integer-or-null":
-        test.assertTrue(value is None or isinstance(value, int))
     elif expected_type == "boolean":
         test.assertIsInstance(value, bool)
     elif expected_type == "object":
@@ -115,18 +147,10 @@ def _assert_type_case(test: unittest.TestCase, value: object, expected_type: str
         test.assertEqual(Path(value).name, value)
     elif expected_type == "artifact-map":
         test.assertIsInstance(value, dict)
-    elif expected_type == "task-array":
-        test.assertIsInstance(value, list)
-    elif expected_type == "artifact-map":
-        test.assertIsInstance(value, dict)
     elif expected_type == "artifact-slot-map":
         test.assertIsInstance(value, dict)
-    elif expected_type == "string-map":
-        test.assertIsInstance(value, dict)
-        test.assertTrue(all(isinstance(item, str) for item in value.values()))
-    elif expected_type == "markdown-string":
-        test.assertIsInstance(value, str)
-        test.assertTrue(value.startswith("# "))
+    elif expected_type == "task-array":
+        test.assertIsInstance(value, list)
     else:
         raise AssertionError(f"unsupported expected type {expected_type!r}")
 
@@ -204,29 +228,43 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         self,
         context: dict[str, object],
         *,
-        skill_id: object,
         result: dict[str, object],
         env: dict[str, str],
     ) -> dict[str, object]:
         with patch.dict(os.environ, env, clear=True):
-            return turn_runtime.persist_skill_result(
+            return turn_runtime.persist_buddy_run(
                 context,
-                skill_id=skill_id,  # type: ignore[arg-type]
                 result=result,
                 manifest_path=turn_runtime.DEFAULT_MANIFEST,
             )
 
-    def _artifact_result(self) -> dict[str, object]:
+    def _dev_commit(self) -> dict[str, object]:
         return {
-            "execution_summary": "Implemented the requested change and verified the core path.",
-            "working_notes": ["Scoped the edits to onboarding CTA behavior."],
-            "deliverables_or_changed_files": ["projects/app/src/example.ts"],
-            "artifact_content": {
-                "task_summary": "Implemented onboarding improvements.",
-                "changed_files": ["projects/app/src/example.ts"],
-                "implementation_notes": ["Updated CTA behavior.", "Kept state transitions unchanged."],
-                "verification_runs": [{"command": "npm test", "result": "passed", "notes": "Targeted unit coverage."}],
-                "known_limitations": ["No production build was executed in this test."],
+            "execution_summary": "Implemented onboarding improvements and persisted dev report.",
+            "working_notes": ["Focused on onboarding CTA behavior."],
+            "artifacts": [
+                {
+                    "kind": "implementation-report",
+                    "title": "Onboarding CTA Implementation Report",
+                    "summary": "Implementation details and verification notes.",
+                    "content": {
+                        "task_summary": "Updated CTA behavior.",
+                        "changed_files": ["projects/app/src/example.ts"],
+                        "implementation_notes": ["Kept state transitions stable."],
+                        "verification": {
+                            "checks_run": ["npm test"],
+                            "passed": ["Targeted unit tests"],
+                            "failed": [],
+                            "blocked": [],
+                        },
+                        "risks": [],
+                        "follow_ups": [],
+                    },
+                }
+            ],
+            "contributors": {
+                "skills": ["implement-task"],
+                "agents": [],
             },
         }
 
@@ -250,13 +288,18 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         self.assertEqual(payload["current_task_id"], payload["task_context"]["task"]["id"])
         self.assertEqual(payload["run_envelope"]["status"], "reserved")
         self.assertIn("turn_identity", payload["run_envelope"])
-        self.assertNotIn("switch", payload)
-        self.assertNotIn("inputs", payload)
-        self.assertNotIn("artifact_selection_by_skill", payload)
-        self.assertFalse(_contains_key_recursive(payload, "selected_skill_packet"))
+        for forbidden in (
+            "selected_skill",
+            "skill_candidates",
+            "skill_instructions",
+            "run_instructions_by_skill",
+            "selected_skill_packet",
+            "instruction_path",
+        ):
+            self.assertFalse(_contains_key_recursive(payload, forbidden), msg=f"forbidden prepare concept leaked: {forbidden}")
 
-    def test_contract_matches_real_persist_skill_result_surface(self) -> None:
-        contract = _load_json(PERSIST_SKILL_RESULT_CONTRACT)
+    def test_contract_matches_real_persist_buddy_run_surface(self) -> None:
+        contract = _load_json(PERSIST_BUDDY_RUN_CONTRACT)
         instance_json = self._write_instance_json(instance_id="inst-contract-02", buddy="dev")
         env = self._product_env(
             instance_json,
@@ -268,15 +311,13 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
             "Implement the approved onboarding improvements in projects/app",
             env=env,
         )
-        result = self._artifact_result()
         persisted = self._persist(
             context,
-            skill_id="implement-task",
-            result=result,
+            result=self._dev_commit(),
             env=env,
         )
 
-        self.assertEqual(contract, EXPECTED_PERSIST_SKILL_RESULT_CONTRACT)
+        self.assertEqual(contract, EXPECTED_PERSIST_BUDDY_RUN_CONTRACT)
         self.assertTrue(persisted["ok"])
         self.assertEqual(list(persisted.keys()), contract["response_key_order"])
         receipt = persisted["receipt"]
@@ -285,12 +326,9 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
             for key in contract["receipt_required_keys"]:
                 self.assertIn(key, receipt)
             self.assertEqual(receipt["run_id"], context["run_envelope"]["run_id"])
-            self.assertIsInstance(receipt["task_id"], str)
-            self.assertTrue(receipt["task_id"])
-            self.assertIsInstance(receipt["task_title"], str)
-            self.assertTrue(receipt["task_title"])
-            self.assertIsInstance(receipt["artifact_id"], str)
-            self.assertIn(receipt["artifact_id"], receipt["artifact_ids"])
+            self.assertEqual(receipt["buddy_id"], "dev")
+            self.assertIsInstance(receipt["artifact_ids"], list)
+            self.assertNotIn("skill_id", receipt)
             self.assertIsInstance(receipt["receipt_paths"], dict)
             if isinstance(receipt["receipt_paths"], dict):
                 for rel_path in receipt["receipt_paths"].values():
@@ -300,56 +338,12 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
                         for item in rel_path:
                             if isinstance(item, str):
                                 self.assertTrue(self._runtime_path(item).exists())
-            self.assertEqual(receipt["next_state"]["task_id"], receipt["task_id"])
-            self.assertNotIn("reference_switches", receipt)
-            self.assertNotIn("recommended_switch", receipt)
+
         self.assertNotIn("skill_id", persisted)
-        self.assertNotIn("task_id", persisted)
         self.assertNotIn("artifact_id", persisted)
-        self.assertNotIn("run_id", persisted)
-        self.assertNotIn("paths", persisted)
-        self.assertNotIn("writes", persisted)
+        self.assertNotIn("task_id", persisted)
 
-    def test_track_manager_persist_returns_receipt_without_artifact_id(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-contract-02-track", buddy="pm")
-        env = self._product_env(
-            instance_json,
-            buddy="pm",
-            instance_id="inst-contract-02-track",
-            shared_root=self.runtime_root,
-        )
-        context = self._prepare("Create onboarding delivery track", env=env)
-        persisted = self._persist(
-            context,
-            skill_id="track-manager",
-            result={
-                "execution_summary": "Created track for onboarding delivery.",
-                "working_notes": ["Initialized track lifecycle."],
-                "deliverables_or_changed_files": [],
-                "track_operation": {
-                    "action": "create",
-                    "track_id": "track-onboarding-delivery",
-                    "title": "Onboarding Delivery",
-                    "status": "active",
-                    "current_buddy": "pm",
-                    "next_buddy": "design",
-                    "summary": "Cross-functional onboarding execution track.",
-                },
-            },
-            env=env,
-        )
-
-        self.assertTrue(persisted["ok"])
-        receipt = persisted["receipt"]
-        self.assertIsInstance(receipt, dict)
-        if isinstance(receipt, dict):
-            self.assertEqual(receipt.get("track_action"), "create")
-            self.assertEqual(receipt.get("artifact_ids"), [])
-            self.assertNotIn("artifact_id", receipt)
-            self.assertIsInstance(receipt.get("track_id"), str)
-            self.assertIsInstance(receipt.get("track_title"), str)
-
-    def test_persist_contract_does_not_leave_hidden_follow_up_reservation(self) -> None:
+    def test_persist_contract_clears_reservation_after_commit(self) -> None:
         instance_json = self._write_instance_json(instance_id="inst-contract-03", buddy="dev")
         env = self._product_env(
             instance_json,
@@ -367,30 +361,26 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
 
         persisted = self._persist(
             context,
-            skill_id="implement-task",
-            result=self._artifact_result(),
+            result=self._dev_commit(),
             env=env,
         )
 
         self.assertTrue(persisted["ok"])
         self.assertFalse(consumed_path.exists())
-        self.assertNotIn("reference_switches", persisted["receipt"])
-        self.assertNotIn("recommended_switch", persisted["receipt"])
-
         reserved_dir = turn_runtime._reserved_run_path("placeholder").parent  # type: ignore[attr-defined]
         remaining = sorted(reserved_dir.glob("*.json")) if reserved_dir.exists() else []
         self.assertEqual(remaining, [])
 
-    def test_red_native_turn_persist_rejects_skill_array_without_side_effects(self) -> None:
-        instance_json = self._write_instance_json(instance_id="inst-contract-04", buddy="market")
+    def test_persist_rejects_legacy_top_level_skill_id_without_side_effects(self) -> None:
+        instance_json = self._write_instance_json(instance_id="inst-contract-04", buddy="dev")
         env = self._product_env(
             instance_json,
-            buddy="market",
+            buddy="dev",
             instance_id="inst-contract-04",
             shared_root=self.runtime_root,
         )
         context = self._prepare(
-            "Validate an AI tool idea for indie developers",
+            "Implement the approved onboarding improvements in projects/app",
             env=env,
         )
         run_dir = self._runtime_path("buddyswitch/content/runs")
@@ -398,39 +388,13 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         before_runs = {path.name for path in run_dir.glob("run-*.json")}
         before_artifacts = {path.name for path in artifact_dir.glob("art-*.json")}
 
-        with self.assertRaisesRegex((TypeError, ValueError), "single skill_id"):
+        invalid = self._dev_commit()
+        invalid["skill_id"] = "implement-task"
+
+        with self.assertRaisesRegex((TypeError, ValueError), "skill_id"):
             self._persist(
                 context,
-                skill_id=["pmf-recon"],  # type: ignore[arg-type]
-                result={
-                    "execution_summary": "Completed PMF recon",
-                    "working_notes": [],
-                    "deliverables_or_changed_files": [],
-                    "artifact_content": {
-                        "research_question": "Is there early demand?",
-                        "research_strategy": {
-                            "depth": "quick",
-                            "rationale": "fast probe",
-                            "collection_mode": "manual",
-                            "initial_hypotheses": ["demand exists"],
-                            "source_category_targets": ["forums"],
-                        },
-                        "channel_plan": ["forums"],
-                        "iteration_log": [],
-                        "evidence": [],
-                        "source_traceability": [],
-                        "assumptions_used": [],
-                        "candidate_icps": [],
-                        "strongest_pain_signals": [],
-                        "existing_alternatives": [],
-                        "why_current_solutions_fall_short": [],
-                        "pmf_confidence": {"level": "low", "rationale": "no data"},
-                        "recommended_next_step": {"action": "interviews", "rationale": "collect primary data"},
-                        "suggested_interview_angles": [],
-                        "risks_and_unknowns": [],
-                        "conclusion": "insufficient evidence",
-                    },
-                },
+                result=invalid,
                 env=env,
             )
 
@@ -450,7 +414,7 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
             track_id=track["id"],
             initial_run_id="run-dev-contract-seed",
         )
-        standalone_task = create_task(
+        create_task(
             "task-market-standalone-contract",
             "Standalone research",
             buddy="market",
@@ -460,8 +424,7 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
             artifact_id="art-dev-contract-freeze",
             title="Implementation Report",
             buddy="dev",
-            skill_id="implement-task",
-            slot="implementation-report",
+            kind="implementation-report",
             task_id=tracked_task["id"],
             source_run_id="run-dev-contract-freeze",
             summary="Implementation summary",
@@ -474,18 +437,24 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
                 {
                     "run_id": "run-dev-contract-freeze",
                     "timestamp": "2026-04-21T12:00:00+08:00",
-                    "active_buddy": "dev",
-                    "current_task_id": tracked_task["id"],
-                    "current_track_id": track["id"],
-                    "request_text": "implement scope",
-                    "resolved_task_id": tracked_task["id"],
+                    "buddy_id": "dev",
+                    "task_id": tracked_task["id"],
+                    "track_id": track["id"],
                     "task_title": tracked_task["title"],
-                    "skill_id": "implement-task",
                     "artifact_ids": [artifact["id"]],
-                    "effective_track_id": track["id"],
                     "track_title": track["title"],
-                    "track_action": "continue",
+                    "track_action": "update",
                     "execution_summary": "Completed implementation",
+                    "handoff": {
+                        "next_buddy": "test",
+                        "reason": "Needs smoke validation",
+                        "context": "Use implementation report artifact",
+                    },
+                    "contributors": {
+                        "skills": ["implement-task"],
+                        "agents": [],
+                    },
+                    "state_effects": {},
                     "related_run_ids": ["run-dev-contract-seed"],
                     "next_state": {
                         "task_id": tracked_task["id"],
@@ -500,6 +469,7 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
                         "track": f"buddyswitch/objects/tracks/{track['id']}.json",
                         "artifacts": [f"buddyswitch/objects/artifacts/{artifact['id']}.json"],
                     },
+                    "writes": [],
                 },
                 ensure_ascii=True,
             ),
@@ -529,8 +499,7 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
         _assert_shape(self, payload["artifacts"][0], contract["view_shapes"]["artifact"])
         self.assertIn("next_state", payload["run_audits"][0])
         self.assertIn("receipt_paths", payload["run_audits"][0])
-        self.assertNotIn("reference_switches", payload["run_audits"][0])
-        self.assertNotIn("recommended_switch", payload["run_audits"][0])
+        self.assertNotIn("skill_id", payload["run_audits"][0])
         _assert_shape(self, payload["run_audits"][0], contract["view_shapes"]["run_audit"])
         _assert_shape(self, payload["tracks"][0]["tasks"][0], contract["view_shapes"]["task"])
         _assert_shape(
@@ -538,11 +507,6 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
             task_rows[tracked_task["id"]]["current_artifacts"]["implementation-report"],
             contract["view_shapes"]["artifact"],
         )
-        self.assertEqual(
-            sorted(payload["standalone_tasks"][0].keys()),
-            sorted(contract["view_shapes"]["task"]["key_order"]),
-        )
-        _assert_field_types(self, payload["standalone_tasks"][0], contract["view_shapes"]["task"]["field_types"])
         self.assertEqual(
             list(task_rows[tracked_task["id"]]["artifact_slots"]["implementation-report"].keys()),
             contract["view_shapes"]["task"]["artifact_slot_entry"]["key_order"],

@@ -1,75 +1,32 @@
-# Launch Prep Template
-
-```markdown
-# Launch Preparation Brief
-
-## Research Question
-research_question:
-
-## Launch Goal
-- primary_goal:
-- timebox:
-- secondary_goal:
-
-## Target Audience
-- primary:
-- why_now:
-- reach_notes:
-
-## Selected Channel
-- channel:
-- reason:
-- constraints:
-  - 
-
-## Launch Assets
-1.
-- asset:
-- purpose:
-- owner:
-- notes:
-
-## Instrumentation Plan
-- signals_to_track:
-  - 
-- capture_method:
-- review_cadence:
-
-## Feedback Collection Plan
-- collection_methods:
-  - 
-- follow_up_path:
-- response_owner:
-
-## Success Signals
-- 
-
-
-## Failure Signals
-- 
-
-
-## Evidence
-1.
-- source_id:
-- url:
-- source_type:
-- accessed_at:
-- claim_excerpt:
-- page_title:
-- auth_state: public / logged_in / paywalled / unknown
-- query_or_filter_used:
-
-## Source Traceability
-1.
-- conclusion:
-- source_ids:
-  - src-1
-
-## Risks And Unknowns
-- 
-
-
-## Conclusion
-conclusion:
-```
+{
+  "execution_summary": "Launch-prep summary for first launch validation.",
+  "working_notes": [
+    "Capture readiness caveats and dependency risks."
+  ],
+  "artifacts": [
+    {
+      "kind": "launch-prep",
+      "title": "Launch Preparation Brief",
+      "summary": "Selection-ready launch learning plan.",
+      "content": {
+        "research_question": "",
+        "evidence": [],
+        "insights": [],
+        "assumptions": [],
+        "risks": [],
+        "conclusion": "",
+        "recommended_next_step": "",
+        "launch_prep": {
+          "launch_goal": {},
+          "target_audience": {},
+          "selected_channel": {},
+          "launch_assets": [],
+          "instrumentation_plan": {},
+          "feedback_collection_plan": {},
+          "success_signals": [],
+          "failure_signals": []
+        }
+      }
+    }
+  ]
+}

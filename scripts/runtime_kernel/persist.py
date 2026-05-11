@@ -6,20 +6,20 @@ from __future__ import annotations
 from typing import Any
 
 
-def persist_skill_result_request(
+def persist_buddy_run_request(
     context: dict[str, Any],
     *,
-    skill_id: str,
     result: dict[str, Any],
     manifest_path: "Path | None" = None,
 ) -> dict[str, Any]:
-    import turn_runtime
+    from env.services import runs as run_service
 
     if manifest_path is None:
+        import turn_runtime
+
         manifest_path = turn_runtime.DEFAULT_MANIFEST
-    return turn_runtime.persist_skill_result(
+    return run_service.commit_buddy_run(
         context,
-        skill_id=skill_id,
         result=result,
         manifest_path=manifest_path,
     )

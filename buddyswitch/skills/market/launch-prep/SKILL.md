@@ -1,3 +1,8 @@
+---
+name: launch-prep
+description: Use when the task is preparing a first launch, validation page, or feedback loop before public release.
+---
+
 # launch-prep
 
 ## Execution Order
@@ -28,9 +33,9 @@
 - Optional notes on audience, success criteria, or manual follow-up capacity.
 
 ## Outputs
-- A launch-prep artifact object with launch goal, audience, selected channel, launch assets, instrumentation plan, feedback collection plan, success and failure signals, and conclusion.
-- A run audit in `buddyswitch/content/runs/` when default runtime persistence is used.
-- Explicit notes when launch confidence depends on assumptions rather than observed evidence.
+- A contribution to the current compact buddy-run commit.
+- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
+- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
 
 ## Market Research Cockpit Runtime
 
@@ -52,22 +57,28 @@
 ## Shared Runtime Rules
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
+- This native skill contributes content to the current buddy run.
+- Do not call persist from the skill perspective.
+- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
 
-## Required Output Fields
+## BuddySwitch Commit Output
 
-- `research_question`
-- `launch_goal`
-- `target_audience`
-- `selected_channel`
-- `launch_assets`
-- `instrumentation_plan`
-- `feedback_collection_plan`
-- `success_signals`
-- `failure_signals`
-- `evidence`
-- `source_traceability`
-- `risks_and_unknowns`
-- `conclusion`
+Contribute to one buddy-run commit. Do not call persist from inside the skill.
+
+Required top-level field:
+- `execution_summary`
+
+Use `artifacts` when this skill produces a durable artifact:
+- `kind`: `launch-prep`
+- `title`: concise artifact title
+- `summary`: short downstream selection summary
+- `content`: include `research_question`, `evidence`, `insights`, `assumptions`, `risks`, `conclusion`, `recommended_next_step`, and launch-prep-specific structured detail
+
+Use optional `working_notes` for concise reasoning or verification notes.
+Use optional `state_effects.task` only for the current prepared task.
+Use optional `handoff` when another manifest buddy should continue.
+
+Market artifact commits require broker-issued `tool_evidence` from the browser evidence gate. Do not invent token strings.
 
 ## Guardrails
 

@@ -15,15 +15,141 @@ if str(SCRIPTS) not in sys.path:
 
 import output_schema  # noqa: E402
 
+BUDDY_RESULT_SCHEMA_PATHS = {
+    "pm": ROOT / "framework" / "schemas" / "pm" / "pm-result.json",
+    "dev": ROOT / "framework" / "schemas" / "dev" / "dev-result.json",
+    "test": ROOT / "framework" / "schemas" / "test" / "test-result.json",
+    "market": ROOT / "framework" / "schemas" / "market" / "market-result.json",
+    "design": ROOT / "framework" / "schemas" / "design" / "design-result.json",
+}
+
+COMMON_REQUIRED_COMMIT_KEYS = {
+    "execution_summary",
+}
+
+COMMON_OPTIONAL_COMMIT_KEYS = {
+    "working_notes",
+    "artifacts",
+    "state_effects",
+    "handoff",
+    "contributors",
+    "tool_evidence",
+}
+
+RETIRED_AUTHORING_KEYS = {
+    "deliverables_or_changed_files",
+    "artifact_content",
+    "specialized_sections",
+    "track_operation",
+}
+
+RUNTIME_METADATA_FIELDS = {
+    "task_id",
+    "task_title",
+    "track_id",
+    "track_title",
+    "artifact_id",
+    "artifact_ids",
+    "run_id",
+    "receipt_paths",
+    "related_run_ids",
+    "next_state",
+    "paths",
+    "writes",
+}
+
 
 class OutputSchemaBoundaryTests(unittest.TestCase):
+    def _load_buddy_schema(self, buddy_id: str) -> dict[str, object]:
+        path = BUDDY_RESULT_SCHEMA_PATHS[buddy_id].relative_to(ROOT).as_posix()
+        return output_schema.load_output_schema(path)
+
+    def _sample_payload_for_buddy(self, buddy_id: str) -> dict[str, object]:
+        content_by_buddy: dict[str, dict[str, object]] = {
+            "pm": {
+                "summary": "PRD summary",
+                "decisions": ["Ship guided flow first."],
+                "risks": ["Copy may still be unclear."],
+                "open_questions": ["Need localization in v1?"],
+                "suggested_next_step": "Hand off to design for flow draft.",
+                "prd": {
+                    "problem": "Users cannot complete onboarding quickly.",
+                    "user_value": "Faster onboarding completion.",
+                    "requirements": ["Define scope", "Capture acceptance criteria"],
+                    "scope": {"in_scope": ["Onboarding copy"], "out_of_scope": ["Billing refactor"]},
+                },
+            },
+            "dev": {
+                "task_summary": "Implemented onboarding banner behavior.",
+                "changed_files": ["projects/app/README.md"],
+                "implementation_notes": ["Kept state mutation local."],
+                "verification": {
+                    "checks_run": ["python3 -m pytest tests/test_turn_runtime.py -q"],
+                    "passed": ["Runtime tests passed"],
+                    "failed": [],
+                    "blocked": [],
+                },
+                "risks": ["Browser smoke not executed."],
+                "follow_ups": ["Run manual browser check."],
+            },
+            "test": {
+                "test_scope": "Smoke validation for onboarding path.",
+                "checks_run": ["npm test -- smoke"],
+                "passed_items": ["Core route loads"],
+                "failed_items": [],
+                "blocked_items": [],
+                "reproduction_notes": [],
+                "readiness": "ready",
+            },
+            "market": {
+                "research_question": "Do founders need faster validation loops?",
+                "evidence": ["Interview themes from founder calls."],
+                "insights": ["Speed and confidence are both required."],
+                "assumptions": ["SMB focus remains stable."],
+                "risks": ["Sample size still small."],
+                "conclusion": "Demand appears real but incomplete.",
+                "recommended_next_step": "Run 5 targeted interviews.",
+                "source_traceability": [{"source_id": "src-1"}],
+            },
+            "design": {
+                "design_goal": "Clarify onboarding decisions.",
+                "flow_or_screen_summary": "Single-step guidance panel in setup flow.",
+                "interaction_notes": ["Primary CTA keeps user in context."],
+                "assets_or_preview_refs": ["runs/raw/design-preview.png"],
+                "handoff_notes": ["Include empty/loading states."],
+                "open_questions": ["Need accessibility review before handoff?"],
+            },
+        }
+        kind_by_buddy = {
+            "pm": "prd",
+            "dev": "implementation-report",
+            "test": "smoke-test",
+            "market": "market-scan",
+            "design": "design-handoff",
+        }
+        return {
+            "execution_summary": f"{buddy_id} result summary",
+            "working_notes": ["Focused on buddy-run commit contract."],
+            "artifacts": [
+                {
+                    "kind": kind_by_buddy[buddy_id],
+                    "title": f"{buddy_id} artifact",
+                    "summary": f"{buddy_id} artifact summary",
+                    "content": content_by_buddy[buddy_id],
+                }
+            ],
+        }
+
+    def test_buddy_result_schema_boundary_is_exactly_five_buddies(self) -> None:
+        self.assertEqual(set(BUDDY_RESULT_SCHEMA_PATHS), {"pm", "dev", "test", "market", "design"})
+
     def test_normalize_schema_path_rejects_parent_escape(self) -> None:
         with self.assertRaisesRegex(output_schema.OutputSchemaError, "repo-relative"):
-            output_schema.normalize_schema_path("../framework/schemas/dev/implement-task.json")
+            output_schema.normalize_schema_path("../framework/schemas/dev/invalid-schema.json")
 
     def test_normalize_schema_path_rejects_wrong_root(self) -> None:
         with self.assertRaisesRegex(output_schema.OutputSchemaError, "under framework/schemas/"):
-            output_schema.normalize_schema_path("schemas/dev/implement-task.json")
+            output_schema.normalize_schema_path("schemas/dev/invalid-schema.json")
 
     def test_validate_reports_missing_required_property(self) -> None:
         schema = {
@@ -82,114 +208,77 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
 
         self.assertEqual(errors, [])
 
-    def test_dev_schema_rejects_suggested_next_switch(self) -> None:
-        schema = output_schema.load_output_schema("framework/schemas/dev/implement-task.json")
-        payload = {
-            "execution_summary": "Implemented onboarding flow",
-            "working_notes": [],
-            "deliverables_or_changed_files": ["projects/app/src/onboarding.tsx"],
-            "suggested_next_switch": "Run smoke validation with the test buddy",
-            "artifact_content": {
-                "task_summary": "Implemented onboarding flow",
-                "changed_files": ["projects/app/src/onboarding.tsx"],
-                "implementation_notes": [],
-                "verification_runs": [],
-                "known_limitations": [],
-            },
+    def test_buddy_result_schema_uses_compact_buddy_run_commit_boundary(self) -> None:
+        expected_properties = COMMON_REQUIRED_COMMIT_KEYS | COMMON_OPTIONAL_COMMIT_KEYS
+        for buddy_id in BUDDY_RESULT_SCHEMA_PATHS:
+            with self.subTest(buddy=buddy_id):
+                schema = self._load_buddy_schema(buddy_id)
+                self.assertEqual(set(schema.get("required", [])), COMMON_REQUIRED_COMMIT_KEYS)
+                self.assertFalse(schema.get("additionalProperties"))
+                properties = schema.get("properties")
+                self.assertIsInstance(properties, dict)
+                assert isinstance(properties, dict)
+                self.assertTrue(expected_properties.issubset(set(properties)))
+                for retired_key in RETIRED_AUTHORING_KEYS:
+                    self.assertNotIn(retired_key, properties)
+                for runtime_field in RUNTIME_METADATA_FIELDS:
+                    self.assertNotIn(runtime_field, properties)
+
+    def test_buddy_result_schema_accepts_compact_artifact_commit_examples(self) -> None:
+        for buddy_id in BUDDY_RESULT_SCHEMA_PATHS:
+            with self.subTest(buddy=buddy_id):
+                schema = self._load_buddy_schema(buddy_id)
+                payload = self._sample_payload_for_buddy(buddy_id)
+                self.assertEqual(output_schema.validate_output_payload(payload, schema), [])
+
+    def test_buddy_result_schema_rejects_runtime_metadata_top_level_fields(self) -> None:
+        for buddy_id in BUDDY_RESULT_SCHEMA_PATHS:
+            with self.subTest(buddy=buddy_id):
+                schema = self._load_buddy_schema(buddy_id)
+                payload = self._sample_payload_for_buddy(buddy_id)
+                payload["task_id"] = "task-should-not-be-present"
+                errors = output_schema.validate_output_payload(payload, schema)
+                self.assertIn("$: unsupported property 'task_id'", errors)
+
+    def test_pm_schema_accepts_track_state_effect_and_rejects_track_operation(self) -> None:
+        schema = self._load_buddy_schema("pm")
+        payload = self._sample_payload_for_buddy("pm")
+        payload["state_effects"] = {
+            "track": {
+                "action": "advance",
+                "track_id": "track-onboarding",
+                "next_buddy": "dev",
+            }
         }
-        self.assertNotEqual(output_schema.validate_output_payload(payload, schema), [])
+        self.assertEqual(output_schema.validate_output_payload(payload, schema), [])
 
-    def test_market_schema_rejects_suggested_next_switch(self) -> None:
-        schema = output_schema.load_output_schema("framework/schemas/market/research-scan.json")
-        payload = {
-            "execution_summary": "Completed market scan",
-            "working_notes": [],
-            "deliverables_or_changed_files": [],
-            "suggested_next_switch": "Scope the opportunity with the PM buddy",
-            "artifact_content": {
-                "research_question": "Do founders need faster validation loops?",
-                "research_strategy": {
-                    "complexity_tier": "quick",
-                    "rationale": "Boundary test only.",
-                    "collection_mode": "browser-first",
-                    "inclusion_notes": [],
-                },
-                "channel_plan": [],
-                "iteration_log": [],
-                "evidence": [],
-                "source_traceability": [],
-                "patterns_and_insights": [],
-                "risks_and_caveats": [],
-                "conclusion": "Too thin for a real conclusion.",
-            },
+        retired_payload = self._sample_payload_for_buddy("pm")
+        retired_payload["state_effects"] = {
+            "track_operation": {
+                "action": "advance",
+                "track_id": "track-onboarding",
+            }
         }
+        errors = output_schema.validate_output_payload(retired_payload, schema)
+        self.assertIn("$.state_effects: unsupported property 'track_operation'", errors)
 
-        self.assertNotEqual(output_schema.validate_output_payload(payload, schema), [])
+    def test_non_pm_schemas_reject_track_state_effects_but_allow_task_effects(self) -> None:
+        for buddy_id in ("dev", "test", "market", "design"):
+            with self.subTest(buddy=buddy_id):
+                schema = self._load_buddy_schema(buddy_id)
+                payload = self._sample_payload_for_buddy(buddy_id)
+                payload["state_effects"] = {"task": {"status": "active", "summary": "Still in progress."}}
+                self.assertEqual(output_schema.validate_output_payload(payload, schema), [])
 
-    def test_market_schema_requires_medium_strength_evidence_fields(self) -> None:
-        schema = output_schema.load_output_schema("framework/schemas/market/pmf-recon.json")
-        payload = {
-            "execution_summary": "Validated PMF signals",
-            "working_notes": [],
-            "deliverables_or_changed_files": [],
-            "artifact_content": {
-                "research_question": "Do founders need workflow validation help?",
-                "research_strategy": {
-                    "depth": "standard",
-                    "rationale": "Test evidence boundaries.",
-                    "collection_mode": "browser-native",
-                    "initial_hypotheses": [],
-                    "source_category_targets": [],
-                },
-                "channel_plan": [],
-                "iteration_log": [],
-                "evidence": [
-                    {
-                        "source_id": "src-1",
-                        "url": "https://example.com/post",
-                        "source_type": "forum",
-                        "accessed_at": "2026-04-16T12:00:00+08:00",
-                        "claim_excerpt": "This is painful.",
-                        "segment": "founders",
-                        "pain_category": "validation",
+                payload = self._sample_payload_for_buddy(buddy_id)
+                payload["state_effects"] = {
+                    "track": {
+                        "action": "advance",
+                        "track_id": "track-onboarding",
                     }
-                ],
-                "source_traceability": [{"conclusion": "Found demand.", "source_ids": ["src-1"]}],
-                "assumptions_used": [],
-                "candidate_icps": [],
-                "strongest_pain_signals": [],
-                "existing_alternatives": [],
-                "why_current_solutions_fall_short": [],
-                "pmf_confidence": {"level": "medium", "rationale": "Preliminary evidence only."},
-                "recommended_next_step": {"action": "interviews", "rationale": "Need direct validation."},
-                "suggested_interview_angles": [],
-                "risks_and_unknowns": [],
-                "conclusion": "Promising but incomplete.",
-            },
-        }
-
-        errors = output_schema.validate_output_payload(payload, schema)
-
-        self.assertIn(
-            "$.artifact_content.evidence[0]: missing required property 'page_title'",
-            errors,
-        )
-        self.assertIn(
-            "$.artifact_content.evidence[0]: missing required property 'auth_state'",
-            errors,
-        )
-        self.assertIn(
-            "$.artifact_content.evidence[0]: missing required property 'query_or_filter_used'",
-            errors,
-        )
-        self.assertNotIn(
-            "$.artifact_content.evidence[0]: missing required property 'interaction_steps_summary'",
-            errors,
-        )
-        self.assertNotIn(
-            "$.artifact_content.evidence[0]: missing required property 'screenshot_ref_or_snapshot_ref'",
-            errors,
-        )
+                }
+                errors = output_schema.validate_output_payload(payload, schema)
+                self.assertIn("$.state_effects: unsupported property 'track'", errors)
 
 
 if __name__ == "__main__":

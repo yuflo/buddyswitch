@@ -1,3 +1,8 @@
+---
+name: implement-task
+description: Use when the task is implementing scoped product changes, bug fixes, or refactors in project code.
+---
+
 # implement-task
 
 ## Purpose
@@ -20,9 +25,9 @@
 - Optional track context or summary hint.
 
 ## Outputs
-- Code changes primarily under `projects/app/`.
-- Runtime-only temporary outputs under `runs/raw/`.
-- A durable implementation artifact object plus run audit from the default runtime.
+- A contribution to the current compact buddy-run commit.
+- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
+- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
 
 ## Steps
 
@@ -41,14 +46,26 @@
 ## Shared Runtime Rules
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
+- This native skill contributes content to the current buddy run.
+- Do not call persist from the skill perspective.
+- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
 
-## Required Output Fields
+## BuddySwitch Commit Output
 
-- `task_summary`
-- `changed_files`
-- `implementation_notes`
-- `verification_runs`
-- `known_limitations`
+Contribute to one buddy-run commit. Do not call persist from inside the skill.
+
+Required top-level field:
+- `execution_summary`
+
+Use `artifacts` when this skill produces a durable artifact:
+- `kind`: `implementation-report`
+- `title`: concise artifact title
+- `summary`: short downstream selection summary
+- `content`: include `task_summary`, `changed_files`, `implementation_notes`, `verification`, `risks`, and `follow_ups`
+
+Use optional `working_notes` for concise reasoning or verification notes.
+Use optional `state_effects.task` only for the current prepared task.
+Use optional `handoff` when another manifest buddy should continue.
 
 ## Guardrails
 

@@ -1,28 +1,21 @@
-# Design Handoff
-
-## Prototype Kind
-- page-map-plus-key-pages
-
-## Page Map
-- home
-
-## Primary User Flow
-- home -> action
-
-## Preview
-- sandbox_root: .sandbox/design/<task-id>
-- entry_file: index.html
-
-## Handoff
-
-### PM
-- Scope note
-
-### Dev
-- Implementation note
-
-### Test
-- Verification note
-
-## Open Questions
-- Outstanding question
+{
+  "execution_summary": "Design handoff summary for the requested prototype scope.",
+  "working_notes": [
+    "Capture major design constraints and tradeoffs."
+  ],
+  "artifacts": [
+    {
+      "kind": "design-handoff",
+      "title": "Design Handoff: Requested Prototype Scope",
+      "summary": "Selection-ready handoff for downstream implementation and testing.",
+      "content": {
+        "design_goal": "",
+        "flow_or_screen_summary": "",
+        "interaction_notes": [],
+        "assets_or_preview_refs": [],
+        "handoff_notes": [],
+        "open_questions": []
+      }
+    }
+  ]
+}

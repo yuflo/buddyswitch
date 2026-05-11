@@ -4,16 +4,21 @@
 
 Define the execution contract for market research skills inside a buddy-locked instance without changing BuddySwitch object authority or skill boundaries.
 
-`prepare_context` exposes the selected skill metadata that makes `browser-native` behavior explicit to the host.
-BuddySwitch does not open browser tools itself; it remains the control layer while the host stays the only executor.
+Runtime instances materialize active buddy skills under `.agents/skills`.
+BuddySwitch does not open browser tools itself; Codex executes native skills while BuddySwitch remains the control layer.
+`prepare` provides context and run envelope only; Codex handles native skill discovery/execution.
+
+Env profile source of truth:
+
+- Market profile (`buddyswitch/env-profiles/market.json`) sets `browser_cockpit=required`.
+- PM/Design/Dev/Test profiles set `browser_cockpit=available` (non-launch-blocking).
 
 ## Per-Run Contract
 
-- The host chooses exactly one `market` `skill_id` for the run.
-- The host reads market execution metadata from `prepare_context.skills[*].host_execution` for that selected skill.
-- The host applies `prepare_context.skills[*].tool_scope` before any market research begins.
-- The host executes the selected skill locally while treating the resolved browser rules as binding browser constraints for that chosen run.
-- This cockpit contract applies to one selected skill at a time; it does not turn BuddySwitch into a multi-skill workflow engine.
+- The host may execute one or more `market` native skills within one prepared buddy run.
+- Codex discovers active runtime skill packages from `.agents/skills/<skill-id>/SKILL.md`.
+- Codex executes active native skill package work inside the locked buddy run while this browser contract remains the binding runtime constraint.
+- This cockpit contract defines execution constraints only; persistence remains one buddy-run commit per turn.
 
 ## Applies To
 
@@ -24,11 +29,11 @@ BuddySwitch does not open browser tools itself; it remains the control layer whi
 - `channel-discovery`
 - `launch-prep`
 
-These six skills stay separate and keep their own output schemas, slots, and scope boundaries.
+These six skills stay separate and keep their own output schemas, artifact kinds, and scope boundaries.
 
-## Shared Host Execution Metadata
+## Shared Runtime Contract
 
-All six market skills must carry identical host execution metadata in `skill.toml`:
+All six market skills use the same browser runtime contract:
 
 - `execution_mode = "browser-cockpit-native"`
 - `browser_mode = "headed-only"`
@@ -39,6 +44,13 @@ All six market skills must carry identical host execution metadata in `skill.tom
 - `fallback_policy = "no-silent-degrade"`
 - `session_continuity = "instance-cockpit"`
 - `evidence_capture_level = "medium"`
+
+## Evidence Gate
+
+- First executable proof loop is broker-issued `browser-cockpit-preflight` token.
+- Market artifact-producing persist requires broker-issued token evidence, or broker-issued `approved-downgrade`.
+- Approved downgrade must include explicit reason and is recorded in run audit `tool_evidence`.
+- Hand-written token strings are rejected by persist validation.
 
 ## Runtime Rules
 
@@ -57,16 +69,19 @@ All six market skills must carry identical host execution metadata in `skill.tom
 - If `browser-native` access is genuinely blocked, only one explicit `user-approved` one-off downgrade is allowed and must be recorded with evidence impact.
 
 4. Ordered host execution
-- `prepare_context.skills[*].host_execution` carries the host-facing Chrome MCP contract (`chrome-devtools-cockpit`, `browser-native`, mandatory takeover, and no-silent-degrade).
-- `prepare_context.skills[*].tool_scope` carries the allowed tool-server scope for the run.
 - For `market-browser-native`, discovery starts with `chrome-devtools-cockpit`; browser-external search is outside the default scope unless an explicit `user-approved` one-off downgrade is granted.
-- The selected skill metadata is the host-facing browser contract for the chosen run; it does not imply that top-level `prepare_context.inputs` is already populated before skill choice in a multi-skill prepare.
-- The host may not replace that resolved contract with manual reconstruction or ad hoc market-specific shortcuts.
+- Active native skills used in the run are the host-facing browser contract for that run.
+- The host may not replace those contracts with manual reconstruction or ad hoc market-specific shortcuts.
 
 ## Cockpit Bootstrap
 
 - Preferred product-mode path: run `./buddyswitch-codex instance start --buddy <buddy>`.
-- Buddy-locked `instance start` bootstraps the active instance home, ensures the instance-bound headed cockpit endpoint, ensures `chrome-devtools-cockpit`, and then launches Codex.
+- Buddy-locked `instance start` bootstraps the active instance home, ensures the instance-bound headed cockpit ready page, ensures `chrome-devtools-cockpit`, and then launches Codex.
+- Ready page means `/json/version` is reachable and `/json/list` contains at least one usable `type=page` target.
+- Usable page targets are `about:blank` (canonical) or normal `http(s)` pages; `chrome://*`, `chrome-untrusted://*`, and `devtools://*` targets (for example `chrome://intro/`) are not ready.
+- If the endpoint is reachable but no usable page exists, launcher/runtime performs one `PUT /json/new?about:blank` repair attempt and re-checks `/json/list`.
+- Market (`browser_cockpit=required`) treats browser bootstrap failure as launch-blocking when no ready page can be verified.
+- PM/Design/Dev/Test (`browser_cockpit=available`) may continue with warning only when browser cockpit cannot be made ready.
 - The launcher patches all enabled MCP servers with `default_tools_approval_mode = "approve"` to keep product-mode runs moving without per-tool MCP approval prompts.
 - Do not set `supports_parallel_tool_calls = true` for the browser cockpit path; browser pages, active tabs, login state, and DOM reads are shared state and must stay serial.
 - `./buddyswitch-codex env browser status` and `./buddyswitch-codex env browser ensure --instance <instance-id>` are debug or compatibility commands outside the normal buddy-locked product-mode path.

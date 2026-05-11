@@ -5,6 +5,8 @@ BUDDYSWITCH_LAUNCHER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUDDYSWITCH_WORKSPACE_HELPER="${BUDDYSWITCH_LAUNCHER_DIR}/workspace.sh"
 BUDDYSWITCH_RUNTIME_LOCK_HELPER_DEFAULT="${BUDDYSWITCH_LAUNCHER_DIR}/runtime_lock.py"
 BUDDYSWITCH_CODEX_CONFIG_HELPER="${BUDDYSWITCH_LAUNCHER_DIR}/codex_config.py"
+BUDDYSWITCH_ENV_PROFILES_HELPER_REL="scripts/env_profiles.py"
+BUDDYSWITCH_RUNTIME_AGENTS_HELPER_REL="scripts/runtime_agents.py"
 
 if [[ ! -f "${BUDDYSWITCH_WORKSPACE_HELPER}" ]]; then
   echo "Workspace helper is missing under tools/launcher." >&2
@@ -53,18 +55,41 @@ buddyswitch_require_runtime_lock() {
 
 buddyswitch_patch_codex_config() {
   local config_path
+  local active_buddy
+  local -a patch_args=()
   local -a temp_root_args=()
   config_path="${BUDDYSWITCH_CODEX_HOME}/config.toml"
+  active_buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
 
   if [[ -n "${TMPDIR:-}" ]]; then
     temp_root_args+=(--temp-root "${TMPDIR}")
   fi
 
+  patch_args=(
+    --config "${config_path}"
+    --repo-root "${BUDDYSWITCH_REPO_ROOT}"
+    --shared-root "${BUDDYSWITCH_SHARED_ROOT}"
+    --source-codex-home "${BUDDYSWITCH_SOURCE_CODEX_HOME}"
+  )
+
+  if [[ -n "${active_buddy}" ]]; then
+    patch_args+=(
+      --manifest "${BUDDYSWITCH_REPO_ROOT}/buddyswitch/manifest.toml"
+      --buddy "${active_buddy}"
+      --instance-root "${BUDDYSWITCH_INSTANCE_ROOT}"
+      --workspace-dir "${BUDDYSWITCH_WORKSPACE_DIR}"
+      --project-workspace-dir "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}"
+      --home "${BUDDYSWITCH_HOME}"
+      --codex-home "${BUDDYSWITCH_CODEX_HOME}"
+      --xdg-config-home "${BUDDYSWITCH_XDG_CONFIG_HOME}"
+    )
+    if [[ -n "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET:-}" ]]; then
+      patch_args+=(--broker-socket "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}")
+    fi
+  fi
+
   python3 "${BUDDYSWITCH_CODEX_CONFIG_HELPER}" \
-    --config "${config_path}" \
-    --shared-root "${BUDDYSWITCH_SHARED_ROOT}" \
-    --source-codex-home "${BUDDYSWITCH_SOURCE_CODEX_HOME}" \
-    --repo-root "${BUDDYSWITCH_REPO_ROOT}" \
+    "${patch_args[@]}" \
     --temp-root "/tmp" \
     "${temp_root_args[@]}"
 }
@@ -137,6 +162,20 @@ buddyswitch_validate_buddy_id() {
   python3 "${manifest_helper}" --manifest "${manifest_path}" show-buddy "${buddy_id}" >/dev/null
 }
 
+buddyswitch_require_env_profile() {
+  local buddy_id="$1"
+  local helper manifest_path
+
+  helper="${BUDDYSWITCH_REPO_ROOT}/${BUDDYSWITCH_ENV_PROFILES_HELPER_REL}"
+  manifest_path="${BUDDYSWITCH_REPO_ROOT}/buddyswitch/manifest.toml"
+
+  if [[ ! -f "${helper}" ]]; then
+    echo "Env profile helper missing: ${helper}" >&2
+    return 1
+  fi
+  python3 "${helper}" --manifest "${manifest_path}" validate --buddy "${buddy_id}" >/dev/null
+}
+
 buddyswitch_buddy_agents_template_path() {
   local buddy_id="$1"
   printf '%s/tools/launcher/assets/buddies/%s/AGENTS.md\n' "${BUDDYSWITCH_REPO_ROOT}" "${buddy_id}"
@@ -144,13 +183,20 @@ buddyswitch_buddy_agents_template_path() {
 
 buddyswitch_require_buddy_agents_template() {
   local buddy_id="$1"
-  local template_path
+  local template_path helper manifest_path
 
   template_path="$(buddyswitch_buddy_agents_template_path "${buddy_id}")"
   if [[ ! -f "${template_path}" ]]; then
     echo "Buddy AGENTS template not found: ${template_path}" >&2
     return 1
   fi
+  helper="${BUDDYSWITCH_REPO_ROOT}/${BUDDYSWITCH_RUNTIME_AGENTS_HELPER_REL}"
+  manifest_path="${BUDDYSWITCH_REPO_ROOT}/buddyswitch/manifest.toml"
+  if [[ ! -f "${helper}" ]]; then
+    echo "Runtime AGENTS helper missing: ${helper}" >&2
+    return 1
+  fi
+  python3 "${helper}" --manifest "${manifest_path}" validate --buddy "${buddy_id}" --template "${template_path}" >/dev/null
   export BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE="${template_path}"
 }
 

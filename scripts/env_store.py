@@ -14,11 +14,17 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OBJECTS_ROOT = ROOT / "buddyswitch" / "objects"
+_RAW_STATE_ROOT = os.environ.get("BUDDYSWITCH_STATE_ROOT")
+if isinstance(_RAW_STATE_ROOT, str) and _RAW_STATE_ROOT.strip():
+    STATE_ROOT = Path(_RAW_STATE_ROOT.strip()).expanduser().resolve(strict=False)
+else:
+    STATE_ROOT = ROOT
+
+OBJECTS_ROOT = STATE_ROOT / "buddyswitch" / "objects"
 TRACKS_DIR = OBJECTS_ROOT / "tracks"
 TASKS_DIR = OBJECTS_ROOT / "tasks"
 ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
-CONTENT_ROOT = ROOT / "buddyswitch" / "content"
+CONTENT_ROOT = STATE_ROOT / "buddyswitch" / "content"
 RUN_CONTENT_DIR = CONTENT_ROOT / "runs"
 RUNTIME_WORKSPACE_AGENTS_HEADER = "# BuddySwitch Runtime Workspace"
 VALID_TRACK_STATUS = ("active", "blocked", "done", "archived")
@@ -31,7 +37,12 @@ def now_iso() -> str:
 
 
 def rel(path: Path) -> str:
-    return path.relative_to(ROOT).as_posix()
+    for candidate_root in (ROOT, STATE_ROOT):
+        try:
+            return path.relative_to(candidate_root).as_posix()
+        except ValueError:
+            continue
+    return path.as_posix()
 
 
 def runtime_workspace_agents_file(root: Path | None = None) -> Path:
@@ -69,23 +80,6 @@ def require_id(value: str, label: str) -> str:
     if not isinstance(value, str) or not ID_PATTERN.match(value):
         raise ValueError(f"{label} must match /^[a-z0-9][a-z0-9-]*$/")
     return value
-
-
-def normalize_repo_path(raw_path: str) -> str:
-    path = Path(raw_path)
-    if path.is_absolute() or ".." in path.parts:
-        raise ValueError(f"path must be repo-relative and must not contain '..': {raw_path}")
-    return path.as_posix()
-
-
-def normalize_run_content_path(raw_path: str) -> str:
-    normalized = normalize_repo_path(raw_path)
-    path = Path(normalized)
-    if path.parts[:3] != ("buddyswitch", "content", "runs"):
-        raise ValueError("run content path must start with buddyswitch/content/runs/")
-    if path.suffix.lower() != ".json":
-        raise ValueError("run content path must be a JSON file (*.json)")
-    return normalized
 
 
 def slugify(text: str) -> str:
@@ -251,8 +245,7 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     title = artifact.get("title")
     task_id = artifact.get("task_id")
     buddy = artifact.get("buddy")
-    skill_id = artifact.get("skill_id")
-    slot = artifact.get("slot")
+    kind = artifact.get("kind")
     revision = artifact.get("revision")
     supersedes_sentinel = object()
     supersedes_artifact_id = artifact.get("supersedes_artifact_id", supersedes_sentinel)
@@ -268,10 +261,9 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     require_id(task_id, "artifact.task_id")
     if not isinstance(buddy, str) or not buddy.strip():
         raise ValueError("artifact.buddy must be a non-empty string")
-    if not isinstance(skill_id, str) or not skill_id.strip():
-        raise ValueError("artifact.skill_id must be a non-empty string")
-    if not isinstance(slot, str) or not slot.strip():
-        raise ValueError("artifact.slot must be a non-empty string")
+    if not isinstance(kind, str) or not kind.strip():
+        raise ValueError("artifact.kind must be a non-empty string")
+    require_id(kind.strip(), "artifact.kind")
     if not isinstance(revision, int) or revision <= 0:
         raise ValueError("artifact.revision must be a positive integer")
     if supersedes_artifact_id is supersedes_sentinel:
@@ -295,8 +287,7 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         "title": title.strip(),
         "task_id": task_id,
         "buddy": buddy.strip(),
-        "skill_id": skill_id.strip(),
-        "slot": slot.strip(),
+        "kind": kind.strip(),
         "revision": revision,
         "supersedes_artifact_id": supersedes_artifact_id,
         "is_current": is_current,
@@ -308,41 +299,26 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _artifact_slot_name(task: dict[str, Any], artifact: dict[str, Any] | None = None) -> str:
+def _artifact_kind_name(task: dict[str, Any], artifact: dict[str, Any] | None = None) -> str:
     if artifact is not None:
-        slot = artifact.get("slot")
-        if isinstance(slot, str) and slot.strip():
-            return slot.strip()
-    if artifact is not None:
-        skill_id = artifact.get("skill_id")
-        if isinstance(skill_id, str) and skill_id.strip():
-            return skill_id.strip()
+        kind = artifact.get("kind")
+        if isinstance(kind, str) and kind.strip():
+            return kind.strip()
     task_title = task.get("title")
     if isinstance(task_title, str) and task_title.strip():
         return slugify(task_title)
     return "artifact"
 
 
-def _task_slot_state(task: dict[str, Any], slot: str) -> dict[str, Any] | None:
+def _task_kind_state(task: dict[str, Any], kind: str) -> dict[str, Any] | None:
     artifact_slots = task.get("artifact_slots", {})
     if not isinstance(artifact_slots, dict):
         return None
-    row = artifact_slots.get(slot)
+    row = artifact_slots.get(kind)
     return row if isinstance(row, dict) else None
 
 
-def _current_task_artifact_id(task: dict[str, Any]) -> str | None:
-    artifact_slots = task.get("artifact_slots", {})
-    if isinstance(artifact_slots, dict):
-        for row in artifact_slots.values():
-            if isinstance(row, dict):
-                current_artifact_id = row.get("current_artifact_id")
-                if isinstance(current_artifact_id, str) and current_artifact_id:
-                    return current_artifact_id
-    return None
-
-
-def _legacy_list_tracks() -> list[dict[str, Any]]:
+def list_tracks() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in TRACKS_DIR.glob("*.json"):
         rows.append(validate_track(_read_json(path)))
@@ -350,7 +326,7 @@ def _legacy_list_tracks() -> list[dict[str, Any]]:
     return rows
 
 
-def _legacy_list_tasks() -> list[dict[str, Any]]:
+def list_tasks() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in TASKS_DIR.glob("*.json"):
         rows.append(validate_task(_read_json(path)))
@@ -358,7 +334,7 @@ def _legacy_list_tasks() -> list[dict[str, Any]]:
     return rows
 
 
-def _legacy_list_artifacts() -> list[dict[str, Any]]:
+def list_artifacts() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in ARTIFACT_OBJECTS_DIR.glob("*.json"):
         rows.append(validate_artifact(_read_json(path)))
@@ -372,15 +348,7 @@ def _task_artifacts_from_map(task: dict[str, Any], artifact_map: dict[str, dict[
     return rows
 
 
-def _legacy_list_task_artifacts(task_id: str) -> list[dict[str, Any]]:
-    task = get_task(task_id)
-    if task is None:
-        raise ValueError(f"task not found: {task_id}")
-    artifact_map = {artifact["id"]: artifact for artifact in list_artifacts()}
-    return _task_artifacts_from_map(task, artifact_map)
-
-
-def _legacy_build_track_artifact_index(track_id: str | None) -> dict[str, Any] | None:
+def build_track_artifact_index(track_id: str | None) -> dict[str, Any] | None:
     if not track_id:
         return None
     track = get_track(track_id)
@@ -407,11 +375,12 @@ def _legacy_build_track_artifact_index(track_id: str | None) -> dict[str, Any] |
                 {
                     "artifact_id": artifact["id"],
                     "title": artifact["title"],
-                    "slot": artifact.get("slot"),
+                    "kind": artifact.get("kind"),
                     "revision": artifact.get("revision"),
                     "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
                     "summary": artifact.get("summary", ""),
-                    "skill_id": artifact.get("skill_id", ""),
+                    "source_run_id": artifact.get("source_run_id"),
+                    "source_buddy": artifact.get("buddy"),
                     "updated_at": artifact_updated_at,
                     "is_current": bool(artifact.get("is_current")),
                 }
@@ -437,49 +406,49 @@ def _legacy_build_track_artifact_index(track_id: str | None) -> dict[str, Any] |
     }
 
 
-def _legacy_get_track(track_id: str) -> dict[str, Any] | None:
+def get_track(track_id: str) -> dict[str, Any] | None:
     path = track_file(track_id)
     if not path.exists():
         return None
     return validate_track(_read_json(path))
 
 
-def _legacy_get_task(task_id: str) -> dict[str, Any] | None:
+def get_task(task_id: str) -> dict[str, Any] | None:
     path = task_file(task_id)
     if not path.exists():
         return None
     return validate_task(_read_json(path))
 
 
-def _legacy_get_artifact(artifact_id: str) -> dict[str, Any] | None:
+def get_artifact(artifact_id: str) -> dict[str, Any] | None:
     path = artifact_file(artifact_id)
     if not path.exists():
         return None
     return validate_artifact(_read_json(path))
 
 
-def _legacy_save_track(track: dict[str, Any]) -> dict[str, Any]:
+def save_track(track: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_track(track)
     ensure_runtime_dirs()
     _write_json(track_file(normalized["id"]), normalized)
     return normalized
 
 
-def _legacy_save_task(task: dict[str, Any]) -> dict[str, Any]:
+def save_task(task: dict[str, Any]) -> dict[str, Any]:
     ensure_runtime_dirs()
     normalized = validate_task(task)
     _write_json(task_file(normalized["id"]), normalized)
     return normalized
 
 
-def _legacy_save_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
+def save_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     ensure_runtime_dirs()
     normalized = validate_artifact(artifact)
     _write_json(artifact_file(normalized["id"]), normalized)
     return normalized
 
 
-def _legacy_create_track(
+def create_track(
     track_id: str,
     title: str,
     *,
@@ -504,7 +473,7 @@ def _legacy_create_track(
     return save_track(track)
 
 
-def _legacy_update_track(track_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+def update_track(track_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     track = get_track(track_id)
     if track is None:
         raise ValueError(f"track not found: {track_id}")
@@ -515,28 +484,6 @@ def _legacy_update_track(track_id: str, patch: dict[str, Any]) -> dict[str, Any]
         track[key] = value
     track["updated_at"] = now_iso()
     return save_track(track)
-
-
-def _legacy_advance_track(
-    track_id: str,
-    *,
-    current_buddy: str | None = None,
-    next_buddy: str | None = None,
-    status: str | None = None,
-    summary: str | None = None,
-) -> dict[str, Any]:
-    patch: dict[str, Any] = {}
-    if current_buddy is not None:
-        patch["current_buddy"] = current_buddy
-    if next_buddy is not None:
-        patch["next_buddy"] = next_buddy
-    if status is not None:
-        patch["status"] = status
-    if summary is not None:
-        patch["summary"] = summary
-    if not patch:
-        raise ValueError("advance requires at least one field")
-    return update_track(track_id, patch)
 
 
 def _register_task_id(track_id: str, task_id: str) -> dict[str, Any]:
@@ -562,7 +509,7 @@ def _unregister_task_id(track_id: str, task_id: str) -> dict[str, Any]:
     return track
 
 
-def _legacy_create_task(
+def create_task(
     task_id: str,
     title: str,
     *,
@@ -605,7 +552,7 @@ def _legacy_create_task(
     return task
 
 
-def _legacy_update_task(task_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+def update_task(task_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     task = get_task(task_id)
     if task is None:
         raise ValueError(f"task not found: {task_id}")
@@ -635,7 +582,7 @@ def _legacy_update_task(task_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     return task
 
 
-def _legacy_register_task_to_track(track_id: str, task_id: str) -> dict[str, Any]:
+def register_task_to_track(track_id: str, task_id: str) -> dict[str, Any]:
     task = get_task(task_id)
     if task is None:
         raise ValueError(f"task not found: {task_id}")
@@ -647,7 +594,7 @@ def _legacy_register_task_to_track(track_id: str, task_id: str) -> dict[str, Any
     return task
 
 
-def _legacy_add_run_to_task(task_id: str, run_id: str, *, summary: str | None = None) -> dict[str, Any]:
+def add_run_to_task(task_id: str, run_id: str, *, summary: str | None = None) -> dict[str, Any]:
     task = get_task(task_id)
     if task is None:
         raise ValueError(f"task not found: {task_id}")
@@ -660,31 +607,31 @@ def _legacy_add_run_to_task(task_id: str, run_id: str, *, summary: str | None = 
     return save_task(task)
 
 
-def _legacy_add_artifact_to_task(task_id: str, artifact_id: str, *, summary: str | None = None) -> dict[str, Any]:
+def add_artifact_to_task(task_id: str, artifact_id: str, *, summary: str | None = None) -> dict[str, Any]:
     task = get_task(task_id)
     if task is None:
         raise ValueError(f"task not found: {task_id}")
     artifact = get_artifact(artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
-    slot = _artifact_slot_name(task, artifact)
+    kind = _artifact_kind_name(task, artifact)
     revision = artifact.get("revision")
     if not isinstance(revision, int) or revision <= 0:
         raise ValueError("artifact.revision must be a positive integer")
     if artifact_id not in task["artifact_ids"]:
         task["artifact_ids"].append(artifact_id)
     artifact_slots = task.setdefault("artifact_slots", {})
-    current_slot = artifact_slots.get(slot)
-    if not isinstance(current_slot, dict):
-        current_slot = None
-    current_artifact_id = current_slot.get("current_artifact_id") if current_slot else None
-    current_revision_count = current_slot.get("revision_count") if current_slot else None
-    if current_slot is None or not isinstance(current_artifact_id, str) or not current_artifact_id:
+    current_kind = artifact_slots.get(kind)
+    if not isinstance(current_kind, dict):
+        current_kind = None
+    current_artifact_id = current_kind.get("current_artifact_id") if current_kind else None
+    current_revision_count = current_kind.get("revision_count") if current_kind else None
+    if current_kind is None or not isinstance(current_artifact_id, str) or not current_artifact_id:
         if not artifact.get("is_current"):
             artifact["is_current"] = True
             artifact["updated_at"] = now_iso()
             save_artifact(artifact)
-        artifact_slots[slot] = {
+        artifact_slots[kind] = {
             "current_artifact_id": artifact_id,
             "revision_count": revision,
         }
@@ -695,12 +642,12 @@ def _legacy_add_artifact_to_task(task_id: str, artifact_id: str, *, summary: str
                 current_artifact["is_current"] = False
                 current_artifact["updated_at"] = now_iso()
                 save_artifact(current_artifact)
-        artifact_slots[slot] = {
+        artifact_slots[kind] = {
             "current_artifact_id": artifact_id,
             "revision_count": max(current_revision_count if isinstance(current_revision_count, int) else 0, revision),
         }
     else:
-        artifact_slots[slot] = {
+        artifact_slots[kind] = {
             "current_artifact_id": current_artifact_id,
             "revision_count": max(current_revision_count if isinstance(current_revision_count, int) else 0, revision),
         }
@@ -710,16 +657,16 @@ def _legacy_add_artifact_to_task(task_id: str, artifact_id: str, *, summary: str
     return save_task(task)
 
 
-def _legacy_remove_artifact_from_task(task_id: str, artifact_id: str) -> dict[str, Any]:
+def remove_artifact_from_task(task_id: str, artifact_id: str) -> dict[str, Any]:
     task = get_task(task_id)
     if task is None:
         raise ValueError(f"task not found: {task_id}")
     artifact = get_artifact(artifact_id)
-    slot = _artifact_slot_name(task, artifact) if artifact else None
-    slot_state = _task_slot_state(task, slot) if slot else None
+    kind = _artifact_kind_name(task, artifact) if artifact else None
+    kind_state = _task_kind_state(task, kind) if kind else None
     task["artifact_ids"] = [item for item in task["artifact_ids"] if item != artifact_id]
-    if slot and slot_state is not None and isinstance(task.get("artifact_slots"), dict):
-        deleting_current = slot_state.get("current_artifact_id") == artifact_id
+    if kind and kind_state is not None and isinstance(task.get("artifact_slots"), dict):
+        deleting_current = kind_state.get("current_artifact_id") == artifact_id
         if deleting_current:
             candidates = []
             artifact_map = {item["id"]: item for item in list_artifacts()}
@@ -727,12 +674,12 @@ def _legacy_remove_artifact_from_task(task_id: str, artifact_id: str) -> dict[st
                 candidate = artifact_map.get(candidate_id)
                 if candidate is None:
                     continue
-                if _artifact_slot_name(task, candidate) == slot:
+                if _artifact_kind_name(task, candidate) == kind:
                     candidates.append(candidate)
             if candidates:
                 candidates.sort(key=lambda row: (row.get("revision", 0), row.get("updated_at", ""), row["id"]), reverse=True)
                 promoted = candidates[0]
-                revision_count = slot_state.get("revision_count", promoted["revision"])
+                revision_count = kind_state.get("revision_count", promoted["revision"])
                 if not isinstance(revision_count, int) or revision_count < promoted["revision"]:
                     revision_count = promoted["revision"]
                 timestamp = now_iso()
@@ -740,31 +687,27 @@ def _legacy_remove_artifact_from_task(task_id: str, artifact_id: str) -> dict[st
                     candidate["is_current"] = candidate["id"] == promoted["id"]
                     candidate["updated_at"] = timestamp
                     save_artifact(candidate)
-                task["artifact_slots"][slot] = {
+                task["artifact_slots"][kind] = {
                     "current_artifact_id": promoted["id"],
                     "revision_count": revision_count,
                 }
             else:
-                task["artifact_slots"].pop(slot, None)
+                task["artifact_slots"].pop(kind, None)
     task["updated_at"] = now_iso()
     return save_task(task)
 
 
-def _legacy_create_artifact(
+def create_artifact(
     *,
     artifact_id: str | None,
     title: str,
     buddy: str,
-    skill_id: str,
-    slot: str | None = None,
+    kind: str,
     task_id: str,
     source_run_id: str,
     summary: str = "",
     content: dict[str, Any] | None = None,
-    auto_register: bool = True,
 ) -> dict[str, Any]:
-    if not auto_register:
-        raise ValueError("auto_register=False is not supported for v2 slot-aware artifact creation")
     task = get_task(task_id)
     if task is None:
         raise ValueError(f"task not found: {task_id}")
@@ -774,10 +717,11 @@ def _legacy_create_artifact(
         raise ValueError(f"artifact already exists: {resolved_id}")
     if task["buddy"] != buddy:
         raise ValueError(f"artifact.buddy '{buddy}' must match task buddy '{task['buddy']}'")
-    resolved_slot = slot.strip() if isinstance(slot, str) and slot.strip() else _artifact_slot_name(task, {"skill_id": skill_id, "title": title})
-    current_slot = _task_slot_state(task, resolved_slot)
-    previous = get_artifact(current_slot["current_artifact_id"]) if current_slot else None
-    revision = 1 if current_slot is None else int(current_slot["revision_count"]) + 1
+    normalized_kind = kind.strip() if isinstance(kind, str) else ""
+    require_id(normalized_kind, "artifact.kind")
+    current_kind = _task_kind_state(task, normalized_kind)
+    previous = get_artifact(current_kind["current_artifact_id"]) if current_kind else None
+    revision = 1 if current_kind is None else int(current_kind["revision_count"]) + 1
     if previous is not None:
         previous["is_current"] = False
         previous["updated_at"] = now_iso()
@@ -788,8 +732,7 @@ def _legacy_create_artifact(
         "title": title,
         "task_id": task_id,
         "buddy": buddy,
-        "skill_id": skill_id,
-        "slot": resolved_slot,
+        "kind": normalized_kind,
         "revision": revision,
         "supersedes_artifact_id": previous["id"] if previous else None,
         "is_current": True,
@@ -800,12 +743,11 @@ def _legacy_create_artifact(
         "updated_at": timestamp,
     }
     artifact = save_artifact(artifact)
-    if auto_register:
-        add_artifact_to_task(task_id, resolved_id, summary=summary or None)
+    add_artifact_to_task(task_id, resolved_id, summary=summary or None)
     return artifact
 
 
-def _legacy_update_artifact(
+def update_artifact(
     artifact_id: str,
     patch: dict[str, Any],
     *,
@@ -819,7 +761,7 @@ def _legacy_update_artifact(
         "title",
         "task_id",
         "buddy",
-        "skill_id",
+        "kind",
         "source_run_id",
         "summary",
         "content",
@@ -844,6 +786,7 @@ def _legacy_update_artifact(
         raise ValueError(f"task not found: {new_task_id}")
     if artifact.get("buddy") != task["buddy"]:
         raise ValueError("artifact.buddy must match artifact.task_id owner")
+    require_id(artifact.get("kind"), "artifact.kind")
     require_id(artifact.get("source_run_id"), "artifact.source_run_id")
 
     artifact["updated_at"] = now_iso()
@@ -856,7 +799,7 @@ def _legacy_update_artifact(
     return artifact
 
 
-def _legacy_delete_artifact(artifact_id: str, *, delete_file: bool = False) -> dict[str, Any]:
+def delete_artifact(artifact_id: str) -> dict[str, Any]:
     require_runtime_workspace_write_root()
     artifact = get_artifact(artifact_id)
     if artifact is None:
@@ -870,228 +813,30 @@ def _legacy_delete_artifact(artifact_id: str, *, delete_file: bool = False) -> d
     return artifact
 
 
-def _legacy_delete_artifacts_by_buddy(
+def delete_artifacts_by_buddy(
     buddy_id: str,
     *,
-    delete_files: bool = False,
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     targets = [artifact for artifact in list_artifacts() if artifact.get("buddy") == buddy_id]
     if dry_run:
         return targets
     for artifact in targets:
-        delete_artifact(artifact["id"], delete_file=delete_files)
+        delete_artifact(artifact["id"])
     return targets
 
 
-def _legacy_delete_all_artifacts(*, delete_files: bool = False, dry_run: bool = False) -> list[dict[str, Any]]:
+def delete_all_artifacts(*, dry_run: bool = False) -> list[dict[str, Any]]:
     targets = list_artifacts()
     if dry_run:
         return targets
     for artifact in targets:
-        delete_artifact(artifact["id"], delete_file=delete_files)
+        delete_artifact(artifact["id"])
     return targets
 
 
-def _legacy_save_run_content(run_id: str, payload: dict[str, Any]) -> str:
+def save_run_content(run_id: str, payload: dict[str, Any]) -> str:
     ensure_runtime_dirs()
-    path = ROOT / run_content_path(run_id)
+    path = STATE_ROOT / run_content_path(run_id)
     _write_json(path, payload)
     return rel(path)
-
-
-def _runtime_repositories():
-    import runtime_store
-
-    return runtime_store
-
-
-def build_track_artifact_index(track_id: str | None) -> dict[str, Any] | None:
-    return _runtime_repositories().build_track_artifact_index(track_id)
-
-
-def list_tracks() -> list[dict[str, Any]]:
-    return _runtime_repositories().list_tracks()
-
-
-def list_tasks() -> list[dict[str, Any]]:
-    return _runtime_repositories().list_tasks()
-
-
-def list_artifacts() -> list[dict[str, Any]]:
-    return _runtime_repositories().list_artifacts()
-
-
-def list_task_artifacts(task_id: str) -> list[dict[str, Any]]:
-    return _runtime_repositories().list_task_artifacts(task_id)
-
-
-def get_track(track_id: str) -> dict[str, Any] | None:
-    return _runtime_repositories().get_track(track_id)
-
-
-def get_task(task_id: str) -> dict[str, Any] | None:
-    return _runtime_repositories().get_task(task_id)
-
-
-def get_artifact(artifact_id: str) -> dict[str, Any] | None:
-    return _runtime_repositories().get_artifact(artifact_id)
-
-
-def save_track(track: dict[str, Any]) -> dict[str, Any]:
-    return _runtime_repositories().save_track(track)
-
-
-def save_task(task: dict[str, Any]) -> dict[str, Any]:
-    return _runtime_repositories().save_task(task)
-
-
-def save_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
-    return _runtime_repositories().save_artifact(artifact)
-
-
-def create_track(
-    track_id: str,
-    title: str,
-    *,
-    status: str = "active",
-    current_buddy: str = "pm",
-    next_buddy: str | None = None,
-    summary: str = "",
-) -> dict[str, Any]:
-    return _runtime_repositories().create_track(
-        track_id,
-        title,
-        status=status,
-        current_buddy=current_buddy,
-        next_buddy=next_buddy,
-        summary=summary,
-    )
-
-
-def update_track(track_id: str, patch: dict[str, Any]) -> dict[str, Any]:
-    return _runtime_repositories().update_track(track_id, patch)
-
-
-def advance_track(
-    track_id: str,
-    *,
-    next_buddy: str,
-    summary: str | None = None,
-    status: str | None = None,
-) -> dict[str, Any]:
-    return _runtime_repositories().advance_track(
-        track_id,
-        next_buddy=next_buddy,
-        summary=summary,
-        status=status,
-    )
-
-
-def create_task(
-    task_id: str,
-    title: str,
-    *,
-    buddy: str,
-    track_id: str | None = None,
-    status: str = "active",
-    summary: str = "",
-    initial_run_id: str | None = None,
-) -> dict[str, Any]:
-    return _runtime_repositories().create_task(
-        task_id,
-        title,
-        buddy=buddy,
-        track_id=track_id,
-        status=status,
-        summary=summary,
-        initial_run_id=initial_run_id,
-    )
-
-
-def update_task(task_id: str, patch: dict[str, Any]) -> dict[str, Any]:
-    return _runtime_repositories().update_task(task_id, patch)
-
-
-def register_task_to_track(track_id: str, task_id: str) -> dict[str, Any]:
-    return _runtime_repositories().register_task_to_track(track_id, task_id)
-
-
-def add_run_to_task(task_id: str, run_id: str, *, summary: str | None = None) -> dict[str, Any]:
-    return _runtime_repositories().add_run_to_task(task_id, run_id, summary=summary)
-
-
-def add_artifact_to_task(task_id: str, artifact_id: str, *, summary: str | None = None) -> dict[str, Any]:
-    return _runtime_repositories().add_artifact_to_task(task_id, artifact_id, summary=summary)
-
-
-def remove_artifact_from_task(task_id: str, artifact_id: str) -> dict[str, Any]:
-    return _runtime_repositories().remove_artifact_from_task(task_id, artifact_id)
-
-
-def create_artifact(
-    *,
-    artifact_id: str | None,
-    title: str,
-    buddy: str,
-    skill_id: str,
-    slot: str | None = None,
-    task_id: str,
-    source_run_id: str,
-    summary: str = "",
-    content: dict[str, Any] | None = None,
-    auto_register: bool = True,
-) -> dict[str, Any]:
-    return _runtime_repositories().create_artifact(
-        artifact_id=artifact_id,
-        title=title,
-        buddy=buddy,
-        skill_id=skill_id,
-        slot=slot,
-        task_id=task_id,
-        source_run_id=source_run_id,
-        summary=summary,
-        content=content,
-        auto_register=auto_register,
-    )
-
-
-def update_artifact(
-    artifact_id: str,
-    patch: dict[str, Any],
-    *,
-    auto_register: bool = True,
-) -> dict[str, Any]:
-    return _runtime_repositories().update_artifact(
-        artifact_id,
-        patch,
-        auto_register=auto_register,
-    )
-
-
-def delete_artifact(artifact_id: str, *, delete_file: bool = False) -> dict[str, Any]:
-    return _runtime_repositories().delete_artifact(artifact_id, delete_file=delete_file)
-
-
-def delete_artifacts_by_buddy(
-    buddy_id: str,
-    *,
-    delete_files: bool = False,
-    dry_run: bool = False,
-) -> list[dict[str, Any]]:
-    return _runtime_repositories().delete_artifacts_by_buddy(
-        buddy_id,
-        delete_files=delete_files,
-        dry_run=dry_run,
-    )
-
-
-def delete_all_artifacts(*, delete_files: bool = False, dry_run: bool = False) -> list[dict[str, Any]]:
-    return _runtime_repositories().delete_all_artifacts(
-        delete_files=delete_files,
-        dry_run=dry_run,
-    )
-
-
-def save_run_content(run_id: str, payload: dict[str, Any]) -> str:
-    return _runtime_repositories().save_run_content(run_id, payload)

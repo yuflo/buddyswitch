@@ -34,7 +34,11 @@ path = "buddyswitch/skills/pm/write-prd"
 
 [[skills]]
 id = "track-manager"
-path = "buddyswitch/skills/pm/track-manager"
+path = "buddyswitch/skills/shared/track-manager"
+
+[[skills]]
+id = "artifact-manager"
+path = "buddyswitch/skills/shared/artifact-manager"
 
 [[skills]]
 id = "shape-prototype"
@@ -45,8 +49,16 @@ id = "implement-task"
 path = "buddyswitch/skills/dev/implement-task"
 
 [[skills]]
+id = "skill-creator-importer"
+path = "buddyswitch/skills/dev/skill-creator-importer"
+
+[[skills]]
 id = "smoke-test"
 path = "buddyswitch/skills/test/smoke-test"
+
+[[skills]]
+id = "task-manager"
+path = "buddyswitch/skills/shared/task-manager"
 
 [[buddies]]
 id = "market"
@@ -59,6 +71,17 @@ skills = [
   "positioning-copy",
   "channel-discovery",
   "launch-prep",
+  "track-manager",
+  "artifact-manager",
+  "task-manager",
+]
+artifact_kinds = [
+  "market-scan",
+  "pmf-report",
+  "customer-discovery",
+  "positioning-brief",
+  "channel-plan",
+  "launch-prep",
 ]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
@@ -66,12 +89,14 @@ permissions = ["track.read", "task.read", "task.create", "task.update", "task.ar
 id = "pm"
 label = "PM"
 scope = "Own product iteration and track progression."
-skills = ["write-prd", "track-manager"]
+skills = ["write-prd", "track-manager", "artifact-manager", "task-manager"]
+artifact_kinds = ["prd", "pm-decision", "track-note"]
 permissions = [
   "track.read",
   "track.create",
   "track.update",
   "track.advance",
+  "track.archive",
   "task.read",
   "task.create",
   "task.update",
@@ -86,19 +111,22 @@ permissions = [
 id = "design"
 label = "Design"
 scope = "Shape UI/UX prototype direction and design handoff outcomes."
-skills = ["shape-prototype"]
+skills = ["shape-prototype", "track-manager", "artifact-manager", "task-manager"]
+artifact_kinds = ["design-handoff", "prototype-brief"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
 [[buddies]]
 id = "dev"
 label = "Dev"
 scope = "Implement approved scope in project code."
-skills = ["implement-task"]
+skills = ["implement-task", "skill-creator-importer", "track-manager", "artifact-manager", "task-manager"]
+artifact_kinds = ["implementation-report", "skill-import-report"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
 [[buddies]]
 id = "test"
 label = "Test"
 scope = "Validate behavior and report pass/fail/blocked outcomes."
-skills = ["smoke-test"]
+skills = ["smoke-test", "track-manager", "artifact-manager", "task-manager"]
+artifact_kinds = ["smoke-test", "test-report"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]

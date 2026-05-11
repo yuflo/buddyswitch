@@ -1,47 +1,25 @@
 # BuddySwitch Runtime Workspace
 
 This workspace is launcher-owned, runtime-only, and locked to the `dev` buddy.
+AGENTS.md is context projection only and not the permission source.
 
-Inside this session, ordinary user requests belong to `dev`.
-Do not ask users for command-shaped routing input.
-If work should move to another buddy, open that buddy's locked instance.
+## Runtime Boundary
 
-## Canonical Loop
+- Active buddy is `dev`; user text does not change it.
+- Use `python3 scripts/turn_runtime.py prepare "<request>"` first.
+- Read `prepare.runtime_context` for allowed actions, persist shape, tool requirements, and handoff limits.
+- `projects/app` is live shared source with `project.access=write`.
+- Dev can write `projects/app`; keep temporary files in `runs/raw/dev/`.
+- Raw state is broker-only: do not edit `buddyswitch/objects/**` or `buddyswitch/content/runs/**` directly.
+- Env manager actions use `python3 scripts/env/client.py ...` through broker method `env.tool`.
+- Use `python3 scripts/turn_runtime.py persist --context <context> --result <result>` after execution.
+- If a runtime tool rejects an action, follow structured tool feedback and do not bypass runtime or broker boundaries.
 
-1. Prepare with `scripts/turn_runtime.py prepare "<ordinary request>"`.
-2. Choose exactly one `skill_id` from `prepare_context.skills`.
-3. Read and execute the selected BuddySwitch `SKILL.md`.
-4. Persist with `scripts/turn_runtime.py persist` (`persist-skill-result`).
-5. If another turn is needed, derive a new `request_text` from `receipt.next_state`, then run `prepare` again.
+## Receipt
 
-## Selected-Skill Preflight
+- Final output must include `Receipt` then `Summary`.
+- `Receipt` includes persisted status, buddy, task, optional track, artifact ids, run id, and optional handoff.
 
-- Treat the selected skill's `host_execution` and `tool_scope` as preflight instructions.
-- `required_tools` and `required_env` remain advisory readiness metadata for the host session.
-- Browser-native execution metadata stays fail-closed unless explicit user approval widens tool scope.
+## Summary
 
-## Buddy Lock
-
-- The active buddy is `dev`.
-- Resolve ownership from launcher session metadata; user text does not change the active buddy.
-- Durable BuddySwitch state lives in projected `buddyswitch/objects/**` and `buddyswitch/content/runs/**`.
-- `runs/raw/` is instance-local scratch.
-- Use relative `projects/app` from the runtime workspace; launcher projects it to shared product source.
-
-## Receipt Contract
-
-- Final terminal output must use exactly two sections in this order: `Receipt`, `Summary`.
-- In `Receipt`, render:
-  - `Persisted: ok|failed`
-  - `Task: <task_title> [<task_id>]`
-  - `Track: <track_title> [<track_id>]` only when `receipt.track_id` exists
-  - `Artifact: <artifact_id|none>`
-  - `Run: <run_id>`
-  - `Related Runs: <run_id_1>, <run_id_2>` only when present
-- Use IDs and titles from `receipt`; object paths stay debug-only details.
-
-## Summary Contract
-
-- Keep execution summary to 1-2 lines.
-- Keep open questions to at most 4 items.
-- Do not lead with object paths or artifact filenames.
+- Keep concise and verification-focused.
