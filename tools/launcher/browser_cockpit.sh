@@ -510,6 +510,7 @@ buddyswitch_browser_ensure_cockpit_endpoint() {
         echo "Profile: ${BUDDYSWITCH_BROWSER_PROFILE_DIR}"
         return 0
       fi
+      break
     fi
     sleep 1
   done
