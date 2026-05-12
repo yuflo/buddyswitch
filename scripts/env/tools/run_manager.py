@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from env.services import runs as run_service
+from env.tools import contracts as tool_contracts
+from env.tools import responses as tool_responses
 
 _ACTION_MAP = {
     "commit": run_service.commit_for_active_instance,
@@ -15,6 +17,10 @@ _ACTION_MAP = {
     "get_raw": run_service.get_raw_for_active_instance,
     "validate_result": run_service.validate_result_for_active_instance,
 }
+
+
+def _supported_actions_text() -> str:
+    return ", ".join(sorted(tool_contracts.supported_actions("run")))
 
 
 def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
@@ -30,25 +36,25 @@ def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str,
         "active_buddy": active_buddy,
         "allowed_next_actions": [
             'Send env.tool payload as {"tool":"run","action":"<action>","args":{...}}.',
-            "Use one supported action: commit, get_receipt, get_raw, validate_result.",
+            f"Use one supported action: {_supported_actions_text()}.",
         ],
     }
 
 
-def _unknown_action_error(*, action: str, active_buddy: str) -> dict[str, Any]:
+def _router_contract_error(*, action: str, active_buddy: str, action_name: str) -> dict[str, Any]:
     return {
         "ok": False,
         "tool": "run",
         "action": action,
         "error": {
-            "code": "E_RUN_ACTION",
-            "message": f"unsupported run action: {action}",
+            "code": "E_ENV_TOOL_ROUTER",
+            "message": f"router dispatched unsupported run action: {action_name}",
         },
-        "permission_boundary": "request-payload",
+        "permission_boundary": "env.tool.router_contract",
         "active_buddy": active_buddy,
         "allowed_next_actions": [
-            "Use one supported action: commit, get_receipt, get_raw, validate_result.",
-            "Check prepare.runtime_context.env_tools.run_manager for command and payload hints.",
+            "Retry through env.tools.router with a registry-declared action.",
+            "Report registry/manager drift if this persists.",
         ],
     }
 
@@ -61,7 +67,7 @@ def _runtime_feedback_error(
     message: str,
     details: dict[str, Any],
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "ok": False,
         "tool": "run",
         "action": action,
@@ -72,6 +78,16 @@ def _runtime_feedback_error(
         "active_buddy": active_buddy,
         **details,
     }
+    if "allowed_next_actions" in payload and "allowed_next_action_options" not in payload:
+        payload["allowed_next_action_options"] = [
+            tool_responses.next_action_option(
+                tool="context",
+                action="summarize",
+                option_id="summarize_context_before_run_retry",
+                reason="Summarize active context before retrying run action.",
+            )
+        ]
+    return payload
 
 
 def dispatch_run_manager_request(
@@ -104,7 +120,7 @@ def dispatch_run_manager_request(
 
     handler = _ACTION_MAP.get(action_name)
     if handler is None:
-        return _unknown_action_error(action=action, active_buddy=active_buddy)
+        return _router_contract_error(action=action, active_buddy=active_buddy, action_name=action_name)
 
     context: run_service.RunServiceContext = {
         "active_buddy": active_buddy,

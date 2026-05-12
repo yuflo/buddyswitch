@@ -106,6 +106,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
     def _assert_success_contract(self, response: dict[str, object], *, tool: str, action: str, buddy: str) -> None:
         self.assertTrue(response.get("ok"), msg=response)
+        for key in ("ok", "tool", "action", "active_buddy", "allowed_next_actions"):
+            self.assertIn(key, response)
         self.assertEqual(response.get("tool"), tool)
         self.assertEqual(response.get("action"), f"{tool}.{action}")
         self.assertEqual(response.get("active_buddy"), buddy)
@@ -116,6 +118,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
     def _assert_rejection_contract(self, response: dict[str, object], *, tool: str, action: str, buddy: str) -> None:
         self.assertFalse(response.get("ok"), msg=response)
+        for key in ("ok", "tool", "action", "active_buddy", "permission_boundary", "allowed_next_actions"):
+            self.assertIn(key, response)
         self.assertEqual(response.get("tool"), tool)
         self.assertEqual(response.get("action"), f"{tool}.{action}")
         self.assertEqual(response.get("active_buddy"), buddy)
@@ -125,12 +129,28 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertIsInstance(error.get("code"), str, msg=response)
         self.assertIsInstance(error.get("message"), str, msg=response)
         self.assertIsInstance(response.get("permission_boundary"), str, msg=response)
+        self.assertNotIn("permission_boundary", error)
+        self.assertNotIn("allowed_next_actions", error)
+        self.assertNotIn("command_hint", error)
+        self.assertNotIn("stop_condition", error)
         allowed_next_actions = response.get("allowed_next_actions")
         self.assertIsInstance(allowed_next_actions, list, msg=response)
         assert isinstance(allowed_next_actions, list)
         self.assertTrue(allowed_next_actions, msg=response)
 
-    def test_each_env_tool_has_success_response_with_required_machine_readable_fields(self) -> None:
+    def _assert_structured_options(self, response: dict[str, object]) -> None:
+        self.assertIn("allowed_next_action_options", response)
+        options = response["allowed_next_action_options"]
+        self.assertIsInstance(options, list, msg=response)
+        assert isinstance(options, list)
+        self.assertGreaterEqual(len(options), 1, msg=response)
+        for row in options:
+            self.assertIsInstance(row, dict, msg=response)
+            assert isinstance(row, dict)
+            for key in ("id", "tool", "action", "mutates", "preconditions", "reason", "source_refs"):
+                self.assertIn(key, row)
+
+    def test_each_env_tool_has_success_response_with_canonical_machine_readable_fields(self) -> None:
         dev_instance_id = "inst-dev-response-contract"
         dev_instance = self._instance_json(instance_id=dev_instance_id, buddy="dev")
         pm_instance_id = "inst-pm-response-contract"
@@ -187,7 +207,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 )
                 self._assert_success_contract(response, tool=tool, action=action, buddy=buddy)
 
-    def test_each_env_tool_has_rejection_response_with_required_machine_readable_fields(self) -> None:
+    def test_each_env_tool_has_rejection_response_with_canonical_machine_readable_fields(self) -> None:
         dev_instance_id = "inst-dev-rejection-contract"
         dev_instance = self._instance_json(instance_id=dev_instance_id, buddy="dev")
         market_instance_id = "inst-market-rejection-contract"
@@ -221,6 +241,63 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                     buddy=buddy,
                 )
                 self._assert_rejection_contract(response, tool=tool, action=action, buddy=buddy)
+
+    def test_decision_critical_rejections_include_structured_next_action_options(self) -> None:
+        dev_instance_id = "inst-dev-option-contract"
+        dev_instance = self._instance_json(instance_id=dev_instance_id, buddy="dev")
+        market_instance_id = "inst-market-option-contract"
+        market_instance = self._instance_json(instance_id=market_instance_id, buddy="market")
+        market_context = self._prepare(
+            text=MARKET_REQUEST,
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+            buddy="market",
+        )
+
+        cases = [
+            ("context", "get", {"context": "not an object"}, dev_instance, dev_instance_id, "dev", False),
+            ("track", "get_current", {}, dev_instance, dev_instance_id, "dev", True),
+            ("handoff", "validate", {}, dev_instance, dev_instance_id, "dev", False),
+            (
+                "evidence",
+                "approve_downgrade",
+                {"context": market_context},
+                market_instance,
+                market_instance_id,
+                "market",
+                False,
+            ),
+        ]
+        for tool, action, args, instance_json, instance_id, buddy, expect_ok in cases:
+            with self.subTest(tool=tool, action=action):
+                response = self._dispatch(
+                    tool=tool,
+                    action=action,
+                    args=args,
+                    instance_json=instance_json,
+                    instance_id=instance_id,
+                    buddy=buddy,
+                )
+                self.assertEqual(bool(response.get("ok")), expect_ok, msg=response)
+                self._assert_structured_options(response)
+
+    def test_response_helpers_do_not_emit_legacy_mirrored_fields(self) -> None:
+        dev_instance_id = "inst-dev-mirror-contract"
+        dev_instance = self._instance_json(instance_id=dev_instance_id, buddy="dev")
+        response = self._dispatch(
+            tool="context",
+            action="get",
+            args={"context": "not an object"},
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            buddy="dev",
+        )
+        self.assertFalse(response.get("ok"), msg=response)
+        payload_text = json.dumps(response, ensure_ascii=True, sort_keys=True)
+        self.assertNotIn("recommended_" + "route", payload_text)
+        self.assertNotIn("selected_" + "track", payload_text)
+        self.assertNotIn("next_" + "workflow_step", payload_text)
+        self.assertNotIn("must_call_" + "next", payload_text)
 
 
 if __name__ == "__main__":

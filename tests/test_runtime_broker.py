@@ -113,6 +113,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_prepare_and_persist_succeed_with_matching_identity(self) -> None:
         instance_json = self._instance_json()
+        before_prepare_instance = json.loads(instance_json.read_text(encoding="utf-8"))
         prepare = self._dispatch(
             method="prepare",
             payload={"text": PM_REQUEST},
@@ -124,8 +125,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(context["active_buddy"], "pm")
         self.assertEqual(context["instance_id"], "inst-pm-example")
         prepared_instance = json.loads(instance_json.read_text(encoding="utf-8"))
-        self.assertEqual(prepared_instance["current_task_id"], context["current_task_id"])
-        self.assertEqual(prepared_instance["current_track_id"], context["current_track_id"])
+        self.assertEqual(prepared_instance, before_prepare_instance)
 
         persisted = self._dispatch(
             method="persist",
@@ -222,7 +222,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="dev",
         )
         self.assertFalse(wrong_instance["ok"])
-        self.assertEqual(wrong_instance["error"]["permission_boundary"], "active-instance")
+        self.assertEqual(wrong_instance["permission_boundary"], "active-instance")
 
         wrong_buddy = self._dispatch(
             method="env.tool",
@@ -232,7 +232,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
         )
         self.assertFalse(wrong_buddy["ok"])
-        self.assertEqual(wrong_buddy["error"]["permission_boundary"], "active-buddy")
+        self.assertEqual(wrong_buddy["permission_boundary"], "active-buddy")
 
         inactive_instance_json = self._instance_json(instance_id="inst-dev-inactive", buddy="dev", status="inactive")
         inactive = self._dispatch(
@@ -243,7 +243,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="dev",
         )
         self.assertFalse(inactive["ok"])
-        self.assertEqual(inactive["error"]["permission_boundary"], "active-instance-status")
+        self.assertEqual(inactive["permission_boundary"], "active-instance-status")
 
     def test_legacy_env_task_method_is_rejected(self) -> None:
         instance_json = self._instance_json(instance_id="inst-dev-example", buddy="dev", status="active")
@@ -256,7 +256,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="dev",
         )
         self.assertFalse(rejected_legacy["ok"])
-        self.assertEqual(rejected_legacy["error"]["permission_boundary"], "broker-protocol")
+        self.assertEqual(rejected_legacy["permission_boundary"], "broker-protocol")
 
     def test_runtime_broker_client_missing_socket_raises_unavailable(self) -> None:
         with patch.dict(

@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 import uuid
 
 import env_profiles
+from env.tools import responses as tool_responses
 
 
 class EvidenceServiceContext(TypedDict):
@@ -47,6 +48,20 @@ def _payload_error(*, action: str, context: EvidenceServiceContext, message: str
         "allowed_next_actions": [
             'Send env.tool payload as {"tool":"evidence","action":"<action>","args":{...}}.',
             "Use prepare.runtime_context.env_tools.evidence_manager.payload_fields to shape args.",
+        ],
+        "allowed_next_action_options": [
+            tool_responses.next_action_option(
+                tool="evidence",
+                action="issue_browser",
+                option_id="issue_browser_token",
+                reason="Issue browser evidence token for the prepared run.",
+            ),
+            tool_responses.next_action_option(
+                tool="evidence",
+                action="approve_downgrade",
+                option_id="issue_approved_downgrade",
+                reason="Issue approved downgrade token only when fallback is explicitly approved.",
+            ),
         ],
     }
 
@@ -285,6 +300,12 @@ def _write_evidence_token(
                 "token_scope": token_scope,
                 "next_action": "Include tool_evidence.browser_cockpit_token in the next artifact-producing persist.",
             },
+            "persist_payload_hint": {
+                "tool_evidence_field": "tool_evidence.browser_cockpit_token",
+                "tool_evidence": {
+                    "accepted_fields": ["browser_cockpit_token", "approved_downgrade_token"],
+                },
+            },
         }
     return {
         "ok": True,
@@ -295,6 +316,12 @@ def _write_evidence_token(
             "persist_field": "tool_evidence.approved_downgrade_token",
             "token_scope": token_scope,
             "next_action": "Include tool_evidence.approved_downgrade_token in the next artifact-producing persist.",
+        },
+        "persist_payload_hint": {
+            "tool_evidence_field": "tool_evidence.approved_downgrade_token",
+            "tool_evidence": {
+                "accepted_fields": ["browser_cockpit_token", "approved_downgrade_token"],
+            },
         },
     }
 
@@ -332,6 +359,14 @@ def _issue(
         "active_buddy": context["active_buddy"],
         "allowed_next_actions": [
             "Include the issued evidence token in the next artifact-producing persist payload.",
+        ],
+        "allowed_next_action_options": [
+            tool_responses.next_action_option(
+                tool="run",
+                action="commit",
+                option_id="commit_with_issued_tool_evidence",
+                reason="Commit the prepared run with the issued tool_evidence token.",
+            ),
         ],
         **payload,
     }

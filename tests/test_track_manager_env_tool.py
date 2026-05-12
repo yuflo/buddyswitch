@@ -135,6 +135,38 @@ class TrackManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             rows[path.name] = json.loads(path.read_text(encoding="utf-8"))
         return rows
 
+    def _write_handoff_run(
+        self,
+        *,
+        run_id: str,
+        task_id: str,
+        track_id: str,
+        buddy_id: str,
+        next_buddy: str,
+    ) -> None:
+        run_path = self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")
+        run_path.parent.mkdir(parents=True, exist_ok=True)
+        run_path.write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "task_id": task_id,
+                    "track_id": track_id,
+                    "buddy_id": buddy_id,
+                    "timestamp": "2026-05-11T00:00:00Z",
+                    "handoff": {
+                        "next_buddy": next_buddy,
+                        "reason": "handoff for discovery ranking",
+                        "context": "continue from PM outputs",
+                    },
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
     def _assert_lifecycle_rejection(self, response: dict[str, object], *, action: str) -> None:
         self.assertFalse(response.get("ok"), msg=response)
         self.assertEqual(response.get("tool"), "track")
@@ -403,6 +435,155 @@ class TrackManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(unbound.get("ok"), msg=unbound)
         self.assertIsNone(unbound.get("track"))
+
+    def test_track_list_returns_discovery_summary_with_deterministic_candidate_order(self) -> None:
+        self._seed_track(
+            track_id="track-handoff-priority",
+            title="Handoff Priority",
+            current_buddy="pm",
+            next_buddy="market",
+            summary="recent PM handoff target",
+        )
+        self._seed_task(
+            task_id="task-pm-handoff-priority",
+            buddy="pm",
+            title="PM Handoff Priority Task",
+            track_id="track-handoff-priority",
+        )
+        self._write_handoff_run(
+            run_id="run-handoff-priority-r1",
+            task_id="task-pm-handoff-priority",
+            track_id="track-handoff-priority",
+            buddy_id="pm",
+            next_buddy="market",
+        )
+
+        self._seed_track(
+            track_id="track-next-only",
+            title="Next Buddy Only",
+            current_buddy="pm",
+            next_buddy="market",
+            summary="next-buddy match only",
+        )
+        self._seed_track(
+            track_id="track-participant-only",
+            title="Participant Only",
+            current_buddy="pm",
+            next_buddy="design",
+            summary="market participates via one task",
+        )
+        self._seed_task(
+            task_id="task-market-participant",
+            buddy="market",
+            title="Market Participant Task",
+            track_id="track-participant-only",
+        )
+        self._seed_track(
+            track_id="track-unrelated",
+            title="Unrelated",
+            current_buddy="pm",
+            next_buddy="design",
+            summary="no market relevance",
+        )
+
+        instance_json = self._instance_json(instance_id="inst-market-discovery", buddy="market")
+        listed = self._dispatch(
+            action="list",
+            args={},
+            instance_json=instance_json,
+            instance_id="inst-market-discovery",
+            buddy="market",
+        )
+        self.assertTrue(listed.get("ok"), msg=listed)
+        discovery_summary = listed.get("discovery_summary")
+        self.assertIsInstance(discovery_summary, dict, msg=listed)
+        assert isinstance(discovery_summary, dict)
+        candidate_ids = discovery_summary.get("candidate_track_ids")
+        self.assertEqual(
+            candidate_ids,
+            ["track-handoff-priority", "track-next-only", "track-participant-only"],
+        )
+        rows = listed.get("tracks")
+        self.assertIsInstance(rows, list, msg=listed)
+        assert isinstance(rows, list)
+        first = rows[0]
+        self.assertIsInstance(first, dict, msg=listed)
+        assert isinstance(first, dict)
+        self.assertEqual(first.get("id"), "track-handoff-priority")
+        discovery = first.get("discovery")
+        self.assertIsInstance(discovery, dict, msg=listed)
+        assert isinstance(discovery, dict)
+        self.assertEqual(discovery.get("active_buddy_role"), "next_buddy")
+        reasons = discovery.get("relevance_reasons")
+        self.assertIsInstance(reasons, list, msg=listed)
+        assert isinstance(reasons, list)
+        self.assertIn("recent_handoff.next_buddy == active_buddy", reasons)
+        self.assertIn("track.next_buddy == active_buddy", reasons)
+
+    def test_track_get_returns_track_context_summary_without_foreign_full_artifact_content(self) -> None:
+        self._seed_track(
+            track_id="track-context-summary",
+            title="Context Summary Track",
+            current_buddy="pm",
+            next_buddy="market",
+            summary="context summary smoke",
+        )
+        self._seed_task(
+            task_id="task-pm-context-summary",
+            buddy="pm",
+            title="PM Context Summary Task",
+            track_id="track-context-summary",
+        )
+        self._seed_task(
+            task_id="task-market-context-summary",
+            buddy="market",
+            title="Market Context Summary Task",
+            track_id="track-context-summary",
+        )
+        env_store.create_artifact(
+            artifact_id="art-pm-context-prd-r1",
+            title="PM PRD",
+            buddy="pm",
+            kind="prd",
+            task_id="task-pm-context-summary",
+            source_run_id="run-pm-context-r1",
+            summary="pm summary",
+            content={"secret": "full pm content must not leak in track summary"},
+        )
+        self._write_handoff_run(
+            run_id="run-pm-context-handoff-r2",
+            task_id="task-pm-context-summary",
+            track_id="track-context-summary",
+            buddy_id="pm",
+            next_buddy="market",
+        )
+
+        instance_json = self._instance_json(instance_id="inst-market-track-get", buddy="market")
+        fetched = self._dispatch(
+            action="get",
+            args={"track_id": "track-context-summary"},
+            instance_json=instance_json,
+            instance_id="inst-market-track-get",
+            buddy="market",
+        )
+        self.assertTrue(fetched.get("ok"), msg=fetched)
+        summary = fetched.get("track_context_summary")
+        self.assertIsInstance(summary, dict, msg=fetched)
+        assert isinstance(summary, dict)
+        tasks = summary.get("tasks")
+        self.assertIsInstance(tasks, list, msg=fetched)
+        assert isinstance(tasks, list)
+        pm_row = next(row for row in tasks if isinstance(row, dict) and row.get("id") == "task-pm-context-summary")
+        current_artifacts = pm_row.get("current_artifacts")
+        self.assertIsInstance(current_artifacts, list, msg=fetched)
+        assert isinstance(current_artifacts, list)
+        self.assertGreaterEqual(len(current_artifacts), 1)
+        art_row = current_artifacts[0]
+        self.assertIsInstance(art_row, dict, msg=fetched)
+        assert isinstance(art_row, dict)
+        for key in ("id", "kind", "title", "summary", "source_buddy", "source_run", "revision", "currentness"):
+            self.assertIn(key, art_row)
+        self.assertNotIn("content", art_row)
 
     def test_invalid_buddy_refs_reject_without_partial_mutation(self) -> None:
         self._seed_track(track_id="track-refs", title="Ref Track", current_buddy="pm")

@@ -339,12 +339,39 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(payload["ok"])
         error = payload["error"]
         self.assertEqual(error["code"], "E_RUNTIME_BROKER_UNAVAILABLE")
-        self.assertEqual(error["permission_boundary"], "product-mode-runtime-broker")
-        self.assertEqual(error["stop_condition"], "stop_and_report_do_not_bypass_broker")
-        actions = " ".join(error["allowed_next_actions"])
+        self.assertEqual(payload["permission_boundary"], "product-mode-runtime-broker")
+        self.assertEqual(payload["stop_condition"], "stop_and_report_do_not_bypass_broker")
+        actions = " ".join(payload["allowed_next_actions"])
         self.assertIn("broker", actions.lower())
         self.assertIn("raw", actions.lower())
         self.assertIn("bypass", actions.lower())
+
+    def _assert_structured_next_action_options(self, payload: dict[str, object]) -> None:
+        self.assertIn("allowed_next_action_options", payload)
+        options = payload["allowed_next_action_options"]
+        self.assertIsInstance(options, list, msg=payload)
+        assert isinstance(options, list)
+        self.assertGreaterEqual(len(options), 1, msg=payload)
+        for row in options:
+            self.assertIsInstance(row, dict, msg=payload)
+            assert isinstance(row, dict)
+            for key in ("id", "tool", "action", "mutates", "preconditions", "reason", "source_refs"):
+                self.assertIn(key, row)
+
+    def _assert_authoritative_feedback_fields(self, payload: dict[str, object]) -> None:
+        self.assertIn("permission_boundary", payload)
+        self.assertIn("allowed_next_actions", payload)
+        if "command_hint" in payload:
+            self.assertIsInstance(payload["command_hint"], str)
+        if "stop_condition" in payload:
+            self.assertIsInstance(payload["stop_condition"], str)
+        error = payload.get("error")
+        self.assertIsInstance(error, dict, msg=payload)
+        assert isinstance(error, dict)
+        self.assertNotIn("permission_boundary", error)
+        self.assertNotIn("allowed_next_actions", error)
+        self.assertNotIn("command_hint", error)
+        self.assertNotIn("stop_condition", error)
 
     def _run_product_cli_without_broker(self, args: list[str], *, buddy: str = "pm") -> dict[str, object]:
         instance_id = f"inst-{buddy}-missing-broker"
@@ -470,8 +497,9 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 )
                 self.assertFalse(response["ok"])
                 error = response["error"]
-                self.assertEqual(error["permission_boundary"], boundary)
-                self.assertIn("allowed_next_actions", error)
+                self.assertEqual(error["code"], "E_RUNTIME_BROKER")
+                self.assertEqual(response["permission_boundary"], boundary)
+                self.assertIn("allowed_next_actions", response)
         self.assertEqual(self._state_snapshot(), before)
 
         inactive_json = self._instance_json(status="inactive")
@@ -481,7 +509,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=inactive_json,
         )
         self.assertFalse(inactive["ok"])
-        self.assertEqual(inactive["error"]["permission_boundary"], "active-instance-status")
+        self.assertEqual(inactive["permission_boundary"], "active-instance-status")
 
     def test_persist_rejections_include_feedback_and_do_not_write_state(self) -> None:
         cases = []
@@ -575,11 +603,11 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertFalse(rejected["ok"], msg=rejected)
                 error = rejected["error"]
                 self.assertEqual(error["code"], "E_RUNTIME_PERSIST")
-                self.assertEqual(error["permission_boundary"], boundary)
-                self.assertIn("allowed_next_actions", error)
-                self.assertIsInstance(error["allowed_next_actions"], list)
-                self.assertGreaterEqual(len(error["allowed_next_actions"]), 1)
-                self.assertIn("persist_payload_hint", error)
+                self.assertEqual(rejected["permission_boundary"], boundary)
+                self.assertIn("allowed_next_actions", rejected)
+                self.assertIsInstance(rejected["allowed_next_actions"], list)
+                self.assertGreaterEqual(len(rejected["allowed_next_actions"]), 1)
+                self.assertIn("persist_payload_hint", rejected)
                 self.assertEqual(self._state_snapshot(), before)
 
     def test_persist_common_validation_failures_return_structured_feedback_and_keep_state_atomic(self) -> None:
@@ -868,11 +896,11 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertFalse(rejected["ok"], msg=rejected)
                 error = rejected["error"]
                 self.assertEqual(error["code"], "E_RUNTIME_PERSIST")
-                self.assertEqual(error["permission_boundary"], boundary)
-                self.assertIn("allowed_next_actions", error)
-                self.assertIsInstance(error["allowed_next_actions"], list)
-                self.assertGreaterEqual(len(error["allowed_next_actions"]), 1)
-                self.assertIn("persist_payload_hint", error)
+                self.assertEqual(rejected["permission_boundary"], boundary)
+                self.assertIn("allowed_next_actions", rejected)
+                self.assertIsInstance(rejected["allowed_next_actions"], list)
+                self.assertGreaterEqual(len(rejected["allowed_next_actions"]), 1)
+                self.assertIn("persist_payload_hint", rejected)
                 self.assertEqual(self._state_snapshot(), before)
 
     def test_stale_context_and_buddy_mismatch_feedback_tell_buddy_to_prepare_again(self) -> None:
@@ -897,8 +925,8 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=pm_json,
         )
         self.assertFalse(stale["ok"])
-        self.assertEqual(stale["error"]["permission_boundary"], "prepare.context_revision")
-        self.assertIn("prepare", " ".join(stale["error"]["allowed_next_actions"]).lower())
+        self.assertEqual(stale["permission_boundary"], "prepare.context_revision")
+        self.assertIn("prepare", " ".join(stale["allowed_next_actions"]).lower())
         self.assertEqual(self._state_snapshot(), before)
 
         mismatch_context = copy.deepcopy(context)
@@ -910,8 +938,8 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=pm_json,
         )
         self.assertFalse(mismatch["ok"])
-        self.assertEqual(mismatch["error"]["permission_boundary"], "active-buddy")
-        self.assertIn("prepare", " ".join(mismatch["error"]["allowed_next_actions"]).lower())
+        self.assertEqual(mismatch["permission_boundary"], "active-buddy")
+        self.assertIn("prepare", " ".join(mismatch["allowed_next_actions"]).lower())
         self.assertEqual(self._state_snapshot(), before_mismatch)
 
     def test_market_browser_preflight_endpoint_only_returns_ready_boundary_feedback(self) -> None:
@@ -934,13 +962,14 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(issue["ok"])
         error = issue["error"]
-        self.assertEqual(error["permission_boundary"], "browser-cockpit-ready")
-        self.assertEqual(error["stop_condition"], "browser cockpit is not ready for MCP page operations")
-        self.assertIn("restart", " ".join(error["allowed_next_actions"]).lower())
-        self.assertIn("open", " ".join(error["allowed_next_actions"]).lower())
-        self.assertIn("browser ensure", " ".join(error["allowed_next_actions"]).lower())
+        self.assertEqual(error["code"], "E_RUNTIME_BROKER")
+        self.assertEqual(issue["permission_boundary"], "browser-cockpit-ready")
+        self.assertEqual(issue["stop_condition"], "browser cockpit is not ready for MCP page operations")
+        self.assertIn("restart", " ".join(issue["allowed_next_actions"]).lower())
+        self.assertIn("open", " ".join(issue["allowed_next_actions"]).lower())
+        self.assertIn("browser ensure", " ".join(issue["allowed_next_actions"]).lower())
         self.assertEqual(
-            error["command_hint"],
+            issue["command_hint"],
             "./buddyswitch-codex env browser ensure --instance inst-market-example",
         )
         self.assertEqual(self._evidence_token_paths(market_json), [])
@@ -976,8 +1005,8 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="market",
         )
         self.assertFalse(missing["ok"])
-        self.assertEqual(missing["error"]["permission_boundary"], "market.browser_evidence")
-        self.assertIn("command_hint", missing["error"])
+        self.assertEqual(missing["permission_boundary"], "market.browser_evidence")
+        self.assertIn("command_hint", missing)
         self.assertEqual(self._state_snapshot(), before)
 
         handwritten = self._dispatch(
@@ -991,7 +1020,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="market",
         )
         self.assertFalse(handwritten["ok"])
-        self.assertEqual(handwritten["error"]["permission_boundary"], "market.browser_evidence")
+        self.assertEqual(handwritten["permission_boundary"], "market.browser_evidence")
         self.assertEqual(self._state_snapshot(), before)
 
         browser_issue = self._dispatch(
@@ -1034,7 +1063,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="market",
         )
         self.assertFalse(wrong_instance["ok"])
-        self.assertEqual(wrong_instance["error"]["permission_boundary"], "market.browser_evidence")
+        self.assertEqual(wrong_instance["permission_boundary"], "market.browser_evidence")
         self.assertEqual(self._state_snapshot(), before_wrong_instance)
 
         downgrade_issue = self._dispatch(
@@ -1068,7 +1097,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="market",
         )
         self.assertFalse(wrong_mode["ok"])
-        self.assertEqual(wrong_mode["error"]["permission_boundary"], "market.browser_evidence")
+        self.assertEqual(wrong_mode["permission_boundary"], "market.browser_evidence")
         self.assertEqual(self._state_snapshot(), before_wrong_instance)
 
     def test_non_market_valid_commits_do_not_require_tool_evidence(self) -> None:
@@ -1096,6 +1125,48 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 )
                 self.assertTrue(persisted["ok"], msg=persisted)
                 self.assertNotIn("tool_evidence", json.dumps(persisted, ensure_ascii=True))
+
+    def test_runtime_feedback_projection_keeps_authoritative_fields_top_level(self) -> None:
+        market_json = self._instance_json(buddy="market", instance_id="inst-market-top-level")
+        market_context = self._prepare(
+            buddy="market",
+            instance_id="inst-market-top-level",
+            request_text=MARKET_REQUEST,
+            instance_json=market_json,
+        )
+        rejected = self._dispatch(
+            method="persist",
+            payload={"context": market_context, "result": _market_commit()},
+            instance_json=market_json,
+            instance_id="inst-market-top-level",
+            buddy="market",
+        )
+        self.assertFalse(rejected["ok"], msg=rejected)
+        self._assert_authoritative_feedback_fields(rejected)
+        self._assert_structured_next_action_options(rejected)
+
+    def test_foreign_scope_rejections_offer_safe_non_raw_state_options(self) -> None:
+        dev_json = self._instance_json(buddy="dev", instance_id="inst-dev-safe-options")
+        dev_context = self._prepare(
+            buddy="dev",
+            instance_id="inst-dev-safe-options",
+            request_text=DEV_REQUEST,
+            instance_json=dev_json,
+        )
+        mismatch_context = copy.deepcopy(dev_context)
+        mismatch_context["active_buddy"] = "market"
+        rejected = self._dispatch(
+            method="persist",
+            payload={"context": mismatch_context, "result": _market_commit()},
+            instance_json=dev_json,
+            instance_id="inst-dev-safe-options",
+            buddy="dev",
+        )
+        self.assertFalse(rejected["ok"], msg=rejected)
+        self._assert_structured_next_action_options(rejected)
+        options_text = json.dumps(rejected["allowed_next_action_options"], ensure_ascii=True)
+        self.assertNotIn("buddyswitch/objects", options_text)
+        self.assertNotIn("raw_state", options_text)
 
 
 if __name__ == "__main__":

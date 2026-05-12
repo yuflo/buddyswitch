@@ -351,7 +351,14 @@ def _owned_artifact(
 
 
 def _artifact_summary(artifact: dict[str, Any], *, include_content: bool) -> dict[str, Any]:
+    source_buddy = artifact.get("buddy")
+    source_run = artifact.get("source_run_id")
+    is_current = bool(artifact.get("is_current"))
     payload = {field: artifact.get(field) for field in _ARTIFACT_PUBLIC_FIELDS}
+    payload["source_buddy"] = source_buddy
+    payload["source_run"] = source_run
+    payload["is_current"] = is_current
+    payload["currentness"] = "current" if is_current else "superseded"
     if include_content:
         payload["content"] = artifact.get("content", {})
     return payload

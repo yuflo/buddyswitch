@@ -688,9 +688,9 @@ class TurnRuntimeBuddyRunTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertFalse(payload["ok"])
         self.assertIn("buddy mismatch", payload["error"]["message"])
-        self.assertEqual(payload["error"]["permission_boundary"], "active-buddy")
-        self.assertIn(PREPARE_COMMAND_HINT, payload["error"]["allowed_next_actions"])
-        self.assertNotIn("Rerun scripts/turn_runtime.py prepare", " ".join(payload["error"]["allowed_next_actions"]))
+        self.assertEqual(payload["permission_boundary"], "active-buddy")
+        self.assertIn(PREPARE_COMMAND_HINT, payload["allowed_next_actions"])
+        self.assertNotIn("Rerun scripts/turn_runtime.py prepare", " ".join(payload["allowed_next_actions"]))
         state_after = self._runtime_state_snapshot()
         self._assert_runtime_state_unchanged(state_before, state_after)
 

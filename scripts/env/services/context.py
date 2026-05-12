@@ -7,8 +7,10 @@ import json
 from pathlib import Path
 from typing import Any, TypedDict
 
+import env_profiles
 import env_store
 from env.services import bindings
+from env.tools import responses as tool_responses
 
 _IDENTITY_FIELDS = {"active_buddy", "buddy", "instance_id"}
 _GET_FIELDS = {"context"} | _IDENTITY_FIELDS
@@ -30,8 +32,9 @@ def _error_payload(
     message: str,
     permission_boundary: str,
     allowed_next_actions: list[str],
+    allowed_next_action_options: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "ok": False,
         "tool": "context",
         "action": action,
@@ -43,6 +46,9 @@ def _error_payload(
         "active_buddy": active_buddy,
         "allowed_next_actions": allowed_next_actions,
     }
+    if isinstance(allowed_next_action_options, list):
+        payload["allowed_next_action_options"] = allowed_next_action_options
+    return payload
 
 
 def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
@@ -55,6 +61,20 @@ def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str,
         allowed_next_actions=[
             'Fix the env.tool envelope fields (`tool`, `action`, `args`) and retry.',
             "Use context.list_sources to inspect available context sections.",
+        ],
+        allowed_next_action_options=[
+            tool_responses.next_action_option(
+                tool="context",
+                action="list_sources",
+                option_id="inspect_context_sources",
+                reason="Inspect available context sections and payload expectations.",
+            ),
+            tool_responses.next_action_option(
+                tool="context",
+                action="summarize",
+                option_id="summarize_current_context",
+                reason="Review compact current context before retrying payload input.",
+            ),
         ],
     )
 
@@ -76,6 +96,20 @@ def _context_boundary_error(
         allowed_next_actions=[
             "Rerun prepare in the active launcher-managed instance.",
             "Use the refreshed context returned by prepare for the next action.",
+        ],
+        allowed_next_action_options=[
+            tool_responses.next_action_option(
+                tool="context",
+                action="summarize",
+                option_id="summarize_active_context_before_prepare",
+                reason="Summarize active context before rerunning prepare.",
+            ),
+            tool_responses.next_action_option(
+                tool="context",
+                action="get",
+                option_id="inspect_active_context_before_prepare",
+                reason="Inspect full active context and binding before rerunning prepare.",
+            ),
         ],
     )
 
@@ -112,26 +146,314 @@ def _derive_context_revision(task: dict[str, Any], sequence: int) -> str:
 
 
 def _summarize_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
+    source_buddy = artifact.get("buddy")
+    source_run_id = artifact.get("source_run_id")
+    is_current = bool(artifact.get("is_current"))
     return {
         "id": artifact.get("id"),
         "kind": artifact.get("kind"),
         "title": artifact.get("title"),
         "summary": artifact.get("summary", ""),
-        "buddy": artifact.get("buddy"),
+        "buddy": source_buddy,
+        "source_buddy": source_buddy,
         "task_id": artifact.get("task_id"),
-        "source_run_id": artifact.get("source_run_id"),
+        "source_run_id": source_run_id,
+        "source_run": source_run_id,
+        "revision": artifact.get("revision"),
+        "is_current": is_current,
+        "currentness": "current" if is_current else "superseded",
         "updated_at": artifact.get("updated_at"),
     }
 
 
-def context_sources_desc() -> dict[str, str]:
+def context_sources_desc() -> dict[str, dict[str, Any]]:
     return {
-        "request_text": "Original user request for this turn.",
-        "task_context.task": "Current task metadata and summary.",
-        "task_context.artifacts": "Full prior artifact content for the current task when available.",
-        "track_context.track": "Current track title, status, buddies, and summary when bound.",
-        "track_context.recent_handoffs": "Recent handoff reason and context.",
-        "current_context_summary": "Compact scan-friendly summary; use full task_context artifacts when content detail is needed.",
+        "request_text": {
+            "description": "Original user request for this turn.",
+            "content": "full",
+            "scope": "current_turn_input",
+            "nullable": False,
+            "decision_use": ["request_intent", "handoff_continuation"],
+            "source_of_truth": "prepare.request_text",
+            "summary_projection": "runtime_context.current_context_summary.task",
+        },
+        "task_context.task": {
+            "description": "Current task metadata and summary.",
+            "content": "summary",
+            "scope": "active_instance_task",
+            "nullable": True,
+            "decision_use": ["task_ownership", "task_status"],
+            "source_of_truth": "buddyswitch/objects/tasks/<task_id>.json",
+        },
+        "task_context.artifacts": {
+            "description": "Full prior artifact content for the current task when available.",
+            "content": "full",
+            "scope": "active_instance_task_artifacts",
+            "nullable": True,
+            "decision_use": ["read_prior_outputs", "artifact_continuation"],
+            "source_of_truth": "buddyswitch/objects/artifacts/<artifact_id>.json",
+            "summary_projection": "runtime_context.current_context_summary.artifacts",
+            "max_items": 5,
+            "sorted_by": "updated_at desc, id desc",
+        },
+        "track_context.track": {
+            "description": "Current track title, status, buddies, and summary when bound.",
+            "content": "summary",
+            "scope": "current_track",
+            "nullable": True,
+            "decision_use": ["track_alignment", "ownership_alignment"],
+            "source_of_truth": "buddyswitch/objects/tracks/<track_id>.json",
+        },
+        "track_context.recent_handoffs": {
+            "description": "Recent handoff reason and context discovered from committed run audits.",
+            "content": "summary",
+            "scope": "current_track_run_audits",
+            "nullable": True,
+            "decision_use": ["handoff_continuation", "latest_transition_check"],
+            "source_of_truth": "buddyswitch/content/runs/<run_id>.json",
+            "max_items": 5,
+            "sorted_by": "timestamp desc, run_id desc",
+        },
+        "current_context_summary": {
+            "description": "Compact scan-friendly summary; use full task_context artifacts when content detail is needed.",
+            "content": "summary",
+            "scope": "active_instance_projection",
+            "nullable": False,
+            "decision_use": ["first_pass_orientation", "safe_context_scan"],
+            "source_of_truth": "runtime projection from task_context + track_context",
+            "summary_projection": "runtime_context.current_context_summary",
+        },
+    }
+
+
+def _build_candidate_track_rows(*, active_buddy: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for track in env_store.list_tracks():
+        track_id = track.get("id")
+        if not isinstance(track_id, str) or not track_id:
+            continue
+
+        reasons: list[str] = []
+        role = "observer"
+        score = 0
+        current_buddy = track.get("current_buddy")
+        next_buddy = track.get("next_buddy")
+        if isinstance(current_buddy, str) and current_buddy == active_buddy:
+            role = "current_buddy"
+            score += 60
+            reasons.append("track.current_buddy == active_buddy")
+        if isinstance(next_buddy, str) and next_buddy == active_buddy:
+            role = "next_buddy"
+            score += 80
+            reasons.append("track.next_buddy == active_buddy")
+
+        has_active_task = False
+        for task_id in track.get("task_ids", []):
+            if not isinstance(task_id, str) or not task_id:
+                continue
+            task = env_store.get_task(task_id)
+            if isinstance(task, dict) and task.get("buddy") == active_buddy:
+                has_active_task = True
+                break
+        if has_active_task:
+            if role == "observer":
+                role = "participant"
+            score += 40
+            reasons.append("track contains active_buddy task")
+
+        recent_handoffs = scan_track_recent_handoffs(track_id, limit=1)
+        latest_handoff_to_active = False
+        if recent_handoffs:
+            handoff = recent_handoffs[0]
+            if handoff.get("next_buddy") == active_buddy:
+                latest_handoff_to_active = True
+                score += 100
+                reasons.append("recent_handoff.next_buddy == active_buddy")
+
+        if score <= 0:
+            continue
+        rows.append(
+            {
+                "track_id": track_id,
+                "title": track.get("title"),
+                "status": track.get("status"),
+                "current_buddy": current_buddy,
+                "next_buddy": next_buddy,
+                "summary": track.get("summary", ""),
+                "active_buddy_role": role,
+                "latest_handoff_to_active_buddy": latest_handoff_to_active,
+                "relevance_score": score,
+                "relevance_reasons": reasons,
+                "updated_at": track.get("updated_at"),
+            }
+        )
+    rows.sort(
+        key=lambda row: (
+            int(row.get("relevance_score") or 0),
+            str(row.get("updated_at") or ""),
+            str(row.get("track_id") or ""),
+        ),
+        reverse=True,
+    )
+    return rows
+
+
+def build_decision_surface(
+    *,
+    active_buddy: str,
+    current_binding: dict[str, Any],
+    task_context: dict[str, Any],
+    track_context: dict[str, Any] | None,
+    tool_requirements: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    binding_task_id = current_binding.get("current_task_id")
+    binding_track_id = current_binding.get("current_track_id")
+
+    has_task_binding = isinstance(binding_task_id, str) and bool(binding_task_id.strip())
+    has_track_binding = isinstance(binding_track_id, str) and bool(binding_track_id.strip())
+
+    task_row = task_context.get("task") if isinstance(task_context, dict) else None
+    task_missing = has_task_binding and not isinstance(task_row, dict)
+    track_row = track_context.get("track") if isinstance(track_context, dict) else None
+    track_missing = has_track_binding and not isinstance(track_row, dict)
+
+    if task_missing or track_missing:
+        binding_state = "stale"
+    elif has_task_binding and has_track_binding:
+        binding_state = "bound_task_and_track"
+    elif has_task_binding:
+        binding_state = "bound_task_only"
+    elif has_track_binding:
+        binding_state = "bound_track_only"
+    else:
+        binding_state = "unbound"
+
+    if isinstance(task_row, dict):
+        task_buddy = task_row.get("buddy")
+        if isinstance(task_buddy, str):
+            task_role = "owner" if task_buddy == active_buddy else "foreign"
+        else:
+            task_role = "missing"
+    else:
+        task_role = "missing" if has_task_binding else "none"
+
+    if isinstance(track_row, dict):
+        current_buddy = track_row.get("current_buddy")
+        next_buddy = track_row.get("next_buddy")
+        if isinstance(current_buddy, str) and current_buddy == active_buddy:
+            track_role = "current_buddy"
+        elif isinstance(next_buddy, str) and next_buddy == active_buddy:
+            track_role = "next_buddy"
+        else:
+            track_tasks = track_context.get("tasks") if isinstance(track_context, dict) else None
+            active_participant = False
+            if isinstance(track_tasks, list):
+                for row in track_tasks:
+                    if isinstance(row, dict) and row.get("buddy") == active_buddy:
+                        active_participant = True
+                        break
+            track_role = "participant" if active_participant else "observer"
+    else:
+        track_role = "missing" if has_track_binding else "none"
+
+    handoffs = track_context.get("recent_handoffs") if isinstance(track_context, dict) else None
+    latest_handoff_to_active_buddy = False
+    if isinstance(handoffs, list) and handoffs:
+        first = handoffs[0]
+        if isinstance(first, dict) and first.get("next_buddy") == active_buddy:
+            latest_handoff_to_active_buddy = True
+
+    task_artifacts = task_context.get("artifacts") if isinstance(task_context, dict) else None
+    has_task_artifacts = isinstance(task_artifacts, list) and len(task_artifacts) > 0
+    has_track_tasks = isinstance(track_context, dict) and isinstance(track_context.get("tasks"), list) and bool(track_context["tasks"])
+    has_track_handoffs = isinstance(handoffs, list) and bool(handoffs)
+
+    requirements = tool_requirements if isinstance(tool_requirements, dict) else {}
+    evidence_readiness = {
+        "browser_cockpit": requirements.get("browser_cockpit"),
+        "market_research_evidence": requirements.get("market_research_evidence"),
+        "ordinary_web_fallback": requirements.get("ordinary_web_fallback"),
+    }
+
+    safe_read_affordances = [
+        {
+            "id": "summarize_current_context",
+            "tool": "context",
+            "action": "summarize",
+            "mutates": "none",
+            "reason": "Get compact decision context without mutation.",
+            "source_refs": ["runtime_context.operation_semantics['context.summarize']"],
+        },
+        {
+            "id": "inspect_current_context",
+            "tool": "context",
+            "action": "get",
+            "mutates": "none",
+            "reason": "Inspect full current context sections.",
+            "source_refs": ["runtime_context.operation_semantics['context.get']"],
+        },
+        {
+            "id": "inspect_context_sources",
+            "tool": "context",
+            "action": "list_sources",
+            "mutates": "none",
+            "reason": "Inspect context source descriptors.",
+            "source_refs": ["runtime_context.operation_semantics['context.list_sources']"],
+        },
+        {
+            "id": "inspect_candidate_tracks",
+            "tool": "track",
+            "action": "list",
+            "mutates": "none",
+            "reason": "Discover readable candidate tracks for continuation context.",
+            "source_refs": ["runtime_context.operation_semantics['track.list']"],
+        },
+        {
+            "id": "inspect_track_details",
+            "tool": "track",
+            "action": "get",
+            "mutates": "none",
+            "reason": "Read one candidate track context summary.",
+            "source_refs": ["runtime_context.operation_semantics['track.get']"],
+        },
+    ]
+
+    return {
+        "binding_state": {
+            "state": binding_state,
+            "current_task_id": binding_task_id,
+            "current_track_id": binding_track_id,
+            "enum_values": [
+                "unbound",
+                "bound_task_only",
+                "bound_track_only",
+                "bound_task_and_track",
+                "stale",
+            ],
+        },
+        "active_buddy_relation": {
+            "task_role": task_role,
+            "track_role": track_role,
+            "latest_handoff_to_active_buddy": latest_handoff_to_active_buddy,
+            "task_role_enum_values": ["owner", "foreign", "none", "missing"],
+            "track_role_enum_values": [
+                "current_buddy",
+                "next_buddy",
+                "participant",
+                "observer",
+                "none",
+                "missing",
+            ],
+        },
+        "context_readiness": {
+            "has_task": isinstance(task_row, dict),
+            "has_task_artifacts": has_task_artifacts,
+            "has_track": isinstance(track_row, dict),
+            "has_track_tasks": has_track_tasks,
+            "has_track_handoffs": has_track_handoffs,
+        },
+        "evidence_readiness": evidence_readiness,
+        "safe_read_affordances": safe_read_affordances,
     }
 
 
@@ -207,6 +529,44 @@ def build_track_context(track_id: str | None) -> dict[str, Any] | None:
         "tasks": rows,
         "recent_handoffs": scan_track_recent_handoffs(track["id"], limit=5),
     }
+
+
+def enrich_task_context_with_track_artifacts(
+    *,
+    task_context: dict[str, Any],
+    track_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    artifacts = task_context.get("artifacts")
+    if isinstance(artifacts, list) and artifacts:
+        return task_context
+    if not isinstance(track_context, dict):
+        return task_context
+    tasks = track_context.get("tasks")
+    if not isinstance(tasks, list):
+        return task_context
+
+    discovered: dict[str, dict[str, Any]] = {}
+    for task_row in tasks:
+        if not isinstance(task_row, dict):
+            continue
+        current_artifacts = task_row.get("current_artifacts")
+        if not isinstance(current_artifacts, dict):
+            continue
+        for artifact in current_artifacts.values():
+            if not isinstance(artifact, dict):
+                continue
+            artifact_id = artifact.get("id")
+            if not isinstance(artifact_id, str) or not artifact_id:
+                continue
+            discovered[artifact_id] = artifact
+
+    if not discovered:
+        return task_context
+    rows = list(discovered.values())
+    rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("id") or "")), reverse=True)
+    enriched = dict(task_context)
+    enriched["artifacts"] = rows[:5]
+    return enriched
 
 
 def scan_track_recent_handoffs(track_id: str, *, limit: int = 5) -> list[dict[str, Any]]:
@@ -321,6 +681,29 @@ def summarize_current_context(
         for artifact in task_artifacts:
             if isinstance(artifact, dict):
                 summarized_artifacts.append(_summarize_artifact(artifact))
+    if not summarized_artifacts and isinstance(track_context, dict):
+        track_tasks = track_context.get("tasks")
+        if isinstance(track_tasks, list):
+            discovered: dict[str, dict[str, Any]] = {}
+            for row in track_tasks:
+                if not isinstance(row, dict):
+                    continue
+                current_artifacts = row.get("current_artifacts")
+                if not isinstance(current_artifacts, dict):
+                    continue
+                for artifact in current_artifacts.values():
+                    if not isinstance(artifact, dict):
+                        continue
+                    artifact_id = artifact.get("id")
+                    if isinstance(artifact_id, str) and artifact_id:
+                        discovered[artifact_id] = artifact
+            fallback_rows = list(discovered.values())
+            fallback_rows.sort(
+                key=lambda row: (str(row.get("updated_at") or ""), str(row.get("id") or "")),
+                reverse=True,
+            )
+            for artifact in fallback_rows[:5]:
+                summarized_artifacts.append(_summarize_artifact(artifact))
 
     summarized_handoffs: list[dict[str, Any]] = []
     handoff_rows = track_context.get("recent_handoffs") if isinstance(track_context, dict) else None
@@ -348,6 +731,19 @@ def summarize_current_context(
     }
 
 
+def _tool_requirements(active_buddy: str) -> dict[str, Any]:
+    repo_root = Path(__file__).resolve().parents[3]
+    profile = env_profiles.require_env_profile(active_buddy, repo_root=repo_root)
+    tool_capability = profile.get("tool_capability")
+    if not isinstance(tool_capability, dict):
+        return {}
+    return {
+        "browser_cockpit": tool_capability.get("browser_cockpit"),
+        "market_research_evidence": tool_capability.get("market_research_evidence"),
+        "ordinary_web_fallback": tool_capability.get("ordinary_web_fallback"),
+    }
+
+
 def current_context_sections(context: ContextServiceContext) -> dict[str, Any]:
     binding = bindings.current_binding(
         {
@@ -365,10 +761,20 @@ def current_context_sections(context: ContextServiceContext) -> dict[str, Any]:
     if not isinstance(track_id, str) or not track_id.strip():
         track_id = task.get("track_id") if isinstance(task, dict) else None
     track_context = build_track_context(track_id if isinstance(track_id, str) else None)
+    task_context = enrich_task_context_with_track_artifacts(task_context=task_context, track_context=track_context)
+    tool_requirements = _tool_requirements(context["active_buddy"])
+    decision_surface = build_decision_surface(
+        active_buddy=context["active_buddy"],
+        current_binding=binding,
+        task_context=task_context,
+        track_context=track_context,
+        tool_requirements=tool_requirements,
+    )
     return {
         "current_binding": binding,
         "task_context": task_context,
         "track_context": track_context,
+        "decision_surface": decision_surface,
         "context_sources_desc": context_sources_desc(),
         "current_context_summary": summarize_current_context(
             task_context=task_context,
@@ -524,15 +930,31 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
             return validation_error
 
     sections = current_context_sections(context)
+    response_sections = dict(sections)
+    response_sections.pop("context_sources_desc", None)
     return {
         "ok": True,
         "tool": "context",
         "action": action,
         "active_buddy": context["active_buddy"],
-        **sections,
+        **response_sections,
         "allowed_next_actions": [
             "Use context.summarize for compact scan-friendly context.",
             "Use task, track, or artifact tools for permitted state operations.",
+        ],
+        "allowed_next_action_options": [
+            tool_responses.next_action_option(
+                tool="context",
+                action="summarize",
+                option_id="summarize_current_context",
+                reason="Get compact decision context before state mutation.",
+            ),
+            tool_responses.next_action_option(
+                tool="context",
+                action="list_sources",
+                option_id="inspect_context_sources",
+                reason="Inspect structured source descriptors for context sections.",
+            ),
         ],
     }
 
@@ -548,6 +970,17 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
     if fields_error is not None:
         return fields_error
     sections = current_context_sections(context)
+    decision_surface = sections["decision_surface"]
+    candidate_tracks: list[dict[str, Any]] = []
+    binding_state = decision_surface.get("binding_state") if isinstance(decision_surface, dict) else None
+    state = binding_state.get("state") if isinstance(binding_state, dict) else None
+    relation = decision_surface.get("active_buddy_relation") if isinstance(decision_surface, dict) else None
+    latest_handoff = relation.get("latest_handoff_to_active_buddy") if isinstance(relation, dict) else False
+    if state in {"unbound", "bound_task_only"} or (
+        state in {"bound_track_only", "bound_task_and_track"} and latest_handoff is not True
+    ):
+        candidate_tracks = _build_candidate_track_rows(active_buddy=context["active_buddy"])
+
     return {
         "ok": True,
         "tool": "context",
@@ -555,9 +988,25 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "active_buddy": context["active_buddy"],
         "current_binding": sections["current_binding"],
         "current_context_summary": sections["current_context_summary"],
+        "decision_surface": decision_surface,
+        "candidate_tracks": candidate_tracks,
         "allowed_next_actions": [
             "Use context.get when full task artifacts or track rows are needed.",
             "Use context.list_sources to inspect available section names.",
+        ],
+        "allowed_next_action_options": [
+            tool_responses.next_action_option(
+                tool="context",
+                action="get",
+                option_id="inspect_full_context_sections",
+                reason="Inspect full context sections, including full task artifacts.",
+            ),
+            tool_responses.next_action_option(
+                tool="track",
+                action="list",
+                option_id="inspect_candidate_tracks",
+                reason="Inspect candidate tracks for cross-buddy continuation context.",
+            ),
         ],
     }
 
@@ -581,5 +1030,19 @@ def list_sources(*, args: dict[str, Any], context: ContextServiceContext) -> dic
         "allowed_next_actions": [
             "Use context.get to read full current context.",
             "Use context.summarize for compact context.",
+        ],
+        "allowed_next_action_options": [
+            tool_responses.next_action_option(
+                tool="context",
+                action="get",
+                option_id="read_full_current_context",
+                reason="Read full current task and track context.",
+            ),
+            tool_responses.next_action_option(
+                tool="context",
+                action="summarize",
+                option_id="summarize_current_context",
+                reason="Read compact current context summary for quick orientation.",
+            ),
         ],
     }

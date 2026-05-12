@@ -28,6 +28,8 @@ import env_profiles
 import env_store
 from env.services import bindings as binding_service
 from env.services import context as context_service
+from env.tools import contracts as tool_contracts
+from env.tools import responses as tool_responses
 from env_store import (
     add_run_to_task,
     build_track_artifact_index,
@@ -204,6 +206,20 @@ def _market_evidence_command_hint() -> str:
 
 
 def _market_evidence_feedback() -> dict[str, Any]:
+    options = [
+        tool_responses.next_action_option(
+            tool="evidence",
+            action="issue_browser",
+            option_id="issue_browser_token_for_current_run",
+            reason="Issue a browser cockpit token for this prepared run before artifact-producing persist.",
+        ),
+        tool_responses.next_action_option(
+            tool="evidence",
+            action="approve_downgrade",
+            option_id="issue_approved_downgrade_for_current_run",
+            reason="Issue an approved downgrade token only when the user explicitly approves the fallback.",
+        ),
+    ]
     return {
         "permission_boundary": "market.browser_evidence",
         "allowed_next_actions": [
@@ -211,6 +227,7 @@ def _market_evidence_feedback() -> dict[str, Any]:
             "Include the returned token in tool_evidence on the next artifact-producing persist.",
             "Use an approved downgrade token only when the user explicitly approves the fallback.",
         ],
+        "allowed_next_action_options": options,
         "command_hint": _market_evidence_command_hint(),
         "persist_payload_hint": {
             "tool_evidence": {
@@ -229,7 +246,22 @@ def runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) 
         },
     }
     if extra:
-        payload["error"].update(extra)
+        payload.update(extra)
+    if "allowed_next_actions" in payload and "allowed_next_action_options" not in payload:
+        payload["allowed_next_action_options"] = [
+            tool_responses.next_action_option(
+                tool="context",
+                action="summarize",
+                option_id="summarize_current_context_before_retry",
+                reason="Summarize current context before deciding the next mutation.",
+            ),
+            tool_responses.next_action_option(
+                tool="context",
+                action="get",
+                option_id="inspect_full_context_before_retry",
+                reason="Inspect full current context sections before retrying persist.",
+            ),
+        ]
     return payload
 
 
@@ -866,213 +898,7 @@ def _build_artifact_kind_desc(buddy: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_env_tools_desc() -> dict[str, Any]:
-    return {
-        "task_manager": {
-            "command": "python3 scripts/env/client.py task <operation>",
-            "scope": "active-buddy runtime-enforced",
-            "broker_method": "env.tool",
-            "envelope": {
-                "tool": "task",
-                "action": "<action>",
-                "args": "<object>",
-            },
-            "cli_resource": "task",
-            "operations": [
-                "create",
-                "list",
-                "get",
-                "get_current",
-                "set_current",
-                "update",
-                "archive",
-            ],
-            "payload_fields": {
-                "create": ["title", "summary"],
-                "list": [],
-                "get": ["task_id"],
-                "get_current": [],
-                "set_current": ["task_id"],
-                "update": ["task_id", "title", "summary", "status"],
-                "archive": ["task_id"],
-            },
-            "feedback_source": "runtime/tool response fields",
-            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
-        },
-        "track_manager": {
-            "command": "python3 scripts/env/client.py track <operation>",
-            "scope": "readable tracks; PM-only lifecycle mutation; active-buddy task linkage",
-            "broker_method": "env.tool",
-            "envelope": {
-                "tool": "track",
-                "action": "<action>",
-                "args": "<object>",
-            },
-            "cli_resource": "track",
-            "operations": [
-                "list",
-                "get",
-                "get_current",
-                "create",
-                "update",
-                "advance",
-                "archive",
-                "attach_task",
-                "detach_task",
-            ],
-            "payload_fields": {
-                "list": [],
-                "get": ["track_id"],
-                "get_current": [],
-                "create": ["track_id", "title", "status", "current_buddy", "next_buddy", "summary"],
-                "update": ["track_id", "title", "status", "current_buddy", "next_buddy", "summary"],
-                "advance": ["track_id", "status", "current_buddy", "next_buddy", "summary"],
-                "archive": ["track_id"],
-                "attach_task": ["track_id", "task_id"],
-                "detach_task": ["track_id", "task_id"],
-            },
-            "feedback_source": "runtime/tool response fields",
-            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
-        },
-        "artifact_manager": {
-            "command": "python3 scripts/env/client.py artifact <operation>",
-            "scope": "active current task listing; active-buddy task artifact reads and revision writes",
-            "broker_method": "env.tool",
-            "envelope": {
-                "tool": "artifact",
-                "action": "<action>",
-                "args": "<object>",
-            },
-            "cli_resource": "artifact",
-            "operations": [
-                "list",
-                "get",
-                "get_current",
-                "validate_payload",
-                "create_revision",
-                "update_metadata",
-            ],
-            "payload_fields": {
-                "list": [],
-                "get": ["artifact_id"],
-                "get_current": ["kind"],
-                "validate_payload": [
-                    "artifact_id",
-                    "task_id",
-                    "kind",
-                    "title",
-                    "summary",
-                    "content",
-                    "source_run_id",
-                ],
-                "create_revision": [
-                    "artifact_id",
-                    "task_id",
-                    "kind",
-                    "title",
-                    "summary",
-                    "content",
-                    "source_run_id",
-                ],
-                "update_metadata": ["artifact_id", "title", "summary", "source_run_id"],
-            },
-            "feedback_source": "runtime/tool response fields",
-            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
-        },
-        "context_manager": {
-            "command": "python3 scripts/env/client.py context <operation>",
-            "scope": "active instance binding context reads and prepared context validation",
-            "broker_method": "env.tool",
-            "envelope": {
-                "tool": "context",
-                "action": "<action>",
-                "args": "<object>",
-            },
-            "cli_resource": "context",
-            "operations": ["get", "summarize", "list_sources"],
-            "payload_fields": {
-                "get": ["context"],
-                "summarize": [],
-                "list_sources": [],
-            },
-            "feedback_source": "runtime/tool response fields",
-            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
-        },
-        "binding_manager": {
-            "command": "python3 scripts/env/client.py binding <operation>",
-            "scope": "active launcher instance binding; runtime-owned instance JSON writes",
-            "broker_method": "env.tool",
-            "envelope": {
-                "tool": "binding",
-                "action": "<action>",
-                "args": "<object>",
-            },
-            "cli_resource": "binding",
-            "operations": ["get", "set_task", "set_track", "clear"],
-            "payload_fields": {
-                "get": [],
-                "set_task": ["task_id"],
-                "set_track": ["track_id"],
-                "clear": [],
-            },
-            "feedback_source": "runtime/tool response fields",
-            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
-        },
-        "handoff_manager": {
-            "command": "python3 scripts/env/client.py handoff <operation>",
-            "scope": "manifest target and active track transition validation; no state mutation",
-            "broker_method": "env.tool",
-            "envelope": {
-                "tool": "handoff",
-                "action": "<action>",
-                "args": "<object>",
-            },
-            "cli_resource": "handoff",
-            "operations": ["validate"],
-            "payload_fields": {
-                "validate": ["next_buddy", "reason", "context", "track_id"],
-            },
-            "feedback_source": "runtime/tool response fields",
-            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
-        },
-        "run_manager": {
-            "command": "python3 scripts/env/client.py run <operation>",
-            "scope": "reserved run validation, commit, receipt reads, and refreshed context feedback",
-            "broker_method": "env.tool",
-            "envelope": {
-                "tool": "run",
-                "action": "<action>",
-                "args": "<object>",
-            },
-            "cli_resource": "run",
-            "operations": ["commit", "get_receipt", "get_raw", "validate_result"],
-            "payload_fields": {
-                "commit": ["context", "result"],
-                "validate_result": ["context", "result"],
-                "get_receipt": ["run_id"],
-                "get_raw": ["run_id"],
-            },
-            "feedback_source": "runtime/tool response fields",
-            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
-        },
-        "evidence_manager": {
-            "command": "python3 scripts/env/client.py evidence <operation>",
-            "scope": "Market browser evidence issuance for the active prepared run",
-            "broker_method": "env.tool",
-            "envelope": {
-                "tool": "evidence",
-                "action": "<action>",
-                "args": "<object>",
-            },
-            "cli_resource": "evidence",
-            "operations": ["issue_browser", "approve_downgrade"],
-            "payload_fields": {
-                "issue_browser": ["context"],
-                "approve_downgrade": ["context", "reason"],
-            },
-            "feedback_source": "runtime/tool response fields",
-            "authoritative_fields": ["permission_boundary", "allowed_next_actions", "command_hint"],
-        },
-    }
+    return tool_contracts.env_tools_description()
 
 
 def _build_runtime_context(
@@ -1080,6 +906,7 @@ def _build_runtime_context(
     manifest: dict[str, Any],
     buddy: dict[str, Any],
     env_profile: dict[str, Any],
+    current_binding: dict[str, Any],
     task_context: dict[str, Any],
     track_context: dict[str, Any] | None,
 ) -> dict[str, Any]:
@@ -1145,6 +972,14 @@ def _build_runtime_context(
             "source": "broker-issued evidence response for current run",
         }
 
+    decision_surface = context_service.build_decision_surface(
+        active_buddy=str(buddy.get("id") or ""),
+        current_binding=current_binding,
+        task_context=task_context,
+        track_context=track_context,
+        tool_requirements=tool_requirements,
+    )
+
     return {
         "active_buddy": {
             "id": buddy.get("id"),
@@ -1175,6 +1010,7 @@ def _build_runtime_context(
             },
         },
         "env_tools": _build_env_tools_desc(),
+        "operation_semantics": tool_contracts.operation_semantics(),
         "tool_requirements": tool_requirements,
         "persist_payload_hint": persist_payload_hint,
         "desc": _build_persist_field_desc(str(buddy.get("id") or ""), tool_capability),
@@ -1183,6 +1019,7 @@ def _build_runtime_context(
             normalized_allowed_track_effects,
         ),
         "artifact_kind_desc": _build_artifact_kind_desc(buddy),
+        "decision_surface": decision_surface,
         "context_sources_desc": context_service.context_sources_desc(),
         "current_context_summary": context_service.summarize_current_context(
             task_context=task_context,
@@ -1397,6 +1234,10 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
         task_context = context_service.build_task_context(resolved_task)
 
     track_context = context_service.build_track_context(effective_track_id)
+    task_context = context_service.enrich_task_context_with_track_artifacts(
+        task_context=task_context,
+        track_context=track_context,
+    )
     track_artifact_index = build_track_artifact_index(effective_track_id)
 
     sequence = _derive_context_sequence(resolved_task)
@@ -1423,10 +1264,29 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
 
     current_task_id = resolved_task["id"]
     current_track_id = effective_track_id
+
+    # Decision-surface binding should reflect explicit payload binding intent.
+    # Track-only prepare payloads remain track-only even when prepare creates a
+    # writable task context for downstream persist.
+    binding_task_id: str | None = current_task_id
+    binding_track_id: str | None = current_track_id
+    if "current_task_id" in payload_dict:
+        binding_task_id = explicit_task_id
+    if "current_track_id" in payload_dict:
+        binding_track_id = explicit_track_id
+        if "current_task_id" not in payload_dict:
+            binding_task_id = None
+
+    current_binding = {
+        "instance_id": instance_id,
+        "current_task_id": binding_task_id,
+        "current_track_id": binding_track_id,
+    }
     runtime_context = _build_runtime_context(
         manifest=manifest,
         buddy=buddy,
         env_profile=env_profile,
+        current_binding=current_binding,
         task_context=task_context,
         track_context=track_context,
     )

@@ -13,10 +13,16 @@ from runtime_kernel.client import RuntimeBrokerError, broker_unavailable_feedbac
 
 
 def _runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-    error: dict[str, Any] = {"code": code, "message": message}
+    payload: dict[str, Any] = {
+        "ok": False,
+        "error": {
+            "code": code,
+            "message": message,
+        },
+    }
     if extra:
-        error.update(extra)
-    return {"ok": False, "error": error}
+        payload.update(extra)
+    return payload
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:

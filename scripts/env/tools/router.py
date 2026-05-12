@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from env.tools import contracts as tool_contracts
 from env.tools.artifact_manager import dispatch_artifact_manager_request
 from env.tools.binding_manager import dispatch_binding_manager_request
 from env.tools.context_manager import dispatch_context_manager_request
@@ -15,69 +16,7 @@ from env.tools.run_manager import dispatch_run_manager_request
 from env.tools.task_manager import dispatch_task_manager_request
 from env.tools.track_manager import dispatch_track_manager_request
 
-_ARTIFACT_ACTIONS = {
-    "list",
-    "get",
-    "get_current",
-    "validate_payload",
-    "create_revision",
-    "update_metadata",
-}
-_BINDING_ACTIONS = {
-    "get",
-    "set_task",
-    "set_track",
-    "clear",
-}
-_CONTEXT_ACTIONS = {
-    "get",
-    "summarize",
-    "list_sources",
-}
-_EVIDENCE_ACTIONS = {
-    "issue_browser",
-    "approve_downgrade",
-}
-_HANDOFF_ACTIONS = {
-    "validate",
-}
-_RUN_ACTIONS = {
-    "commit",
-    "get_receipt",
-    "get_raw",
-    "validate_result",
-}
-_TASK_ACTIONS = {
-    "create",
-    "list",
-    "get",
-    "get_current",
-    "set_current",
-    "update",
-    "archive",
-}
-_TRACK_ACTIONS = {
-    "list",
-    "get",
-    "get_current",
-    "create",
-    "update",
-    "advance",
-    "archive",
-    "attach_task",
-    "detach_task",
-}
-_TOOL_ACTIONS = {
-    "artifact": _ARTIFACT_ACTIONS,
-    "binding": _BINDING_ACTIONS,
-    "context": _CONTEXT_ACTIONS,
-    "evidence": _EVIDENCE_ACTIONS,
-    "handoff": _HANDOFF_ACTIONS,
-    "run": _RUN_ACTIONS,
-    "task": _TASK_ACTIONS,
-    "track": _TRACK_ACTIONS,
-}
-_TOOL_DISPATCHERS: dict[str, Callable[..., dict[str, Any]]] = {
+_ALL_DISPATCHERS: dict[str, Callable[..., dict[str, Any]]] = {
     "artifact": dispatch_artifact_manager_request,
     "binding": dispatch_binding_manager_request,
     "context": dispatch_context_manager_request,
@@ -87,16 +26,16 @@ _TOOL_DISPATCHERS: dict[str, Callable[..., dict[str, Any]]] = {
     "task": dispatch_task_manager_request,
     "track": dispatch_track_manager_request,
 }
-_TOOL_HINTS = {
-    "artifact": "artifact_manager",
-    "binding": "binding_manager",
-    "context": "context_manager",
-    "evidence": "evidence_manager",
-    "handoff": "handoff_manager",
-    "run": "run_manager",
-    "task": "task_manager",
-    "track": "track_manager",
+_TOOL_ACTIONS = {
+    tool: tool_contracts.supported_actions(tool)
+    for tool in sorted(tool_contracts.supported_tools())
 }
+_TOOL_DISPATCHERS: dict[str, Callable[..., dict[str, Any]]] = {
+    tool: _ALL_DISPATCHERS[tool]
+    for tool in _TOOL_ACTIONS
+    if tool in _ALL_DISPATCHERS
+}
+_TOOL_HINTS = {tool: tool_contracts.manager_name_for_tool(tool) for tool in _TOOL_ACTIONS}
 
 
 def _supported_tools_text() -> str:

@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import env_store
+from env.services import context as context_service
 from env_manifest import buddy_permissions, get_buddy
+from env.tools import responses as tool_responses
 
 _TRACK_PUBLIC_FIELDS = (
     "id",
@@ -284,6 +286,145 @@ def _task_summary(task: dict[str, Any]) -> dict[str, Any]:
     return {field: task.get(field) for field in _TASK_PUBLIC_FIELDS}
 
 
+def _artifact_decision_summary(artifact: dict[str, Any]) -> dict[str, Any]:
+    source_buddy = artifact.get("buddy")
+    source_run = artifact.get("source_run_id")
+    is_current = bool(artifact.get("is_current"))
+    return {
+        "id": artifact.get("id"),
+        "kind": artifact.get("kind"),
+        "title": artifact.get("title"),
+        "summary": artifact.get("summary", ""),
+        "source_buddy": source_buddy,
+        "source_run": source_run,
+        "revision": artifact.get("revision"),
+        "is_current": is_current,
+        "currentness": "current" if is_current else "superseded",
+        "updated_at": artifact.get("updated_at"),
+    }
+
+
+def _task_current_artifact_rows(task: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    artifact_slots = task.get("artifact_slots")
+    if not isinstance(artifact_slots, dict):
+        return rows
+    for kind in sorted(artifact_slots.keys()):
+        row = artifact_slots.get(kind)
+        if not isinstance(row, dict):
+            continue
+        artifact_id = row.get("current_artifact_id")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            continue
+        artifact = env_store.get_artifact(artifact_id)
+        if not isinstance(artifact, dict):
+            continue
+        rows.append(_artifact_decision_summary(artifact))
+    rows.sort(key=lambda item: (str(item.get("kind") or ""), str(item.get("id") or "")))
+    return rows
+
+
+def _track_context_summary(track: dict[str, Any]) -> dict[str, Any]:
+    tasks: list[dict[str, Any]] = []
+    for task_id in sorted(track.get("task_ids", [])):
+        if not isinstance(task_id, str) or not task_id:
+            continue
+        task = env_store.get_task(task_id)
+        if not isinstance(task, dict):
+            continue
+        tasks.append(
+            {
+                "id": task.get("id"),
+                "buddy": task.get("buddy"),
+                "status": task.get("status"),
+                "summary": task.get("summary", ""),
+                "current_artifacts": _task_current_artifact_rows(task),
+            }
+        )
+
+    recent_handoffs = context_service.scan_track_recent_handoffs(str(track.get("id") or ""), limit=3)
+    compact_handoffs: list[dict[str, Any]] = []
+    for row in recent_handoffs:
+        if not isinstance(row, dict):
+            continue
+        compact_handoffs.append(
+            {
+                "run_id": row.get("run_id"),
+                "task_id": row.get("task_id"),
+                "buddy_id": row.get("buddy_id"),
+                "next_buddy": row.get("next_buddy"),
+                "reason": row.get("reason"),
+                "context": row.get("context"),
+                "timestamp": row.get("timestamp"),
+            }
+        )
+    return {
+        "track_id": track.get("id"),
+        "tasks": tasks,
+        "recent_handoffs": compact_handoffs,
+    }
+
+
+def _track_discovery(
+    *,
+    track: dict[str, Any],
+    active_buddy: str,
+) -> tuple[dict[str, Any], int | None]:
+    reasons: list[str] = []
+    track_id = track.get("id")
+    next_buddy = track.get("next_buddy")
+    current_buddy = track.get("current_buddy")
+    is_next_buddy = isinstance(next_buddy, str) and next_buddy == active_buddy
+    is_current_buddy = isinstance(current_buddy, str) and current_buddy == active_buddy
+    participates = False
+    for task_id in track.get("task_ids", []):
+        if not isinstance(task_id, str) or not task_id:
+            continue
+        task = env_store.get_task(task_id)
+        if isinstance(task, dict) and task.get("buddy") == active_buddy:
+            participates = True
+            break
+
+    recent_to_active = False
+    if isinstance(track_id, str) and track_id:
+        recent_handoffs = context_service.scan_track_recent_handoffs(track_id, limit=1)
+        if recent_handoffs:
+            first = recent_handoffs[0]
+            if isinstance(first, dict) and first.get("next_buddy") == active_buddy:
+                recent_to_active = True
+                reasons.append("recent_handoff.next_buddy == active_buddy")
+
+    if is_next_buddy:
+        reasons.append("track.next_buddy == active_buddy")
+    if participates:
+        reasons.append("track has active_buddy participant task")
+    if is_current_buddy:
+        reasons.append("track.current_buddy == active_buddy")
+
+    if is_next_buddy:
+        active_role = "next_buddy"
+    elif is_current_buddy:
+        active_role = "current_buddy"
+    elif participates:
+        active_role = "participant"
+    else:
+        active_role = "observer"
+
+    priority: int | None = None
+    if recent_to_active and is_next_buddy:
+        priority = 0
+    elif is_next_buddy:
+        priority = 1
+    elif participates:
+        priority = 2
+
+    return {
+        "active_buddy_role": active_role,
+        "latest_handoff_to_active_buddy": recent_to_active,
+        "relevance_reasons": reasons,
+    }, priority
+
+
 def _current_binding(context: TrackServiceContext) -> dict[str, Any]:
     payload = context["instance_payload"]
     return {
@@ -436,15 +577,46 @@ def list_tracks_for_active_buddy(*, args: dict[str, Any], context: TrackServiceC
         )
         if fields_error is not None:
             return fields_error
-    return _success_payload(
+    tracks: list[dict[str, Any]] = []
+    candidate_rows: list[tuple[int, str, dict[str, Any]]] = []
+    for track in env_store.list_tracks():
+        row = _track_summary(track)
+        discovery, priority = _track_discovery(track=track, active_buddy=context["active_buddy"])
+        row["discovery"] = discovery
+        tracks.append(row)
+        if priority is not None:
+            track_id = str(track.get("id") or "")
+            candidate_rows.append((priority, track_id, row))
+
+    candidate_rows.sort(key=lambda item: (item[0], item[1]))
+    candidate_ids = [row.get("id") for _, _, row in candidate_rows if isinstance(row.get("id"), str)]
+
+    prioritized_ids = {track_id for _, track_id, _ in candidate_rows}
+    tracks.sort(
+        key=lambda row: (
+            0 if str(row.get("id") or "") in prioritized_ids else 1,
+            next(
+                (priority for priority, track_id, _ in candidate_rows if track_id == str(row.get("id") or "")),
+                99,
+            ),
+            str(row.get("id") or ""),
+        )
+    )
+
+    payload = _success_payload(
         action=action,
         context=context,
-        tracks=[_track_summary(track) for track in env_store.list_tracks()],
+        tracks=tracks,
         allowed_next_actions=[
             "Use track.get with a returned track_id to inspect one track.",
             "Ask PM to create or advance lifecycle state when needed.",
         ],
     )
+    payload["discovery_summary"] = {
+        "active_buddy": context["active_buddy"],
+        "candidate_track_ids": candidate_ids,
+    }
+    return payload
 
 
 def get_track_for_active_buddy(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
@@ -464,7 +636,7 @@ def get_track_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCon
     if error is not None:
         return error
     assert track is not None
-    return _success_payload(
+    payload = _success_payload(
         action=action,
         context=context,
         track=track,
@@ -473,6 +645,8 @@ def get_track_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCon
             "Ask PM to update or advance track lifecycle state.",
         ],
     )
+    payload["track_context_summary"] = _track_context_summary(track)
+    return payload
 
 
 def get_current_track(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
@@ -492,18 +666,32 @@ def get_current_track(*, args: dict[str, Any], context: TrackServiceContext) -> 
     binding = _current_binding(context)
     track_id = binding.get("current_track_id")
     if not isinstance(track_id, str) or not track_id.strip():
-        return {
-            "ok": True,
-            "tool": "track",
-            "action": action,
-            "active_buddy": context["active_buddy"],
-            "track": None,
-            "current_binding": binding,
-            "allowed_next_actions": [
+        payload = _success_payload(
+            action=action,
+            context=context,
+            track=None,
+            allowed_next_actions=[
                 "Use track.list to inspect available tracks.",
-                "Set a current task that is linked to a track when track binding is needed.",
+                "Use track.get with a selected track_id when details are needed.",
             ],
-        }
+        )
+        payload["track"] = None
+        payload["track_id"] = None
+        payload["allowed_next_action_options"] = [
+            tool_responses.next_action_option(
+                tool="track",
+                action="list",
+                option_id="inspect_candidate_tracks",
+                reason="Inspect readable tracks when no current track binding exists.",
+            ),
+            tool_responses.next_action_option(
+                tool="track",
+                action="get",
+                option_id="inspect_track_details_after_list",
+                reason="Inspect one selected track after listing candidates.",
+            ),
+        ]
+        return payload
     track = env_store.get_track(track_id.strip())
     if track is None:
         return _track_lookup_error(action=action, active_buddy=context["active_buddy"], track_id=track_id.strip())

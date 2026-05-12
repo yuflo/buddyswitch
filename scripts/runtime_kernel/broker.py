@@ -19,6 +19,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from env_manifest import ManifestError, load_manifest
 from env.services import bindings as binding_service
+from env.tools import responses as tool_responses
 from runtime_kernel.client import PROTOCOL
 from runtime_kernel.persist import persist_buddy_run_request
 from runtime_kernel.resolve import prepare_turn_context_request
@@ -27,10 +28,31 @@ from env.tools.router import dispatch_env_tool_request
 
 
 def _error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-    error: dict[str, Any] = {"code": code, "message": message}
+    payload: dict[str, Any] = {
+        "ok": False,
+        "error": {
+            "code": code,
+            "message": message,
+        },
+    }
     if extra:
-        error.update(extra)
-    return {"ok": False, "error": error}
+        payload.update(extra)
+    if "allowed_next_actions" in payload and "allowed_next_action_options" not in payload:
+        payload["allowed_next_action_options"] = [
+            tool_responses.next_action_option(
+                tool="context",
+                action="summarize",
+                option_id="summarize_current_context_before_retry",
+                reason="Summarize current context before retrying runtime operations.",
+            ),
+            tool_responses.next_action_option(
+                tool="context",
+                action="get",
+                option_id="inspect_context_before_retry",
+                reason="Inspect full current context before retrying runtime operations.",
+            ),
+        ]
+    return payload
 
 
 def _allowed(*actions: str) -> list[str]:
@@ -48,10 +70,11 @@ def _boundary_error(code: str, message: str, *, boundary: str, actions: list[str
     )
 
 
-def _error_from_payload(error: dict[str, Any], *, default_code: str, default_message: str) -> dict[str, Any]:
+def _error_from_payload(payload: dict[str, Any], *, default_code: str, default_message: str) -> dict[str, Any]:
+    error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
     message = error.get("message") if isinstance(error.get("message"), str) else default_message
     code = error.get("code") if isinstance(error.get("code"), str) else default_code
-    extra = {key: value for key, value in error.items() if key not in {"code", "message"}}
+    extra = {key: value for key, value in payload.items() if key not in {"ok", "error"}}
     return _error(code, message, extra)
 
 
@@ -119,15 +142,7 @@ def _prepare_dispatch(
         raise ValueError("prepare payload.text must be a non-empty string")
     prepared = prepare_turn_context_request(text, manifest_path=manifest_path)
     if prepared.get("ok") is not True:
-        error = prepared.get("error") if isinstance(prepared.get("error"), dict) else {}
-        return _error_from_payload(error, default_code="E_RUNTIME_BROKER", default_message="prepare rejected")
-    session = _product_session(instance_json_path=instance_json_path, instance_record=instance_record)
-    try:
-        task_id, track_id = binding_service.resolve_binding_from_payload(prepared)
-        binding_service.write_product_session_binding(session, task_id=task_id, track_id=track_id)
-    except (OSError, ValueError) as exc:
-        turn_runtime._clear_reservation_from_payload(prepared, fail_on_warning=True)
-        raise ValueError(f"instance binding update failed after prepare: {exc}") from exc
+        return _error_from_payload(prepared, default_code="E_RUNTIME_BROKER", default_message="prepare rejected")
     return {"ok": True, "payload": prepared}
 
 
@@ -161,8 +176,7 @@ def _persist_dispatch(
         return _error(exc.code, exc.message, exc.details)
     persisted = persist_buddy_run_request(context, result=result, manifest_path=manifest_path)
     if persisted.get("ok") is not True:
-        error = persisted.get("error") if isinstance(persisted.get("error"), dict) else {}
-        return _error_from_payload(error, default_code="E_RUNTIME_BROKER", default_message="persist rejected")
+        return _error_from_payload(persisted, default_code="E_RUNTIME_BROKER", default_message="persist rejected")
     binding = binding_service.persist_binding_from_payload(persisted)
     if binding is not None:
         task_id, track_id = binding

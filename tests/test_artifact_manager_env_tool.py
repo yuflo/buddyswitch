@@ -236,6 +236,81 @@ class ArtifactManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(artifact, dict)
         self.assertEqual(artifact.get("content"), {"result": "current content"})
 
+    def test_artifact_list_get_and_get_current_include_decision_metadata_fields(self) -> None:
+        instance_json = self._instance_json(current_task_id="task-dev-metadata")
+        self._seed_task(task_id="task-dev-metadata", buddy="dev", title="Dev Metadata Task")
+        self._seed_run_reservation(run_id="run-dev-metadata-r1", task_id="task-dev-metadata")
+        self._seed_run_reservation(run_id="run-dev-metadata-r2", task_id="task-dev-metadata")
+
+        first = self._dispatch(
+            action="create_revision",
+            args={
+                "artifact_id": "art-dev-metadata-report-r1",
+                "task_id": "task-dev-metadata",
+                "kind": "implementation-report",
+                "title": "Metadata Report R1",
+                "summary": "r1",
+                "content": {"body": "r1"},
+                "source_run_id": "run-dev-metadata-r1",
+            },
+            instance_json=instance_json,
+        )
+        self.assertTrue(first.get("ok"), msg=first)
+        second = self._dispatch(
+            action="create_revision",
+            args={
+                "artifact_id": "art-dev-metadata-report-r2",
+                "task_id": "task-dev-metadata",
+                "kind": "implementation-report",
+                "title": "Metadata Report R2",
+                "summary": "r2",
+                "content": {"body": "r2"},
+                "source_run_id": "run-dev-metadata-r2",
+            },
+            instance_json=instance_json,
+        )
+        self.assertTrue(second.get("ok"), msg=second)
+
+        listed = self._dispatch(action="list", args={}, instance_json=instance_json)
+        self.assertTrue(listed.get("ok"), msg=listed)
+        listed_rows = listed.get("artifacts")
+        self.assertIsInstance(listed_rows, list, msg=listed)
+        assert isinstance(listed_rows, list)
+        self.assertGreaterEqual(len(listed_rows), 2)
+        first_row = listed_rows[0]
+        self.assertIsInstance(first_row, dict, msg=listed)
+        assert isinstance(first_row, dict)
+        for key in ("source_buddy", "source_run", "revision", "is_current", "currentness"):
+            self.assertIn(key, first_row)
+        self.assertEqual(first_row.get("source_buddy"), "dev")
+        self.assertIn(first_row.get("currentness"), {"current", "superseded"})
+
+        fetched = self._dispatch(
+            action="get",
+            args={"artifact_id": "art-dev-metadata-report-r2"},
+            instance_json=instance_json,
+        )
+        self.assertTrue(fetched.get("ok"), msg=fetched)
+        artifact = fetched.get("artifact")
+        self.assertIsInstance(artifact, dict, msg=fetched)
+        assert isinstance(artifact, dict)
+        for key in ("source_buddy", "source_run", "revision", "is_current", "currentness"):
+            self.assertIn(key, artifact)
+        self.assertEqual(artifact.get("source_run"), "run-dev-metadata-r2")
+        self.assertEqual(artifact.get("currentness"), "current")
+
+        current = self._dispatch(action="get_current", args={}, instance_json=instance_json)
+        self.assertTrue(current.get("ok"), msg=current)
+        current_rows = current.get("artifacts")
+        self.assertIsInstance(current_rows, list, msg=current)
+        assert isinstance(current_rows, list)
+        self.assertEqual([row.get("id") for row in current_rows if isinstance(row, dict)], ["art-dev-metadata-report-r2"])
+        current_row = current_rows[0]
+        self.assertIsInstance(current_row, dict, msg=current)
+        assert isinstance(current_row, dict)
+        self.assertEqual(current_row.get("source_run"), "run-dev-metadata-r2")
+        self.assertEqual(current_row.get("currentness"), "current")
+
     def test_create_revision_promotes_current_artifact_and_updates_task_slots(self) -> None:
         instance_json = self._instance_json(current_task_id="task-dev-revision")
         self._seed_task(task_id="task-dev-revision", buddy="dev", title="Dev Revision")

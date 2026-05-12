@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from env.services import tasks as task_service
+from env.tools import contracts as tool_contracts
 
 _ACTION_MAP = {
     "create": task_service.create_task_for_active_buddy,
@@ -17,6 +18,10 @@ _ACTION_MAP = {
     "update": task_service.update_task_for_active_buddy,
     "archive": task_service.archive_task_for_active_buddy,
 }
+
+
+def _supported_actions_text() -> str:
+    return ", ".join(sorted(tool_contracts.supported_actions("task")))
 
 
 def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
@@ -32,25 +37,25 @@ def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str,
         "active_buddy": active_buddy,
         "allowed_next_actions": [
             'Send env.tool payload as {"tool":"task","action":"<action>","args":{...}}.',
-            "Use one supported action: create, list, get, get_current, set_current, update, archive.",
+            f"Use one supported action: {_supported_actions_text()}.",
         ],
     }
 
 
-def _unknown_action_error(*, action: str, active_buddy: str) -> dict[str, Any]:
+def _router_contract_error(*, action: str, active_buddy: str, action_name: str) -> dict[str, Any]:
     return {
         "ok": False,
         "tool": "task",
         "action": action,
         "error": {
-            "code": "E_TASK_ACTION",
-            "message": f"unsupported task action: {action}",
+            "code": "E_ENV_TOOL_ROUTER",
+            "message": f"router dispatched unsupported task action: {action_name}",
         },
-        "permission_boundary": "request-payload",
+        "permission_boundary": "env.tool.router_contract",
         "active_buddy": active_buddy,
         "allowed_next_actions": [
-            "Use one supported action: create, list, get, get_current, set_current, update, archive.",
-            "Check prepare.runtime_context.env_tools.task_manager for command and payload hints.",
+            "Retry through env.tools.router with a registry-declared action.",
+            "Report registry/manager drift if this persists.",
         ],
     }
 
@@ -84,7 +89,7 @@ def dispatch_task_manager_request(
 
     handler = _ACTION_MAP.get(action_name)
     if handler is None:
-        return _unknown_action_error(action=action, active_buddy=active_buddy)
+        return _router_contract_error(action=action, active_buddy=active_buddy, action_name=action_name)
 
     context: task_service.TaskServiceContext = {
         "active_buddy": active_buddy,

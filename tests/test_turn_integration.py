@@ -459,8 +459,8 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=market_instance_id,
         )
         self.assertFalse(issue["ok"])
-        self.assertEqual(issue["error"]["permission_boundary"], "browser-cockpit-ready")
-        self.assertEqual(issue["error"]["stop_condition"], "browser cockpit is not ready for MCP page operations")
+        self.assertEqual(issue["permission_boundary"], "browser-cockpit-ready")
+        self.assertEqual(issue["stop_condition"], "browser cockpit is not ready for MCP page operations")
         self.assertEqual(self._evidence_token_paths(market_instance), [])
 
     def test_market_browser_evidence_wrong_instance_fails_before_any_browser_cdp_call(self) -> None:
@@ -487,7 +487,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id="inst-other",
         )
         self.assertFalse(issue["ok"])
-        self.assertEqual(issue["error"]["permission_boundary"], "active-instance")
+        self.assertEqual(issue["permission_boundary"], "active-instance")
         self.assertEqual(state.snapshot_calls(), [])
         self.assertEqual(self._evidence_token_paths(market_instance), [])
 

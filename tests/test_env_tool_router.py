@@ -157,6 +157,42 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertEqual(self._tasks_snapshot(), before_tasks)
                 self.assertEqual(self._load_instance(instance_json), before_instance)
 
+    def test_router_supported_tools_and_actions_match_registry(self) -> None:
+        contracts = importlib.import_module("env.tools.contracts")
+        router = importlib.import_module("env.tools.router")
+
+        registry = contracts.TOOL_REGISTRY
+        expected_tools = {spec["tool"] for spec in registry}
+        self.assertEqual(set(router._TOOL_ACTIONS), expected_tools)
+        self.assertEqual(set(router._TOOL_DISPATCHERS), expected_tools)
+
+        for spec in registry:
+            with self.subTest(tool=spec["tool"]):
+                expected_actions = {action["name"] for action in spec["actions"]}
+                self.assertEqual(set(router._TOOL_ACTIONS[spec["tool"]]), expected_actions)
+
+    def test_manager_handler_actions_match_registry_actions(self) -> None:
+        contracts = importlib.import_module("env.tools.contracts")
+        registry = contracts.TOOL_REGISTRY
+
+        manager_modules = {
+            "task": "env.tools.task_manager",
+            "track": "env.tools.track_manager",
+            "artifact": "env.tools.artifact_manager",
+            "context": "env.tools.context_manager",
+            "binding": "env.tools.binding_manager",
+            "handoff": "env.tools.handoff_manager",
+            "run": "env.tools.run_manager",
+            "evidence": "env.tools.evidence_manager",
+        }
+        for spec in registry:
+            tool_name = spec["tool"]
+            module = importlib.import_module(manager_modules[tool_name])
+            action_map = getattr(module, "_ACTION_MAP")
+            self.assertIsInstance(action_map, dict)
+            expected_actions = {action["name"] for action in spec["actions"]}
+            self.assertEqual(set(action_map), expected_actions)
+
 
 if __name__ == "__main__":
     unittest.main()

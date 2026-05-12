@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from env.services import bindings as binding_service
+from env.tools import contracts as tool_contracts
 
 _ACTION_MAP = {
     "get": binding_service.get_binding,
@@ -14,6 +15,10 @@ _ACTION_MAP = {
     "set_track": binding_service.set_track_binding,
     "clear": binding_service.clear_binding,
 }
+
+
+def _supported_actions_text() -> str:
+    return ", ".join(sorted(tool_contracts.supported_actions("binding")))
 
 
 def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
@@ -29,25 +34,25 @@ def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str,
         "active_buddy": active_buddy,
         "allowed_next_actions": [
             'Send env.tool payload as {"tool":"binding","action":"<action>","args":{...}}.',
-            "Use one supported action: get, set_task, set_track, clear.",
+            f"Use one supported action: {_supported_actions_text()}.",
         ],
     }
 
 
-def _unknown_action_error(*, action: str, active_buddy: str) -> dict[str, Any]:
+def _router_contract_error(*, action: str, active_buddy: str, action_name: str) -> dict[str, Any]:
     return {
         "ok": False,
         "tool": "binding",
         "action": action,
         "error": {
-            "code": "E_BINDING_ACTION",
-            "message": f"unsupported binding action: {action}",
+            "code": "E_ENV_TOOL_ROUTER",
+            "message": f"router dispatched unsupported binding action: {action_name}",
         },
-        "permission_boundary": "request-payload",
+        "permission_boundary": "env.tool.router_contract",
         "active_buddy": active_buddy,
         "allowed_next_actions": [
-            "Use one supported action: get, set_task, set_track, clear.",
-            "Check prepare.runtime_context.env_tools.binding_manager for command and payload hints.",
+            "Retry through env.tools.router with a registry-declared action.",
+            "Report registry/manager drift if this persists.",
         ],
     }
 
@@ -81,7 +86,7 @@ def dispatch_binding_manager_request(
 
     handler = _ACTION_MAP.get(action_name)
     if handler is None:
-        return _unknown_action_error(action=action, active_buddy=active_buddy)
+        return _router_contract_error(action=action, active_buddy=active_buddy, action_name=action_name)
 
     context: binding_service.BindingServiceContext = {
         "active_buddy": active_buddy,

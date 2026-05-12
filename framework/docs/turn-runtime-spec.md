@@ -103,6 +103,7 @@ Required top-level sections:
 - `runtime_commands`
 - `capability_boundary`
 - `env_tools`
+- `operation_semantics`
 - `tool_requirements`
 - `persist_payload_hint`
 - `desc`
@@ -110,6 +111,7 @@ Required top-level sections:
 - `artifact_kind_desc`
 - `context_sources_desc`
 - `current_context_summary`
+- `decision_surface`
 
 `runtime_context.desc` provides compact persist field guidance for `execution_summary`, `artifacts`, `state_effects.task`, `state_effects.track`, `handoff`, `contributors`, and `tool_evidence`.
 
@@ -120,11 +122,31 @@ Required top-level sections:
 
 `runtime_context.artifact_kind_desc` describes only the active buddy's allowed artifact kinds, each with compact `label` and `use_when`.
 
-`runtime_context.context_sources_desc` tells hosts where to read request/task/artifact/track/handoff context from the prepare payload without source inference.
+`runtime_context.context_sources_desc` is a structured descriptor map keyed by source id (`request_text`, `task_context.task`, `task_context.artifacts`, `track_context.track`, `track_context.recent_handoffs`, `current_context_summary`). Each descriptor includes `description`, `content`, `scope`, `nullable`, and `decision_use`, with optional `source_of_truth`, `summary_projection`, `max_items`, and `sorted_by`.
+
+`runtime_context.decision_surface` is the host-facing decision summary for the active binding. It includes:
+
+- `binding_state` (`unbound`, `bound_task_only`, `bound_track_only`, `bound_task_and_track`, `stale`)
+- `active_buddy_relation` (`task_role`, `track_role`, `latest_handoff_to_active_buddy`)
+- `context_readiness`
+- `evidence_readiness`
+- `safe_read_affordances` (read-only next options with `mutates=none`)
 
 Runtime AGENTS guidance should point to these runtime context surfaces instead of duplicating payload recipes or capability matrices.
 
-`runtime_context.env_tools` is the compact source for broker-routed env tool operations. Shared env slices are executed through `python3 scripts/env/client.py <resource> <operation>` and routed through broker method `env.tool` with envelope `{tool, action, args}`. Active slices include `task-manager`, `track-manager`, `artifact-manager`, `context-manager`, `binding-manager`, `handoff-manager`, `run-manager`, and `evidence-manager`. Permission enforcement, active-buddy ownership checks, PM-only track lifecycle authority, artifact-kind scope, artifact source-run validation, instance binding writes, context validation, handoff target validation, run reservation validation, run commit persistence, Market evidence issuance, browser ready-page enforcement, and evidence token scope are implemented in runtime tool/service code, not in prompt wording.
+`runtime_context.env_tools` is the compact source for broker-routed env tool operations. Shared env slices are executed through `python3 scripts/env/client.py <resource> <operation>` and routed through broker method `env.tool` with envelope `{tool, action, args}`. Active slices include `task-manager`, `track-manager`, `artifact-manager`, `context-manager`, `binding-manager`, `handoff-manager`, `run-manager`, and `evidence-manager`.
+
+`runtime_context.operation_semantics` is a registry-derived map keyed by `"<tool>.<action>"` (for example `track.list`, `run.commit`). Each row includes `kind`, `mutates`, `required_permission`, `authority`, `requires`, and `returns`.
+
+Permission enforcement, active-buddy ownership checks, PM-only track lifecycle authority, artifact-kind scope, artifact source-run validation, instance binding writes, context validation, handoff target validation, run reservation validation, run commit persistence, Market evidence issuance, browser ready-page enforcement, and evidence token scope are implemented in runtime tool/service code, not in prompt wording.
+
+## Discovery Surfaces
+
+Discovery is descriptive and read-only. It does not mutate active instance binding.
+
+- `track.list` returns per-row `discovery` semantics and `discovery_summary.candidate_track_ids`.
+- `track.get` returns `track_context_summary` with compact task/current-artifact metadata.
+- Track-context artifact summaries expose decision metadata (`id`, `kind`, `title`, `summary`, `source_buddy`, `source_run`, `revision`, `is_current`, `currentness`) and must not include foreign full artifact `content`.
 
 ## Persist Contract
 
@@ -158,12 +180,15 @@ When `prepare`, `persist`, or broker-routed evidence tools reject a request, res
 - `permission_boundary`
 - `stop_condition`
 - `allowed_next_actions`
+- `allowed_next_action_options`
 - `command_hint`
 - `persist_payload_hint`
 
 Common persist validation failures should return structured `E_RUNTIME_PERSIST` feedback with actionable `permission_boundary` and `allowed_next_actions` (for example `persist.execution_summary`, `persist.durable_signal`, `persist.artifacts`, `state_effects.track.track_id`, `persist.handoff`).
 
 Buddy runtime guidance should follow these fields and must not bypass broker-owned runtime boundaries.
+
+`allowed_next_action_options[*].source_refs` should reference operation semantics rows via resolvable keys such as `runtime_context.operation_semantics['track.list']`.
 
 ## Receipt Contract
 
@@ -200,6 +225,25 @@ After successful persist:
 3. Run `prepare` again.
 
 Do not continue a turn through hidden reservation state.
+
+## Manual Product-Mode Smoke
+
+Run in a launcher-managed instance context and verify the same decision surfaces exposed by tests:
+
+```bash
+./buddyswitch-codex instance start --buddy pm -- --help
+./buddyswitch-codex instance start --buddy market -- --help
+python3 scripts/turn_runtime.py prepare "Receive PM's onboarding rewrite handoff, do a quick market scan, produce a market-scan artifact, and hand the next step to Design."
+python3 scripts/env/client.py context summarize
+python3 scripts/env/client.py track list
+```
+
+Expected signals:
+
+- `runtime_context.decision_surface` is present.
+- Market `evidence_readiness.market_research_evidence` is explicit.
+- `track.list.discovery_summary.candidate_track_ids` is present when candidate tracks exist.
+- Top discovery rows include `discovery.active_buddy_role` and `discovery.relevance_reasons`.
 
 ## Canonical State Paths
 

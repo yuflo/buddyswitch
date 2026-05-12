@@ -334,10 +334,30 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.addCleanup(thread.join, 1.0)
         return port
 
+    def _assert_structured_options(self, payload: dict[str, object]) -> None:
+        self.assertIn("allowed_next_action_options", payload)
+        options = payload["allowed_next_action_options"]
+        self.assertIsInstance(options, list, msg=payload)
+        assert isinstance(options, list)
+        self.assertGreaterEqual(len(options), 1, msg=payload)
+        for row in options:
+            self.assertIsInstance(row, dict, msg=payload)
+            assert isinstance(row, dict)
+            for key in ("id", "tool", "action", "mutates", "preconditions", "reason", "source_refs"):
+                self.assertIn(key, row)
+
     def test_market_profile_requires_browser_evidence(self) -> None:
         profile = env_profiles.require_env_profile("market", manifest_path=MANIFEST, repo_root=ROOT)
         self.assertEqual(profile["tool_capability"]["browser_cockpit"], "required")
         self.assertEqual(profile["tool_capability"]["market_research_evidence"], "required")
+
+    def test_market_prepare_decision_surface_exposes_evidence_readiness(self) -> None:
+        instance_json = self._instance_json()
+        context = self._prepare_market(instance_json=instance_json)
+        decision_surface = context["runtime_context"]["decision_surface"]
+        evidence_readiness = decision_surface["evidence_readiness"]
+        self.assertEqual(evidence_readiness["browser_cockpit"], "required")
+        self.assertEqual(evidence_readiness["market_research_evidence"], "required")
 
     def test_market_persist_without_evidence_rejects_before_writes(self) -> None:
         instance_json = self._instance_json()
@@ -357,6 +377,31 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("tool_evidence", response["error"]["message"])
         after_runs = list(self._runtime_path("buddyswitch/content/runs").glob("*.json"))
         self.assertEqual(after_runs, before_runs)
+
+    def test_market_missing_evidence_rejection_names_exact_persist_fields_and_issue_option(self) -> None:
+        instance_json = self._instance_json()
+        context = self._prepare_market(instance_json=instance_json)
+        rejected = self._dispatch(
+            request={
+                "protocol": "buddyswitch-runtime-broker/v1",
+                "instance_id": "inst-market-example",
+                "active_buddy": "market",
+                "method": "persist",
+                "payload": {"context": context, "result": _market_commit()},
+            },
+            instance_json=instance_json,
+        )
+        self.assertFalse(rejected["ok"], msg=rejected)
+        self.assertEqual(rejected["permission_boundary"], "market.browser_evidence")
+        self.assertIn("persist_payload_hint", rejected)
+        hint = rejected["persist_payload_hint"]
+        self.assertEqual(
+            set(hint["tool_evidence"]["accepted_fields"]),
+            {"browser_cockpit_token", "approved_downgrade_token"},
+        )
+        self._assert_structured_options(rejected)
+        option_pairs = {(row["tool"], row["action"]) for row in rejected["allowed_next_action_options"]}
+        self.assertIn(("evidence", "issue_browser"), option_pairs)
 
     def test_browser_evidence_issue_requires_market_profile(self) -> None:
         instance_json = self._instance_json(buddy="pm", instance_id="inst-pm-example")
@@ -443,9 +488,10 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(issue["ok"])
         error = issue["error"]
-        self.assertEqual(error["permission_boundary"], "browser-cockpit-ready")
-        self.assertEqual(error["stop_condition"], "browser cockpit is not ready for MCP page operations")
-        self.assertIn("env browser ensure", error["command_hint"])
+        self.assertEqual(error["code"], "E_RUNTIME_BROKER")
+        self.assertEqual(issue["permission_boundary"], "browser-cockpit-ready")
+        self.assertEqual(issue["stop_condition"], "browser cockpit is not ready for MCP page operations")
+        self.assertIn("env browser ensure", issue["command_hint"])
         self.assertEqual(self._evidence_token_paths(instance_json), [])
 
     def test_browser_preflight_repairs_intro_only_with_put_json_new(self) -> None:
@@ -516,6 +562,36 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(run_payload["tool_evidence"]["kind"], "browser-cockpit-preflight")
         self.assertEqual(run_payload["tool_evidence"]["token"], token)
 
+    def test_browser_evidence_response_exposes_token_scope_and_persist_payload_hint(self) -> None:
+        state = _CDPState(
+            version_ok=True,
+            pages=[{"id": "target-about-blank", "type": "page", "url": "about:blank"}],
+        )
+        port = self._start_cdp_server(state)
+        instance_json = self._instance_json(browser_port=port)
+        context = self._prepare_market(instance_json=instance_json)
+        issue = self._dispatch(
+            request={
+                "protocol": "buddyswitch-runtime-broker/v1",
+                "instance_id": "inst-market-example",
+                "active_buddy": "market",
+                "method": "env.tool",
+                "payload": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
+            },
+            instance_json=instance_json,
+        )
+        self.assertTrue(issue["ok"], msg=issue)
+        feedback = issue["feedback"]
+        token_scope = feedback["token_scope"]
+        self.assertEqual(token_scope["run_id"], context["run_envelope"]["run_id"])
+        self.assertEqual(token_scope["context_revision"], context["context_revision"])
+        self.assertEqual(token_scope["instance_id"], context["instance_id"])
+        self.assertEqual(token_scope["buddy_id"], context["active_buddy"])
+        self.assertEqual(token_scope["task_id"], context["current_task_id"])
+        self.assertEqual(feedback["persist_field"], "tool_evidence.browser_cockpit_token")
+        self.assertIn("persist_payload_hint", issue)
+        self.assertEqual(issue["persist_payload_hint"]["tool_evidence_field"], "tool_evidence.browser_cockpit_token")
+
     def test_market_persist_with_token_for_other_run_rejects(self) -> None:
         state = _CDPState(
             version_ok=True,
@@ -574,6 +650,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(rejected["ok"])
         self.assertIn("not issued by runtime broker", rejected["error"]["message"])
+        self._assert_structured_options(rejected)
         self.assertEqual(self._state_snapshot(), before_rejected)
 
     def test_market_persist_with_handwritten_token_rejects_before_writes(self) -> None:

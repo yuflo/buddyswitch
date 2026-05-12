@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from env.services import tracks as track_service
+from env.tools import contracts as tool_contracts
 
 _ACTION_MAP = {
     "list": track_service.list_tracks_for_active_buddy,
@@ -19,6 +20,10 @@ _ACTION_MAP = {
     "attach_task": track_service.attach_task_to_track,
     "detach_task": track_service.detach_task_from_track,
 }
+
+
+def _supported_actions_text() -> str:
+    return ", ".join(sorted(tool_contracts.supported_actions("track")))
 
 
 def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
@@ -34,25 +39,25 @@ def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str,
         "active_buddy": active_buddy,
         "allowed_next_actions": [
             'Send env.tool payload as {"tool":"track","action":"<action>","args":{...}}.',
-            "Use one supported action: list, get, get_current, create, update, advance, archive, attach_task, detach_task.",
+            f"Use one supported action: {_supported_actions_text()}.",
         ],
     }
 
 
-def _unknown_action_error(*, action: str, active_buddy: str) -> dict[str, Any]:
+def _router_contract_error(*, action: str, active_buddy: str, action_name: str) -> dict[str, Any]:
     return {
         "ok": False,
         "tool": "track",
         "action": action,
         "error": {
-            "code": "E_TRACK_ACTION",
-            "message": f"unsupported track action: {action}",
+            "code": "E_ENV_TOOL_ROUTER",
+            "message": f"router dispatched unsupported track action: {action_name}",
         },
-        "permission_boundary": "request-payload",
+        "permission_boundary": "env.tool.router_contract",
         "active_buddy": active_buddy,
         "allowed_next_actions": [
-            "Use one supported action: list, get, get_current, create, update, advance, archive, attach_task, detach_task.",
-            "Check prepare.runtime_context.env_tools.track_manager for command and payload hints.",
+            "Retry through env.tools.router with a registry-declared action.",
+            "Report registry/manager drift if this persists.",
         ],
     }
 
@@ -86,7 +91,7 @@ def dispatch_track_manager_request(
 
     handler = _ACTION_MAP.get(action_name)
     if handler is None:
-        return _unknown_action_error(action=action, active_buddy=active_buddy)
+        return _router_contract_error(action=action, active_buddy=active_buddy, action_name=action_name)
 
     context: track_service.TrackServiceContext = {
         "active_buddy": active_buddy,

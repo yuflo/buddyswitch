@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import env_store
+from env.tools import responses as tool_responses
 
 _IDENTITY_FIELDS = {"active_buddy", "buddy", "instance_id"}
 _VALIDATE_FIELDS = {"next_buddy", "reason", "context", "track_id"} | _IDENTITY_FIELDS
@@ -36,7 +37,9 @@ def _error_payload(
     message: str,
     permission_boundary: str,
     allowed_next_actions: list[str],
+    allowed_next_action_options: list[dict[str, Any]] | None = None,
     track_id: str | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "ok": False,
@@ -50,8 +53,12 @@ def _error_payload(
         "active_buddy": active_buddy,
         "allowed_next_actions": allowed_next_actions,
     }
+    if isinstance(allowed_next_action_options, list):
+        payload["allowed_next_action_options"] = allowed_next_action_options
     if isinstance(track_id, str) and track_id.strip():
         payload["track_id"] = track_id.strip()
+    if isinstance(extra, dict):
+        payload.update(extra)
     return payload
 
 
@@ -66,7 +73,30 @@ def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str,
             "Provide next_buddy, reason, and context as non-empty strings.",
             "Remove handoff when no cross-buddy continuation is needed.",
         ],
+        allowed_next_action_options=[
+            tool_responses.next_action_option(
+                tool="context",
+                action="summarize",
+                option_id="summarize_context_before_handoff",
+                reason="Summarize context before validating handoff payload.",
+            ),
+            tool_responses.next_action_option(
+                tool="track",
+                action="list",
+                option_id="inspect_tracks_before_handoff",
+                reason="Inspect track context before selecting handoff target.",
+            ),
+        ],
     )
+
+
+def _discoverability() -> dict[str, Any]:
+    return {
+        "will_be_discoverable_by_next_buddy": True,
+        "discovery_basis": "persisted_run_audit_handoff",
+        "available_after": "run.commit",
+        "discovery_surfaces": ["track.list", "track.get", "context.summarize"],
+    }
 
 
 def _ensure_allowed_fields(
@@ -131,7 +161,16 @@ def _normalize_handoff_args(
                 "Use one of the manifest buddy ids as next_buddy.",
                 "Remove handoff if no valid target exists.",
             ],
-        ) | {"handoff_targets": sorted(known_buddies)}
+            allowed_next_action_options=[
+                tool_responses.next_action_option(
+                    tool="context",
+                    action="summarize",
+                    option_id="summarize_context_before_target_retry",
+                    reason="Summarize context before retrying handoff target selection.",
+                ),
+            ],
+            extra={"handoff_targets": sorted(known_buddies)},
+        )
     return normalized, None
 
 
@@ -167,6 +206,13 @@ def validate_handoff(*, args: dict[str, Any], context: HandoffServiceContext) ->
     track_id, track_parse_error = _track_id_from_args_or_binding(args, context)
     if track_parse_error is not None:
         return _payload_error(action=action, active_buddy=context["active_buddy"], message=track_parse_error)
+    track_alignment: dict[str, Any] = {
+        "track_id": track_id,
+        "requested_next_buddy": handoff["next_buddy"],
+        "track_next_buddy": None,
+        "target_matches_track_next_buddy": True,
+    }
+    discoverability = _discoverability()
     if track_id is not None:
         track = env_store.get_track(track_id)
         if track is None:
@@ -181,9 +227,21 @@ def validate_handoff(*, args: dict[str, Any], context: HandoffServiceContext) ->
                     "Use track.list to inspect available track ids.",
                     "Validate handoff without track_id when no track is bound.",
                 ],
+                allowed_next_action_options=[
+                    tool_responses.next_action_option(
+                        tool="track",
+                        action="list",
+                        option_id="list_tracks_for_handoff_validation",
+                        reason="Inspect available tracks before validating handoff target.",
+                    ),
+                ],
             )
         next_buddy = track.get("next_buddy")
+        normalized_track_next = next_buddy.strip() if isinstance(next_buddy, str) and next_buddy.strip() else None
+        track_alignment["track_next_buddy"] = normalized_track_next
         if isinstance(next_buddy, str) and next_buddy.strip() and next_buddy.strip() != handoff["next_buddy"]:
+            track_alignment["target_matches_track_next_buddy"] = False
+            track_alignment["suggested_next_buddy"] = next_buddy.strip()
             return _error_payload(
                 action=action,
                 active_buddy=context["active_buddy"],
@@ -198,6 +256,24 @@ def validate_handoff(*, args: dict[str, Any], context: HandoffServiceContext) ->
                     "Use the track next_buddy as the handoff target.",
                     "Ask PM to advance the track before handing off to a different buddy.",
                 ],
+                allowed_next_action_options=[
+                    tool_responses.next_action_option(
+                        tool="track",
+                        action="get",
+                        option_id="inspect_track_transition_before_handoff",
+                        reason="Inspect track transition state before retrying handoff target.",
+                    ),
+                    tool_responses.next_action_option(
+                        tool="context",
+                        action="summarize",
+                        option_id="summarize_context_before_handoff_retry",
+                        reason="Summarize context before retrying conflicting handoff target.",
+                    ),
+                ],
+                extra={
+                    "track_alignment": track_alignment,
+                    "discoverability": discoverability,
+                },
             )
 
     return {
@@ -207,8 +283,24 @@ def validate_handoff(*, args: dict[str, Any], context: HandoffServiceContext) ->
         "active_buddy": context["active_buddy"],
         "track_id": track_id,
         "handoff": handoff,
+        "track_alignment": track_alignment,
+        "discoverability": discoverability,
         "allowed_next_actions": [
             "Include this handoff object in the next persist result when a transfer is needed.",
             "Use context.get to inspect current task and track context.",
+        ],
+        "allowed_next_action_options": [
+            tool_responses.next_action_option(
+                tool="run",
+                action="commit",
+                option_id="commit_handoff_to_run_audit",
+                reason="Commit this validated handoff to make it discoverable for the next buddy.",
+            ),
+            tool_responses.next_action_option(
+                tool="context",
+                action="get",
+                option_id="inspect_context_before_handoff_commit",
+                reason="Inspect full context before committing handoff.",
+            ),
         ],
     }

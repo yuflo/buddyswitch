@@ -77,6 +77,31 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest_path=MANIFEST,
         )
 
+    def _prepare(
+        self,
+        *,
+        instance_json: Path,
+        instance_id: str,
+        buddy: str,
+        text: str,
+    ) -> dict[str, object]:
+        prepared = runtime_broker.dispatch_runtime_request(
+            request={
+                "protocol": PROTOCOL,
+                "instance_id": instance_id,
+                "active_buddy": buddy,
+                "method": "prepare",
+                "payload": {"text": text},
+            },
+            instance_json_path=instance_json,
+            manifest_path=MANIFEST,
+        )
+        self.assertTrue(prepared.get("ok"), msg=prepared)
+        payload = prepared.get("payload")
+        self.assertIsInstance(payload, dict, msg=prepared)
+        assert isinstance(payload, dict)
+        return payload
+
     def _load_instance(self, instance_json: Path) -> dict[str, object]:
         return json.loads(instance_json.read_text(encoding="utf-8"))
 
@@ -171,6 +196,44 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             + "\n",
             encoding="utf-8",
         )
+
+    def _seed_pm_track_with_market_handoff(self) -> tuple[str, str]:
+        track_id = "track-pm-handoff-seeded"
+        pm_task_id = "task-pm-handoff-seeded"
+        self._seed_track(
+            track_id=track_id,
+            title="PM Handoff Track",
+            current_buddy="pm",
+            next_buddy="market",
+            summary="Seeded PM-to-Market handoff track.",
+        )
+        self._seed_task(
+            task_id=pm_task_id,
+            buddy="pm",
+            title="PM Seed Task",
+            track_id=track_id,
+            initial_run_id="run-pm-seeded-r1",
+        )
+        self._seed_artifact(
+            artifact_id="art-pm-seeded-prd-r1",
+            task_id=pm_task_id,
+            buddy="pm",
+            kind="prd",
+            title="PM Seed PRD",
+            source_run_id="run-pm-seeded-r1",
+            content={
+                "problem": "Busy teams lose time to scheduling overhead.",
+                "requirements": ["Hero value clarity", "Concrete CTA"],
+            },
+        )
+        self._write_handoff_run(
+            run_id="run-pm-seeded-handoff-r2",
+            task_id=pm_task_id,
+            track_id=track_id,
+            buddy_id="pm",
+            next_buddy="market",
+        )
+        return track_id, pm_task_id
 
     def test_binding_get_and_set_task_sync_active_instance_json(self) -> None:
         self._seed_track(track_id="track-dev-example", title="Dev Track", next_buddy="dev")
@@ -471,6 +534,174 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(conflict.get("ok"), msg=conflict)
         self.assertEqual(conflict.get("permission_boundary"), "handoff.track_transition")
         self.assertEqual(self._load_instance(instance_json), before)
+
+    def test_context_get_and_summarize_return_same_decision_surface_for_active_binding(self) -> None:
+        track_id, _ = self._seed_pm_track_with_market_handoff()
+        market_task_id = "task-market-context-decision-surface"
+        self._seed_task(
+            task_id=market_task_id,
+            buddy="market",
+            title="Market Bound Task",
+            track_id=track_id,
+            initial_run_id="run-market-bound-r1",
+        )
+        instance_json = self._instance_json(
+            instance_id="inst-market-example",
+            buddy="market",
+            current_task_id=market_task_id,
+            current_track_id=track_id,
+        )
+        prepared = self._prepare(
+            instance_json=instance_json,
+            instance_id="inst-market-example",
+            buddy="market",
+            text="Continue PM handoff in market context.",
+        )
+        context_get = self._dispatch(
+            tool="context",
+            action="get",
+            args={},
+            instance_json=instance_json,
+            instance_id="inst-market-example",
+            buddy="market",
+        )
+        self.assertTrue(context_get.get("ok"), msg=context_get)
+        summary = self._dispatch(
+            tool="context",
+            action="summarize",
+            args={},
+            instance_json=instance_json,
+            instance_id="inst-market-example",
+            buddy="market",
+        )
+        self.assertTrue(summary.get("ok"), msg=summary)
+
+        self.assertIn("decision_surface", prepared["runtime_context"])
+        self.assertIn("decision_surface", context_get)
+        self.assertIn("decision_surface", summary)
+        self.assertEqual(context_get["decision_surface"], prepared["runtime_context"]["decision_surface"])
+        self.assertEqual(summary["decision_surface"], prepared["runtime_context"]["decision_surface"])
+
+    def test_context_list_sources_matches_prepare_structured_descriptors(self) -> None:
+        track_id, _ = self._seed_pm_track_with_market_handoff()
+        market_task_id = "task-market-structured-source"
+        self._seed_task(
+            task_id=market_task_id,
+            buddy="market",
+            title="Market Structured Source Task",
+            track_id=track_id,
+            initial_run_id="run-market-structured-source-r1",
+        )
+        instance_json = self._instance_json(
+            instance_id="inst-market-source-desc",
+            buddy="market",
+            current_task_id=market_task_id,
+            current_track_id=track_id,
+        )
+        prepared = self._prepare(
+            instance_json=instance_json,
+            instance_id="inst-market-source-desc",
+            buddy="market",
+            text="Read structured context sources.",
+        )
+        listed = self._dispatch(
+            tool="context",
+            action="list_sources",
+            args={},
+            instance_json=instance_json,
+            instance_id="inst-market-source-desc",
+            buddy="market",
+        )
+        self.assertTrue(listed.get("ok"), msg=listed)
+        prepare_sources = prepared["runtime_context"]["context_sources_desc"]
+        listed_sources = listed["sources"]
+        self.assertEqual(set(prepare_sources), set(listed_sources))
+        for name, descriptor in listed_sources.items():
+            with self.subTest(name=name):
+                self.assertIsInstance(descriptor, dict)
+                assert isinstance(descriptor, dict)
+                for field in ("description", "content", "scope", "nullable", "decision_use"):
+                    self.assertIn(field, descriptor)
+        self.assertEqual(listed_sources["task_context.artifacts"]["content"], "full")
+        self.assertEqual(listed_sources["current_context_summary"]["content"], "summary")
+
+    def test_context_summarize_unbound_market_returns_candidate_tracks_without_binding_mutation(self) -> None:
+        track_id, _ = self._seed_pm_track_with_market_handoff()
+        instance_json = self._instance_json(instance_id="inst-market-unbound", buddy="market")
+        before = self._load_instance(instance_json)
+        summary = self._dispatch(
+            tool="context",
+            action="summarize",
+            args={},
+            instance_json=instance_json,
+            instance_id="inst-market-unbound",
+            buddy="market",
+        )
+        self.assertTrue(summary.get("ok"), msg=summary)
+        self.assertIn("candidate_tracks", summary)
+        candidate_tracks = summary["candidate_tracks"]
+        self.assertIsInstance(candidate_tracks, list, msg=summary)
+        assert isinstance(candidate_tracks, list)
+        self.assertIn(track_id, {row["track_id"] for row in candidate_tracks})
+        first_row = candidate_tracks[0]
+        self.assertIn("relevance_reasons", first_row)
+        self.assertIn("track.next_buddy == active_buddy", first_row["relevance_reasons"])
+        self.assertEqual(self._load_instance(instance_json), before)
+
+    def test_handoff_validate_returns_track_alignment_and_discoverability(self) -> None:
+        track_id, _ = self._seed_pm_track_with_market_handoff()
+        instance_json = self._instance_json(
+            instance_id="inst-pm-handoff-semantic",
+            buddy="pm",
+            current_track_id=track_id,
+        )
+        before = self._load_instance(instance_json)
+        accepted = self._dispatch(
+            tool="handoff",
+            action="validate",
+            args={
+                "next_buddy": "market",
+                "reason": "Market should continue from PM output.",
+                "context": "Use PM PRD plus run audit context.",
+            },
+            instance_json=instance_json,
+            instance_id="inst-pm-handoff-semantic",
+            buddy="pm",
+        )
+        self.assertTrue(accepted.get("ok"), msg=accepted)
+        self.assertIn("track_alignment", accepted)
+        self.assertIn("discoverability", accepted)
+        self.assertTrue(accepted["track_alignment"]["target_matches_track_next_buddy"])
+        self.assertEqual(accepted["discoverability"]["available_after"], "run.commit")
+        self.assertEqual(
+            accepted["discoverability"]["discovery_surfaces"],
+            ["track.list", "track.get", "context.summarize"],
+        )
+        self.assertEqual(self._load_instance(instance_json), before)
+
+    def test_handoff_validate_conflict_returns_suggested_next_buddy(self) -> None:
+        track_id, _ = self._seed_pm_track_with_market_handoff()
+        instance_json = self._instance_json(
+            instance_id="inst-pm-handoff-conflict-semantic",
+            buddy="pm",
+            current_track_id=track_id,
+        )
+        conflict = self._dispatch(
+            tool="handoff",
+            action="validate",
+            args={
+                "next_buddy": "design",
+                "reason": "Force a conflicting next buddy.",
+                "context": "This should return suggested_next_buddy.",
+            },
+            instance_json=instance_json,
+            instance_id="inst-pm-handoff-conflict-semantic",
+            buddy="pm",
+        )
+        self.assertFalse(conflict.get("ok"), msg=conflict)
+        self.assertEqual(conflict.get("permission_boundary"), "handoff.track_transition")
+        self.assertIn("track_alignment", conflict)
+        self.assertEqual(conflict["track_alignment"]["suggested_next_buddy"], "market")
 
 
 if __name__ == "__main__":
