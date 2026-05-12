@@ -251,7 +251,7 @@ class RepoConsistencyTests(unittest.TestCase):
     def test_template_assets_exist(self) -> None:
         required_templates = [
             ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "assets" / "prd-template.md",
-            ROOT / "buddyswitch" / "skills" / "shared" / "track-manager" / "assets" / "track-operation-template.md",
+            ROOT / "buddyswitch" / "skills" / "shared" / "track-tool" / "assets" / "track-operation-template.md",
             ROOT / "buddyswitch" / "skills" / "design" / "shape-prototype" / "assets" / "design-handoff-template.md",
             ROOT / "buddyswitch" / "skills" / "dev" / "implement-task" / "assets" / "implementation-report-template.md",
             ROOT / "buddyswitch" / "skills" / "test" / "smoke-test" / "assets" / "test-report-template.md",
@@ -549,34 +549,44 @@ class RepoConsistencyTests(unittest.TestCase):
                 for snippet in forbidden_snippets:
                     self.assertNotIn(snippet, text)
 
-    def test_manifest_declares_shared_managers_for_every_buddy(self) -> None:
+    def test_manifest_declares_shared_env_tool_skills_for_every_buddy(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         skills = {
             row["id"]: row
             for row in manifest.get("skills", [])
             if isinstance(row, dict) and isinstance(row.get("id"), str)
         }
-        self.assertIn("task-manager", skills)
+        self.assertIn("task-tool", skills)
         self.assertEqual(
-            skills["task-manager"].get("path"),
-            "buddyswitch/skills/shared/task-manager",
+            skills["task-tool"].get("path"),
+            "buddyswitch/skills/shared/task-tool",
         )
-        self.assertIn("track-manager", skills)
+        self.assertIn("track-tool", skills)
         self.assertEqual(
-            skills["track-manager"].get("path"),
-            "buddyswitch/skills/shared/track-manager",
+            skills["track-tool"].get("path"),
+            "buddyswitch/skills/shared/track-tool",
         )
+        self.assertIn("artifact-tool", skills)
+        self.assertEqual(
+            skills["artifact-tool"].get("path"),
+            "buddyswitch/skills/shared/artifact-tool",
+        )
+        for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
+            self.assertNotIn(removed, skills)
         for buddy in manifest.get("buddies", []):
             if not isinstance(buddy, dict):
                 continue
             buddy_id = buddy.get("id")
             skill_ids = [item for item in buddy.get("skills", []) if isinstance(item, str)]
             with self.subTest(buddy=buddy_id):
-                self.assertEqual(skill_ids.count("task-manager"), 1)
-                self.assertEqual(skill_ids.count("track-manager"), 1)
+                self.assertEqual(skill_ids.count("task-tool"), 1)
+                self.assertEqual(skill_ids.count("track-tool"), 1)
+                self.assertEqual(skill_ids.count("artifact-tool"), 1)
+                for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
+                    self.assertNotIn(removed, skill_ids)
 
-    def test_task_manager_skill_keeps_permissions_in_runtime_code(self) -> None:
-        skill_md = ROOT / "buddyswitch" / "skills" / "shared" / "task-manager" / "SKILL.md"
+    def test_task_tool_skill_keeps_permissions_in_runtime_code(self) -> None:
+        skill_md = ROOT / "buddyswitch" / "skills" / "shared" / "task-tool" / "SKILL.md"
         self.assertTrue(skill_md.exists())
         text = skill_md.read_text(encoding="utf-8")
         lowered = text.lower()
@@ -591,8 +601,8 @@ class RepoConsistencyTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertNotIn(token, lowered)
 
-    def test_track_manager_skill_keeps_permissions_in_runtime_code(self) -> None:
-        skill_md = ROOT / "buddyswitch" / "skills" / "shared" / "track-manager" / "SKILL.md"
+    def test_track_tool_skill_keeps_permissions_in_runtime_code(self) -> None:
+        skill_md = ROOT / "buddyswitch" / "skills" / "shared" / "track-tool" / "SKILL.md"
         self.assertTrue(skill_md.exists())
         text = skill_md.read_text(encoding="utf-8")
         lowered = text.lower()
@@ -623,11 +633,11 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn(legacy_client_call, text)
 
         env_tools = turn_runtime._build_env_tools_desc()
-        task_manager = env_tools.get("task_manager")
-        self.assertIsInstance(task_manager, dict)
-        assert isinstance(task_manager, dict)
-        self.assertEqual(task_manager.get("broker_method"), "env.tool")
-        self.assertEqual(task_manager.get("command"), "python3 scripts/env/client.py task <operation>")
+        task = env_tools.get("task")
+        self.assertIsInstance(task, dict)
+        assert isinstance(task, dict)
+        self.assertEqual(task.get("broker_method"), "env.tool")
+        self.assertEqual(task.get("command"), "python3 scripts/env/client.py task <operation>")
 
     def test_browser_evidence_issuance_uses_env_tool_surface(self) -> None:
         legacy_method = "issue_browser" + "_evidence"
@@ -644,28 +654,29 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn(legacy_client_call, text)
 
         env_tools = turn_runtime._build_env_tools_desc()
-        evidence_manager = env_tools.get("evidence_manager")
-        self.assertIsInstance(evidence_manager, dict)
-        assert isinstance(evidence_manager, dict)
-        self.assertEqual(evidence_manager.get("broker_method"), "env.tool")
-        self.assertEqual(evidence_manager.get("command"), "python3 scripts/env/client.py evidence <operation>")
+        evidence = env_tools.get("evidence")
+        self.assertIsInstance(evidence, dict)
+        assert isinstance(evidence, dict)
+        self.assertEqual(evidence.get("broker_method"), "env.tool")
+        self.assertEqual(evidence.get("command"), "python3 scripts/env/client.py evidence <operation>")
 
     def test_phase8_active_surfaces_agree_on_env_tool_contract(self) -> None:
         env_tools = turn_runtime._build_env_tools_desc()
         expected_tool_names = {
-            "artifact_manager": "artifact",
-            "binding_manager": "binding",
-            "context_manager": "context",
-            "evidence_manager": "evidence",
-            "handoff_manager": "handoff",
-            "run_manager": "run",
-            "task_manager": "task",
-            "track_manager": "track",
+            "artifact": "artifact",
+            "binding": "binding",
+            "context": "context",
+            "evidence": "evidence",
+            "handoff": "handoff",
+            "run": "run",
+            "task": "task",
+            "track": "track",
         }
         self.assertEqual(set(env_tools), set(expected_tool_names))
-        for manager_name, tool_name in expected_tool_names.items():
-            with self.subTest(manager=manager_name):
-                desc = env_tools[manager_name]
+        self.assertFalse(any(name.endswith("_" + "manager") for name in env_tools))
+        for tool_id, tool_name in expected_tool_names.items():
+            with self.subTest(tool=tool_id):
+                desc = env_tools[tool_id]
                 self.assertEqual(desc["broker_method"], "env.tool")
                 self.assertEqual(desc["envelope"], {"tool": tool_name, "action": "<action>", "args": "<object>"})
                 self.assertIn("python3 scripts/env/client.py", desc["command"])
@@ -673,9 +684,9 @@ class RepoConsistencyTests(unittest.TestCase):
         active_contract_paths = self._active_runtime_contract_paths()
         active_contract_paths.extend(
             [
-                ROOT / "buddyswitch" / "skills" / "shared" / "task-manager" / "SKILL.md",
-                ROOT / "buddyswitch" / "skills" / "shared" / "track-manager" / "SKILL.md",
-                ROOT / "buddyswitch" / "skills" / "shared" / "artifact-manager" / "SKILL.md",
+                ROOT / "buddyswitch" / "skills" / "shared" / "task-tool" / "SKILL.md",
+                ROOT / "buddyswitch" / "skills" / "shared" / "track-tool" / "SKILL.md",
+                ROOT / "buddyswitch" / "skills" / "shared" / "artifact-tool" / "SKILL.md",
             ]
         )
         for path in active_contract_paths:
@@ -683,6 +694,83 @@ class RepoConsistencyTests(unittest.TestCase):
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("env.tool", text)
                 self.assertNotIn("env" + "." + "task", text)
+
+    def test_env_tool_active_surface_residue_scan(self) -> None:
+        target_roots = [
+            ROOT / "README.md",
+            ROOT / "framework" / "docs",
+            ROOT / "framework" / "contracts",
+            ROOT / "tools" / "launcher" / "assets" / "buddies",
+            ROOT / "scripts",
+            ROOT / "tests",
+            ROOT / "buddyswitch" / "manifest.toml",
+        ]
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        for row in manifest.get("skills", []):
+            if not isinstance(row, dict):
+                continue
+            skill_path = row.get("path")
+            if isinstance(skill_path, str):
+                target_roots.append(ROOT / skill_path)
+
+        forbidden_tokens = (
+            "manager " + "actions",
+            "Env " + "manager",
+            "_" + "ACTION" + "_MAP",
+            "_" + "router_contract_error",
+            "manager" + "_name",
+            "task" + "_manager",
+            "track" + "_manager",
+            "artifact" + "_manager",
+            "context" + "_manager",
+            "binding" + "_manager",
+            "handoff" + "_manager",
+            "run" + "_manager",
+            "evidence" + "_manager",
+            "task" + "-manager",
+            "track" + "-manager",
+            "artifact" + "-manager",
+            "env" + "." + "task",
+            "issue_browser" + "_evidence",
+            "handoff" + "_inbox",
+            "automatic " + "router",
+            "auto-" + "routing",
+            "workflow " + "engine",
+            "event " + "bus",
+            "DS" + "L",
+        )
+        excluded_docs = {
+            ROOT / "docs" / "memo" / "2026-05-12-env-tool-layer-rebuild-residue-removal-implementation-plan.md",
+            ROOT / "docs" / "memo" / "2026-05-12-env-tool-layer-rebuild-residue-removal-test-plan.md",
+        }
+        for root in target_roots:
+            paths: list[Path]
+            if root.is_file():
+                paths = [root]
+            elif root.exists():
+                paths = [path for path in root.rglob("*") if path.is_file()]
+            else:
+                continue
+            for path in paths:
+                if path in excluded_docs:
+                    continue
+                if "docs/memo" in path.as_posix():
+                    continue
+                if path.suffix not in {".md", ".py", ".toml", ".json"}:
+                    continue
+                text = path.read_text(encoding="utf-8")
+                for token in forbidden_tokens:
+                    with self.subTest(path=str(path.relative_to(ROOT)), token=token):
+                        self.assertNotIn(token, text)
+
+    def test_specs_with_manager_history_must_be_marked_superseded(self) -> None:
+        manager_tokens = ("task" + "_manager", "track" + "_manager", "artifact" + "_manager", "manager" + "_name")
+        banner = "Superseded on 2026-05-12 by the env tool layer rebuild residue removal work."
+        for path in sorted((ROOT / "docs" / "spec").glob("*.md")):
+            text = path.read_text(encoding="utf-8")
+            if any(token in text for token in manager_tokens):
+                with self.subTest(path=str(path.relative_to(ROOT))):
+                    self.assertIn(banner, text)
 
     def test_phase8_retired_product_overlap_scripts_are_not_active_files(self) -> None:
         retired_product_scripts = (

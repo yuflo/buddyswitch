@@ -62,7 +62,7 @@ PM_COMMIT = {
         "context": "Use the PRD artifact and track summary as source context.",
     },
     "contributors": {
-        "skills": ["write-prd", "track-manager"],
+        "skills": ["write-prd", "track-tool"],
         "agents": [],
     },
 }

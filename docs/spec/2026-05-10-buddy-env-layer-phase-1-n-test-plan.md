@@ -1,3 +1,5 @@
+> Superseded on 2026-05-12 by the env tool layer rebuild residue removal work. This file is historical context, not active implementation guidance.
+
 # Buddy Env Layer Phase 1-N Test Plan
 
 **Goal:** Verify from product requirements that BuddySwitch buddies can operate task, track, artifact, context, binding, run, evidence, and handoff state through one runtime-owned env layer, without prompt-based permission enforcement or old debug/manual product paths.

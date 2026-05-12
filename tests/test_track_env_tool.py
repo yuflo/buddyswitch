@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Functional coverage for broker-routed env.tool track-manager operations."""
+"""Functional coverage for broker-routed env.tool track env tool operations."""
 
 from __future__ import annotations
 

@@ -80,7 +80,7 @@ permissions = ["task.read", "task.create", "task.update", "artifact.read", "arti
 id = "pm"
 label = "PM"
 scope = "PM scope"
-skills = ["track-manager"]
+skills = ["track-tool"]
 permissions = ["track.read", "track.create", "track.update", "task.read", "task.create", "task.update", "artifact.read", "artifact.delete"]
 """.strip()
             + "\n",

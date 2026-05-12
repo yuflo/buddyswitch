@@ -21,7 +21,6 @@ MUTATES_BROKER_TOKEN = "broker_token"
 TOOL_REGISTRY: list[dict[str, Any]] = [
     {
         "tool": "task",
-        "manager_name": "task_manager",
         "cli_resource": "task",
         "command": "python3 scripts/env/client.py task <operation>",
         "scope": "active-buddy runtime-enforced",
@@ -100,7 +99,6 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     },
     {
         "tool": "track",
-        "manager_name": "track_manager",
         "cli_resource": "track",
         "command": "python3 scripts/env/client.py track <operation>",
         "scope": "readable tracks; PM lifecycle authority; active-buddy task linkage",
@@ -199,7 +197,6 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     },
     {
         "tool": "artifact",
-        "manager_name": "artifact_manager",
         "cli_resource": "artifact",
         "command": "python3 scripts/env/client.py artifact <operation>",
         "scope": "active current task listing; active-buddy task artifact reads and writes",
@@ -268,7 +265,6 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     },
     {
         "tool": "context",
-        "manager_name": "context_manager",
         "cli_resource": "context",
         "command": "python3 scripts/env/client.py context <operation>",
         "scope": "active instance context reads and prepared-context validation",
@@ -314,7 +310,6 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     },
     {
         "tool": "binding",
-        "manager_name": "binding_manager",
         "cli_resource": "binding",
         "command": "python3 scripts/env/client.py binding <operation>",
         "scope": "active launcher instance binding",
@@ -363,7 +358,6 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     },
     {
         "tool": "handoff",
-        "manager_name": "handoff_manager",
         "cli_resource": "handoff",
         "command": "python3 scripts/env/client.py handoff <operation>",
         "scope": "handoff target and transition validation",
@@ -382,7 +376,6 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     },
     {
         "tool": "run",
-        "manager_name": "run_manager",
         "cli_resource": "run",
         "command": "python3 scripts/env/client.py run <operation>",
         "scope": "reserved run validation, commit, and receipt reads",
@@ -431,7 +424,6 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     },
     {
         "tool": "evidence",
-        "manager_name": "evidence_manager",
         "cli_resource": "evidence",
         "command": "python3 scripts/env/client.py evidence <operation>",
         "scope": "market browser evidence issuance for active prepared run",
@@ -479,16 +471,6 @@ def get_action_spec(tool: str, action: str) -> dict[str, Any] | None:
     return None
 
 
-def manager_name_for_tool(tool: str) -> str:
-    spec = get_tool_spec(tool)
-    if spec is None:
-        return f"{tool}_manager"
-    name = spec.get("manager_name")
-    if isinstance(name, str) and name.strip():
-        return name
-    return f"{tool}_manager"
-
-
 def supported_actions(tool: str) -> set[str]:
     spec = get_tool_spec(tool)
     if spec is None:
@@ -506,7 +488,6 @@ def env_tools_description() -> dict[str, dict[str, Any]]:
         tool = spec.get("tool")
         if not isinstance(tool, str) or not tool:
             continue
-        manager_name = manager_name_for_tool(tool)
         operations: list[str] = []
         payload_fields: dict[str, list[str]] = {}
         for action_spec in spec.get("actions", []):
@@ -515,7 +496,7 @@ def env_tools_description() -> dict[str, dict[str, Any]]:
                 continue
             operations.append(action)
             payload_fields[action] = list(action_spec.get("payload_fields", []))
-        rows[manager_name] = {
+        rows[tool] = {
             "command": spec.get("command"),
             "scope": spec.get("scope"),
             "broker_method": "env.tool",

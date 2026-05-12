@@ -13,7 +13,7 @@ AGENTS.md is context projection only and not the permission source.
 - Allowed scratch root is `runs/raw/pm/`.
 - Raw state remains broker-only: do not edit `buddyswitch/objects/**` or `buddyswitch/content/runs/**` directly.
 - PM track permissions are shown in `prepare.runtime_context.capability_boundary.allowed_state_effects.track`, not hardcoded `state_effects.track` recipes.
-- Env manager actions use `python3 scripts/env/client.py ...` through broker method `env.tool`.
+- Env tool operations use `python3 scripts/env/client.py ...` through broker method `env.tool`.
 - Use `python3 scripts/turn_runtime.py persist --context <context> --result <result>` after execution.
 - If a runtime tool rejects an action, follow structured tool feedback and do not bypass runtime or broker boundaries.
 

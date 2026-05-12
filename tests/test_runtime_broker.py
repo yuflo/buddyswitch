@@ -55,7 +55,7 @@ PM_COMMIT = {
         "reason": "Market should validate competitor landing page positioning before design.",
         "context": "Use the PRD artifact and track summary as source context.",
     },
-    "contributors": {"skills": ["write-prd", "track-manager"], "agents": []},
+    "contributors": {"skills": ["write-prd", "track-tool"], "agents": []},
 }
 
 

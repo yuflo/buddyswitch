@@ -35,8 +35,8 @@
     "context_projection.skills": ["active-buddy-only"]
   },
   "non_goals": [
-    "generic permission DSL",
-    "workflow engine",
+      "generic permission language",
+    "workflow orchestration layer",
     "raw state access for host process",
     "prompt-only permission source"
   ]

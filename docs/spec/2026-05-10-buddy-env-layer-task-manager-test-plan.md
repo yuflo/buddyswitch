@@ -1,3 +1,5 @@
+> Superseded on 2026-05-12 by the env tool layer rebuild residue removal work. This file is historical context, not active implementation guidance.
+
 # Buddy Env Layer Task Manager Test Plan
 
 **Goal:** Verify from product requirements that BuddySwitch buddies can manage their own tasks through a shared `task-manager` skill and runtime-owned env tool path, while cross-buddy task access is rejected by code and current task binding remains consistent.

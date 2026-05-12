@@ -47,7 +47,7 @@ def _payload_error(*, action: str, context: EvidenceServiceContext, message: str
         "active_buddy": context["active_buddy"],
         "allowed_next_actions": [
             'Send env.tool payload as {"tool":"evidence","action":"<action>","args":{...}}.',
-            "Use prepare.runtime_context.env_tools.evidence_manager.payload_fields to shape args.",
+            "Use prepare.runtime_context.env_tools.evidence.payload_fields to shape args.",
         ],
         "allowed_next_action_options": [
             tool_responses.next_action_option(

@@ -8,7 +8,7 @@ This document defines active track behavior in BuddySwitch.
 - Tasks: `buddyswitch/objects/tasks/*.json`
 - Artifacts: `buddyswitch/objects/artifacts/*.json`
 - Runtime tool service: `scripts/env/services/tracks.py`
-- Broker tool dispatch: `scripts/env/tools/track_manager.py`
+- Broker tool dispatch: `scripts/env/tools/dispatch.py`
 - Skill-facing command: `python3 scripts/env/client.py track <operation>`
 
 ## Track Schema (v1)

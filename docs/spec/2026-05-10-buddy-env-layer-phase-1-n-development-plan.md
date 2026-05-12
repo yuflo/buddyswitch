@@ -1,3 +1,5 @@
+> Superseded on 2026-05-12 by the env tool layer rebuild residue removal work. This file is historical context, not active implementation guidance.
+
 # Buddy Env Layer Phase 1-N Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` before implementing any phase in this plan. Use `superpowers:test-driven-development` before production code changes and `superpowers:verification-before-completion` before claiming a phase is complete. Steps use checkbox (`- [ ]`) syntax for phase tracking.

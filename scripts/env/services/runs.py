@@ -677,6 +677,6 @@ def _payload_error(*, action: str, context: RunServiceContext, message: str) -> 
         "active_buddy": context["active_buddy"],
         "allowed_next_actions": [
             'Send env.tool payload as {"tool":"run","action":"<action>","args":{...}}.',
-            "Use prepare.runtime_context.env_tools.run_manager.payload_fields to shape args.",
+            "Use prepare.runtime_context.env_tools.run.payload_fields to shape args.",
         ],
     }

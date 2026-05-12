@@ -1,3 +1,5 @@
+> Superseded on 2026-05-12 by the env tool layer rebuild residue removal work. This file is historical context, not active implementation guidance.
+
 # Host Decision Surface Full Test Plan
 
 **Goal:** Verify the full host decision surface upgrade from product semantics: prepared runtime context, env tool contracts, discovery responses, handoff validation, evidence requirements, artifact metadata, response recovery options, product-mode flows, and forward-only cleanup.

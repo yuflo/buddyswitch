@@ -1,3 +1,5 @@
+> Superseded on 2026-05-12 by the env tool layer rebuild residue removal work. This file is historical context, not active implementation guidance.
+
 # Host Decision Surface Env Upgrade Plan
 
 > **For agentic workers:** This is a product and architecture upgrade plan, not an implementation diff. Before implementing any phase, use `superpowers:subagent-driven-development` or `superpowers:executing-plans`; use `superpowers:test-driven-development` for behavior changes; use `superpowers:verification-before-completion` before claiming a phase is done.

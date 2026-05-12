@@ -78,7 +78,7 @@ Terminal final output must follow `Receipt -> Summary`:
 - Project source access: `project.access=write` for `projects/app`.
 - Scratch root: `runs/raw/dev/`.
 - Raw state: broker-only (`buddyswitch/objects/**`, `buddyswitch/content/runs/**` are not direct-edit paths).
-- Env manager operations use `python3 scripts/env/client.py ...` through broker method `env.tool`.
+- Env tool operations use `python3 scripts/env/client.py ...` through broker method `env.tool`.
 - Active skills only: runtime materializes Dev skill set only under `.agents/skills`.
 - Rejected runtime writes or persist actions must not be bypassed.
 

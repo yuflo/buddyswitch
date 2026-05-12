@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Functional coverage for broker-routed env.tool run-manager operations."""
+"""Functional coverage for broker-routed env.tool run env tool operations."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def _pm_commit() -> dict[str, object]:
             "context": "Use the PRD artifact and track summary as source context.",
         },
         "contributors": {
-            "skills": ["write-prd", "track-manager"],
+            "skills": ["write-prd", "track-tool"],
             "agents": [],
         },
     }

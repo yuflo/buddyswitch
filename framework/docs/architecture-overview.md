@@ -41,7 +41,7 @@ If another turn is needed, use `receipt.next_state` or `receipt.handoff` to comp
 - Product mode is locked to one buddy instance.
 - User text does not override active buddy binding.
 - Runtime broker is the only product-mode state writer.
-- Env manager operations route through broker method `env.tool` and `python3 scripts/env/client.py`.
+- Env tool operations route through broker method `env.tool` and `python3 scripts/env/client.py`.
 - Runtime writes happen only in canonical BuddySwitch object/run paths.
 - Raw state paths are broker-only from host sandbox perspective.
 - `persist` is the end-of-turn commit boundary.
@@ -66,13 +66,13 @@ Market buddy currently exposes:
 - `positioning-copy`
 - `channel-discovery`
 - `launch-prep`
-- shared `task-manager`, `track-manager`, and `artifact-manager`
+- shared `task-tool`, `track-tool`, and `artifact-tool`
 
 Other buddies:
 
-- `pm`: `write-prd`, plus shared `task-manager`, `track-manager`, and `artifact-manager`
-- `design`: `shape-prototype`, plus shared `task-manager`, `track-manager`, and `artifact-manager`
-- `dev`: `implement-task`, plus shared `task-manager`, `track-manager`, and `artifact-manager`
-- `test`: `smoke-test`, plus shared `task-manager`, `track-manager`, and `artifact-manager`
+- `pm`: `write-prd`, plus shared `task-tool`, `track-tool`, and `artifact-tool`
+- `design`: `shape-prototype`, plus shared `task-tool`, `track-tool`, and `artifact-tool`
+- `dev`: `implement-task`, plus shared `task-tool`, `track-tool`, and `artifact-tool`
+- `test`: `smoke-test`, plus shared `task-tool`, `track-tool`, and `artifact-tool`
 
 Track lifecycle mutations are explicit `state_effects.track` actions (`create|update|advance|archive`) validated against buddy permissions.

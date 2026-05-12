@@ -1,9 +1,9 @@
 ---
-name: artifact-manager
+name: artifact-tool
 description: Use when you need to inspect active-task artifacts, validate artifact payloads, create new artifact revisions, or update artifact metadata through runtime-owned env tools.
 ---
 
-# artifact-manager
+# artifact-tool
 
 ## Purpose
 - Manage artifact reads and revision writes through the broker-routed env tool path.
@@ -13,7 +13,7 @@ description: Use when you need to inspect active-task artifacts, validate artifa
 ## Use when
 - The active buddy needs to list or inspect artifacts for its current task.
 - A new artifact revision should be created for the active buddy's task.
-- Runtime/tool feedback asks for an artifact-manager command.
+- Runtime/tool feedback asks for an artifact env tool command.
 
 ## Do Not Use When
 - You only need upstream artifacts already included in `prepare.runtime_context`.

@@ -138,7 +138,7 @@ class EnvManifestV2Tests(unittest.TestCase):
                     },
                     {
                         "id": "duplicate",
-                        "path": "buddyswitch/skills/shared/track-manager",
+                        "path": "buddyswitch/skills/shared/track-tool",
                     },
                 ],
                 buddies={"pm": ["duplicate"]},
@@ -234,11 +234,14 @@ class EnvManifestV2Tests(unittest.TestCase):
     def test_buddy_authority_profile_uses_membership_and_buddy_run_persist_wording(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         authority = env_manifest.buddy_authority_profile(manifest, "pm")
+        manifest_skill_ids = {row["id"] for row in manifest.get("skills", []) if isinstance(row, dict) and isinstance(row.get("id"), str)}
 
         self.assertEqual(
             authority["routing_skills"],
-            ["write-prd", "track-manager", "artifact-manager", "task-manager"],
+            ["write-prd", "track-tool", "artifact-tool", "task-tool"],
         )
+        for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
+            self.assertNotIn(removed, manifest_skill_ids)
         self.assertIn("materialized", authority["runtime_note"])
         self.assertIn("buddy run", authority["runtime_note"].lower())
 

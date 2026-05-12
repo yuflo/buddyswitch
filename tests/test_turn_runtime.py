@@ -72,7 +72,7 @@ def _pm_commit() -> dict[str, object]:
             "context": "Use the PRD artifact and track summary as source context.",
         },
         "contributors": {
-            "skills": ["write-prd", "track-manager"],
+            "skills": ["write-prd", "track-tool"],
             "agents": [],
         },
     }
@@ -638,7 +638,7 @@ class TurnRuntimeBuddyRunTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "reason": "Need market positioning input before expanding scope.",
                 "context": "Start from the current PM task context.",
             },
-            "contributors": {"skills": ["track-manager"], "agents": []},
+            "contributors": {"skills": ["track-tool"], "agents": []},
         }
 
         payload = self._persist(context, handoff_only)

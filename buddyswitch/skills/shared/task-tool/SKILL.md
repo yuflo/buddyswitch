@@ -1,9 +1,9 @@
 ---
-name: task-manager
+name: task-tool
 description: Use when you need to create, inspect, update, archive, or bind the current task for the active buddy through runtime-owned env tools.
 ---
 
-# task-manager
+# task-tool
 
 ## Purpose
 - Manage task lifecycle through the broker-routed env tool path.
@@ -35,7 +35,7 @@ description: Use when you need to create, inspect, update, archive, or bind the 
 
 ## Decision Source
 - Runtime/tool feedback is authoritative for permission boundaries and next actions.
-- Use `prepare.runtime_context.env_tools.task_manager` plus structured rejection payload fields (`permission_boundary`, `allowed_next_actions`, `command_hint`) to choose the next step.
+- Use `prepare.runtime_context.env_tools.task` plus structured rejection payload fields (`permission_boundary`, `allowed_next_actions`, `command_hint`) to choose the next step.
 
 ## Shared Runtime Rules
 - Contribute to one buddy-run commit.

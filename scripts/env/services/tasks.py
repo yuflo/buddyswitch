@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Active-buddy scoped task manager service for broker-routed env.tool operations."""
+"""Active-buddy scoped task env tool service for broker-routed env.tool operations."""
 
 from __future__ import annotations
 

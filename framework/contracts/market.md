@@ -87,7 +87,7 @@ Terminal final output must follow `Receipt -> Summary`:
 - Project source access: `project.access=read-only` (`projects/app` is live but not writable).
 - Scratch root: `runs/raw/market/`.
 - Raw state: broker-only (`buddyswitch/objects/**`, `buddyswitch/content/runs/**` are not direct-edit paths).
-- Env manager operations use `python3 scripts/env/client.py ...` through broker method `env.tool`.
+- Env tool operations use `python3 scripts/env/client.py ...` through broker method `env.tool`.
 - Active skills only: runtime materializes Market skill set only under `.agents/skills`.
 - Browser evidence gate is required for Market artifact-producing persists.
 - Rejected runtime writes or persist actions must not be bypassed.

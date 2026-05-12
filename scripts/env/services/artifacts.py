@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Active-buddy scoped artifact manager service for broker-routed env.tool operations."""
+"""Active-buddy scoped artifact env tool service for broker-routed env.tool operations."""
 
 from __future__ import annotations
 
@@ -150,7 +150,7 @@ def _artifact_scope_error(
         task_id=task_id,
         allowed_next_actions=[
             "Choose an artifact produced for the active buddy task.",
-            "Use prepare context for upstream cross-buddy artifacts instead of direct artifact-manager reads.",
+            "Use prepare context for upstream cross-buddy artifacts instead of direct artifact tool reads.",
         ],
     )
 

@@ -4,38 +4,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from env.tools import contracts as tool_contracts
-from env.tools.artifact_manager import dispatch_artifact_manager_request
-from env.tools.binding_manager import dispatch_binding_manager_request
-from env.tools.context_manager import dispatch_context_manager_request
-from env.tools.evidence_manager import dispatch_evidence_manager_request
-from env.tools.handoff_manager import dispatch_handoff_manager_request
-from env.tools.run_manager import dispatch_run_manager_request
-from env.tools.task_manager import dispatch_task_manager_request
-from env.tools.track_manager import dispatch_track_manager_request
+from env.tools.dispatch import dispatch_registered_env_tool
 
-_ALL_DISPATCHERS: dict[str, Callable[..., dict[str, Any]]] = {
-    "artifact": dispatch_artifact_manager_request,
-    "binding": dispatch_binding_manager_request,
-    "context": dispatch_context_manager_request,
-    "evidence": dispatch_evidence_manager_request,
-    "handoff": dispatch_handoff_manager_request,
-    "run": dispatch_run_manager_request,
-    "task": dispatch_task_manager_request,
-    "track": dispatch_track_manager_request,
-}
 _TOOL_ACTIONS = {
     tool: tool_contracts.supported_actions(tool)
     for tool in sorted(tool_contracts.supported_tools())
 }
-_TOOL_DISPATCHERS: dict[str, Callable[..., dict[str, Any]]] = {
-    tool: _ALL_DISPATCHERS[tool]
-    for tool in _TOOL_ACTIONS
-    if tool in _ALL_DISPATCHERS
-}
-_TOOL_HINTS = {tool: tool_contracts.manager_name_for_tool(tool) for tool in _TOOL_ACTIONS}
+_TOOL_HINTS = {tool: tool for tool in _TOOL_ACTIONS}
 
 
 def _supported_tools_text() -> str:
@@ -161,18 +139,17 @@ def dispatch_env_tool_request(
             ],
         )
 
-    dispatch = _TOOL_DISPATCHERS[tool]
-    dispatch_kwargs = {
-        "payload": {"action": action, "args": args},
-        "active_buddy": active_buddy,
-        "instance_id": instance_id,
-        "instance_json": instance_json,
-        "instance_payload": instance_payload,
-        "manifest": manifest,
-    }
-    if tool in {"run", "evidence"}:
-        dispatch_kwargs["manifest_path"] = manifest_path
-    response = dispatch(**dispatch_kwargs)
+    response = dispatch_registered_env_tool(
+        tool=tool,
+        action=action,
+        args=args,
+        active_buddy=active_buddy,
+        instance_id=instance_id,
+        instance_json=instance_json,
+        instance_payload=instance_payload,
+        manifest=manifest,
+        manifest_path=manifest_path,
+    )
     if isinstance(response, dict):
         response.setdefault("tool", tool)
     return response

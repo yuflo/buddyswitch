@@ -153,6 +153,7 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertIsInstance(error, dict, msg=response)
                 assert isinstance(error, dict)
                 self.assertEqual(error.get("code"), error_code)
+                self.assertNotEqual(error.get("code"), "E_ENV_TOOL_ROUTER")
                 self.assertEqual(response.get("permission_boundary"), boundary)
                 self.assertEqual(self._tasks_snapshot(), before_tasks)
                 self.assertEqual(self._load_instance(instance_json), before_instance)
@@ -164,34 +165,49 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         registry = contracts.TOOL_REGISTRY
         expected_tools = {spec["tool"] for spec in registry}
         self.assertEqual(set(router._TOOL_ACTIONS), expected_tools)
-        self.assertEqual(set(router._TOOL_DISPATCHERS), expected_tools)
 
         for spec in registry:
             with self.subTest(tool=spec["tool"]):
                 expected_actions = {action["name"] for action in spec["actions"]}
                 self.assertEqual(set(router._TOOL_ACTIONS[spec["tool"]]), expected_actions)
 
-    def test_manager_handler_actions_match_registry_actions(self) -> None:
+    def test_dispatch_handler_coverage_matches_registry_actions(self) -> None:
         contracts = importlib.import_module("env.tools.contracts")
+        dispatch = importlib.import_module("env.tools.dispatch")
+        router = importlib.import_module("env.tools.router")
         registry = contracts.TOOL_REGISTRY
 
-        manager_modules = {
-            "task": "env.tools.task_manager",
-            "track": "env.tools.track_manager",
-            "artifact": "env.tools.artifact_manager",
-            "context": "env.tools.context_manager",
-            "binding": "env.tools.binding_manager",
-            "handoff": "env.tools.handoff_manager",
-            "run": "env.tools.run_manager",
-            "evidence": "env.tools.evidence_manager",
-        }
+        expected: dict[str, set[str]] = {}
         for spec in registry:
             tool_name = spec["tool"]
-            module = importlib.import_module(manager_modules[tool_name])
-            action_map = getattr(module, "_ACTION_MAP")
-            self.assertIsInstance(action_map, dict)
-            expected_actions = {action["name"] for action in spec["actions"]}
-            self.assertEqual(set(action_map), expected_actions)
+            expected[tool_name] = {action["name"] for action in spec["actions"]}
+
+        dispatch_actions = dispatch.dispatch_handler_actions()
+        self.assertEqual(dispatch_actions, expected)
+        self.assertEqual({tool: set(actions) for tool, actions in router._TOOL_ACTIONS.items()}, expected)
+        self.assertFalse(hasattr(router, "_TOOL_DISPATCHERS"))
+
+    def test_router_residue_guards_require_dispatch_only_surface(self) -> None:
+        importlib.import_module("env.tools.dispatch")
+
+        manager_suffix = "_" + "manager"
+        for tool in ("task", "track", "artifact", "context", "binding", "handoff", "run", "evidence"):
+            module_name = "env.tools." + tool + manager_suffix
+            with self.subTest(module=module_name):
+                with self.assertRaises(ModuleNotFoundError):
+                    importlib.import_module(module_name)
+
+        tools_dir = ROOT / "scripts" / "env" / "tools"
+        forbidden_tokens = (
+            "_" + "ACTION" + "_MAP",
+            "_" + "router_contract_error",
+            "manager" + "_name",
+        )
+        for path in sorted(tools_dir.glob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            for token in forbidden_tokens:
+                with self.subTest(path=str(path.relative_to(ROOT)), token=token):
+                    self.assertNotIn(token, text)
 
 
 if __name__ == "__main__":

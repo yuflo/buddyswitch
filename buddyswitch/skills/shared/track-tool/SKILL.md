@@ -1,9 +1,9 @@
 ---
-name: track-manager
+name: track-tool
 description: Use when you need to inspect tracks, attach or detach active-buddy tasks, or ask PM to mutate track lifecycle through runtime-owned env tools.
 ---
 
-# track-manager
+# track-tool
 
 ## Purpose
 - Manage track coordination through the broker-routed env tool path.
@@ -13,7 +13,7 @@ description: Use when you need to inspect tracks, attach or detach active-buddy 
 ## Use when
 - The demand is explicitly about creating, updating, advancing, archiving, or inspecting tracks.
 - The active buddy needs to attach or detach one of its own tasks from an existing track.
-- Runtime/tool feedback asks for a track-manager command.
+- Runtime/tool feedback asks for a track env tool command.
 
 ## Do Not Use When
 - The primary deliverable is a PRD, research report, design artifact, implementation change, or smoke-test report.

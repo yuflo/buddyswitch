@@ -33,12 +33,12 @@ id = "write-prd"
 path = "buddyswitch/skills/pm/write-prd"
 
 [[skills]]
-id = "track-manager"
-path = "buddyswitch/skills/shared/track-manager"
+id = "track-tool"
+path = "buddyswitch/skills/shared/track-tool"
 
 [[skills]]
-id = "artifact-manager"
-path = "buddyswitch/skills/shared/artifact-manager"
+id = "artifact-tool"
+path = "buddyswitch/skills/shared/artifact-tool"
 
 [[skills]]
 id = "shape-prototype"
@@ -57,8 +57,8 @@ id = "smoke-test"
 path = "buddyswitch/skills/test/smoke-test"
 
 [[skills]]
-id = "task-manager"
-path = "buddyswitch/skills/shared/task-manager"
+id = "task-tool"
+path = "buddyswitch/skills/shared/task-tool"
 
 [[buddies]]
 id = "market"
@@ -71,9 +71,9 @@ skills = [
   "positioning-copy",
   "channel-discovery",
   "launch-prep",
-  "track-manager",
-  "artifact-manager",
-  "task-manager",
+  "track-tool",
+  "artifact-tool",
+  "task-tool",
 ]
 artifact_kinds = [
   "market-scan",
@@ -89,7 +89,7 @@ permissions = ["track.read", "task.read", "task.create", "task.update", "task.ar
 id = "pm"
 label = "PM"
 scope = "Own product iteration and track progression."
-skills = ["write-prd", "track-manager", "artifact-manager", "task-manager"]
+skills = ["write-prd", "track-tool", "artifact-tool", "task-tool"]
 artifact_kinds = ["prd", "pm-decision", "track-note"]
 permissions = [
   "track.read",
@@ -111,7 +111,7 @@ permissions = [
 id = "design"
 label = "Design"
 scope = "Shape UI/UX prototype direction and design handoff outcomes."
-skills = ["shape-prototype", "track-manager", "artifact-manager", "task-manager"]
+skills = ["shape-prototype", "track-tool", "artifact-tool", "task-tool"]
 artifact_kinds = ["design-handoff", "prototype-brief"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
@@ -119,7 +119,7 @@ permissions = ["track.read", "task.read", "task.create", "task.update", "task.ar
 id = "dev"
 label = "Dev"
 scope = "Implement approved scope in project code."
-skills = ["implement-task", "skill-creator-importer", "track-manager", "artifact-manager", "task-manager"]
+skills = ["implement-task", "skill-creator-importer", "track-tool", "artifact-tool", "task-tool"]
 artifact_kinds = ["implementation-report", "skill-import-report"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
@@ -127,6 +127,6 @@ permissions = ["track.read", "task.read", "task.create", "task.update", "task.ar
 id = "test"
 label = "Test"
 scope = "Validate behavior and report pass/fail/blocked outcomes."
-skills = ["smoke-test", "track-manager", "artifact-manager", "task-manager"]
+skills = ["smoke-test", "track-tool", "artifact-tool", "task-tool"]
 artifact_kinds = ["smoke-test", "test-report"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]

@@ -78,7 +78,7 @@ def _pm_commit_with_track_and_handoff() -> dict[str, object]:
             "context": "Use the PRD artifact plus track summary as source context.",
         },
         "contributors": {
-            "skills": ["write-prd", "track-manager"],
+            "skills": ["write-prd", "track-tool"],
             "agents": [],
         },
     }
@@ -294,12 +294,12 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_prepare_exposes_env_tool_hints(self) -> None:
         payload = self._prepare(buddy="dev", request_text=DEV_REQUEST)
         env_tools = payload["runtime_context"]["env_tools"]
-        self.assertIn("task_manager", env_tools)
-        task_manager = env_tools["task_manager"]
-        self.assertEqual(task_manager["command"], "python3 scripts/env/client.py task <operation>")
-        self.assertEqual(task_manager["scope"], "active-buddy runtime-enforced")
-        self.assertEqual(task_manager["broker_method"], "env.tool")
-        envelope = task_manager["envelope"]
+        self.assertIn("task", env_tools)
+        task = env_tools["task"]
+        self.assertEqual(task["command"], "python3 scripts/env/client.py task <operation>")
+        self.assertEqual(task["scope"], "active-buddy runtime-enforced")
+        self.assertEqual(task["broker_method"], "env.tool")
+        envelope = task["envelope"]
         self.assertEqual(
             envelope,
             {
@@ -308,22 +308,22 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "args": "<object>",
             },
         )
-        operations = task_manager["operations"]
+        operations = task["operations"]
         self.assertEqual(
             operations,
             ["create", "list", "get", "get_current", "set_current", "update", "archive"],
         )
-        payload_fields = task_manager["payload_fields"]
+        payload_fields = task["payload_fields"]
         self.assertEqual(payload_fields["create"], ["title", "summary"])
         self.assertEqual(payload_fields["get"], ["task_id"])
         self.assertEqual(payload_fields["set_current"], ["task_id"])
 
-        self.assertIn("track_manager", env_tools)
-        track_manager = env_tools["track_manager"]
-        self.assertEqual(track_manager["command"], "python3 scripts/env/client.py track <operation>")
-        self.assertEqual(track_manager["broker_method"], "env.tool")
+        self.assertIn("track", env_tools)
+        track = env_tools["track"]
+        self.assertEqual(track["command"], "python3 scripts/env/client.py track <operation>")
+        self.assertEqual(track["broker_method"], "env.tool")
         self.assertEqual(
-            track_manager["envelope"],
+            track["envelope"],
             {
                 "tool": "track",
                 "action": "<action>",
@@ -331,7 +331,7 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         self.assertEqual(
-            track_manager["operations"],
+            track["operations"],
             [
                 "list",
                 "get",
@@ -344,17 +344,17 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "detach_task",
             ],
         )
-        track_payload_fields = track_manager["payload_fields"]
+        track_payload_fields = track["payload_fields"]
         self.assertEqual(track_payload_fields["get"], ["track_id"])
         self.assertEqual(track_payload_fields["archive"], ["track_id"])
         self.assertEqual(track_payload_fields["attach_task"], ["track_id", "task_id"])
 
-        self.assertIn("artifact_manager", env_tools)
-        artifact_manager = env_tools["artifact_manager"]
-        self.assertEqual(artifact_manager["command"], "python3 scripts/env/client.py artifact <operation>")
-        self.assertEqual(artifact_manager["broker_method"], "env.tool")
+        self.assertIn("artifact", env_tools)
+        artifact = env_tools["artifact"]
+        self.assertEqual(artifact["command"], "python3 scripts/env/client.py artifact <operation>")
+        self.assertEqual(artifact["broker_method"], "env.tool")
         self.assertEqual(
-            artifact_manager["envelope"],
+            artifact["envelope"],
             {
                 "tool": "artifact",
                 "action": "<action>",
@@ -362,7 +362,7 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         self.assertEqual(
-            artifact_manager["operations"],
+            artifact["operations"],
             [
                 "list",
                 "get",
@@ -372,96 +372,96 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "update_metadata",
             ],
         )
-        artifact_payload_fields = artifact_manager["payload_fields"]
+        artifact_payload_fields = artifact["payload_fields"]
         self.assertEqual(artifact_payload_fields["get"], ["artifact_id"])
         self.assertEqual(
             artifact_payload_fields["create_revision"],
             ["artifact_id", "task_id", "kind", "title", "summary", "content", "source_run_id"],
         )
 
-        self.assertIn("context_manager", env_tools)
-        context_manager = env_tools["context_manager"]
-        self.assertEqual(context_manager["command"], "python3 scripts/env/client.py context <operation>")
-        self.assertEqual(context_manager["broker_method"], "env.tool")
+        self.assertIn("context", env_tools)
+        context = env_tools["context"]
+        self.assertEqual(context["command"], "python3 scripts/env/client.py context <operation>")
+        self.assertEqual(context["broker_method"], "env.tool")
         self.assertEqual(
-            context_manager["envelope"],
+            context["envelope"],
             {
                 "tool": "context",
                 "action": "<action>",
                 "args": "<object>",
             },
         )
-        self.assertEqual(context_manager["operations"], ["get", "summarize", "list_sources"])
-        self.assertEqual(context_manager["payload_fields"]["get"], ["context"])
-        self.assertEqual(context_manager["payload_fields"]["summarize"], [])
-        self.assertEqual(context_manager["payload_fields"]["list_sources"], [])
+        self.assertEqual(context["operations"], ["get", "summarize", "list_sources"])
+        self.assertEqual(context["payload_fields"]["get"], ["context"])
+        self.assertEqual(context["payload_fields"]["summarize"], [])
+        self.assertEqual(context["payload_fields"]["list_sources"], [])
 
-        self.assertIn("binding_manager", env_tools)
-        binding_manager = env_tools["binding_manager"]
-        self.assertEqual(binding_manager["command"], "python3 scripts/env/client.py binding <operation>")
-        self.assertEqual(binding_manager["broker_method"], "env.tool")
+        self.assertIn("binding", env_tools)
+        binding = env_tools["binding"]
+        self.assertEqual(binding["command"], "python3 scripts/env/client.py binding <operation>")
+        self.assertEqual(binding["broker_method"], "env.tool")
         self.assertEqual(
-            binding_manager["envelope"],
+            binding["envelope"],
             {
                 "tool": "binding",
                 "action": "<action>",
                 "args": "<object>",
             },
         )
-        self.assertEqual(binding_manager["operations"], ["get", "set_task", "set_track", "clear"])
-        self.assertEqual(binding_manager["payload_fields"]["get"], [])
-        self.assertEqual(binding_manager["payload_fields"]["set_task"], ["task_id"])
-        self.assertEqual(binding_manager["payload_fields"]["set_track"], ["track_id"])
-        self.assertEqual(binding_manager["payload_fields"]["clear"], [])
+        self.assertEqual(binding["operations"], ["get", "set_task", "set_track", "clear"])
+        self.assertEqual(binding["payload_fields"]["get"], [])
+        self.assertEqual(binding["payload_fields"]["set_task"], ["task_id"])
+        self.assertEqual(binding["payload_fields"]["set_track"], ["track_id"])
+        self.assertEqual(binding["payload_fields"]["clear"], [])
 
-        self.assertIn("handoff_manager", env_tools)
-        handoff_manager = env_tools["handoff_manager"]
-        self.assertEqual(handoff_manager["command"], "python3 scripts/env/client.py handoff <operation>")
-        self.assertEqual(handoff_manager["broker_method"], "env.tool")
+        self.assertIn("handoff", env_tools)
+        handoff = env_tools["handoff"]
+        self.assertEqual(handoff["command"], "python3 scripts/env/client.py handoff <operation>")
+        self.assertEqual(handoff["broker_method"], "env.tool")
         self.assertEqual(
-            handoff_manager["envelope"],
+            handoff["envelope"],
             {
                 "tool": "handoff",
                 "action": "<action>",
                 "args": "<object>",
             },
         )
-        self.assertEqual(handoff_manager["operations"], ["validate"])
-        self.assertEqual(handoff_manager["payload_fields"]["validate"], ["next_buddy", "reason", "context", "track_id"])
+        self.assertEqual(handoff["operations"], ["validate"])
+        self.assertEqual(handoff["payload_fields"]["validate"], ["next_buddy", "reason", "context", "track_id"])
 
-        self.assertIn("run_manager", env_tools)
-        run_manager = env_tools["run_manager"]
-        self.assertEqual(run_manager["command"], "python3 scripts/env/client.py run <operation>")
-        self.assertEqual(run_manager["broker_method"], "env.tool")
+        self.assertIn("run", env_tools)
+        run = env_tools["run"]
+        self.assertEqual(run["command"], "python3 scripts/env/client.py run <operation>")
+        self.assertEqual(run["broker_method"], "env.tool")
         self.assertEqual(
-            run_manager["envelope"],
+            run["envelope"],
             {
                 "tool": "run",
                 "action": "<action>",
                 "args": "<object>",
             },
         )
-        self.assertEqual(run_manager["operations"], ["commit", "get_receipt", "get_raw", "validate_result"])
-        self.assertEqual(run_manager["payload_fields"]["commit"], ["context", "result"])
-        self.assertEqual(run_manager["payload_fields"]["validate_result"], ["context", "result"])
-        self.assertEqual(run_manager["payload_fields"]["get_receipt"], ["run_id"])
-        self.assertEqual(run_manager["payload_fields"]["get_raw"], ["run_id"])
+        self.assertEqual(run["operations"], ["commit", "get_receipt", "get_raw", "validate_result"])
+        self.assertEqual(run["payload_fields"]["commit"], ["context", "result"])
+        self.assertEqual(run["payload_fields"]["validate_result"], ["context", "result"])
+        self.assertEqual(run["payload_fields"]["get_receipt"], ["run_id"])
+        self.assertEqual(run["payload_fields"]["get_raw"], ["run_id"])
 
-        self.assertIn("evidence_manager", env_tools)
-        evidence_manager = env_tools["evidence_manager"]
-        self.assertEqual(evidence_manager["command"], "python3 scripts/env/client.py evidence <operation>")
-        self.assertEqual(evidence_manager["broker_method"], "env.tool")
+        self.assertIn("evidence", env_tools)
+        evidence = env_tools["evidence"]
+        self.assertEqual(evidence["command"], "python3 scripts/env/client.py evidence <operation>")
+        self.assertEqual(evidence["broker_method"], "env.tool")
         self.assertEqual(
-            evidence_manager["envelope"],
+            evidence["envelope"],
             {
                 "tool": "evidence",
                 "action": "<action>",
                 "args": "<object>",
             },
         )
-        self.assertEqual(evidence_manager["operations"], ["issue_browser", "approve_downgrade"])
-        self.assertEqual(evidence_manager["payload_fields"]["issue_browser"], ["context"])
-        self.assertEqual(evidence_manager["payload_fields"]["approve_downgrade"], ["context", "reason"])
+        self.assertEqual(evidence["operations"], ["issue_browser", "approve_downgrade"])
+        self.assertEqual(evidence["payload_fields"]["issue_browser"], ["context"])
+        self.assertEqual(evidence["payload_fields"]["approve_downgrade"], ["context", "reason"])
 
     def test_prepare_env_tools_are_registry_derived_and_include_operation_semantics(self) -> None:
         import importlib
@@ -472,17 +472,17 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         env_tools = payload["runtime_context"]["env_tools"]
         operation_semantics = payload["runtime_context"].get("operation_semantics")
 
-        expected_manager_names = {f"{spec['tool']}_manager" for spec in registry}
-        self.assertEqual(set(env_tools), expected_manager_names)
+        expected_tool_names = {spec["tool"] for spec in registry}
+        self.assertEqual(set(env_tools), expected_tool_names)
+        self.assertFalse(any(name.endswith("_" + "manager") for name in env_tools))
         self.assertIsInstance(operation_semantics, dict, msg=payload["runtime_context"])
         assert isinstance(operation_semantics, dict)
 
         for spec in registry:
             tool_name = spec["tool"]
-            manager_name = f"{tool_name}_manager"
-            manager_row = env_tools[manager_name]
+            tool_row = env_tools[tool_name]
             actions = {action["name"] for action in spec["actions"]}
-            self.assertEqual(set(manager_row["operations"]), actions)
+            self.assertEqual(set(tool_row["operations"]), actions)
             for action in actions:
                 semantic_key = f"{tool_name}.{action}"
                 self.assertIn(semantic_key, operation_semantics)
@@ -509,14 +509,14 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(
             set(env_tools),
             {
-                "artifact_manager",
-                "binding_manager",
-                "context_manager",
-                "evidence_manager",
-                "handoff_manager",
-                "run_manager",
-                "task_manager",
-                "track_manager",
+                "artifact",
+                "binding",
+                "context",
+                "evidence",
+                "handoff",
+                "run",
+                "task",
+                "track",
             },
         )
         for name, desc in env_tools.items():

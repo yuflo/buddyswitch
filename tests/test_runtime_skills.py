@@ -208,13 +208,13 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                 description="Write PRD",
                 with_asset=True,
             )
-            track_manager = self._write_skill_package(
+            track_tool = self._write_skill_package(
                 skills_root,
-                skill_id="track-manager",
+                skill_id="track-tool",
                 description="Manage tracks",
             )
-            (track_manager / "assets").mkdir(parents=True, exist_ok=True)
-            (track_manager / "assets" / "track-operation-template.md").write_text(
+            (track_tool / "assets").mkdir(parents=True, exist_ok=True)
+            (track_tool / "assets" / "track-operation-template.md").write_text(
                 "template-track-operation\n",
                 encoding="utf-8",
             )
@@ -231,15 +231,15 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                         "path": write_prd.relative_to(ROOT).as_posix(),
                     },
                     {
-                        "id": "track-manager",
-                        "path": track_manager.relative_to(ROOT).as_posix(),
+                        "id": "track-tool",
+                        "path": track_tool.relative_to(ROOT).as_posix(),
                     },
                     {
                         "id": "shape-prototype",
                         "path": shape_prototype.relative_to(ROOT).as_posix(),
                     },
                 ],
-                buddies={"pm": ["write-prd", "track-manager"], "design": ["shape-prototype"]},
+                buddies={"pm": ["write-prd", "track-tool"], "design": ["shape-prototype"]},
             )
             workspace = temp_root / "workspace"
             workspace.mkdir(parents=True, exist_ok=True)
@@ -249,9 +249,9 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             runtime_skills = workspace / ".agents" / "skills"
             self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
-            self.assertTrue((runtime_skills / "track-manager" / "SKILL.md").exists())
+            self.assertTrue((runtime_skills / "track-tool" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "write-prd" / "assets" / "write-prd.md").exists())
-            self.assertTrue((runtime_skills / "track-manager" / "assets" / "track-operation-template.md").exists())
+            self.assertTrue((runtime_skills / "track-tool" / "assets" / "track-operation-template.md").exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
 
     def test_install_replaces_stale_directories_when_switching_buddies(self) -> None:
@@ -259,7 +259,7 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             temp_root = Path(temp_dir)
             skills_root = temp_root / "packages"
             write_prd = self._write_skill_package(skills_root, skill_id="write-prd", description="Write PRD")
-            track_manager = self._write_skill_package(skills_root, skill_id="track-manager", description="Manage tracks")
+            track_tool = self._write_skill_package(skills_root, skill_id="track-tool", description="Manage tracks")
             shape_prototype = self._write_skill_package(skills_root, skill_id="shape-prototype", description="Shape prototype")
             manifest = self._write_manifest(
                 temp_root,
@@ -269,15 +269,15 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                         "path": write_prd.relative_to(ROOT).as_posix(),
                     },
                     {
-                        "id": "track-manager",
-                        "path": track_manager.relative_to(ROOT).as_posix(),
+                        "id": "track-tool",
+                        "path": track_tool.relative_to(ROOT).as_posix(),
                     },
                     {
                         "id": "shape-prototype",
                         "path": shape_prototype.relative_to(ROOT).as_posix(),
                     },
                 ],
-                buddies={"pm": ["write-prd", "track-manager"], "design": ["shape-prototype"]},
+                buddies={"pm": ["write-prd", "track-tool"], "design": ["shape-prototype"]},
             )
             workspace = temp_root / "workspace"
             workspace.mkdir(parents=True, exist_ok=True)
@@ -293,7 +293,7 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
 
             runtime_skills = workspace / ".agents" / "skills"
             self.assertFalse((runtime_skills / "write-prd").exists())
-            self.assertFalse((runtime_skills / "track-manager").exists())
+            self.assertFalse((runtime_skills / "track-tool").exists())
             self.assertFalse((runtime_skills / "stale-skill").exists())
             self.assertTrue((runtime_skills / "shape-prototype" / "SKILL.md").exists())
 
@@ -841,28 +841,30 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             self.assertTrue((workspace / ".agents" / "skills" / "write-prd" / "SKILL.md").exists())
             self.assertFalse((workspace / ".agents" / "skills" / "dev-summary").exists())
 
-    def test_repo_manifest_declares_shared_managers_for_every_buddy(self) -> None:
+    def test_repo_manifest_declares_shared_env_tool_skills_for_every_buddy(self) -> None:
         manifest = load_manifest(ROOT / "buddyswitch" / "manifest.toml")
         skills = {
             row["id"]: row
             for row in manifest.get("skills", [])
             if isinstance(row, dict) and isinstance(row.get("id"), str)
         }
-        self.assertIn("task-manager", skills)
+        self.assertIn("task-tool", skills)
         self.assertEqual(
-            skills["task-manager"].get("path"),
-            "buddyswitch/skills/shared/task-manager",
+            skills["task-tool"].get("path"),
+            "buddyswitch/skills/shared/task-tool",
         )
-        self.assertIn("track-manager", skills)
+        self.assertIn("track-tool", skills)
         self.assertEqual(
-            skills["track-manager"].get("path"),
-            "buddyswitch/skills/shared/track-manager",
+            skills["track-tool"].get("path"),
+            "buddyswitch/skills/shared/track-tool",
         )
-        self.assertIn("artifact-manager", skills)
+        self.assertIn("artifact-tool", skills)
         self.assertEqual(
-            skills["artifact-manager"].get("path"),
-            "buddyswitch/skills/shared/artifact-manager",
+            skills["artifact-tool"].get("path"),
+            "buddyswitch/skills/shared/artifact-tool",
         )
+        for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
+            self.assertNotIn(removed, skills)
 
         buddies = [row for row in manifest.get("buddies", []) if isinstance(row, dict)]
         self.assertTrue(buddies)
@@ -870,9 +872,11 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             buddy_id = buddy.get("id")
             skill_ids = [item for item in buddy.get("skills", []) if isinstance(item, str)]
             with self.subTest(buddy=buddy_id):
-                self.assertEqual(skill_ids.count("task-manager"), 1)
-                self.assertEqual(skill_ids.count("track-manager"), 1)
-                self.assertEqual(skill_ids.count("artifact-manager"), 1)
+                self.assertEqual(skill_ids.count("task-tool"), 1)
+                self.assertEqual(skill_ids.count("track-tool"), 1)
+                self.assertEqual(skill_ids.count("artifact-tool"), 1)
+                for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
+                    self.assertNotIn(removed, skill_ids)
 
 
 if __name__ == "__main__":

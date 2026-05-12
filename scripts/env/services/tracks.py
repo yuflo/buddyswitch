@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Track manager service for broker-routed env.tool operations."""
+"""Track env tool service for broker-routed env.tool operations."""
 
 from __future__ import annotations
 

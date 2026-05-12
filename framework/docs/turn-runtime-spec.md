@@ -134,7 +134,7 @@ Required top-level sections:
 
 Runtime AGENTS guidance should point to these runtime context surfaces instead of duplicating payload recipes or capability matrices.
 
-`runtime_context.env_tools` is the compact source for broker-routed env tool operations. Shared env slices are executed through `python3 scripts/env/client.py <resource> <operation>` and routed through broker method `env.tool` with envelope `{tool, action, args}`. Active slices include `task-manager`, `track-manager`, `artifact-manager`, `context-manager`, `binding-manager`, `handoff-manager`, `run-manager`, and `evidence-manager`.
+`runtime_context.env_tools` is the compact source for broker-routed env tool operations. Shared env slices are executed through `python3 scripts/env/client.py <resource> <operation>` and routed through broker method `env.tool` with envelope `{tool, action, args}`. Active slices include `task-tool`, `track-tool`, `artifact-tool`, `context`, `binding`, `handoff`, `run`, and `evidence`.
 
 `runtime_context.operation_semantics` is a registry-derived map keyed by `"<tool>.<action>"` (for example `track.list`, `run.commit`). Each row includes `kind`, `mutates`, `required_permission`, `authority`, `requires`, and `returns`.
 

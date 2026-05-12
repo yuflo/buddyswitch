@@ -38,7 +38,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Call broker-routed BuddySwitch env operations.")
     sub = parser.add_subparsers(dest="resource", required=True)
 
-    task = sub.add_parser("task", help="Task manager env operations")
+    task = sub.add_parser("task", help="Task env tool operations")
     task_sub = task.add_subparsers(dest="operation", required=True)
 
     create = task_sub.add_parser("create", help="Create active-buddy task")
@@ -60,7 +60,7 @@ def _parse_args() -> argparse.Namespace:
     archive = task_sub.add_parser("archive", help="Archive active-buddy task")
     archive.add_argument("--task-id", required=True)
 
-    track = sub.add_parser("track", help="Track manager env operations")
+    track = sub.add_parser("track", help="Track env tool operations")
     track_sub = track.add_subparsers(dest="operation", required=True)
 
     create_track = track_sub.add_parser("create", help="Create PM-owned track")
@@ -90,7 +90,7 @@ def _parse_args() -> argparse.Namespace:
     detach_task.add_argument("--track-id", required=True)
     detach_task.add_argument("--task-id", required=True)
 
-    artifact = sub.add_parser("artifact", help="Artifact manager env operations")
+    artifact = sub.add_parser("artifact", help="Artifact env tool operations")
     artifact_sub = artifact.add_subparsers(dest="operation", required=True)
 
     artifact_sub.add_parser("list", help="List artifacts for the active current task")
