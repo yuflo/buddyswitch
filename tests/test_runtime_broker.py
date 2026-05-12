@@ -9,6 +9,10 @@ import sys
 import tempfile
 import unittest
 import contextlib
+import importlib
+import socket
+import threading
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,6 +26,7 @@ import runtime_kernel.client as runtime_client  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+BROKER_V2_PROTOCOL = "buddyswitch-runtime-broker/v2"
 PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
 
 PM_COMMIT = {
@@ -34,6 +39,13 @@ PM_COMMIT = {
     },
     "contributors": {"skills": ["write-prd", "track-tool"], "agents": []},
 }
+
+
+def _require_module(name: str):
+    try:
+        return importlib.import_module(name)
+    except ModuleNotFoundError as exc:
+        raise AssertionError(f"missing required Runtime Broker V2 module: {name}") from exc
 
 
 class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -249,6 +261,653 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             with self.assertRaises(runtime_client.RuntimeBrokerError) as raised:
                 runtime_client.runtime_broker_socket_from_env()
         self.assertEqual(raised.exception.code, "E_RUNTIME_BROKER_UNAVAILABLE")
+
+
+class RuntimeBrokerProtocolTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.protocol = _require_module("runtime_kernel.protocol")
+
+    def _framed(self, payload: dict[str, object]) -> bytes:
+        body = json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+        return f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body
+
+    def test_protocol_round_trips_content_length_framed_json(self) -> None:
+        left, right = socket.socketpair()
+        try:
+            first = {"a": 1}
+            second = {"b": 2}
+            left.sendall(self._framed(first) + self._framed(second))
+            self.assertEqual(self.protocol.read_message(right), first)
+            self.assertEqual(self.protocol.read_message(right), second)
+        finally:
+            left.close()
+            right.close()
+
+    def test_protocol_rejects_missing_content_length(self) -> None:
+        left, right = socket.socketpair()
+        try:
+            left.sendall(b"{}\n")
+            left.shutdown(socket.SHUT_WR)
+            with self.assertRaises(self.protocol.BrokerProtocolError) as raised:
+                self.protocol.read_message(right)
+        finally:
+            left.close()
+            right.close()
+        self.assertEqual(raised.exception.code, "E_RUNTIME_BROKER_PROTOCOL")
+
+    def test_protocol_rejects_invalid_json_body(self) -> None:
+        left, right = socket.socketpair()
+        try:
+            body = b'{"ok":'
+            header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+            left.sendall(header + body)
+            with self.assertRaises(self.protocol.BrokerProtocolError) as raised:
+                self.protocol.read_message(right)
+        finally:
+            left.close()
+            right.close()
+        self.assertEqual(raised.exception.code, "E_RUNTIME_BROKER_PROTOCOL")
+        self.assertIn("invalid JSON", raised.exception.message)
+
+    def test_validate_request_requires_v2_protocol_request_id_method_params_deadline(self) -> None:
+        valid = {
+            "protocol": BROKER_V2_PROTOCOL,
+            "request_id": "req-1",
+            "method": "prepare",
+            "params": {"text": "x"},
+            "deadline_ms": 35000,
+        }
+        for missing in ("protocol", "request_id", "method", "params", "deadline_ms"):
+            request = dict(valid)
+            request.pop(missing)
+            with self.assertRaises(self.protocol.BrokerProtocolError, msg=missing):
+                self.protocol.validate_request(request)
+
+    def test_write_methods_require_idempotency_key(self) -> None:
+        request = {
+            "protocol": BROKER_V2_PROTOCOL,
+            "request_id": "req-2",
+            "method": "persist",
+            "params": {"context": {}, "result": {}},
+            "deadline_ms": 35000,
+        }
+        with self.assertRaises(self.protocol.BrokerProtocolError) as raised:
+            self.protocol.validate_request(request)
+        self.assertEqual(raised.exception.code, "E_RUNTIME_IDEMPOTENCY_REQUIRED")
+
+    def test_response_envelopes_use_result_or_error(self) -> None:
+        success = self.protocol.success_response("req-ok", {"ok": True, "value": 1})
+        self.assertEqual(success["protocol"], BROKER_V2_PROTOCOL)
+        self.assertEqual(success["request_id"], "req-ok")
+        self.assertTrue(success["ok"])
+        self.assertEqual(success["result"], {"ok": True, "value": 1})
+        self.assertNotIn("payload", success)
+
+        failure = self.protocol.error_response(
+            "req-bad",
+            code="E_RUNTIME_BROKER_PERMISSION",
+            message="denied",
+            retriable=False,
+        )
+        self.assertEqual(failure["protocol"], BROKER_V2_PROTOCOL)
+        self.assertEqual(failure["request_id"], "req-bad")
+        self.assertFalse(failure["ok"])
+        self.assertEqual(failure["error"]["code"], "E_RUNTIME_BROKER_PERMISSION")
+        self.assertIs(failure["error"]["retriable"], False)
+        self.assertNotIn("payload", failure)
+
+
+class RuntimeBrokerServerIsolationTests(unittest.TestCase):
+    def _start_server(self, dispatch_fn, *, max_workers: int = 1):
+        protocol = _require_module("runtime_kernel.protocol")
+        server_module = _require_module("runtime_kernel.server")
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        config = server_module.RuntimeBrokerConfig(
+            socket_path=root / "runtime-broker.sock",
+            pid_file=root / "runtime-broker.pid",
+            instance_json_path=root / "instance.json",
+            manifest_path=MANIFEST,
+            max_workers=max_workers,
+        )
+        broker = server_module.RuntimeBrokerServer(config=config, dispatch_fn=dispatch_fn)
+        thread = threading.Thread(target=broker.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(broker.close)
+        for _ in range(100):
+            if config.socket_path.exists():
+                break
+            time.sleep(0.01)
+        return protocol, config.socket_path, broker, thread
+
+    def _request(self, protocol, socket_path: Path, request: dict[str, object]) -> dict[str, object]:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(2.0)
+            sock.connect(str(socket_path))
+            protocol.write_message(sock, request)
+            response = protocol.read_message(sock)
+        return response
+
+    def test_client_disconnect_before_response_does_not_stop_server(self) -> None:
+        release = threading.Event()
+
+        def dispatch(request):
+            release.wait(timeout=2.0)
+            return {"ok": True, "pong": request["request_id"]}
+
+        protocol, socket_path, _broker, thread = self._start_server(dispatch, max_workers=1)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.connect(str(socket_path))
+            protocol.write_message(
+                sock,
+                {
+                    "protocol": BROKER_V2_PROTOCOL,
+                    "request_id": "req-disconnect",
+                    "method": "ping",
+                    "params": {},
+                    "deadline_ms": 35000,
+                },
+            )
+        release.set()
+        response = self._request(
+            protocol,
+            socket_path,
+            {
+                "protocol": BROKER_V2_PROTOCOL,
+                "request_id": "req-ping",
+                "method": "ping",
+                "params": {},
+                "deadline_ms": 35000,
+            },
+        )
+        self.assertTrue(thread.is_alive())
+        self.assertTrue(response["ok"], msg=response)
+        self.assertEqual(response["result"]["pong"], "req-ping")
+
+    def test_malformed_request_returns_protocol_error_and_next_ping_succeeds(self) -> None:
+        def dispatch(request):
+            return {"ok": True, "pong": request["request_id"]}
+
+        protocol, socket_path, _broker, thread = self._start_server(dispatch, max_workers=1)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(2.0)
+            sock.connect(str(socket_path))
+            sock.sendall(b"{}\n")
+            try:
+                response = protocol.read_message(sock)
+                self.assertEqual(response["error"]["code"], "E_RUNTIME_BROKER_PROTOCOL")
+            except (protocol.BrokerProtocolError, OSError):
+                pass
+
+        response = self._request(
+            protocol,
+            socket_path,
+            {
+                "protocol": BROKER_V2_PROTOCOL,
+                "request_id": "req-after-malformed",
+                "method": "ping",
+                "params": {},
+                "deadline_ms": 35000,
+            },
+        )
+        self.assertTrue(thread.is_alive())
+        self.assertTrue(response["ok"], msg=response)
+
+    def test_capacity_limit_returns_busy_without_killing_server(self) -> None:
+        release = threading.Event()
+
+        def dispatch(request):
+            if request["request_id"] == "req-blocking":
+                release.wait(timeout=2.0)
+            return {"ok": True, "request_id": request["request_id"]}
+
+        protocol, socket_path, _broker, thread = self._start_server(dispatch, max_workers=1)
+
+        def blocking_request() -> None:
+            self._request(
+                protocol,
+                socket_path,
+                {
+                    "protocol": BROKER_V2_PROTOCOL,
+                    "request_id": "req-blocking",
+                    "method": "ping",
+                    "params": {},
+                    "deadline_ms": 35000,
+                },
+            )
+
+        worker = threading.Thread(target=blocking_request, daemon=True)
+        worker.start()
+        time.sleep(0.05)
+        busy = self._request(
+            protocol,
+            socket_path,
+            {
+                "protocol": BROKER_V2_PROTOCOL,
+                "request_id": "req-busy",
+                "method": "ping",
+                "params": {},
+                "deadline_ms": 35000,
+            },
+        )
+        self.assertFalse(busy["ok"], msg=busy)
+        self.assertEqual(busy["error"]["code"], "E_RUNTIME_BROKER_BUSY")
+        self.assertIs(busy["error"]["retriable"], True)
+        self.assertEqual(busy["error"]["retry_after_ms"], 250)
+        release.set()
+        worker.join(timeout=2.0)
+        self.assertTrue(thread.is_alive())
+
+
+class RuntimeBrokerCoordinatorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.coordinator = _require_module("runtime_kernel.coordinator")
+
+    def test_lock_mode_for_prepare_and_persist_is_write(self) -> None:
+        self.assertEqual(self.coordinator.lock_mode_for_request("prepare", {"text": "x"}), self.coordinator.LockMode.WRITE)
+        self.assertEqual(
+            self.coordinator.lock_mode_for_request("persist", {"context": {}, "result": {}}),
+            self.coordinator.LockMode.WRITE,
+        )
+
+    def test_lock_mode_for_read_only_env_tool_is_read(self) -> None:
+        for params in (
+            {"tool": "task", "action": "list", "args": {}},
+            {"tool": "context", "action": "summarize", "args": {}},
+        ):
+            with self.subTest(params=params):
+                self.assertEqual(self.coordinator.lock_mode_for_request("env.tool", params), self.coordinator.LockMode.READ)
+
+    def test_lock_mode_for_mutating_env_tool_is_write(self) -> None:
+        for params in (
+            {"tool": "task", "action": "create", "args": {}},
+            {"tool": "track", "action": "attach_task", "args": {}},
+            {"tool": "run", "action": "commit", "args": {}},
+            {"tool": "evidence", "action": "issue_browser", "args": {}},
+        ):
+            with self.subTest(params=params):
+                self.assertEqual(self.coordinator.lock_mode_for_request("env.tool", params), self.coordinator.LockMode.WRITE)
+
+    def test_unknown_env_tool_action_defaults_to_write(self) -> None:
+        params = {"tool": "task", "action": "merge", "args": {}}
+        self.assertEqual(self.coordinator.lock_mode_for_request("env.tool", params), self.coordinator.LockMode.WRITE)
+
+    def test_ping_and_status_do_not_acquire_runtime_lock(self) -> None:
+        calls: list[str] = []
+
+        @contextlib.contextmanager
+        def fake_lock(*args, **kwargs):
+            calls.append("lock")
+            yield
+
+        def dispatch_fn(request, session):
+            return {"ok": True, "method": request["method"]}
+
+        session = {"instance_json": Path("instance.json"), "manifest_path": MANIFEST}
+        with patch("turn_runtime._hold_product_runtime_lock", side_effect=fake_lock):
+            for method in ("ping", "status"):
+                response = self.coordinator.dispatch_with_coordination(
+                    {
+                        "protocol": BROKER_V2_PROTOCOL,
+                        "request_id": f"req-{method}",
+                        "method": method,
+                        "params": {},
+                        "deadline_ms": 35000,
+                    },
+                    session,
+                    dispatch_fn,
+                )
+                self.assertEqual(response["method"], method)
+        self.assertEqual(calls, [])
+
+
+class RuntimeBrokerClientV2Tests(unittest.TestCase):
+    def _serve_once(self, handler):
+        protocol = _require_module("runtime_kernel.protocol")
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        socket_path = Path(temp.name) / "runtime-broker.sock"
+        captured: list[dict[str, object]] = []
+
+        def run() -> None:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                server.bind(str(socket_path))
+                server.listen(1)
+                conn, _ = server.accept()
+                with conn:
+                    request = protocol.read_message(conn)
+                    captured.append(request)
+                    response = handler(request)
+                    if response is not None:
+                        protocol.write_message(conn, response)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        for _ in range(100):
+            if socket_path.exists():
+                break
+            time.sleep(0.01)
+        return protocol, socket_path, thread, captured
+
+    def test_client_sends_v2_request_id_deadline_and_reads_result(self) -> None:
+        client = _require_module("runtime_kernel.client")
+
+        def handler(request):
+            return self.protocol.success_response(request["request_id"], {"ok": True, "value": 1})
+
+        self.protocol, socket_path, thread, captured = self._serve_once(handler)
+        with patch.dict(
+            os.environ,
+            {
+                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
+                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": str(socket_path),
+            },
+            clear=False,
+        ):
+            result = client.request_runtime_broker("prepare", {"text": "Draft onboarding PRD"})
+        thread.join(timeout=2.0)
+        self.assertEqual(result, {"ok": True, "value": 1})
+        self.assertEqual(len(captured), 1)
+        outgoing = captured[0]
+        self.assertEqual(outgoing["protocol"], BROKER_V2_PROTOCOL)
+        self.assertRegex(outgoing["request_id"], r"^req-[0-9a-f-]+")
+        self.assertEqual(outgoing["deadline_ms"], 35000)
+        self.assertEqual(outgoing["method"], "prepare")
+        self.assertEqual(outgoing["params"], {"text": "Draft onboarding PRD"})
+        self.assertNotIn("payload", outgoing)
+
+    def test_client_preserves_structured_error_fields(self) -> None:
+        client = _require_module("runtime_kernel.client")
+
+        def handler(request):
+            return self.protocol.error_response(
+                request["request_id"],
+                {
+                    "code": "E_RUNTIME_BROKER_PERMISSION",
+                    "message": "active buddy mismatch",
+                    "retriable": False,
+                    "permission_boundary": "active-buddy",
+                },
+            )
+
+        self.protocol, socket_path, thread, _captured = self._serve_once(handler)
+        with patch.dict(
+            os.environ,
+            {
+                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
+                "BUDDYSWITCH_ACTIVE_BUDDY": "market",
+                "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": str(socket_path),
+            },
+            clear=False,
+        ):
+            with self.assertRaises(client.RuntimeBrokerError) as raised:
+                client.request_runtime_broker("env.tool", {"tool": "task", "action": "list", "args": {}})
+        thread.join(timeout=2.0)
+        self.assertEqual(raised.exception.code, "E_RUNTIME_BROKER_PERMISSION")
+        self.assertEqual(raised.exception.details.get("permission_boundary"), "active-buddy")
+        self.assertIs(raised.exception.details.get("retriable"), False)
+        self.assertRegex(raised.exception.details.get("request_id", ""), r"^req-[0-9a-f-]+")
+
+    def test_client_retries_persist_once_after_transport_reset_when_key_present(self) -> None:
+        protocol = _require_module("runtime_kernel.protocol")
+        client = _require_module("runtime_kernel.client")
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        socket_path = Path(temp.name) / "runtime-broker.sock"
+        captured: list[dict[str, object]] = []
+
+        def run() -> None:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                server.bind(str(socket_path))
+                server.listen(2)
+                first, _ = server.accept()
+                with first:
+                    captured.append(protocol.read_message(first))
+                second, _ = server.accept()
+                with second:
+                    request = protocol.read_message(second)
+                    captured.append(request)
+                    protocol.write_message(second, protocol.success_response(request["request_id"], {"ok": True}))
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        for _ in range(100):
+            if socket_path.exists():
+                break
+            time.sleep(0.01)
+        with patch.dict(
+            os.environ,
+            {
+                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
+                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": str(socket_path),
+            },
+            clear=False,
+        ):
+            result = client.request_runtime_broker(
+                "persist",
+                {"context": {"run_id": "run-1"}, "result": {"execution_summary": "done"}},
+                idempotency_key="persist:run-1:abc",
+            )
+        thread.join(timeout=2.0)
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(len(captured), 2)
+        self.assertNotEqual(captured[0]["request_id"], captured[1]["request_id"])
+        self.assertEqual(captured[0]["idempotency_key"], "persist:run-1:abc")
+        self.assertEqual(captured[1]["idempotency_key"], "persist:run-1:abc")
+
+    def test_client_does_not_retry_prepare_after_transport_reset(self) -> None:
+        protocol = _require_module("runtime_kernel.protocol")
+        client = _require_module("runtime_kernel.client")
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        socket_path = Path(temp.name) / "runtime-broker.sock"
+        captured: list[dict[str, object]] = []
+
+        def run() -> None:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                server.bind(str(socket_path))
+                server.listen(1)
+                conn, _ = server.accept()
+                with conn:
+                    captured.append(protocol.read_message(conn))
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        for _ in range(100):
+            if socket_path.exists():
+                break
+            time.sleep(0.01)
+        with patch.dict(
+            os.environ,
+            {
+                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
+                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": str(socket_path),
+            },
+            clear=False,
+        ):
+            with self.assertRaises(client.RuntimeBrokerError):
+                client.request_runtime_broker("prepare", {"text": "x"})
+        thread.join(timeout=2.0)
+        self.assertEqual(len(captured), 1)
+
+
+class RuntimeBrokerLifecycleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.lifecycle = _require_module("runtime_kernel.lifecycle")
+
+    def _paths(self, root: Path):
+        return self.lifecycle.BrokerPaths(
+            socket_path=root / "runtime-broker.sock",
+            pid_file=root / "runtime-broker.pid",
+            marker_file=root / "runtime-broker.socket",
+            log_file=root / "runtime-broker.log",
+        )
+
+    def test_status_reports_unhealthy_when_pid_live_but_socket_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            paths = self._paths(Path(temp))
+            paths.pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+            paths.marker_file.write_text(str(paths.socket_path), encoding="utf-8")
+            status = self.lifecycle.broker_status(paths, expected_instance_id="inst-pm-example", expected_active_buddy="pm")
+        self.assertFalse(status["healthy"])
+        self.assertEqual(status["error"]["code"], "E_RUNTIME_BROKER_STALE_SOCKET")
+
+    def test_status_reports_unhealthy_when_marker_disagrees_with_socket(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = self._paths(root)
+            paths.pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+            paths.marker_file.write_text(str(root / "other.sock"), encoding="utf-8")
+            status = self.lifecycle.broker_status(paths, expected_instance_id="inst-pm-example", expected_active_buddy="pm")
+        self.assertFalse(status["healthy"])
+        self.assertEqual(status["socket_path"], str(paths.socket_path))
+        self.assertEqual(status["marker_path"], str(paths.marker_file))
+
+    def test_ensure_cleans_stale_pid_marker_and_socket_before_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            paths = self._paths(Path(temp))
+            paths.pid_file.write_text("999999\n", encoding="utf-8")
+            paths.marker_file.write_text("/tmp/stale.sock", encoding="utf-8")
+            paths.socket_path.write_text("not a socket", encoding="utf-8")
+            events: list[str] = []
+
+            def fake_start(*args, **kwargs):
+                events.append("start")
+                self.assertFalse(paths.pid_file.exists())
+                self.assertFalse(paths.socket_path.exists())
+                paths.pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+                return {"ok": True, "pid": os.getpid()}
+
+            def fake_ping(*args, **kwargs):
+                events.append("ping")
+                return {"ok": True, "protocol": BROKER_V2_PROTOCOL, "instance_id": "inst-pm-example", "active_buddy": "pm"}
+
+            with patch.object(self.lifecycle, "start_broker_process", side_effect=fake_start), patch.object(
+                self.lifecycle,
+                "ping_broker",
+                side_effect=fake_ping,
+            ):
+                result = self.lifecycle.ensure_broker(
+                    paths,
+                    instance_json_path=Path("instance.json"),
+                    manifest_path=MANIFEST,
+                    expected_instance_id="inst-pm-example",
+                    expected_active_buddy="pm",
+                )
+        self.assertTrue(result["ok"], msg=result)
+        self.assertEqual(events, ["start", "ping"])
+        self.assertEqual(paths.marker_file.read_text(encoding="utf-8"), str(paths.socket_path))
+
+    def test_ensure_failure_returns_log_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            paths = self._paths(Path(temp))
+            with patch.object(self.lifecycle, "start_broker_process", return_value={"ok": True, "pid": os.getpid()}), patch.object(
+                self.lifecycle,
+                "ping_broker",
+                return_value={"ok": False, "error": {"code": "E_RUNTIME_BROKER_UNAVAILABLE", "message": "not ready"}},
+            ):
+                result = self.lifecycle.ensure_broker(
+                    paths,
+                    instance_json_path=Path("instance.json"),
+                    manifest_path=MANIFEST,
+                    expected_instance_id="inst-pm-example",
+                    expected_active_buddy="pm",
+                    startup_timeout_seconds=0.05,
+                )
+        self.assertFalse(result["ok"], msg=result)
+        self.assertEqual(result["error"]["broker_status"]["log_file"], str(paths.log_file))
+
+
+class RuntimeBrokerPersistIdempotencyTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _instance_json(self) -> Path:
+        instance_json = self._runtime_path("instance.json")
+        instance_json.write_text(
+            json.dumps(
+                {
+                    "instance_id": "inst-pm-example",
+                    "buddy": "pm",
+                    "status": "active",
+                    "current_task_id": None,
+                    "current_track_id": None,
+                    "workspace_dir": str(self.runtime_root),
+                },
+                ensure_ascii=True,
+            ),
+            encoding="utf-8",
+        )
+        return instance_json
+
+    def test_persist_without_idempotency_key_is_rejected_before_commit(self) -> None:
+        dispatcher = _require_module("runtime_kernel.dispatcher")
+        request = {
+            "protocol": BROKER_V2_PROTOCOL,
+            "request_id": "req-persist",
+            "method": "persist",
+            "params": {"context": {}, "result": {}},
+            "deadline_ms": 35000,
+        }
+        session = dispatcher.RuntimeBrokerSession(instance_json_path=self._instance_json(), manifest_path=MANIFEST)
+        with patch("runtime_kernel.dispatcher.persist_buddy_run_request") as persist_mock:
+            response = dispatcher.dispatch_runtime_request(request, session)
+        self.assertFalse(response["ok"], msg=response)
+        self.assertEqual(response["error"]["code"], "E_RUNTIME_IDEMPOTENCY_REQUIRED")
+        self.assertIs(response["error"]["retriable"], False)
+        persist_mock.assert_not_called()
+
+
+class RuntimeBrokerV2AcceptanceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_active_identity_mismatch_errors_are_structured_non_retriable(self) -> None:
+        dispatcher = _require_module("runtime_kernel.dispatcher")
+        instance_json = self._runtime_path("instance.json")
+        instance_json.write_text(
+            json.dumps(
+                {
+                    "instance_id": "inst-pm-example",
+                    "buddy": "pm",
+                    "status": "active",
+                    "workspace_dir": str(self.runtime_root),
+                },
+                ensure_ascii=True,
+            ),
+            encoding="utf-8",
+        )
+        session = dispatcher.RuntimeBrokerSession(instance_json_path=instance_json, manifest_path=MANIFEST)
+        for request in (
+            {
+                "protocol": BROKER_V2_PROTOCOL,
+                "request_id": "req-wrong-instance",
+                "method": "prepare",
+                "params": {"text": PM_REQUEST, "instance_id": "inst-other", "active_buddy": "pm"},
+                "deadline_ms": 35000,
+            },
+            {
+                "protocol": BROKER_V2_PROTOCOL,
+                "request_id": "req-wrong-buddy",
+                "method": "prepare",
+                "params": {"text": PM_REQUEST, "instance_id": "inst-pm-example", "active_buddy": "market"},
+                "deadline_ms": 35000,
+            },
+        ):
+            with self.subTest(request=request["request_id"]):
+                response = dispatcher.dispatch_runtime_request(request, session)
+                self.assertFalse(response["ok"], msg=response)
+                self.assertEqual(response["request_id"], request["request_id"])
+                self.assertIs(response["error"]["retriable"], False)
+                self.assertNotEqual(response["error"]["code"], "E_RUNTIME_BROKER_UNAVAILABLE")
+                self.assertIn(response["error"]["permission_boundary"], {"active-instance", "active-buddy"})
+
+    def test_runtime_broker_v2_stays_local_unix_socket_gateway(self) -> None:
+        server_module = _require_module("runtime_kernel.server")
+        source_root = ROOT / "scripts" / "runtime_kernel"
+        text = "\n".join(path.read_text(encoding="utf-8") for path in sorted(source_root.glob("*.py")))
+        self.assertNotIn("grpc", text)
+        self.assertNotIn("http.server", text)
+        self.assertNotIn("sqlite3", text)
+        self.assertIn("AF_UNIX", Path(server_module.__file__).read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
