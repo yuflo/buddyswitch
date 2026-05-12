@@ -27,32 +27,6 @@ DESIGN_REQUEST = "基于现有 PRD 和市场简报，整理 landing page 原型�
 def _pm_seed_commit(track_id: str) -> dict[str, object]:
     return {
         "execution_summary": "PM wrote PRD and handed off to Market.",
-        "artifacts": [
-            {
-                "kind": "prd",
-                "title": "Landing Page PRD",
-                "summary": "Defines PM scope and constraints.",
-                "content": {
-                    "problem": "Scheduling overhead is too high.",
-                    "requirements": ["clear value", "specific CTA"],
-                },
-            }
-        ],
-        "state_effects": {
-            "track": {
-                "action": "create",
-                "track_id": track_id,
-                "title": "Host Decision Surface Track",
-                "status": "active",
-                "current_buddy": "pm",
-                "next_buddy": "market",
-                "summary": "PM -> Market -> Design decision surface fixture.",
-            },
-            "task": {
-                "status": "done",
-                "summary": "PM PRD is ready for Market continuation.",
-            },
-        },
         "handoff": {
             "next_buddy": "market",
             "reason": "Market should continue with evidence-backed positioning.",
@@ -61,19 +35,37 @@ def _pm_seed_commit(track_id: str) -> dict[str, object]:
     }
 
 
+PM_ARTIFACTS = [
+    {
+        "kind": "prd",
+        "title": "Landing Page PRD",
+        "summary": "Defines PM scope and constraints.",
+        "content": {
+            "problem": "Scheduling overhead is too high.",
+            "requirements": ["clear value", "specific CTA"],
+        },
+    }
+]
+
+PM_TASK_UPDATE = {
+    "status": "done",
+    "summary": "PM PRD is ready for Market continuation.",
+}
+
+def _pm_track_create(track_id: str) -> dict[str, object]:
+    return {
+        "track_id": track_id,
+        "title": "Host Decision Surface Track",
+        "status": "active",
+        "current_buddy": "pm",
+        "next_buddy": "market",
+        "summary": "PM -> Market -> Design decision surface fixture.",
+    }
+
+
 def _market_commit(approved_downgrade_token: str) -> dict[str, object]:
     return {
         "execution_summary": "Market completed scan and handed off to Design.",
-        "artifacts": [
-            {
-                "kind": "market-scan",
-                "title": "Market Scan",
-                "summary": "Competitor positioning and angle recommendations.",
-                "content": {
-                    "insights": ["Concrete workflow outcomes convert better."]
-                },
-            }
-        ],
         "handoff": {
             "next_buddy": "design",
             "reason": "Design should continue from PM+Market context.",
@@ -83,6 +75,18 @@ def _market_commit(approved_downgrade_token: str) -> dict[str, object]:
             "approved_downgrade_token": approved_downgrade_token,
         },
     }
+
+
+MARKET_ARTIFACTS = [
+    {
+        "kind": "market-scan",
+        "title": "Market Scan",
+        "summary": "Competitor positioning and angle recommendations.",
+        "content": {
+            "insights": ["Concrete workflow outcomes convert better."]
+        },
+    }
+]
 
 
 class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -138,6 +142,133 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             manifest_path=MANIFEST,
         )
 
+    def _env_tool(
+        self,
+        *,
+        buddy: str,
+        instance_id: str,
+        instance_json: Path,
+        tool: str,
+        action: str,
+        args: dict[str, object],
+    ) -> dict[str, object]:
+        response = self._dispatch(
+            method="env.tool",
+            payload={"tool": tool, "action": action, "args": args},
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy=buddy,
+        )
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("tool"), tool)
+        return response
+
+    def _create_tracked_task(
+        self,
+        *,
+        buddy: str,
+        instance_id: str,
+        instance_json: Path,
+        task_id: str,
+        track_id: str,
+        title: str,
+        summary: str,
+    ) -> None:
+        self._env_tool(
+            buddy=buddy,
+            instance_id=instance_id,
+            instance_json=instance_json,
+            tool="task",
+            action="create",
+            args={"task_id": task_id, "title": title, "summary": summary},
+        )
+        self._env_tool(
+            buddy=buddy,
+            instance_id=instance_id,
+            instance_json=instance_json,
+            tool="track",
+            action="attach_task",
+            args={"track_id": track_id, "task_id": task_id},
+        )
+        self._env_tool(
+            buddy=buddy,
+            instance_id=instance_id,
+            instance_json=instance_json,
+            tool="binding",
+            action="set_task",
+            args={"task_id": task_id},
+        )
+
+    def _update_task(
+        self,
+        *,
+        buddy: str,
+        instance_id: str,
+        instance_json: Path,
+        task_id: str,
+        patch: dict[str, object],
+    ) -> None:
+        self._env_tool(
+            buddy=buddy,
+            instance_id=instance_id,
+            instance_json=instance_json,
+            tool="task",
+            action="update",
+            args={"task_id": task_id, **patch},
+        )
+
+    def _create_artifacts(
+        self,
+        *,
+        buddy: str,
+        instance_id: str,
+        instance_json: Path,
+        context: dict[str, object],
+        task_id: str,
+        artifact_specs: list[dict[str, object]],
+    ) -> list[str]:
+        run_envelope = context["run_envelope"]
+        self.assertIsInstance(run_envelope, dict)
+        assert isinstance(run_envelope, dict)
+        source_run_id = run_envelope["run_id"]
+        self.assertIsInstance(source_run_id, str)
+        artifact_ids: list[str] = []
+        for spec in artifact_specs:
+            kind = spec["kind"]
+            self.assertIsInstance(kind, str)
+            created = self._env_tool(
+                buddy=buddy,
+                instance_id=instance_id,
+                instance_json=instance_json,
+                tool="artifact",
+                action="create_revision",
+                args={
+                    "artifact_id": f"art-{task_id}-{kind}-{source_run_id.replace('run-', '')[:8]}",
+                    "task_id": task_id,
+                    "kind": kind,
+                    "title": spec["title"],
+                    "summary": spec["summary"],
+                    "content": spec["content"],
+                    "source_run_id": source_run_id,
+                },
+            )
+            artifact_ids.append(str(created["artifact_id"]))
+        return artifact_ids
+
+    def _audit_result(
+        self,
+        base: dict[str, object],
+        *,
+        task_id: str,
+        track_id: str,
+        artifact_ids: list[str],
+    ) -> dict[str, object]:
+        result = json.loads(json.dumps(base))
+        result["task_id"] = task_id
+        result["track_id"] = track_id
+        result["artifact_ids"] = artifact_ids
+        return result
+
     def _prepare(
         self,
         *,
@@ -183,6 +314,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
 
     def _seed_pm_handoff(self) -> tuple[str, dict[str, object]]:
         track_id = "track-host-decision-surface"
+        pm_task_id = "task-pm-host-decision-surface"
         pm_instance_id = "inst-pm-host-ds"
         pm_instance = self._instance_json(buddy="pm", instance_id=pm_instance_id)
         pm_context = self._prepare(
@@ -191,12 +323,49 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             instance_json=pm_instance,
             text=PM_REQUEST,
         )
+        self._env_tool(
+            buddy="pm",
+            instance_id=pm_instance_id,
+            instance_json=pm_instance,
+            tool="track",
+            action="create",
+            args=_pm_track_create(track_id),
+        )
+        self._create_tracked_task(
+            buddy="pm",
+            instance_id=pm_instance_id,
+            instance_json=pm_instance,
+            task_id=pm_task_id,
+            track_id=track_id,
+            title="PM Host Decision Surface PRD",
+            summary="PM task for host decision surface fixture.",
+        )
+        self._update_task(
+            buddy="pm",
+            instance_id=pm_instance_id,
+            instance_json=pm_instance,
+            task_id=pm_task_id,
+            patch=PM_TASK_UPDATE,
+        )
+        artifact_ids = self._create_artifacts(
+            buddy="pm",
+            instance_id=pm_instance_id,
+            instance_json=pm_instance,
+            context=pm_context,
+            task_id=pm_task_id,
+            artifact_specs=PM_ARTIFACTS,
+        )
         persisted = self._persist(
             buddy="pm",
             instance_id=pm_instance_id,
             instance_json=pm_instance,
             context=pm_context,
-            result=_pm_seed_commit(track_id),
+            result=self._audit_result(
+                _pm_seed_commit(track_id),
+                task_id=pm_task_id,
+                track_id=track_id,
+                artifact_ids=artifact_ids,
+            ),
         )
         receipt = persisted["receipt"]
         self.assertIsInstance(receipt, dict, msg=persisted)
@@ -238,21 +407,16 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
     def test_bound_market_sees_pm_prd_handoff_track_relation_evidence_and_design_handoff_constraints(self) -> None:
         track_id, _ = self._seed_pm_handoff()
         market_task_id = "task-market-host-ds-bound"
-        env_store.create_task(
-            market_task_id,
-            "Market Host Decision Surface Bound Task",
-            buddy="market",
-            track_id=track_id,
-            status="active",
-            summary="Bound market task for host decision surface tests.",
-            initial_run_id=None,
-        )
         market_instance_id = "inst-market-bound-host-ds"
-        market_instance = self._instance_json(
+        market_instance = self._instance_json(buddy="market", instance_id=market_instance_id, current_track_id=track_id)
+        self._create_tracked_task(
             buddy="market",
             instance_id=market_instance_id,
-            current_task_id=market_task_id,
-            current_track_id=track_id,
+            instance_json=market_instance,
+            task_id=market_task_id,
+            track_id=track_id,
+            title="Market Host Decision Surface Bound Task",
+            summary="Bound market task for host decision surface tests.",
         )
         market_context = self._prepare(
             buddy="market",
@@ -274,21 +438,16 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
     def test_full_buddy_loop_uses_decision_surface_and_persists_market_scan_to_design_handoff(self) -> None:
         track_id, _ = self._seed_pm_handoff()
         market_task_id = "task-market-host-ds-loop"
-        env_store.create_task(
-            market_task_id,
-            "Market Host Decision Surface Loop Task",
-            buddy="market",
-            track_id=track_id,
-            status="active",
-            summary="Market loop task.",
-            initial_run_id=None,
-        )
         market_instance_id = "inst-market-loop-host-ds"
-        market_instance = self._instance_json(
+        market_instance = self._instance_json(buddy="market", instance_id=market_instance_id, current_track_id=track_id)
+        self._create_tracked_task(
             buddy="market",
             instance_id=market_instance_id,
-            current_task_id=market_task_id,
-            current_track_id=track_id,
+            instance_json=market_instance,
+            task_id=market_task_id,
+            track_id=track_id,
+            title="Market Host Decision Surface Loop Task",
+            summary="Market loop task.",
         )
         market_context = self._prepare(
             buddy="market",
@@ -313,33 +472,41 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             buddy="market",
         )
         self.assertTrue(downgrade_issue.get("ok"), msg=downgrade_issue)
+        market_artifact_ids = self._create_artifacts(
+            buddy="market",
+            instance_id=market_instance_id,
+            instance_json=market_instance,
+            context=market_context,
+            task_id=market_task_id,
+            artifact_specs=MARKET_ARTIFACTS,
+        )
         market_persisted = self._persist(
             buddy="market",
             instance_id=market_instance_id,
             instance_json=market_instance,
             context=market_context,
-            result=_market_commit(downgrade_issue["tool_evidence"]["approved_downgrade_token"]),
+            result=self._audit_result(
+                _market_commit(downgrade_issue["tool_evidence"]["approved_downgrade_token"]),
+                task_id=market_task_id,
+                track_id=track_id,
+                artifact_ids=market_artifact_ids,
+            ),
         )
         market_receipt = market_persisted["receipt"]
         self.assertEqual(market_receipt["track_id"], track_id)
         self.assertEqual(market_receipt["handoff"]["next_buddy"], "design")
 
         design_task_id = "task-design-host-ds-loop"
-        env_store.create_task(
-            design_task_id,
-            "Design Host Decision Surface Loop Task",
-            buddy="design",
-            track_id=track_id,
-            status="active",
-            summary="Design continuation task.",
-            initial_run_id=None,
-        )
         design_instance_id = "inst-design-loop-host-ds"
-        design_instance = self._instance_json(
+        design_instance = self._instance_json(buddy="design", instance_id=design_instance_id, current_track_id=track_id)
+        self._create_tracked_task(
             buddy="design",
             instance_id=design_instance_id,
-            current_task_id=design_task_id,
-            current_track_id=track_id,
+            instance_json=design_instance,
+            task_id=design_task_id,
+            track_id=track_id,
+            title="Design Host Decision Surface Loop Task",
+            summary="Design continuation task.",
         )
         design_context = self._prepare(
             buddy="design",

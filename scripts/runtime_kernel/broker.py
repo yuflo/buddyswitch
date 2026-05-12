@@ -18,7 +18,6 @@ if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from env_manifest import ManifestError, load_manifest
-from env.services import bindings as binding_service
 from env.tools import responses as tool_responses
 from runtime_kernel.client import PROTOCOL
 from runtime_kernel.persist import persist_buddy_run_request
@@ -177,13 +176,6 @@ def _persist_dispatch(
     persisted = persist_buddy_run_request(context, result=result, manifest_path=manifest_path)
     if persisted.get("ok") is not True:
         return _error_from_payload(persisted, default_code="E_RUNTIME_BROKER", default_message="persist rejected")
-    binding = binding_service.persist_binding_from_payload(persisted)
-    if binding is not None:
-        task_id, track_id = binding
-        try:
-            binding_service.write_product_session_binding(session, task_id=task_id, track_id=track_id)
-        except (OSError, ValueError) as exc:
-            turn_runtime._mark_committed_binding_update_failed(persisted, session, exc)
     return {"ok": True, "payload": persisted}
 
 

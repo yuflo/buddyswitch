@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import fcntl
-import hashlib
 import json
 import math
 import os
@@ -26,36 +25,23 @@ from env_manifest import (
 )
 import env_profiles
 import env_store
-from env.services import bindings as binding_service
 from env.services import context as context_service
 from env.tools import contracts as tool_contracts
 from env.tools import responses as tool_responses
 from env_store import (
-    add_run_to_task,
     build_track_artifact_index,
-    create_artifact,
-    create_task,
-    create_track,
     get_task,
     get_track,
-    list_artifacts,
     list_tasks,
-    list_tracks,
     now_iso,
     require_runtime_workspace_write_root,
-    register_task_to_track,
     run_content_path,
-    save_run_content,
-    slugify,
-    update_track,
 )
 from runtime_kernel.client import RuntimeBrokerError, request_runtime_broker
 ROOT = env_store.ROOT
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-TRACK_ACTIONS = ("create", "update", "advance", "archive")
-STATUS_VALUES = ("active", "blocked", "done", "archived")
 LEGACY_OUTPUT_ERROR = (
     "Derived markdown outputs are retired. Persist BuddySwitch state to task/artifact objects and run audits only."
 )
@@ -404,120 +390,30 @@ def _clear_reservation_from_payload(payload: dict[str, Any], *, fail_on_warning:
         _clear_reservation_from_payload(refreshed_context, fail_on_warning=fail_on_warning)
 
 
-def _mark_committed_binding_update_failed(payload: dict[str, Any], product_session: dict[str, Any], exc: Exception) -> None:
-    _clear_reservation_from_payload(payload)
-    receipt = payload.setdefault("receipt", {})
-    if not isinstance(receipt, dict):
-        return
-    warning = {
-        "code": "W_INSTANCE_BINDING_UPDATE_FAILED",
-        "message": f"instance binding update failed after persist commit: {exc}",
-        "instance_id": product_session.get("instance_id"),
-        "instance_json": str(product_session.get("instance_json")),
-    }
-    warnings = receipt.setdefault("warnings", [])
-    if isinstance(warnings, list):
-        warnings.append(warning)
-    payload["refreshed_context"] = {
-        "ok": False,
-        "error": {
-            "code": "E_RUNTIME_REFRESH_CONTEXT",
-            "message": "instance binding update failed after persist commit; rerun prepare for next turn",
-            "instance_id": product_session.get("instance_id"),
-            "instance_json": str(product_session.get("instance_json")),
-        },
-    }
-
-
 def _ensure_no_legacy_outputs(demand: str) -> None:
     for pattern in _LEGACY_OUTPUT_PATTERNS:
         match = pattern.search(demand)
         if match:
             raise ValueError(f"{LEGACY_OUTPUT_ERROR} Rejecting requested path '{match.group(1)}'.")
 
-def _next_unique(base: str, existing: set[str]) -> str:
-    if base not in existing:
-        return base
-    index = 2
-    while True:
-        candidate = f"{base}-{index}"
-        if candidate not in existing:
-            return candidate
-        index += 1
-
-
-def _readable_demand_slug(demand: str) -> str:
-    tokens = [token for token in slugify(demand).split("-") if token]
-    if not tokens:
-        tokens = ["task"]
-    return "-".join(token[:10] for token in tokens[:4]).strip("-") or "task"
-
-
-def _derive_create_token(demand: str) -> str:
-    return f"{_readable_demand_slug(demand)}-{uuid.uuid4().hex[:8]}"
-
-
-def _derive_task_id(buddy: str, demand: str, *, create_token: str | None = None) -> str:
-    if isinstance(create_token, str) and create_token:
-        token_slug = _readable_demand_slug(create_token)
-        digest = hashlib.sha256(f"{buddy}\n{create_token}".encode("utf-8")).hexdigest()[:10]
-        return f"task-{buddy}-{token_slug}-{digest}"
-
-    short_slug = _readable_demand_slug(demand)
-    existing = {row["id"] for row in list_tasks()}
-    while True:
-        candidate = f"task-{buddy}-{short_slug}-{uuid.uuid4().hex[:6]}"
-        if candidate not in existing:
-            return candidate
-
-
-def _derive_track_id(demand: str) -> str:
-    candidates: list[tuple[int, str]] = []
-    patterns = (
-        r"(?<![a-z0-9-])track\s+([a-z0-9][a-z0-9-]{1,80})\b",
-        r"(?<![a-z0-9-])([a-z0-9][a-z0-9-]{1,80})\s+track\b(?!-)",
-        r"继续\s*([a-z0-9][a-z0-9-]{1,80})\s*track",
-    )
-    for pattern in patterns:
-        for match in re.finditer(pattern, demand, flags=re.IGNORECASE):
-            candidates.append((match.start(1), match.group(1).lower()))
-
-    existing = {track["id"] for track in list_tracks()}
-    if candidates:
-        candidates.sort(key=lambda item: item[0])
-        preferred = candidates[0][1]
-        if preferred.startswith("track-"):
-            return _next_unique(preferred, existing)
-        return _next_unique(f"track-{preferred}", existing)
-
-    cleaned = slugify(demand).replace("switch", "").replace("track", "").strip("-") or "track"
-    if not cleaned.startswith("track"):
-        cleaned = f"track-{cleaned}"
-    return _next_unique(cleaned, existing)
-
-
-def _derive_task_title(demand: str) -> str:
-    words = demand.split()
-    snippet = " ".join(words[:8]).strip()
-    return snippet if snippet else "Task"
-
-
-def _derive_artifact_id(task_id: str, kind: str) -> str:
-    existing = {artifact["id"] for artifact in list_artifacts()}
-    base = f"art-{slugify(f'{task_id}-{kind}')}"
-    return _next_unique(base, existing)
-
 
 def _build_next_state(
     *,
-    task_id: str,
+    task_id: str | None,
     track_id: str | None,
     current_buddy: str,
     next_buddy: str | None,
     track_action: str | None = None,
 ) -> dict[str, Any]:
     resolved_next_buddy = next_buddy if isinstance(next_buddy, str) and next_buddy.strip() else None
-    mode = "handoff" if resolved_next_buddy and resolved_next_buddy != current_buddy else "continue_current_task"
+    if resolved_next_buddy and resolved_next_buddy != current_buddy:
+        mode = "handoff"
+    elif task_id:
+        mode = "task_associated"
+    elif track_id:
+        mode = "track_associated"
+    else:
+        mode = "taskless_audit"
     if track_action == "archive":
         mode = "track_archived"
     return {
@@ -530,22 +426,11 @@ def _build_next_state(
 
 
 def _validate_context_revision(context: dict[str, Any]) -> dict[str, Any]:
-    context_revision = context.get("context_revision")
-    if not isinstance(context_revision, str) or not context_revision.strip():
-        raise ValueError("context_revision is required")
-    context_revision = context_revision.strip()
-
-    task_context = context.get("task_context")
-    if not isinstance(task_context, dict):
-        raise ValueError("task_context is required")
-    task_payload = task_context.get("task")
-    if not isinstance(task_payload, dict):
-        raise ValueError("task_context.task is required")
-    task_id = task_payload.get("id")
+    validated = _validate_prepared_run_context(context)
+    task_id = validated.get("task_id")
     if not isinstance(task_id, str) or not task_id.strip():
-        raise ValueError("task_context.task.id is required")
-
-    stored_task = get_task(task_id)
+        return {}
+    stored_task = get_task(task_id.strip())
     if stored_task is None:
         _raise_runtime_feedback(
             "E_RUNTIME_PERSIST",
@@ -553,9 +438,23 @@ def _validate_context_revision(context: dict[str, Any]) -> dict[str, Any]:
             permission_boundary="prepare.context_revision",
             allowed_next_actions=_rerun_prepare_actions(),
         )
+    return stored_task
 
-    expected_sequence = _derive_context_sequence(stored_task)
-    expected_revision = _derive_context_revision(stored_task, expected_sequence)
+
+def _validate_prepared_run_context(context: dict[str, Any]) -> dict[str, Any]:
+    context_revision = context.get("context_revision")
+    if not isinstance(context_revision, str) or not context_revision.strip():
+        raise ValueError("context_revision is required")
+    context_revision = context_revision.strip()
+
+    run_envelope = context.get("run_envelope")
+    if not isinstance(run_envelope, dict):
+        raise ValueError("run_envelope is required")
+    run_id = run_envelope.get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("run_envelope.run_id is required")
+    run_id = run_id.strip()
+    expected_revision = _derive_run_context_revision(run_id)
     if context_revision != expected_revision:
         _raise_runtime_feedback(
             "E_RUNTIME_PERSIST",
@@ -564,19 +463,52 @@ def _validate_context_revision(context: dict[str, Any]) -> dict[str, Any]:
             allowed_next_actions=_rerun_prepare_actions(),
         )
 
-    run_envelope = context.get("run_envelope")
-    if not isinstance(run_envelope, dict):
-        raise ValueError("run_envelope is required")
     sequence = run_envelope.get("sequence")
-    if isinstance(sequence, int) and sequence != expected_sequence:
+    if isinstance(sequence, int) and sequence != 1:
         _raise_runtime_feedback(
             "E_RUNTIME_PERSIST",
-            f"context_revision mismatch: expected sequence {expected_sequence}, received {sequence}",
+            f"context_revision mismatch: expected sequence 1, received {sequence}",
             permission_boundary="prepare.context_revision",
             allowed_next_actions=_rerun_prepare_actions(),
         )
+    turn_identity = run_envelope.get("turn_identity")
+    if not isinstance(turn_identity, dict):
+        raise ValueError("run_envelope.turn_identity is required")
 
-    return stored_task
+    task_id = context.get("current_task_id")
+    if task_id is not None and (not isinstance(task_id, str) or not task_id.strip()):
+        raise ValueError("current_task_id must be a non-empty string or null")
+    track_id = context.get("current_track_id")
+    if track_id is not None and (not isinstance(track_id, str) or not track_id.strip()):
+        raise ValueError("current_track_id must be a non-empty string or null")
+
+    if turn_identity.get("run_id") != run_id:
+        raise ValueError("run_envelope.turn_identity run_id mismatch")
+    if turn_identity.get("context_revision") != context_revision:
+        raise ValueError("run_envelope.turn_identity context_revision mismatch")
+    if turn_identity.get("task_id") != task_id:
+        raise ValueError("run_envelope.turn_identity task_id mismatch")
+    if turn_identity.get("track_id") != track_id:
+        raise ValueError("run_envelope.turn_identity track_id mismatch")
+    if turn_identity.get("instance_id") != context.get("instance_id"):
+        raise ValueError("run_envelope.turn_identity instance_id mismatch")
+    if turn_identity.get("active_buddy") != context.get("active_buddy"):
+        raise ValueError("run_envelope.turn_identity active_buddy mismatch")
+    if turn_identity.get("request_text") != context.get("request_text"):
+        raise ValueError("run_envelope.turn_identity request_text mismatch")
+
+    return {
+        "run_id": run_id,
+        "context_revision": context_revision,
+        "sequence": sequence,
+        "task_id": task_id.strip() if isinstance(task_id, str) else None,
+        "track_id": track_id.strip() if isinstance(track_id, str) else None,
+        "instance_id": context.get("instance_id"),
+        "active_buddy": context.get("active_buddy"),
+        "request_text": context.get("request_text"),
+        "run_envelope": run_envelope,
+        "turn_identity": turn_identity,
+    }
 
 
 def _assert_run_id_unused(run_id: str) -> None:
@@ -665,9 +597,9 @@ def _validate_market_tool_evidence(
     if _runtime_evidence_token_root() is None:
         return None
 
-    artifacts = result.get("artifacts")
-    has_artifacts = isinstance(artifacts, list) and len(artifacts) > 0
-    if not has_artifacts:
+    artifact_ids = result.get("artifact_ids")
+    has_artifact_refs = isinstance(artifact_ids, list) and len(artifact_ids) > 0
+    if not has_artifact_refs:
         return None
 
     tool_evidence = result.get("tool_evidence")
@@ -729,6 +661,21 @@ def _validate_market_tool_evidence(
         _raise_runtime_feedback("E_RUNTIME_PERSIST", "Market tool_evidence token instance id mismatch", **_market_evidence_feedback())
     if record.get("buddy_id") != active_buddy:
         _raise_runtime_feedback("E_RUNTIME_PERSIST", "Market tool_evidence token buddy mismatch", **_market_evidence_feedback())
+    token_task_id = record.get("task_id")
+    result_task_id = result.get("task_id")
+    if isinstance(token_task_id, str) and token_task_id:
+        if result_task_id is None:
+            _raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                "Market tool_evidence token is scoped to a task but result.task_id is missing",
+                **_market_evidence_feedback(),
+            )
+        if token_task_id != result_task_id:
+            _raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                "Market tool_evidence token task scope mismatch",
+                **_market_evidence_feedback(),
+            )
 
     normalized: dict[str, Any] = {
         "kind": expected_mode,
@@ -820,27 +767,23 @@ def _project_write_rule(access: str) -> str:
 def _build_persist_field_desc(active_buddy: str, tool_capability: dict[str, Any]) -> dict[str, Any]:
     tool_evidence_required: bool | str = False
     if active_buddy == "market" and tool_capability.get("market_research_evidence") == "required":
-        tool_evidence_required = "Market artifact-producing commits require broker-issued evidence."
+        tool_evidence_required = "Market commits with evidence-backed artifact refs require broker-issued evidence."
     return {
         "execution_summary": {
             "required": True,
             "purpose": "Short durable summary of what this buddy completed in this turn.",
         },
-        "artifacts": {
+        "task_id": {
             "required": False,
-            "purpose": "Durable work products owned by the active buddy.",
-            "item_fields": ["kind", "title", "summary", "content"],
-            "kind_source": "runtime_context.artifact_kind_desc",
+            "purpose": "Optional association to an existing active-buddy task already created through task-tool.",
         },
-        "state_effects.task": {
+        "track_id": {
             "required": False,
-            "purpose": "Update status or summary for the current prepared task only.",
-            "allowed_fields": ["status", "summary"],
+            "purpose": "Optional association to an existing track already managed through track-tool.",
         },
-        "state_effects.track": {
+        "artifact_ids": {
             "required": False,
-            "purpose": "PM-owned track lifecycle mutations.",
-            "rule_source": "runtime_context.track_lifecycle_desc",
+            "purpose": "Optional refs to artifacts already written through artifact-tool.",
         },
         "handoff": {
             "required": False,
@@ -907,7 +850,7 @@ def _build_runtime_context(
     buddy: dict[str, Any],
     env_profile: dict[str, Any],
     current_binding: dict[str, Any],
-    task_context: dict[str, Any],
+    task_context: dict[str, Any] | None,
     track_context: dict[str, Any] | None,
 ) -> dict[str, Any]:
     state_capability = env_profile.get("state_capability")
@@ -932,10 +875,10 @@ def _build_runtime_context(
 
     allowed_task_effects = state_capability.get("task_effects")
     if not isinstance(allowed_task_effects, list):
-        raise ValueError("env profile state_capability.task_effects must be a list")
+        allowed_task_effects = []
     allowed_track_effects = state_capability.get("track_effects")
     if not isinstance(allowed_track_effects, list):
-        raise ValueError("env profile state_capability.track_effects must be a list")
+        allowed_track_effects = []
     normalized_allowed_task_effects = [item for item in allowed_task_effects if isinstance(item, str)]
     normalized_allowed_track_effects = [item for item in allowed_track_effects if isinstance(item, str)]
 
@@ -954,15 +897,17 @@ def _build_runtime_context(
         "required": ["execution_summary"],
         "optional": [
             "working_notes",
-            "artifacts",
-            "state_effects",
+            "task_id",
+            "track_id",
+            "artifact_ids",
             "handoff",
             "contributors",
             "tool_evidence",
         ],
-        "durable_signal_rule": "include at least one of artifacts/state_effects/handoff",
-        "artifact_kind_source": "runtime_context.capability_boundary.allowed_artifact_kinds",
-        "state_effect_source": "runtime_context.capability_boundary.allowed_state_effects",
+        "durable_signal_rule": "audit-only commits are valid; lifecycle writes must use env tools first",
+        "task_write_source": "runtime_context.env_tools.task",
+        "track_write_source": "runtime_context.env_tools.track",
+        "artifact_write_source": "runtime_context.env_tools.artifact",
         "handoff_target_source": "runtime_context.capability_boundary.handoff_targets",
     }
     if buddy.get("id") == "market":
@@ -990,9 +935,10 @@ def _build_runtime_context(
         "runtime_commands": _runtime_command_hints(),
         "capability_boundary": {
             "allowed_artifact_kinds": list(buddy.get("artifact_kinds", [])),
-            "allowed_state_effects": {
-                "task": list(normalized_allowed_task_effects),
-                "track": list(normalized_allowed_track_effects),
+            "state_write_boundary": {
+                "task": "Use task-tool/env.tool task actions.",
+                "track": "Use track-tool/env.tool track actions.",
+                "artifact": "Use artifact-tool/env.tool artifact actions.",
             },
             "handoff_targets": _manifest_buddy_order(manifest),
             "project": {
@@ -1028,13 +974,9 @@ def _build_runtime_context(
     }
 
 
-def _derive_context_revision(task: dict[str, Any], sequence: int) -> str:
-    task_id = task.get("id") if isinstance(task, dict) else None
-    if not isinstance(task_id, str) or not task_id:
-        raise ValueError("task.id is required to derive context_revision")
-    if not isinstance(sequence, int) or sequence < 1:
-        raise ValueError("sequence must be a positive integer")
-    return f"ctx-{task_id}-turn-{sequence}"
+def _derive_run_context_revision(run_id: str) -> str:
+    normalized_run_id = env_store.require_id(run_id.strip(), "run id")
+    return f"ctx-{normalized_run_id}"
 
 
 def _build_turn_identity(
@@ -1042,7 +984,7 @@ def _build_turn_identity(
     instance_id: str | None,
     active_buddy: str,
     request_text: str,
-    task_id: str,
+    task_id: str | None,
     track_id: str | None,
     context_revision: str,
     sequence: int,
@@ -1078,7 +1020,7 @@ def _save_run_reservation(
     run_id: str,
     context_revision: str,
     sequence: int,
-    task_id: str,
+    task_id: str | None,
     turn_identity: dict[str, Any],
     instance_id: str | None,
 ) -> None:
@@ -1119,11 +1061,108 @@ def _post_persist_refreshed_context_unavailable(receipt: dict[str, Any]) -> dict
     }
 
 
-def _derive_context_sequence(task: dict[str, Any]) -> int:
-    run_ids = task.get("run_ids")
-    if isinstance(run_ids, list):
-        return len(run_ids) + 1
-    return 1
+def _binding_state_name(*, task_id: str | None, track_id: str | None, stale: bool) -> str:
+    if stale:
+        return "stale"
+    if task_id and track_id:
+        return "bound_task_and_track"
+    if task_id:
+        return "bound_task_only"
+    if track_id:
+        return "bound_track_only"
+    return "unbound"
+
+
+def _binding_snapshot_from_product_session(
+    product_session: dict[str, Any],
+    active_buddy: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None, list[dict[str, Any]]]:
+    payload = product_session.get("payload")
+    payload_dict = payload if isinstance(payload, dict) else {}
+    raw_task_id = payload_dict.get("current_task_id")
+    raw_track_id = payload_dict.get("current_track_id")
+    current_task_id = raw_task_id.strip() if isinstance(raw_task_id, str) and raw_task_id.strip() else None
+    current_track_id = raw_track_id.strip() if isinstance(raw_track_id, str) and raw_track_id.strip() else None
+    warnings: list[dict[str, Any]] = []
+
+    task: dict[str, Any] | None = None
+    track: dict[str, Any] | None = None
+    stale = False
+    if current_task_id:
+        task = get_task(current_task_id)
+        if task is None:
+            stale = True
+            warnings.append(
+                {
+                    "code": "W_STALE_TASK_BINDING",
+                    "message": f"active instance binding points to missing task '{current_task_id}'",
+                    "task_id": current_task_id,
+                    "allowed_next_actions": [
+                        "Use task.list to inspect active-buddy tasks.",
+                        "Use task.set_current, binding.set_task, or binding.clear to repair the binding explicitly.",
+                    ],
+                }
+            )
+        elif task.get("buddy") != active_buddy:
+            stale = True
+            warnings.append(
+                {
+                    "code": "W_STALE_TASK_BINDING",
+                    "message": f"active instance binding points to task owned by '{task.get('buddy')}'",
+                    "task_id": current_task_id,
+                    "allowed_next_actions": [
+                        "Use task.list to inspect active-buddy tasks.",
+                        "Use binding.clear or task.set_current with an active-buddy task.",
+                    ],
+                }
+            )
+            task = None
+
+    if current_track_id:
+        track = get_track(current_track_id)
+        if track is None:
+            stale = True
+            warnings.append(
+                {
+                    "code": "W_STALE_TRACK_BINDING",
+                    "message": f"active instance binding points to missing track '{current_track_id}'",
+                    "track_id": current_track_id,
+                    "allowed_next_actions": [
+                        "Use track.list to inspect tracks.",
+                        "Use binding.set_track or binding.clear to repair the binding explicitly.",
+                    ],
+                }
+            )
+
+    if current_track_id is None and isinstance(task, dict):
+        task_track_id = task.get("track_id")
+        if isinstance(task_track_id, str) and task_track_id.strip():
+            derived_track = get_track(task_track_id.strip())
+            if derived_track is None:
+                warnings.append(
+                    {
+                        "code": "W_STALE_TRACK_BINDING",
+                        "message": f"bound task points to missing track '{task_track_id}'",
+                        "track_id": task_track_id,
+                        "allowed_next_actions": [
+                            "Use track.list to inspect tracks.",
+                            "Use track.attach_task or task.update through env tools to repair task-track linkage.",
+                        ],
+                    }
+                )
+            else:
+                track = derived_track
+
+    state = _binding_state_name(task_id=current_task_id, track_id=current_track_id, stale=stale)
+    snapshot = {
+        "instance_id": product_session.get("instance_id"),
+        "active_buddy": active_buddy,
+        "current_task_id": current_task_id,
+        "current_track_id": current_track_id,
+        "binding_state": state,
+        "state": state,
+    }
+    return snapshot, task, track, warnings
 
 
 def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
@@ -1142,12 +1181,6 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
     active_buddy = product_session["active_buddy"]
     instance_id = product_session["instance_id"]
     demand = request_text.strip()
-    payload = product_session.get("payload")
-    payload_dict = payload if isinstance(payload, dict) else {}
-    payload_task = payload_dict.get("current_task_id")
-    payload_track = payload_dict.get("current_track_id")
-    explicit_task_id = payload_task.strip() if isinstance(payload_task, str) and payload_task.strip() else None
-    explicit_track_id = payload_track.strip() if isinstance(payload_track, str) and payload_track.strip() else None
 
     _ensure_no_legacy_outputs(demand)
 
@@ -1158,96 +1191,35 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
         repo_root=REPO_ROOT,
     )
 
-    existing_task: dict[str, Any] | None = None
-    if explicit_task_id:
-        existing_task = get_task(explicit_task_id)
-        if existing_task is None:
-            if explicit_track_id and get_track(explicit_track_id) is None:
-                create_track(
-                    explicit_track_id,
-                    explicit_track_id.replace("-", " ").title(),
-                    status="active",
-                    current_buddy=active_buddy,
-                    next_buddy=None,
-                    summary="",
-                )
-            existing_task = create_task(
-                explicit_task_id,
-                _derive_task_title(demand),
-                buddy=active_buddy,
-                track_id=explicit_track_id,
-                status="active",
-                summary="",
-                initial_run_id=None,
-            )
-        if explicit_track_id and existing_task.get("track_id") not in {None, explicit_track_id}:
-            raise ValueError(
-                f"Task '{existing_task['id']}' is bound to track '{existing_task['track_id']}', cannot switch to '{explicit_track_id}'."
-            )
-
-    if explicit_track_id and get_track(explicit_track_id) is None:
-        create_track(
-            explicit_track_id,
-            explicit_track_id.replace("-", " ").title(),
-            status="active",
-            current_buddy=active_buddy,
-            next_buddy=None,
-            summary="",
-        )
-
-    effective_track_id = explicit_track_id or (existing_task.get("track_id") if existing_task else None)
-    if existing_task:
-        resolved_task = existing_task
-        task_context = context_service.build_task_context(existing_task)
-    else:
-        create_token = _derive_create_token(demand)
-        task_id = _derive_task_id(
-            active_buddy,
-            demand,
-            create_token=create_token,
-        )
-        preexisting_task = get_task(task_id)
-        if preexisting_task is None:
-            resolved_task = create_task(
-                task_id,
-                _derive_task_title(demand),
-                buddy=active_buddy,
-                track_id=effective_track_id,
-                status="active",
-                summary="",
-                initial_run_id=None,
-            )
-        else:
-            if preexisting_task["buddy"] != active_buddy:
-                raise ValueError(
-                    f"Task '{task_id}' belongs to buddy '{preexisting_task['buddy']}', not '{active_buddy}'."
-                )
-            if effective_track_id and preexisting_task.get("track_id") not in {None, effective_track_id}:
-                raise ValueError(
-                    f"Task '{task_id}' is bound to track '{preexisting_task.get('track_id')}', cannot switch to '{effective_track_id}'."
-                )
-            resolved_task = preexisting_task
-            if effective_track_id and resolved_task.get("track_id") is None:
-                resolved_task = register_task_to_track(effective_track_id, task_id)
-        if effective_track_id is None:
-            effective_track_id = resolved_task.get("track_id")
-        task_context = context_service.build_task_context(resolved_task)
-
-    track_context = context_service.build_track_context(effective_track_id)
-    task_context = context_service.enrich_task_context_with_track_artifacts(
-        task_context=task_context,
-        track_context=track_context,
+    run_id = f"run-{uuid.uuid4().hex[:10]}"
+    sequence = 1
+    context_revision = _derive_run_context_revision(run_id)
+    binding_snapshot, resolved_task, resolved_track, warnings = _binding_snapshot_from_product_session(
+        product_session,
+        active_buddy,
     )
+    current_task_id = resolved_task["id"] if isinstance(resolved_task, dict) else None
+    if isinstance(resolved_track, dict):
+        effective_track_id = resolved_track["id"]
+    elif isinstance(resolved_task, dict) and isinstance(resolved_task.get("track_id"), str):
+        effective_track_id = resolved_task.get("track_id")
+    else:
+        effective_track_id = None
+
+    task_context = context_service.build_task_context(resolved_task) if resolved_task is not None else None
+    track_context = context_service.build_track_context(effective_track_id)
+    if task_context is not None:
+        task_context = context_service.enrich_task_context_with_track_artifacts(
+            task_context=task_context,
+            track_context=track_context,
+        )
     track_artifact_index = build_track_artifact_index(effective_track_id)
 
-    sequence = _derive_context_sequence(resolved_task)
-    context_revision = _derive_context_revision(resolved_task, sequence)
-    run_id = f"run-{uuid.uuid4().hex[:10]}"
     turn_identity = _build_turn_identity(
         instance_id=instance_id,
         active_buddy=active_buddy,
         request_text=request_text,
-        task_id=resolved_task["id"],
+        task_id=current_task_id,
         track_id=effective_track_id,
         context_revision=context_revision,
         sequence=sequence,
@@ -1257,36 +1229,18 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
         run_id=run_id,
         context_revision=context_revision,
         sequence=sequence,
-        task_id=resolved_task["id"],
+        task_id=current_task_id,
         turn_identity=turn_identity,
         instance_id=instance_id,
     )
 
-    current_task_id = resolved_task["id"]
     current_track_id = effective_track_id
 
-    # Decision-surface binding should reflect explicit payload binding intent.
-    # Track-only prepare payloads remain track-only even when prepare creates a
-    # writable task context for downstream persist.
-    binding_task_id: str | None = current_task_id
-    binding_track_id: str | None = current_track_id
-    if "current_task_id" in payload_dict:
-        binding_task_id = explicit_task_id
-    if "current_track_id" in payload_dict:
-        binding_track_id = explicit_track_id
-        if "current_task_id" not in payload_dict:
-            binding_task_id = None
-
-    current_binding = {
-        "instance_id": instance_id,
-        "current_task_id": binding_task_id,
-        "current_track_id": binding_track_id,
-    }
     runtime_context = _build_runtime_context(
         manifest=manifest,
         buddy=buddy,
         env_profile=env_profile,
-        current_binding=current_binding,
+        current_binding=binding_snapshot,
         task_context=task_context,
         track_context=track_context,
     )
@@ -1298,6 +1252,7 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
         "context_revision": context_revision,
         "instance_id": instance_id,
         "active_buddy": buddy["id"],
+        "binding_snapshot": binding_snapshot,
         "runtime_context": runtime_context,
         "context_save_path": context_save_path,
         "persist_command_hint": persist_command_hint,
@@ -1313,7 +1268,7 @@ def _build_prepare_turn_context(text: str, manifest_path: Path = DEFAULT_MANIFES
             "sequence": sequence,
             "turn_identity": turn_identity,
         },
-        "warnings": [],
+        "warnings": warnings,
     }
     context_path = ROOT / context_save_path
     try:
@@ -1426,22 +1381,6 @@ def _known_buddy_ids(manifest: dict[str, Any]) -> set[str]:
     }
 
 
-def _allowed_state_effects_hint(env_profile: dict[str, Any]) -> dict[str, Any]:
-    state_capability = env_profile.get("state_capability")
-    if not isinstance(state_capability, dict):
-        raise ValueError("env profile state_capability must be an object")
-    task_effects = state_capability.get("task_effects")
-    track_effects = state_capability.get("track_effects")
-    if not isinstance(task_effects, list):
-        raise ValueError("env profile state_capability.task_effects must be a list")
-    if not isinstance(track_effects, list):
-        raise ValueError("env profile state_capability.track_effects must be a list")
-    return {
-        "task": [item for item in task_effects if isinstance(item, str)],
-        "track": [item for item in track_effects if isinstance(item, str)],
-    }
-
-
 def _validate_handoff(handoff: Any, known_buddies: set[str]) -> dict[str, Any]:
     if not isinstance(handoff, dict):
         _raise_runtime_feedback(
@@ -1508,510 +1447,6 @@ def _validate_handoff(handoff: Any, known_buddies: set[str]) -> dict[str, Any]:
     }
 
 
-def _validate_state_effects(
-    *,
-    state_effects: Any,
-    buddy: dict[str, Any],
-    env_profile: dict[str, Any],
-    task: dict[str, Any],
-    explicit_track_id: str | None,
-    known_buddies: set[str],
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    if state_effects is None:
-        return None, None
-    if not isinstance(state_effects, dict):
-        raise ValueError("state_effects must be an object")
-
-    track_effect = state_effects.get("track")
-    task_effect = state_effects.get("task")
-
-    normalized_track: dict[str, Any] | None = None
-    if track_effect is not None:
-        if not isinstance(track_effect, dict):
-            raise ValueError("state_effects.track must be an object")
-        allowed_track_keys = {"action", "track_id", "title", "status", "current_buddy", "next_buddy", "summary"}
-        unsupported_track_keys = sorted(key for key in track_effect if key not in allowed_track_keys)
-        if unsupported_track_keys:
-            raise ValueError(
-                "state_effects.track has unsupported keys: "
-                + ", ".join(unsupported_track_keys)
-            )
-        action = track_effect.get("action")
-        allowed_state_effects = _allowed_state_effects_hint(env_profile)
-        if action not in TRACK_ACTIONS:
-            _raise_runtime_feedback(
-                "E_RUNTIME_PERSIST",
-                "state_effects.track.action must be one of create/update/advance/archive",
-                permission_boundary="env-profile.state_capability.track_effects",
-                allowed_next_actions=[
-                    "Use one of create, update, advance, or archive for state_effects.track.action.",
-                    "Remove state_effects.track when no track lifecycle mutation is needed.",
-                ],
-                persist_payload_hint={"allowed_state_effects": allowed_state_effects},
-            )
-        allowed_track_effects = env_profile.get("state_capability", {}).get("track_effects")
-        if not isinstance(allowed_track_effects, list):
-            raise ValueError("env profile state_capability.track_effects must be a list")
-        if action not in allowed_track_effects:
-            _raise_runtime_feedback(
-                "E_RUNTIME_PERSIST",
-                f"buddy '{buddy.get('id')}' is not allowed to perform track action '{action}'",
-                permission_boundary="env-profile.state_capability.track_effects",
-                allowed_next_actions=[
-                    f"Remove state_effects.track from the {buddy.get('id')} commit.",
-                    "Persist an artifact or handoff instead when appropriate.",
-                    "Hand off track lifecycle changes to PM.",
-                ],
-                persist_payload_hint={"allowed_state_effects": allowed_state_effects},
-            )
-
-        normalized_track = {"action": action}
-        for key in ("track_id", "title", "status", "current_buddy", "next_buddy", "summary"):
-            if key in track_effect:
-                normalized_track[key] = track_effect.get(key)
-
-        for key in ("current_buddy", "next_buddy"):
-            if key not in normalized_track or normalized_track.get(key) is None:
-                continue
-            value = normalized_track.get(key)
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"state_effects.track.{key} must be a non-empty string when provided")
-            value = value.strip()
-            if value not in known_buddies:
-                raise ValueError(f"state_effects.track.{key} must reference a manifest buddy id; got '{value}'")
-            normalized_track[key] = value
-
-        if "status" in normalized_track and normalized_track.get("status") is not None:
-            status = normalized_track.get("status")
-            if status not in STATUS_VALUES:
-                raise ValueError(f"state_effects.track.status must be one of {', '.join(STATUS_VALUES)}")
-
-        requested_track_id = normalized_track.get("track_id")
-        normalized_requested_track_id: str | None
-        if isinstance(requested_track_id, str) and requested_track_id.strip():
-            normalized_requested_track_id = requested_track_id.strip()
-            normalized_track["track_id"] = normalized_requested_track_id
-        else:
-            normalized_requested_track_id = None
-            normalized_track.pop("track_id", None)
-
-        if explicit_track_id and normalized_requested_track_id and normalized_requested_track_id != explicit_track_id:
-            raise ValueError("state_effects.track.track_id must match current_track_id when current_track_id is set")
-
-        if action == "create":
-            existing_bound_track = explicit_track_id or task.get("track_id")
-            if isinstance(existing_bound_track, str) and existing_bound_track:
-                _raise_runtime_feedback(
-                    "E_RUNTIME_PERSIST",
-                    "state_effects.track.create cannot be used when the prepared task is already bound "
-                    f"to track '{existing_bound_track}'.",
-                    permission_boundary="state_effects.track.create",
-                    allowed_next_actions=[
-                        "Use update, advance, or archive for the existing track.",
-                        "Remove state_effects.track when no lifecycle change is needed.",
-                    ],
-                    persist_payload_hint={"allowed_state_effects": allowed_state_effects},
-                )
-
-        target_track_id = normalized_requested_track_id or explicit_track_id or task.get("track_id")
-        if action != "create":
-            if not isinstance(target_track_id, str) or not target_track_id:
-                _raise_runtime_feedback(
-                    "E_RUNTIME_PERSIST",
-                    "state_effects.track requires track_id for non-create actions",
-                    permission_boundary="state_effects.track.track_id",
-                    allowed_next_actions=[
-                        "Provide state_effects.track.track_id for update, advance, or archive.",
-                        "Create a track first in PM when no current track exists.",
-                    ],
-                    persist_payload_hint={"allowed_state_effects": allowed_state_effects},
-                )
-            if get_track(target_track_id) is None:
-                _raise_runtime_feedback(
-                    "E_RUNTIME_PERSIST",
-                    f"Track not found: {target_track_id}",
-                    permission_boundary="state_effects.track.track_id",
-                    allowed_next_actions=[
-                        "Use a valid existing track_id from current context.",
-                        "Rerun prepare and confirm current_track_id before persisting.",
-                    ],
-                    persist_payload_hint={"allowed_state_effects": allowed_state_effects},
-                )
-            if action in {"update", "advance"}:
-                mutable = {
-                    key: normalized_track.get(key)
-                    for key in ("title", "status", "current_buddy", "next_buddy", "summary")
-                    if key in normalized_track and normalized_track.get(key) is not None
-                }
-                if not mutable:
-                    _raise_runtime_feedback(
-                        "E_RUNTIME_PERSIST",
-                        "state_effects.track for update/advance must include at least one mutable field",
-                        permission_boundary="state_effects.track",
-                        allowed_next_actions=[
-                            "Add at least one of title, status, current_buddy, next_buddy, or summary.",
-                            "Remove state_effects.track when no track change is needed.",
-                        ],
-                        persist_payload_hint={
-                            "mutable_fields": ["title", "status", "current_buddy", "next_buddy", "summary"]
-                        },
-                    )
-
-    normalized_task: dict[str, Any] | None = None
-    if task_effect is not None:
-        if not isinstance(task_effect, dict):
-            raise ValueError("state_effects.task must be an object")
-        allowed_task_effects = env_profile.get("state_capability", {}).get("task_effects")
-        if not isinstance(allowed_task_effects, list):
-            raise ValueError("env profile state_capability.task_effects must be a list")
-        allowed_task_keys = set(allowed_task_effects)
-        unsupported_task_keys = sorted(key for key in task_effect if key not in allowed_task_keys)
-        if unsupported_task_keys:
-            _raise_runtime_feedback(
-                "E_RUNTIME_PERSIST",
-                "state_effects.task has unsupported keys: " + ", ".join(unsupported_task_keys),
-                permission_boundary="env-profile.state_capability.task_effects",
-                allowed_next_actions=[
-                    "Remove unsupported state_effects.task fields.",
-                    "Use only status and summary for task updates.",
-                ],
-                persist_payload_hint={"allowed_state_effects": {"task": sorted(allowed_task_keys)}},
-            )
-        normalized_task = {}
-        if "status" in task_effect:
-            status = task_effect.get("status")
-            if status not in STATUS_VALUES:
-                raise ValueError(f"state_effects.task.status must be one of {', '.join(STATUS_VALUES)}")
-            normalized_task["status"] = status
-        if "summary" in task_effect:
-            summary = task_effect.get("summary")
-            if summary is not None and not isinstance(summary, str):
-                raise ValueError("state_effects.task.summary must be a string")
-            normalized_task["summary"] = summary or ""
-        if not normalized_task:
-            raise ValueError("state_effects.task must include at least one of status or summary")
-
-    return normalized_track, normalized_task
-
-
-def _validate_artifacts(
-    *,
-    artifacts: Any,
-    allowed_kinds: set[str],
-    active_buddy: str,
-) -> list[dict[str, Any]]:
-    if artifacts is None:
-        return []
-    if not isinstance(artifacts, list):
-        raise ValueError("artifacts must be a list")
-    normalized: list[dict[str, Any]] = []
-    seen_kinds: set[str] = set()
-    for index, artifact in enumerate(artifacts):
-        if not isinstance(artifact, dict):
-            raise ValueError("artifacts items must be objects")
-        kind = artifact.get("kind")
-        title = artifact.get("title")
-        content = artifact.get("content")
-        summary = artifact.get("summary", "")
-        if not isinstance(kind, str) or not kind.strip():
-            _raise_runtime_feedback(
-                "E_RUNTIME_PERSIST",
-                f"artifacts[{index}].kind must be a non-empty string",
-                permission_boundary="persist.artifacts",
-                allowed_next_actions=[
-                    "Provide artifacts as objects with kind, title, summary, and content.",
-                    "Remove malformed artifacts entries before persisting.",
-                ],
-                persist_payload_hint={"artifact_fields": ["kind", "title", "summary", "content"]},
-            )
-        normalized_kind = kind.strip()
-        if normalized_kind in seen_kinds:
-            _raise_runtime_feedback(
-                "E_RUNTIME_PERSIST",
-                "duplicate artifact kind in one commit",
-                permission_boundary="persist.artifacts.kind",
-                allowed_next_actions=[
-                    "Keep only one artifact per kind in a single persist commit.",
-                    "Split additional artifacts into later turns when needed.",
-                ],
-                persist_payload_hint={"one_artifact_per_kind": True},
-            )
-        if normalized_kind not in allowed_kinds:
-            _raise_runtime_feedback(
-                "E_RUNTIME_PERSIST",
-                f"artifact kind '{normalized_kind}' is not allowed for this buddy",
-                permission_boundary="manifest.artifact_kinds",
-                allowed_next_actions=[
-                    f"Use one of the artifact kinds allowed for buddy '{active_buddy}'.",
-                    "Hand off work to a buddy that owns the requested artifact kind.",
-                ],
-                persist_payload_hint={"allowed_artifact_kinds": sorted(allowed_kinds)},
-            )
-        if not isinstance(title, str) or not title.strip():
-            _raise_runtime_feedback(
-                "E_RUNTIME_PERSIST",
-                f"artifacts[{index}].title must be a non-empty string",
-                permission_boundary="persist.artifacts",
-                allowed_next_actions=[
-                    "Provide artifacts as objects with kind, title, summary, and content.",
-                    "Remove malformed artifacts entries before persisting.",
-                ],
-                persist_payload_hint={"artifact_fields": ["kind", "title", "summary", "content"]},
-            )
-        if not isinstance(content, dict):
-            _raise_runtime_feedback(
-                "E_RUNTIME_PERSIST",
-                f"artifacts[{index}].content must be an object",
-                permission_boundary="persist.artifacts",
-                allowed_next_actions=[
-                    "Provide artifacts as objects with kind, title, summary, and content.",
-                    "Remove malformed artifacts entries before persisting.",
-                ],
-                persist_payload_hint={"artifact_fields": ["kind", "title", "summary", "content"]},
-            )
-        if summary is not None and not isinstance(summary, str):
-            raise ValueError(f"artifacts[{index}].summary must be a string when provided")
-        seen_kinds.add(normalized_kind)
-        normalized.append(
-            {
-                "kind": normalized_kind,
-                "title": title.strip(),
-                "summary": summary or "",
-                "content": content,
-            }
-        )
-    return normalized
-
-
-def _validate_task_binding(
-    *,
-    task: dict[str, Any],
-    explicit_track_id: str | None,
-) -> None:
-    if not explicit_track_id:
-        return
-    if task.get("track_id") not in {None, explicit_track_id}:
-        raise ValueError(
-            f"Task '{task['id']}' is bound to track '{task['track_id']}', cannot switch to '{explicit_track_id}'."
-        )
-
-
-def _apply_track_effect(
-    *,
-    track_effect: dict[str, Any] | None,
-    active_buddy: str,
-    request_text: str,
-    task: dict[str, Any],
-    effective_track_id: str | None,
-) -> tuple[dict[str, Any], str | None, str | None, str | None, str | None, list[str]]:
-    if track_effect is None:
-        return task, effective_track_id, None, None, None, []
-
-    action = str(track_effect.get("action") or "")
-    if action == "create":
-        new_id = track_effect.get("track_id") or _derive_track_id(request_text)
-        title = track_effect.get("title") or str(new_id).replace("-", " ").title()
-        status = track_effect.get("status") or "active"
-        track = create_track(
-            str(new_id),
-            str(title),
-            status=str(status),
-            current_buddy=track_effect.get("current_buddy") or active_buddy,
-            next_buddy=track_effect.get("next_buddy"),
-            summary=track_effect.get("summary") or "",
-        )
-        updated_task = register_task_to_track(track["id"], task["id"])
-        writes = [_task_object_path(updated_task["id"]), _track_object_path(track["id"])]
-        return updated_task, track["id"], track["title"], track.get("next_buddy"), action, writes
-
-    target_track_id = track_effect.get("track_id") or effective_track_id
-    if not isinstance(target_track_id, str) or not target_track_id:
-        raise ValueError("state_effects.track requires track_id for non-create actions")
-
-    if action in {"update", "advance"}:
-        patch: dict[str, Any] = {}
-        for key in ("title", "status", "current_buddy", "next_buddy", "summary"):
-            if key in track_effect and track_effect.get(key) is not None:
-                patch[key] = track_effect.get(key)
-        track = update_track(target_track_id, patch)
-    elif action == "archive":
-        track = update_track(target_track_id, {"status": "archived"})
-    else:
-        raise ValueError("state_effects.track.action must be one of create/update/advance/archive")
-
-    updated_task = register_task_to_track(track["id"], task["id"])
-    writes = [_task_object_path(updated_task["id"]), _track_object_path(track["id"])]
-    return updated_task, track["id"], track["title"], track.get("next_buddy"), action, writes
-
-
-def _validate_buddy_run_commit(
-    *,
-    context: dict[str, Any],
-    result: dict[str, Any],
-    manifest: dict[str, Any],
-    buddy: dict[str, Any],
-    env_profile: dict[str, Any],
-    task: dict[str, Any],
-    current_track_id: str | None,
-) -> dict[str, Any]:
-    if "skill_id" in result:
-        raise ValueError("top-level skill_id is not allowed in buddy run commits")
-
-    execution_summary = result.get("execution_summary")
-    if not isinstance(execution_summary, str) or not execution_summary.strip():
-        _raise_runtime_feedback(
-            "E_RUNTIME_PERSIST",
-            "execution_summary must be a non-empty string",
-            permission_boundary="persist.execution_summary",
-            allowed_next_actions=[
-                "Add execution_summary with a short durable summary of completed work.",
-                "Keep execution_summary concise and specific to this turn.",
-            ],
-            persist_payload_hint={"required": ["execution_summary"]},
-        )
-
-    working_notes = result.get("working_notes")
-    normalized_working_notes: list[str]
-    if working_notes is None:
-        normalized_working_notes = []
-    else:
-        normalized_working_notes = _require_string_list(working_notes, "working_notes")
-
-    known_buddies = _known_buddy_ids(manifest)
-    profile_state_capability = env_profile.get("state_capability")
-    if not isinstance(profile_state_capability, dict):
-        raise ValueError("env profile state_capability must be an object")
-    if profile_state_capability.get("artifact_kinds") != "from-manifest":
-        raise ValueError("env profile must declare state_capability.artifact_kinds=from-manifest")
-    allowed_kinds = {
-        kind
-        for kind in buddy.get("artifact_kinds", [])
-        if isinstance(kind, str) and kind
-    }
-    normalized_artifacts = _validate_artifacts(
-        artifacts=result.get("artifacts"),
-        allowed_kinds=allowed_kinds,
-        active_buddy=str(buddy.get("id") or ""),
-    )
-
-    normalized_track_effect, normalized_task_effect = _validate_state_effects(
-        state_effects=result.get("state_effects"),
-        buddy=buddy,
-        env_profile=env_profile,
-        task=task,
-        explicit_track_id=current_track_id,
-        known_buddies=known_buddies,
-    )
-
-    normalized_handoff: dict[str, Any] | None = None
-    if result.get("handoff") is not None:
-        if profile_state_capability.get("handoff_targets") != "manifest-buddies":
-            raise ValueError("env profile must declare state_capability.handoff_targets=manifest-buddies")
-        normalized_handoff = _validate_handoff(result.get("handoff"), known_buddies)
-
-    if normalized_handoff is not None and normalized_track_effect is not None:
-        track_next_buddy = normalized_track_effect.get("next_buddy")
-        if isinstance(track_next_buddy, str) and track_next_buddy and track_next_buddy != normalized_handoff["next_buddy"]:
-            _raise_runtime_feedback(
-                "E_RUNTIME_PERSIST",
-                "handoff.next_buddy and state_effects.track.next_buddy must match",
-                permission_boundary="persist.handoff",
-                allowed_next_actions=[
-                    "Make handoff.next_buddy and state_effects.track.next_buddy the same value.",
-                    "Remove one of the fields when only one transition target is needed.",
-                ],
-                persist_payload_hint={"handoff_fields": ["next_buddy", "reason", "context"]},
-            )
-
-    contributors = result.get("contributors")
-    normalized_contributors = {"skills": [], "agents": []}
-    if contributors is not None:
-        if not isinstance(contributors, dict):
-            raise ValueError("contributors must be an object")
-        if "skills" in contributors:
-            normalized_contributors["skills"] = _require_string_list(contributors.get("skills"), "contributors.skills")
-        if "agents" in contributors:
-            normalized_contributors["agents"] = _require_string_list(contributors.get("agents"), "contributors.agents")
-
-    normalized_tool_evidence = _validate_market_tool_evidence(
-        context=context,
-        result=result,
-        env_profile=env_profile,
-        active_buddy=str(buddy.get("id") or ""),
-    )
-
-    has_state_effects = normalized_track_effect is not None or normalized_task_effect is not None
-    if not normalized_artifacts and not has_state_effects and normalized_handoff is None:
-        _raise_runtime_feedback(
-            "E_RUNTIME_PERSIST",
-            "at least one durable collaboration signal is required (artifacts/state_effects/handoff)",
-            permission_boundary="persist.durable_signal",
-            allowed_next_actions=[
-                "Provide at least one artifact, state_effects entry, or handoff.",
-                "Do not submit summary-only commits with no durable state change.",
-            ],
-            persist_payload_hint={
-                "durable_signal_options": ["artifacts", "state_effects", "handoff"],
-            },
-        )
-
-    return {
-        "execution_summary": execution_summary.strip(),
-        "working_notes": normalized_working_notes,
-        "artifacts": normalized_artifacts,
-        "track_effect": normalized_track_effect,
-        "task_effect": normalized_task_effect,
-        "handoff": normalized_handoff,
-        "contributors": normalized_contributors,
-        "tool_evidence": normalized_tool_evidence,
-    }
-
-
-def _build_run_audit(
-    *,
-    run_id: str,
-    active_buddy: str,
-    task: dict[str, Any],
-    track_id: str | None,
-    track_title: str | None,
-    artifact_ids: list[str],
-    track_action: str | None,
-    writes: list[str],
-    receipt_paths: dict[str, Any],
-    related_run_ids: list[str],
-    next_state: dict[str, Any],
-    commit: dict[str, Any],
-) -> dict[str, Any]:
-    state_effects: dict[str, Any] = {}
-    if commit.get("track_effect") is not None:
-        state_effects["track"] = commit["track_effect"]
-    if commit.get("task_effect") is not None:
-        state_effects["task"] = commit["task_effect"]
-
-    audit: dict[str, Any] = {
-        "run_id": run_id,
-        "timestamp": now_iso(),
-        "buddy_id": active_buddy,
-        "task_id": task["id"],
-        "track_id": track_id,
-        "task_title": task["title"],
-        "track_title": track_title,
-        "artifact_ids": artifact_ids,
-        "execution_summary": commit["execution_summary"],
-        "working_notes": commit["working_notes"],
-        "state_effects": state_effects,
-        "handoff": commit.get("handoff"),
-        "contributors": commit.get("contributors", {"skills": [], "agents": []}),
-        "tool_evidence": commit.get("tool_evidence"),
-        "next_state": next_state,
-        "track_action": track_action,
-        "receipt_paths": receipt_paths,
-        "related_run_ids": related_run_ids,
-        "writes": writes,
-    }
-    return audit
-
-
 def persist_buddy_run(
     context: dict[str, Any],
     *,
@@ -2056,17 +1491,6 @@ def _cmd_prepare(args: argparse.Namespace) -> int:
                 if product_session is None:
                     raise ValueError("product-mode env disappeared while acquiring runtime lock")
                 payload = prepare_turn_context(args.text, manifest_path=args.manifest)
-                if payload.get("ok"):
-                    task_id, track_id = binding_service.resolve_binding_from_payload(payload)
-                    try:
-                        binding_service.write_product_session_binding(
-                            product_session,
-                            task_id=task_id,
-                            track_id=track_id,
-                        )
-                    except (OSError, ValueError) as exc:
-                        _clear_reservation_from_payload(payload, fail_on_warning=True)
-                        raise ValueError(f"instance binding update failed after prepare: {exc}") from exc
     except RuntimeBrokerError as exc:
         payload = runtime_error(exc.code, exc.message, exc.details)
     except RuntimeFeedbackError as exc:
@@ -2179,18 +1603,6 @@ def _cmd_persist(args: argparse.Namespace) -> int:
                     result=result,
                     manifest_path=args.manifest,
                 )
-                if payload.get("ok"):
-                    binding = binding_service.persist_binding_from_payload(payload)
-                    if binding is not None:
-                        task_id, track_id = binding
-                        try:
-                            binding_service.write_product_session_binding(
-                                product_session,
-                                task_id=task_id,
-                                track_id=track_id,
-                            )
-                        except (OSError, ValueError) as exc:
-                            _mark_committed_binding_update_failed(payload, product_session, exc)
     except RuntimeBrokerError as exc:
         payload = runtime_error(exc.code, exc.message, exc.details)
     except RuntimeFeedbackError as exc:

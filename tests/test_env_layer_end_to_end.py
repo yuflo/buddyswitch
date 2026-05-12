@@ -20,13 +20,21 @@ import env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 from tests.test_turn_integration import (  # noqa: E402
+    DESIGN_ARTIFACTS,
     DESIGN_COMMIT,
+    DEV_ARTIFACTS,
     DEV_COMMIT,
+    DEV_TASK_UPDATE,
+    MARKET_ARTIFACTS,
     MARKET_COMMIT,
     MARKET_REQUEST,
+    PM_ARTIFACTS,
     PM_COMMIT,
     PM_REQUEST,
+    PM_TASK_UPDATE,
+    TEST_ARTIFACTS,
     TEST_COMMIT,
+    TEST_TASK_UPDATE,
     _CDPState,
     _make_cdp_handler,
 )
@@ -184,6 +192,79 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"task_id": task_id},
         )
 
+    def _update_task(
+        self,
+        *,
+        buddy: str,
+        instance_json: Path,
+        instance_id: str,
+        task_id: str,
+        patch: dict[str, object],
+    ) -> None:
+        self._env_tool(
+            buddy=buddy,
+            instance_json=instance_json,
+            instance_id=instance_id,
+            tool="task",
+            action="update",
+            args={"task_id": task_id, **patch},
+        )
+
+    def _create_artifacts(
+        self,
+        *,
+        buddy: str,
+        instance_json: Path,
+        instance_id: str,
+        context: dict[str, object],
+        task_id: str,
+        artifact_specs: list[dict[str, object]],
+    ) -> list[str]:
+        run_envelope = context["run_envelope"]
+        self.assertIsInstance(run_envelope, dict)
+        assert isinstance(run_envelope, dict)
+        source_run_id = run_envelope["run_id"]
+        self.assertIsInstance(source_run_id, str)
+        artifact_ids: list[str] = []
+        for spec in artifact_specs:
+            kind = spec["kind"]
+            self.assertIsInstance(kind, str)
+            created = self._env_tool(
+                buddy=buddy,
+                instance_json=instance_json,
+                instance_id=instance_id,
+                tool="artifact",
+                action="create_revision",
+                args={
+                    "artifact_id": f"art-{task_id}-{kind}-{source_run_id.replace('run-', '')[:8]}",
+                    "task_id": task_id,
+                    "kind": kind,
+                    "title": spec["title"],
+                    "summary": spec["summary"],
+                    "content": spec["content"],
+                    "source_run_id": source_run_id,
+                },
+            )
+            artifact_ids.append(str(created["artifact_id"]))
+        return artifact_ids
+
+    def _audit_result(
+        self,
+        base: dict[str, object],
+        *,
+        task_id: str,
+        track_id: str,
+        artifact_ids: list[str],
+        tool_evidence: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        result = _clone(base)
+        result["task_id"] = task_id
+        result["track_id"] = track_id
+        result["artifact_ids"] = artifact_ids
+        if tool_evidence is not None:
+            result["tool_evidence"] = tool_evidence
+        return result
+
     def _commit(
         self,
         *,
@@ -245,14 +326,32 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=pm_instance,
             instance_id=pm_instance_id,
         )
-        pm_result = _clone(PM_COMMIT)
-        pm_result["state_effects"] = {"task": PM_COMMIT["state_effects"]["task"]}
+        self._update_task(
+            buddy="pm",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+            task_id=task_ids["pm"],
+            patch=PM_TASK_UPDATE,
+        )
+        pm_artifact_ids = self._create_artifacts(
+            buddy="pm",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+            context=pm_context,
+            task_id=task_ids["pm"],
+            artifact_specs=PM_ARTIFACTS,
+        )
         pm_persisted = self._commit(
             buddy="pm",
             instance_json=pm_instance,
             instance_id=pm_instance_id,
             context=pm_context,
-            result=pm_result,
+            result=self._audit_result(
+                PM_COMMIT,
+                task_id=task_ids["pm"],
+                track_id=track_id,
+                artifact_ids=pm_artifact_ids,
+            ),
         )
 
         state = _CDPState(
@@ -295,14 +394,26 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(token_scope["run_id"], market_context["run_envelope"]["run_id"])
         self.assertEqual(token_scope["instance_id"], market_instance_id)
         self.assertEqual(token_scope["buddy_id"], "market")
-        market_result = _clone(MARKET_COMMIT)
-        market_result["tool_evidence"] = evidence["tool_evidence"]
+        market_artifact_ids = self._create_artifacts(
+            buddy="market",
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+            context=market_context,
+            task_id=task_ids["market"],
+            artifact_specs=MARKET_ARTIFACTS,
+        )
         market_persisted = self._commit(
             buddy="market",
             instance_json=market_instance,
             instance_id=market_instance_id,
             context=market_context,
-            result=market_result,
+            result=self._audit_result(
+                MARKET_COMMIT,
+                task_id=task_ids["market"],
+                track_id=track_id,
+                artifact_ids=market_artifact_ids,
+                tool_evidence=evidence["tool_evidence"],
+            ),
         )
 
         design_instance_id = "inst-design-phase8-loop"
@@ -321,12 +432,25 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=design_instance,
             instance_id=design_instance_id,
         )
+        design_artifact_ids = self._create_artifacts(
+            buddy="design",
+            instance_json=design_instance,
+            instance_id=design_instance_id,
+            context=design_context,
+            task_id=task_ids["design"],
+            artifact_specs=DESIGN_ARTIFACTS,
+        )
         design_persisted = self._commit(
             buddy="design",
             instance_json=design_instance,
             instance_id=design_instance_id,
             context=design_context,
-            result=_clone(DESIGN_COMMIT),
+            result=self._audit_result(
+                DESIGN_COMMIT,
+                task_id=task_ids["design"],
+                track_id=track_id,
+                artifact_ids=design_artifact_ids,
+            ),
         )
 
         dev_instance_id = "inst-dev-phase8-loop"
@@ -345,12 +469,32 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=dev_instance,
             instance_id=dev_instance_id,
         )
+        self._update_task(
+            buddy="dev",
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            task_id=task_ids["dev"],
+            patch=DEV_TASK_UPDATE,
+        )
+        dev_artifact_ids = self._create_artifacts(
+            buddy="dev",
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            context=dev_context,
+            task_id=task_ids["dev"],
+            artifact_specs=DEV_ARTIFACTS,
+        )
         dev_persisted = self._commit(
             buddy="dev",
             instance_json=dev_instance,
             instance_id=dev_instance_id,
             context=dev_context,
-            result=_clone(DEV_COMMIT),
+            result=self._audit_result(
+                DEV_COMMIT,
+                task_id=task_ids["dev"],
+                track_id=track_id,
+                artifact_ids=dev_artifact_ids,
+            ),
         )
 
         test_instance_id = "inst-test-phase8-loop"
@@ -369,19 +513,32 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=test_instance,
             instance_id=test_instance_id,
         )
-        test_result = _clone(TEST_COMMIT)
-        test_result["state_effects"] = {
-            "task": {
-                "status": "done",
-                "summary": "Test report completed and ready for PM review.",
-            },
-        }
+        self._update_task(
+            buddy="test",
+            instance_json=test_instance,
+            instance_id=test_instance_id,
+            task_id=task_ids["test"],
+            patch=TEST_TASK_UPDATE,
+        )
+        test_artifact_ids = self._create_artifacts(
+            buddy="test",
+            instance_json=test_instance,
+            instance_id=test_instance_id,
+            context=test_context,
+            task_id=task_ids["test"],
+            artifact_specs=TEST_ARTIFACTS,
+        )
         test_persisted = self._commit(
             buddy="test",
             instance_json=test_instance,
             instance_id=test_instance_id,
             context=test_context,
-            result=test_result,
+            result=self._audit_result(
+                TEST_COMMIT,
+                task_id=task_ids["test"],
+                track_id=track_id,
+                artifact_ids=test_artifact_ids,
+            ),
         )
 
         receipts = [

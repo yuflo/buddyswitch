@@ -131,20 +131,6 @@ def _ensure_allowed_fields(
     )
 
 
-def _derive_context_sequence(task: dict[str, Any]) -> int:
-    run_ids = task.get("run_ids")
-    if isinstance(run_ids, list):
-        return len(run_ids) + 1
-    return 1
-
-
-def _derive_context_revision(task: dict[str, Any], sequence: int) -> str:
-    task_id = task.get("id")
-    if not isinstance(task_id, str) or not task_id:
-        raise ValueError("task.id is required to derive context revision")
-    return f"ctx-{task_id}-turn-{sequence}"
-
-
 def _summarize_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     source_buddy = artifact.get("buddy")
     source_run_id = artifact.get("source_run_id")
@@ -302,7 +288,7 @@ def build_decision_surface(
     *,
     active_buddy: str,
     current_binding: dict[str, Any],
-    task_context: dict[str, Any],
+    task_context: dict[str, Any] | None,
     track_context: dict[str, Any] | None,
     tool_requirements: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -646,10 +632,10 @@ def scan_task_recent_runs(task_id: str, *, limit: int = 3) -> list[dict[str, Any
 
 def summarize_current_context(
     *,
-    task_context: dict[str, Any],
+    task_context: dict[str, Any] | None,
     track_context: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    task_payload = task_context.get("task")
+    task_payload = task_context.get("task") if isinstance(task_context, dict) else None
     if isinstance(task_payload, dict):
         summarized_task: dict[str, Any] | None = {
             "id": task_payload.get("id"),
@@ -676,7 +662,7 @@ def summarize_current_context(
         summarized_track = None
 
     summarized_artifacts: list[dict[str, Any]] = []
-    task_artifacts = task_context.get("artifacts")
+    task_artifacts = task_context.get("artifacts") if isinstance(task_context, dict) else None
     if isinstance(task_artifacts, list):
         for artifact in task_artifacts:
             if isinstance(artifact, dict):
@@ -812,19 +798,29 @@ def _validate_context_payload(
             permission_boundary="active-buddy",
         )
 
-    payload_task_id = args_context.get("current_task_id")
-    if not isinstance(payload_task_id, str) or not payload_task_id.strip():
+    import turn_runtime as rt
+    try:
+        validated = rt._validate_prepared_run_context(args_context)
+    except rt.RuntimeFeedbackError as exc:
+        return {
+            "ok": False,
+            "tool": "context",
+            "action": action,
+            "error": {"code": exc.code, "message": exc.message},
+            "permission_boundary": exc.details.get("permission_boundary", "prepare.context_revision"),
+            "active_buddy": context["active_buddy"],
+            "allowed_next_actions": exc.details.get("allowed_next_actions", []),
+        }
+    except (ValueError, TypeError) as exc:
         return _context_boundary_error(
             action=action,
             active_buddy=context["active_buddy"],
-            message="context current_task_id is required",
+            code="E_CONTEXT_SCOPE",
+            message=str(exc),
             permission_boundary="prepare.context_revision",
         )
-    task_id = payload_task_id.strip()
-    try:
-        env_store.require_id(task_id, "task id")
-    except ValueError as exc:
-        return _payload_error(action=action, active_buddy=context["active_buddy"], message=str(exc))
+    task_id = validated.get("task_id")
+    track_id = validated.get("track_id")
 
     bound_task_id = context["instance_payload"].get("current_task_id")
     if isinstance(bound_task_id, str) and bound_task_id.strip() and bound_task_id.strip() != task_id:
@@ -835,10 +831,9 @@ def _validate_context_payload(
             permission_boundary="active-instance",
         )
 
-    payload_track_id = args_context.get("current_track_id")
     bound_track_id = context["instance_payload"].get("current_track_id")
     if isinstance(bound_track_id, str) and bound_track_id.strip():
-        if payload_track_id != bound_track_id.strip():
+        if track_id != bound_track_id.strip():
             return _context_boundary_error(
                 action=action,
                 active_buddy=context["active_buddy"],
@@ -846,8 +841,11 @@ def _validate_context_payload(
                 permission_boundary="active-instance",
             )
 
-    task = env_store.get_task(task_id)
-    if task is None:
+    if isinstance(task_id, str):
+        task = env_store.get_task(task_id)
+    else:
+        task = None
+    if isinstance(task_id, str) and task is None:
         return _context_boundary_error(
             action=action,
             active_buddy=context["active_buddy"],
@@ -855,51 +853,14 @@ def _validate_context_payload(
             message=f"context task not found: {task_id}",
             permission_boundary="prepare.context_revision",
         )
-
-    expected_sequence = _derive_context_sequence(task)
-    expected_revision = _derive_context_revision(task, expected_sequence)
-    context_revision = args_context.get("context_revision")
-    if context_revision != expected_revision:
+    if isinstance(track_id, str) and env_store.get_track(track_id) is None:
         return _context_boundary_error(
             action=action,
             active_buddy=context["active_buddy"],
-            code="E_CONTEXT_REVISION",
-            message=f"context_revision mismatch: expected '{expected_revision}', received '{context_revision}'",
+            code="E_CONTEXT_TRACK_NOT_FOUND",
+            message=f"context track not found: {track_id}",
             permission_boundary="prepare.context_revision",
         )
-    run_envelope = args_context.get("run_envelope")
-    sequence = run_envelope.get("sequence") if isinstance(run_envelope, dict) else None
-    if isinstance(sequence, int) and sequence != expected_sequence:
-        return _context_boundary_error(
-            action=action,
-            active_buddy=context["active_buddy"],
-            code="E_CONTEXT_REVISION",
-            message=f"context sequence mismatch: expected {expected_sequence}, received {sequence}",
-            permission_boundary="prepare.context_revision",
-        )
-    turn_identity = run_envelope.get("turn_identity") if isinstance(run_envelope, dict) else None
-    if isinstance(turn_identity, dict):
-        if turn_identity.get("instance_id") != context["instance_id"]:
-            return _context_boundary_error(
-                action=action,
-                active_buddy=context["active_buddy"],
-                message="context turn_identity instance_id does not match active instance",
-                permission_boundary="active-instance",
-            )
-        if turn_identity.get("active_buddy") != context["active_buddy"]:
-            return _context_boundary_error(
-                action=action,
-                active_buddy=context["active_buddy"],
-                message="context turn_identity active_buddy does not match active buddy",
-                permission_boundary="active-buddy",
-            )
-        if turn_identity.get("task_id") != task_id:
-            return _context_boundary_error(
-                action=action,
-                active_buddy=context["active_buddy"],
-                message="context turn_identity task_id does not match current task",
-                permission_boundary="prepare.context_revision",
-            )
     return None
 
 

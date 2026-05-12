@@ -25,8 +25,8 @@ description: Use when the task is shaping a visible UI/UX prototype and producin
 
 ## Outputs
 - A contribution to the current compact buddy-run commit.
-- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
-- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
+- Durable design handoff content is written before persist through `artifact-tool` `artifact.create_revision`.
+- The final run commit references already-written artifacts with optional `artifact_ids` metadata.
 
 ## Steps
 
@@ -56,14 +56,15 @@ Contribute to one buddy-run commit. Do not call persist from inside the skill.
 Required top-level field:
 - `execution_summary`
 
-Use `artifacts` when this skill produces a durable artifact:
+Use `artifact-tool` before persist when this skill produces a durable artifact:
 - `kind`: `design-handoff`
 - `title`: concise artifact title
 - `summary`: short downstream selection summary
 - `content`: include `design_goal`, `flow_or_screen_summary`, `interaction_notes`, `assets_or_preview_refs`, `handoff_notes`, and `open_questions`
 
+After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
 Use optional `working_notes` for concise reasoning or verification notes.
-Use optional `state_effects.task` only for the current prepared task.
+Use optional `task_id` only as association metadata for an explicitly selected task.
 Use optional `handoff` when another manifest buddy should continue.
 
 ## Guardrails

@@ -23,19 +23,19 @@ description: Use when the task is drafting a PRD, defining MVP scope, or turning
 
 ## Outputs
 - A contribution to the current compact buddy-run commit.
-- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
-- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
+- Durable PRD content is written before persist through `artifact-tool` `artifact.create_revision`.
+- The final run commit references already-written artifacts with optional `artifact_ids` metadata.
 
 ## Steps
 1. Define the PRD summary and key decisions.
 2. Capture risks, open questions, and one concrete suggested next step.
-3. Put PRD-specific detail under `artifacts[].content.prd` (problem, user_value, requirements, scope).
-4. If an explicit PM track lifecycle mutation is required, include `state_effects.track` explicitly.
+3. Put PRD-specific detail under the artifact payload `content.prd` (problem, user_value, requirements, scope).
+4. If an explicit PM track lifecycle mutation is required, use `track-tool` before persist.
 
 ## Verification
 - Keep the result product-definition centered.
-- Keep PRD detail in `artifacts[].content.prd`, not top-level PM fields.
-- Use `state_effects.track` only for explicit PM lifecycle intent.
+- Keep PRD detail in the artifact payload `content.prd`, not top-level PM fields.
+- Confirm any task or track lifecycle change was completed through `task-tool` or `track-tool` with `ok=true`.
 
 ## Shared Runtime Rules
 - See `framework/docs/skill-runtime-shared-rules.md`.
@@ -50,15 +50,15 @@ Contribute to one buddy-run commit. Do not call persist from inside the skill.
 Required top-level field:
 - `execution_summary`
 
-Use `artifacts` when this skill produces a durable artifact:
+Use `artifact-tool` before persist when this skill produces a durable artifact:
 - `kind`: `prd`
 - `title`: concise artifact title
 - `summary`: short downstream selection summary
 - `content`: include `prd`, `decisions`, `risks`, `open_questions`, and `suggested_next_step`
 
+After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
 Use optional `working_notes` for concise reasoning or verification notes.
-Use optional `state_effects.task` only for the current prepared task.
-Use optional `state_effects.track` for PM lifecycle actions (`create|update|advance|archive`).
+Use optional `task_id` or `track_id` only as association metadata for explicit env-tool state.
 Use optional `handoff` when another manifest buddy should continue.
 
 ## Examples

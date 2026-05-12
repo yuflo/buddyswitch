@@ -113,7 +113,7 @@ Required top-level sections:
 - `current_context_summary`
 - `decision_surface`
 
-`runtime_context.desc` provides compact persist field guidance for `execution_summary`, `artifacts`, `state_effects.task`, `state_effects.track`, `handoff`, `contributors`, and `tool_evidence`.
+`runtime_context.desc` provides compact persist field guidance for `execution_summary`, optional `task_id`, optional `track_id`, optional `artifact_ids`, `handoff`, `contributors`, and `tool_evidence`.
 
 `runtime_context.track_lifecycle_desc` is the source of truth for PM-owned lifecycle rules:
 
@@ -161,15 +161,14 @@ Top-level response shape is frozen by `framework/contracts/persist-buddy-run.jso
 - context and reservation identity integrity;
 - reserved run id exists and has not already been committed;
 - commit includes non-empty `execution_summary`;
-- `artifacts`, when present, are validated objects with non-empty `kind`/`title` and object `content`;
-- artifact kinds are unique within one commit and authorized by active buddy `artifact_kinds`;
-- `state_effects.track`, when present, uses `create|update|advance|archive` and is permission-gated;
-- `state_effects.task`, when present, updates only current prepared task;
+- `artifact_ids`, when present, reference existing artifact revisions written through artifact-tool;
+- optional `task_id` and `track_id` are validated as associations only (no lifecycle writes);
+- lifecycle writes for task/track/artifact are rejected from persist payload and must route through env tools;
 - `handoff`, when present, includes `next_buddy`, `reason`, `context`, and known buddy reference;
 - profile state capability is enforced (`artifact_kinds`, `task_effects`, `track_effects`, `handoff_targets`);
 - `tool_evidence` is optional generally and required for Market artifact-producing commits in broker-backed product mode;
 - if both handoff next buddy and track next buddy are present, they must match;
-- at least one durable collaboration signal exists: `artifacts`, `state_effects`, or `handoff`.
+- audit-only persist is valid; durable associations are optional metadata.
 
 State writes in product mode are broker-owned. Run reservation and commit writes are owned by `scripts/env/services/runs.py`; the host `persist` command and broker `persist` method call the same service path as `env.tool` `run.commit`. Browser evidence tokens are issued by `scripts/env/services/evidence.py` through `env.tool` `evidence.issue_browser` and `evidence.approve_downgrade`; the host browser evidence CLI remains a wrapper over the same env tool path.
 
@@ -184,7 +183,7 @@ When `prepare`, `persist`, or broker-routed evidence tools reject a request, res
 - `command_hint`
 - `persist_payload_hint`
 
-Common persist validation failures should return structured `E_RUNTIME_PERSIST` feedback with actionable `permission_boundary` and `allowed_next_actions` (for example `persist.execution_summary`, `persist.durable_signal`, `persist.artifacts`, `state_effects.track.track_id`, `persist.handoff`).
+Common persist validation failures should return structured `E_RUNTIME_PERSIST` feedback with actionable `permission_boundary` and `allowed_next_actions` (for example `persist.execution_summary`, `persist.state_effects`, `persist.artifacts`, `persist.task_id`, `persist.handoff`).
 
 Buddy runtime guidance should follow these fields and must not bypass broker-owned runtime boundaries.
 
@@ -198,8 +197,6 @@ Required `receipt` keys:
 
 - `ok`
 - `buddy_id`
-- `task_id`
-- `task_title`
 - `artifact_ids`
 - `run_id`
 - `next_state`
@@ -210,7 +207,8 @@ Optional `receipt` keys:
 
 - `track_id`
 - `track_title`
-- `track_action`
+- `task_id`
+- `task_title`
 - `handoff`
 - `warnings`
 

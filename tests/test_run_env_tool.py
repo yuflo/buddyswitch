@@ -29,35 +29,7 @@ PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份P
 def _pm_commit() -> dict[str, object]:
     return {
         "execution_summary": "PM wrote the AI schedule tool landing page PRD and created the delivery track.",
-        "artifacts": [
-            {
-                "kind": "prd",
-                "title": "AI Schedule Tool Landing Page PRD",
-                "summary": "Defines landing page scope, sections, MVP requirements, and acceptance criteria.",
-                "content": {
-                    "problem": "Busy professionals need an AI-assisted way to reduce scheduling overhead.",
-                    "requirements": [
-                        "Explain the core promise in the hero",
-                        "Show concrete scheduling workflows",
-                    ],
-                },
-            }
-        ],
-        "state_effects": {
-            "track": {
-                "action": "create",
-                "track_id": "track-ai-schedule-landing-page",
-                "title": "AI Schedule Tool Landing Page",
-                "status": "active",
-                "current_buddy": "pm",
-                "next_buddy": "market",
-                "summary": "Cross-buddy landing page iteration for an AI schedule tool.",
-            },
-            "task": {
-                "status": "done",
-                "summary": "PM PRD is ready for market positioning research.",
-            },
-        },
+        "working_notes": ["PM completed planning and queued next research step."],
         "handoff": {
             "next_buddy": "market",
             "reason": "Market should validate competitor landing page positioning before design.",
@@ -157,9 +129,10 @@ class RunManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _load_instance(self, instance_json: Path) -> dict[str, object]:
         return json.loads(instance_json.read_text(encoding="utf-8"))
 
-    def test_run_commit_persists_buddy_run_and_updates_instance_binding(self) -> None:
+    def test_run_commit_persists_buddy_run_without_mutating_instance_binding(self) -> None:
         context = self._prepare()
         instance_json = self._instance_json()
+        instance_before = self._load_instance(instance_json)
 
         response = self._dispatch(
             action="commit",
@@ -178,10 +151,16 @@ class RunManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(run_id, str)
         self.assertTrue(self._runtime_path(f"buddyswitch/content/runs/{run_id}.json").exists())
         self.assertFalse(self._runtime_path(f"buddyswitch/content/runs/reserved/{run_id}.json").exists())
+        next_state = receipt.get("next_state")
+        self.assertIsInstance(next_state, dict, msg=response)
+        assert isinstance(next_state, dict)
+        self.assertEqual(next_state.get("mode"), "handoff")
+        self.assertIsNone(next_state.get("task_id"))
+        self.assertIsNone(next_state.get("track_id"))
+        self.assertEqual(next_state.get("next_buddy"), "market")
 
         instance_payload = self._load_instance(instance_json)
-        self.assertEqual(instance_payload["current_task_id"], receipt["task_id"])
-        self.assertEqual(instance_payload["current_track_id"], receipt["track_id"])
+        self.assertEqual(instance_payload, instance_before)
 
     def test_invalid_run_commit_returns_feedback_without_mutating_state(self) -> None:
         context = self._prepare()
@@ -191,7 +170,13 @@ class RunManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         response = self._dispatch(
             action="commit",
-            args={"context": context, "result": {"execution_summary": "summary only"}},
+            args={
+                "context": context,
+                "result": {
+                    "execution_summary": "legacy host payload",
+                    "state_effects": {"task": {"status": "done"}},
+                },
+            },
             instance_json=instance_json,
         )
 
@@ -202,7 +187,7 @@ class RunManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(error, dict, msg=response)
         assert isinstance(error, dict)
         self.assertEqual(error.get("code"), "E_RUNTIME_PERSIST")
-        self.assertEqual(response.get("permission_boundary"), "persist.durable_signal")
+        self.assertEqual(response.get("permission_boundary"), "persist.state_effects")
         self.assertEqual(self._runtime_state_snapshot(), state_before)
         self.assertEqual(self._load_instance(instance_json), instance_before)
 

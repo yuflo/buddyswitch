@@ -30,32 +30,6 @@ MARKET_REQUEST = "对于 track-id 这样一款产品的landing page，我们想�
 PM_COMMIT = {
     "execution_summary": "PM wrote the AI schedule tool landing page PRD and created the delivery track.",
     "working_notes": ["The user requested PRD creation and track binding in one PM run."],
-    "artifacts": [
-        {
-            "kind": "prd",
-            "title": "AI Schedule Tool Landing Page PRD",
-            "summary": "Defines landing page scope, sections, MVP requirements, and acceptance criteria.",
-            "content": {
-                "problem": "Busy professionals need an AI-assisted way to reduce scheduling overhead.",
-                "target_users": ["calendar-heavy professionals", "small team operators"],
-            },
-        }
-    ],
-    "state_effects": {
-        "track": {
-            "action": "create",
-            "track_id": "track-ai-schedule-landing-page",
-            "title": "AI Schedule Tool Landing Page",
-            "status": "active",
-            "current_buddy": "pm",
-            "next_buddy": "market",
-            "summary": "Cross-buddy landing page iteration for an AI schedule tool.",
-        },
-        "task": {
-            "status": "done",
-            "summary": "PM PRD is ready for market positioning research.",
-        },
-    },
     "handoff": {
         "next_buddy": "market",
         "reason": "Market should validate competitor landing page positioning before design.",
@@ -67,20 +41,35 @@ PM_COMMIT = {
     },
 }
 
+PM_ARTIFACTS = [
+    {
+        "kind": "prd",
+        "title": "AI Schedule Tool Landing Page PRD",
+        "summary": "Defines landing page scope, sections, MVP requirements, and acceptance criteria.",
+        "content": {
+            "problem": "Busy professionals need an AI-assisted way to reduce scheduling overhead.",
+            "target_users": ["calendar-heavy professionals", "small team operators"],
+        },
+    }
+]
+
+PM_TASK_UPDATE = {
+    "status": "done",
+    "summary": "PM PRD is ready for market positioning research.",
+}
+
+PM_TRACK_CREATE = {
+    "track_id": "track-ai-schedule-landing-page",
+    "title": "AI Schedule Tool Landing Page",
+    "status": "active",
+    "current_buddy": "pm",
+    "next_buddy": "market",
+    "summary": "Cross-buddy landing page iteration for an AI schedule tool.",
+}
+
 MARKET_COMMIT = {
     "execution_summary": "Market analyzed AI scheduling landing page competitors and recommended positioning angles.",
     "working_notes": ["The request referenced the existing PM-created track."],
-    "artifacts": [
-        {
-            "kind": "market-scan",
-            "title": "AI Schedule Tool Landing Page Market Brief",
-            "summary": "Summarizes competitor messaging patterns and recommended landing page expression.",
-            "content": {
-                "research_question": "How should an AI schedule tool express and present itself on a landing page?",
-                "recommended_angles": ["recover focus time", "reduce back-and-forth scheduling"],
-            },
-        }
-    ],
     "handoff": {
         "next_buddy": "design",
         "reason": "Design can now combine PRD scope with market positioning.",
@@ -92,22 +81,22 @@ MARKET_COMMIT = {
     },
 }
 
+MARKET_ARTIFACTS = [
+    {
+        "kind": "market-scan",
+        "title": "AI Schedule Tool Landing Page Market Brief",
+        "summary": "Summarizes competitor messaging patterns and recommended landing page expression.",
+        "content": {
+            "research_question": "How should an AI schedule tool express and present itself on a landing page?",
+            "recommended_angles": ["recover focus time", "reduce back-and-forth scheduling"],
+        },
+    }
+]
+
 
 DESIGN_COMMIT = {
     "execution_summary": "Design shaped the landing page handoff for Dev.",
     "working_notes": ["Design used the PM PRD and Market positioning brief."],
-    "artifacts": [
-        {
-            "kind": "design-handoff",
-            "title": "AI Schedule Tool Landing Page Design Handoff",
-            "summary": "Defines the hero flow, page structure, and interaction direction for implementation.",
-            "content": {
-                "design_goal": "Make recovered focus time concrete in the first viewport.",
-                "sections": ["hero", "workflow proof", "trust cues", "CTA"],
-                "handoff_notes": ["Dev should implement a simple static landing page first."],
-            },
-        }
-    ],
     "handoff": {
         "next_buddy": "dev",
         "reason": "Dev can implement the approved landing page structure.",
@@ -119,26 +108,22 @@ DESIGN_COMMIT = {
     },
 }
 
+DESIGN_ARTIFACTS = [
+    {
+        "kind": "design-handoff",
+        "title": "AI Schedule Tool Landing Page Design Handoff",
+        "summary": "Defines the hero flow, page structure, and interaction direction for implementation.",
+        "content": {
+            "design_goal": "Make recovered focus time concrete in the first viewport.",
+            "sections": ["hero", "workflow proof", "trust cues", "CTA"],
+            "handoff_notes": ["Dev should implement a simple static landing page first."],
+        },
+    }
+]
+
 DEV_COMMIT = {
     "execution_summary": "Dev implemented the landing page source marker and recorded implementation notes.",
     "working_notes": ["Dev changed project source as the only source-writing buddy in this smoke."],
-    "artifacts": [
-        {
-            "kind": "implementation-report",
-            "title": "AI Schedule Tool Landing Page Implementation Report",
-            "summary": "Reports the source implementation completed for smoke coverage.",
-            "content": {
-                "implementation_notes": ["Created a Dev-owned source marker."],
-                "changed_files": ["projects/app/dev-smoke.txt"],
-            },
-        }
-    ],
-    "state_effects": {
-        "task": {
-            "status": "done",
-            "summary": "Dev implementation is ready for Test smoke validation.",
-        },
-    },
     "handoff": {
         "next_buddy": "test",
         "reason": "Test can validate the implemented landing page behavior.",
@@ -150,25 +135,26 @@ DEV_COMMIT = {
     },
 }
 
+DEV_ARTIFACTS = [
+    {
+        "kind": "implementation-report",
+        "title": "AI Schedule Tool Landing Page Implementation Report",
+        "summary": "Reports the source implementation completed for smoke coverage.",
+        "content": {
+            "implementation_notes": ["Created a Dev-owned source marker."],
+            "changed_files": ["projects/app/dev-smoke.txt"],
+        },
+    }
+]
+
+DEV_TASK_UPDATE = {
+    "status": "done",
+    "summary": "Dev implementation is ready for Test smoke validation.",
+}
+
 TEST_COMMIT = {
     "execution_summary": "Test ran landing page smoke checks and reported readiness without editing source.",
     "working_notes": ["Test inspected behavior and wrote report state only."],
-    "artifacts": [
-        {
-            "kind": "test-report",
-            "title": "Landing Page Smoke Test Report",
-            "summary": "Reports pass/fail results for landing page hero and CTA behavior.",
-            "content": {
-                "test_scope": ["landing page hero", "CTA click behavior"],
-                "checks_run": ["manual DOM smoke", "static asset load check"],
-                "passed_items": ["hero renders", "source marker exists"],
-                "failed_items": [],
-                "blocked_items": [],
-                "reproduction_notes": [],
-                "readiness": "ready-for-pm-review",
-            },
-        }
-    ],
     "handoff": {
         "next_buddy": "pm",
         "reason": "PM can review readiness.",
@@ -178,6 +164,28 @@ TEST_COMMIT = {
         "skills": ["smoke-test"],
         "agents": [],
     },
+}
+
+TEST_ARTIFACTS = [
+    {
+        "kind": "test-report",
+        "title": "Landing Page Smoke Test Report",
+        "summary": "Reports pass/fail results for landing page hero and CTA behavior.",
+        "content": {
+            "test_scope": ["landing page hero", "CTA click behavior"],
+            "checks_run": ["manual DOM smoke", "static asset load check"],
+            "passed_items": ["hero renders", "source marker exists"],
+            "failed_items": [],
+            "blocked_items": [],
+            "reproduction_notes": [],
+            "readiness": "ready-for-pm-review",
+        },
+    }
+]
+
+TEST_TASK_UPDATE = {
+    "status": "done",
+    "summary": "Test report completed and ready for PM review.",
 }
 
 
@@ -362,6 +370,157 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest_path=MANIFEST,
         )
 
+    def _env_tool(
+        self,
+        *,
+        buddy: str,
+        instance_json: Path,
+        instance_id: str,
+        tool: str,
+        action: str,
+        args: dict[str, object],
+    ) -> dict[str, object]:
+        response = self._dispatch(
+            buddy=buddy,
+            method="env.tool",
+            payload={"tool": tool, "action": action, "args": args},
+            instance_json=instance_json,
+            instance_id=instance_id,
+        )
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("tool"), tool)
+        return response
+
+    def _create_track(
+        self,
+        *,
+        track_id: str,
+        instance_json: Path,
+        instance_id: str,
+    ) -> None:
+        payload = json.loads(json.dumps(PM_TRACK_CREATE))
+        payload["track_id"] = track_id
+        self._env_tool(
+            buddy="pm",
+            instance_json=instance_json,
+            instance_id=instance_id,
+            tool="track",
+            action="create",
+            args=payload,
+        )
+
+    def _create_tracked_task(
+        self,
+        *,
+        buddy: str,
+        instance_json: Path,
+        instance_id: str,
+        task_id: str,
+        track_id: str,
+        title: str,
+    ) -> None:
+        self._env_tool(
+            buddy=buddy,
+            instance_json=instance_json,
+            instance_id=instance_id,
+            tool="task",
+            action="create",
+            args={"task_id": task_id, "title": title, "summary": f"{buddy} task for integration flow."},
+        )
+        self._env_tool(
+            buddy=buddy,
+            instance_json=instance_json,
+            instance_id=instance_id,
+            tool="track",
+            action="attach_task",
+            args={"track_id": track_id, "task_id": task_id},
+        )
+        self._env_tool(
+            buddy=buddy,
+            instance_json=instance_json,
+            instance_id=instance_id,
+            tool="binding",
+            action="set_task",
+            args={"task_id": task_id},
+        )
+
+    def _update_task(
+        self,
+        *,
+        buddy: str,
+        instance_json: Path,
+        instance_id: str,
+        task_id: str,
+        patch: dict[str, object],
+    ) -> None:
+        args = {"task_id": task_id, **patch}
+        self._env_tool(
+            buddy=buddy,
+            instance_json=instance_json,
+            instance_id=instance_id,
+            tool="task",
+            action="update",
+            args=args,
+        )
+
+    def _create_artifacts(
+        self,
+        *,
+        buddy: str,
+        instance_json: Path,
+        instance_id: str,
+        context: dict[str, object],
+        task_id: str,
+        artifact_specs: list[dict[str, object]],
+    ) -> list[str]:
+        run_envelope = context["run_envelope"]
+        self.assertIsInstance(run_envelope, dict)
+        assert isinstance(run_envelope, dict)
+        source_run_id = run_envelope["run_id"]
+        self.assertIsInstance(source_run_id, str)
+        artifact_ids: list[str] = []
+        for spec in artifact_specs:
+            kind = spec["kind"]
+            self.assertIsInstance(kind, str)
+            artifact_id = f"art-{task_id}-{kind}-{source_run_id.replace('run-', '')[:8]}"
+            created = self._env_tool(
+                buddy=buddy,
+                instance_json=instance_json,
+                instance_id=instance_id,
+                tool="artifact",
+                action="create_revision",
+                args={
+                    "artifact_id": artifact_id,
+                    "task_id": task_id,
+                    "kind": kind,
+                    "title": spec["title"],
+                    "summary": spec["summary"],
+                    "content": spec["content"],
+                    "source_run_id": source_run_id,
+                },
+            )
+            artifact = created.get("artifact")
+            self.assertIsInstance(artifact, dict, msg=created)
+            artifact_ids.append(str(created["artifact_id"]))
+        return artifact_ids
+
+    def _audit_result(
+        self,
+        base: dict[str, object],
+        *,
+        task_id: str,
+        track_id: str,
+        artifact_ids: list[str],
+        tool_evidence: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        result = json.loads(json.dumps(base))
+        result["task_id"] = task_id
+        result["track_id"] = track_id
+        result["artifact_ids"] = artifact_ids
+        if tool_evidence is not None:
+            result["tool_evidence"] = tool_evidence
+        return result
+
     def _evidence_payload(self, *, context: dict[str, object]) -> dict[str, object]:
         return {"tool": "evidence", "action": "issue_browser", "args": {"context": context}}
 
@@ -420,6 +579,28 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         payload = response
         self.assertIsInstance(payload, dict)
         tool_evidence = payload["tool_evidence"]
+        self.assertIsInstance(tool_evidence, dict)
+        return tool_evidence
+
+    def _approve_market_downgrade_evidence(
+        self,
+        *,
+        context: dict[str, object],
+        instance_json: Path,
+        instance_id: str,
+    ) -> dict[str, object]:
+        response = self._env_tool(
+            buddy="market",
+            instance_json=instance_json,
+            instance_id=instance_id,
+            tool="evidence",
+            action="approve_downgrade",
+            args={
+                "context": context,
+                "reason": "Test fixture uses a non-browser fallback for this market integration path.",
+            },
+        )
+        tool_evidence = response["tool_evidence"]
         self.assertIsInstance(tool_evidence, dict)
         return tool_evidence
 
@@ -492,17 +673,92 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(self._evidence_token_paths(market_instance), [])
 
     def test_pm_to_market_collaboration_persists_on_one_track_without_skill_ids(self) -> None:
-        pm_context = self._prepare(PM_REQUEST, buddy="pm")
-        pm_persisted = self._persist(pm_context, PM_COMMIT)
-        pm_receipt = pm_persisted["receipt"]
-        track_id = pm_receipt["track_id"]
-
-        market_context = self._prepare(
-            MARKET_REQUEST,
-            buddy="market",
-            payload={"current_track_id": track_id},
+        track_id = "track-ai-schedule-landing-page"
+        pm_task_id = "task-pm-ai-schedule-prd"
+        pm_instance_id = "inst-pm-one-track"
+        pm_instance = self._instance_json(buddy="pm", instance_id=pm_instance_id)
+        pm_context = self._broker_prepare(
+            buddy="pm",
+            text=PM_REQUEST,
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
         )
-        market_persisted = self._persist(market_context, MARKET_COMMIT)
+        self._create_track(track_id=track_id, instance_json=pm_instance, instance_id=pm_instance_id)
+        self._create_tracked_task(
+            buddy="pm",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+            task_id=pm_task_id,
+            track_id=track_id,
+            title="PM PRD",
+        )
+        self._update_task(
+            buddy="pm",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+            task_id=pm_task_id,
+            patch=PM_TASK_UPDATE,
+        )
+        pm_artifact_ids = self._create_artifacts(
+            buddy="pm",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+            context=pm_context,
+            task_id=pm_task_id,
+            artifact_specs=PM_ARTIFACTS,
+        )
+        pm_persisted = self._broker_persist(
+            buddy="pm",
+            context=pm_context,
+            result=self._audit_result(PM_COMMIT, task_id=pm_task_id, track_id=track_id, artifact_ids=pm_artifact_ids),
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+        )
+        pm_receipt = pm_persisted["receipt"]
+
+        market_task_id = "task-market-ai-schedule-scan"
+        market_instance_id = "inst-market-one-track"
+        market_instance = self._instance_json(buddy="market", instance_id=market_instance_id, current_track_id=track_id)
+        self._create_tracked_task(
+            buddy="market",
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+            task_id=market_task_id,
+            track_id=track_id,
+            title="Market scan",
+        )
+        market_context = self._broker_prepare(
+            buddy="market",
+            text=MARKET_REQUEST,
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+        )
+        market_tool_evidence = self._approve_market_downgrade_evidence(
+            context=market_context,
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+        )
+        market_artifact_ids = self._create_artifacts(
+            buddy="market",
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+            context=market_context,
+            task_id=market_task_id,
+            artifact_specs=MARKET_ARTIFACTS,
+        )
+        market_persisted = self._broker_persist(
+            buddy="market",
+            context=market_context,
+            result=self._audit_result(
+                MARKET_COMMIT,
+                task_id=market_task_id,
+                track_id=track_id,
+                artifact_ids=market_artifact_ids,
+                tool_evidence=market_tool_evidence,
+            ),
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+        )
         market_receipt = market_persisted["receipt"]
 
         track = env_store.get_track(track_id)
@@ -535,21 +791,92 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("skill_id", market_run)
 
     def test_design_prepare_on_market_handoff_track_exposes_prior_artifacts(self) -> None:
-        pm_context = self._prepare(PM_REQUEST, buddy="pm")
-        pm_persisted = self._persist(pm_context, PM_COMMIT)
-        track_id = pm_persisted["receipt"]["track_id"]
-
-        market_context = self._prepare(
-            MARKET_REQUEST,
-            buddy="market",
-            payload={"current_track_id": track_id},
+        track_id = "track-ai-schedule-design-context"
+        pm_task_id = "task-pm-design-context-prd"
+        pm_instance_id = "inst-pm-design-context"
+        pm_instance = self._instance_json(buddy="pm", instance_id=pm_instance_id)
+        pm_context = self._broker_prepare(
+            buddy="pm",
+            text=PM_REQUEST,
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
         )
-        self._persist(market_context, MARKET_COMMIT)
+        self._create_track(track_id=track_id, instance_json=pm_instance, instance_id=pm_instance_id)
+        self._create_tracked_task(
+            buddy="pm",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+            task_id=pm_task_id,
+            track_id=track_id,
+            title="PM PRD",
+        )
+        pm_artifact_ids = self._create_artifacts(
+            buddy="pm",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+            context=pm_context,
+            task_id=pm_task_id,
+            artifact_specs=PM_ARTIFACTS,
+        )
+        self._broker_persist(
+            buddy="pm",
+            context=pm_context,
+            result=self._audit_result(PM_COMMIT, task_id=pm_task_id, track_id=track_id, artifact_ids=pm_artifact_ids),
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+        )
 
-        design_context = self._prepare(
-            "根据已有track继续设计",
+        market_task_id = "task-market-design-context-scan"
+        market_instance_id = "inst-market-design-context"
+        market_instance = self._instance_json(buddy="market", instance_id=market_instance_id, current_track_id=track_id)
+        self._create_tracked_task(
+            buddy="market",
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+            task_id=market_task_id,
+            track_id=track_id,
+            title="Market scan",
+        )
+        market_context = self._broker_prepare(
+            buddy="market",
+            text=MARKET_REQUEST,
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+        )
+        market_tool_evidence = self._approve_market_downgrade_evidence(
+            context=market_context,
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+        )
+        market_artifact_ids = self._create_artifacts(
+            buddy="market",
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+            context=market_context,
+            task_id=market_task_id,
+            artifact_specs=MARKET_ARTIFACTS,
+        )
+        self._broker_persist(
+            buddy="market",
+            context=market_context,
+            result=self._audit_result(
+                MARKET_COMMIT,
+                task_id=market_task_id,
+                track_id=track_id,
+                artifact_ids=market_artifact_ids,
+                tool_evidence=market_tool_evidence,
+            ),
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+        )
+
+        design_instance_id = "inst-design-context"
+        design_instance = self._instance_json(buddy="design", instance_id=design_instance_id, current_track_id=track_id)
+        design_context = self._broker_prepare(
             buddy="design",
-            payload={"current_track_id": track_id},
+            text="根据已有track继续设计",
+            instance_json=design_instance,
+            instance_id=design_instance_id,
         )
         self.assertEqual(design_context["current_track_id"], track_id)
 
@@ -586,6 +913,14 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
     def test_cross_buddy_flow_smoke_persists_pm_market_design_dev_and_test(self) -> None:
+        track_id = "track-ai-schedule-cross-buddy"
+        task_ids = {
+            "pm": "task-pm-cross-buddy-prd",
+            "market": "task-market-cross-buddy-scan",
+            "design": "task-design-cross-buddy-handoff",
+            "dev": "task-dev-cross-buddy-implementation",
+            "test": "task-test-cross-buddy-report",
+        }
         pm_instance_id = "inst-pm-flow"
         pm_instance = self._instance_json(buddy="pm", instance_id=pm_instance_id)
         pm_context = self._broker_prepare(
@@ -594,14 +929,37 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=pm_instance,
             instance_id=pm_instance_id,
         )
+        self._create_track(track_id=track_id, instance_json=pm_instance, instance_id=pm_instance_id)
+        self._create_tracked_task(
+            buddy="pm",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+            task_id=task_ids["pm"],
+            track_id=track_id,
+            title="PM PRD",
+        )
+        self._update_task(
+            buddy="pm",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+            task_id=task_ids["pm"],
+            patch=PM_TASK_UPDATE,
+        )
+        pm_artifact_ids = self._create_artifacts(
+            buddy="pm",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+            context=pm_context,
+            task_id=task_ids["pm"],
+            artifact_specs=PM_ARTIFACTS,
+        )
         pm_persisted = self._broker_persist(
             buddy="pm",
             context=pm_context,
-            result=PM_COMMIT,
+            result=self._audit_result(PM_COMMIT, task_id=task_ids["pm"], track_id=track_id, artifact_ids=pm_artifact_ids),
             instance_json=pm_instance,
             instance_id=pm_instance_id,
         )
-        track_id = pm_persisted["receipt"]["track_id"]
 
         state = _CDPState(
             version_ok=True,
@@ -618,22 +976,44 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             current_track_id=track_id,
             browser_port=browser_port,
         )
+        self._create_tracked_task(
+            buddy="market",
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+            task_id=task_ids["market"],
+            track_id=track_id,
+            title="Market scan",
+        )
         market_context = self._broker_prepare(
             buddy="market",
             text=MARKET_REQUEST,
             instance_json=market_instance,
             instance_id=market_instance_id,
         )
-        market_result = json.loads(json.dumps(MARKET_COMMIT))
-        market_result["tool_evidence"] = self._issue_market_browser_evidence(
+        market_tool_evidence = self._issue_market_browser_evidence(
             context=market_context,
             instance_json=market_instance,
             instance_id=market_instance_id,
         )
+        market_artifact_ids = self._create_artifacts(
+            buddy="market",
+            instance_json=market_instance,
+            instance_id=market_instance_id,
+            context=market_context,
+            task_id=task_ids["market"],
+            artifact_specs=MARKET_ARTIFACTS,
+        )
+        market_result = json.loads(json.dumps(MARKET_COMMIT))
         market_persisted = self._broker_persist(
             buddy="market",
             context=market_context,
-            result=market_result,
+            result=self._audit_result(
+                market_result,
+                task_id=task_ids["market"],
+                track_id=track_id,
+                artifact_ids=market_artifact_ids,
+                tool_evidence=market_tool_evidence,
+            ),
             instance_json=market_instance,
             instance_id=market_instance_id,
         )
@@ -646,10 +1026,31 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=design_instance,
             instance_id=design_instance_id,
         )
+        self._create_tracked_task(
+            buddy="design",
+            instance_json=design_instance,
+            instance_id=design_instance_id,
+            task_id=task_ids["design"],
+            track_id=track_id,
+            title="Design handoff",
+        )
+        design_artifact_ids = self._create_artifacts(
+            buddy="design",
+            instance_json=design_instance,
+            instance_id=design_instance_id,
+            context=design_context,
+            task_id=task_ids["design"],
+            artifact_specs=DESIGN_ARTIFACTS,
+        )
         design_persisted = self._broker_persist(
             buddy="design",
             context=design_context,
-            result=DESIGN_COMMIT,
+            result=self._audit_result(
+                DESIGN_COMMIT,
+                task_id=task_ids["design"],
+                track_id=track_id,
+                artifact_ids=design_artifact_ids,
+            ),
             instance_json=design_instance,
             instance_id=design_instance_id,
         )
@@ -666,10 +1067,45 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=dev_instance,
             instance_id=dev_instance_id,
         )
+        self._create_tracked_task(
+            buddy="dev",
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            task_id=task_ids["dev"],
+            track_id=track_id,
+            title="Dev implementation",
+        )
+        self._update_task(
+            buddy="dev",
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            task_id=task_ids["dev"],
+            patch=DEV_TASK_UPDATE,
+        )
+        dev_artifact_ids = self._create_artifacts(
+            buddy="dev",
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            context=dev_context,
+            task_id=task_ids["dev"],
+            artifact_specs=DEV_ARTIFACTS,
+        )
+        self._update_task(
+            buddy="dev",
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            task_id=task_ids["dev"],
+            patch=DEV_TASK_UPDATE,
+        )
         dev_persisted = self._broker_persist(
             buddy="dev",
             context=dev_context,
-            result=DEV_COMMIT,
+            result=self._audit_result(
+                DEV_COMMIT,
+                task_id=task_ids["dev"],
+                track_id=track_id,
+                artifact_ids=dev_artifact_ids,
+            ),
             instance_json=dev_instance,
             instance_id=dev_instance_id,
         )
@@ -682,10 +1118,38 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=test_instance,
             instance_id=test_instance_id,
         )
+        self._create_tracked_task(
+            buddy="test",
+            instance_json=test_instance,
+            instance_id=test_instance_id,
+            task_id=task_ids["test"],
+            track_id=track_id,
+            title="Test report",
+        )
+        self._update_task(
+            buddy="test",
+            instance_json=test_instance,
+            instance_id=test_instance_id,
+            task_id=task_ids["test"],
+            patch=TEST_TASK_UPDATE,
+        )
+        test_artifact_ids = self._create_artifacts(
+            buddy="test",
+            instance_json=test_instance,
+            instance_id=test_instance_id,
+            context=test_context,
+            task_id=task_ids["test"],
+            artifact_specs=TEST_ARTIFACTS,
+        )
         test_persisted = self._broker_persist(
             buddy="test",
             context=test_context,
-            result=TEST_COMMIT,
+            result=self._audit_result(
+                TEST_COMMIT,
+                task_id=task_ids["test"],
+                track_id=track_id,
+                artifact_ids=test_artifact_ids,
+            ),
             instance_json=test_instance,
             instance_id=test_instance_id,
         )

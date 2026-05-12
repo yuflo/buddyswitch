@@ -26,19 +26,18 @@ Persist commits one active buddy run result. Native skills may contribute to tha
 
 - non-empty string `execution_summary`;
 - optional `working_notes` list of strings;
-- optional `artifacts` list with object items (`kind`, `title`, object `content`, optional `summary`);
-- optional `state_effects` object (`track`, `task`);
+- optional association metadata: `task_id`, `track_id`, `artifact_ids`;
 - optional `handoff` object (`next_buddy`, `reason`, `context`);
 - optional `contributors` object (`skills`/`agents` string lists);
-- at least one durable collaboration signal: artifact, state effect, or handoff.
+- audit-only commit is valid when no association metadata is needed.
 
 Buddy-level schemas remain authoring and development guidance. Runtime does not require full schema completeness unless a field is needed for safe writes.
 
 ## Task, Artifact, And Handoff Boundaries
 
 - Follow `framework/docs/track-registry.md` for track context.
-- Track lifecycle mutations must use `state_effects.track`.
-- Task updates must use `state_effects.task`.
+- Track lifecycle mutations must use track-tool/env tool track actions.
+- Task updates must use task-tool/env tool task actions.
 - Handoff is explicit collaboration state and does not implicitly mutate tracks.
 
 ## Durable Output Paths

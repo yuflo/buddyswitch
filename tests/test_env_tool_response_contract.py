@@ -24,14 +24,6 @@ PROTOCOL = "buddyswitch-runtime-broker/v1"
 def _pm_result() -> dict[str, object]:
     return {
         "execution_summary": "PM validated env tool response contracts.",
-        "artifacts": [
-            {
-                "kind": "prd",
-                "title": "Response Contract PRD",
-                "summary": "Defines env tool response shape requirements.",
-                "content": {"requirements": ["Every env tool returns machine-readable feedback."]},
-            }
-        ],
     }
 
 

@@ -44,7 +44,7 @@ Required fields:
 - `created_at`
 - `updated_at`
 
-Every persisted run belongs to a task.
+A persisted run may optionally associate a task.
 A task may be untracked or bound to exactly one track.
 
 ## Artifact Schema (v1)
@@ -78,5 +78,5 @@ Artifacts participate in track flow through `artifact.task_id -> task.track_id`.
 
 ## Auto-Register Rule
 
-When a task is bound to a track, runtime registers the task id in that track's `task_ids`.
-Artifact creation updates task `artifact_ids` and per-kind `artifact_slots` revision state.
+Track membership changes only through explicit `track.attach_task` and `track.detach_task`.
+Artifact creation updates task `artifact_ids` and per-kind `artifact_slots` revision state through artifact-tool operations.

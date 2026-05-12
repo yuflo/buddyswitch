@@ -98,12 +98,9 @@ def _context_matches_active_instance(*, prepared_context: dict[str, Any], contex
             allowed_next_actions=rt._rerun_prepare_actions(),
         )
 
-    task_id = prepared_context.get("current_task_id")
-    if not isinstance(task_id, str) or not task_id.strip():
-        raise ValueError("context.current_task_id is required for evidence issuance")
-    context_track_id = prepared_context.get("current_track_id")
-    if context_track_id is not None and not isinstance(context_track_id, str):
-        raise ValueError("context.current_track_id must be a string when provided")
+    validated = rt._validate_prepared_run_context(prepared_context)
+    task_id = validated.get("task_id")
+    context_track_id = validated.get("track_id")
 
     bound_task = instance_payload.get("current_task_id")
     if isinstance(bound_task, str) and bound_task.strip() and bound_task != task_id:
@@ -123,17 +120,7 @@ def _context_matches_active_instance(*, prepared_context: dict[str, Any], contex
                 allowed_next_actions=rt._rerun_prepare_actions(),
             )
 
-    context_revision = prepared_context.get("context_revision")
-    if not isinstance(context_revision, str) or not context_revision.strip():
-        raise ValueError("context.context_revision is required for evidence issuance")
-    run_envelope = prepared_context.get("run_envelope")
-    if not isinstance(run_envelope, dict):
-        raise ValueError("context.run_envelope is required for evidence issuance")
-    run_id = run_envelope.get("run_id")
-    if not isinstance(run_id, str) or not run_id.strip():
-        raise ValueError("context.run_envelope.run_id is required for evidence issuance")
-
-    rt._validate_context_revision(prepared_context)
+    rt._validate_prepared_run_context(prepared_context)
 
 
 def _require_market_evidence_profile(*, context: EvidenceServiceContext) -> None:
@@ -256,7 +243,8 @@ def _write_evidence_token(
     context_revision = str(prepared_context["context_revision"]).strip()
     buddy_id = str(prepared_context["active_buddy"]).strip()
     instance_id = str(prepared_context["instance_id"]).strip()
-    task_id = str(prepared_context["current_task_id"]).strip()
+    raw_task_id = prepared_context.get("current_task_id")
+    task_id = raw_task_id.strip() if isinstance(raw_task_id, str) and raw_task_id.strip() else None
     track_id = prepared_context.get("current_track_id")
     token_prefix = "evidence" if mode == "browser-cockpit-preflight" else "downgrade"
     token = f"{token_prefix}-{run_id}-{uuid.uuid4().hex[:8]}"

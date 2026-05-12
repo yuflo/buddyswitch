@@ -1,11 +1,12 @@
 {
   "contract_id": "prepare-turn-context",
-  "contract_version": "2026-05-03",
+  "contract_version": "2026-05-12",
   "response_key_order": [
     "ok",
     "context_revision",
     "instance_id",
     "active_buddy",
+    "binding_snapshot",
     "runtime_context",
     "context_save_path",
     "persist_command_hint",

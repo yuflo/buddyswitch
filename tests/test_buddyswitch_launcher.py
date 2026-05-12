@@ -1374,13 +1374,14 @@ exec "$real_git" "$@"
             for token in (
                 "context projection only",
                 "project.access=read-only",
-                "state_effects.track",
+                "env_tools.track",
                 "python3 scripts/turn_runtime.py prepare",
                 "python3 scripts/turn_runtime.py persist",
                 "## receipt",
                 "## summary",
             ):
                 self.assertIn(token, copied_agents)
+            self.assertNotIn("state_effects.track", copied_agents)
             self.assertNotIn("skill_id", copied_agents)
             self.assertNotIn("persist-skill-result", copied_agents)
             self.assertNotIn("scripts/result_bridge.py", copied_agents)

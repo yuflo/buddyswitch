@@ -25,14 +25,7 @@ PROTOCOL = "buddyswitch-runtime-broker/v1"
 def _pm_result() -> dict[str, object]:
     return {
         "execution_summary": "PM wrote a compact PRD for identity validation.",
-        "artifacts": [
-            {
-                "kind": "prd",
-                "title": "Identity Validation PRD",
-                "summary": "Records requirements for env tool identity behavior.",
-                "content": {"requirements": ["Runtime identity wins over payload-authored fields."]},
-            }
-        ],
+        "working_notes": ["Result validation should use prepared runtime identity, not payload-authored identity fields."],
     }
 
 

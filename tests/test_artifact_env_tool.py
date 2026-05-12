@@ -58,6 +58,46 @@ class ArtifactManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return instance_json
 
+    def _dispatch_request(
+        self,
+        *,
+        method: str,
+        payload: dict[str, object],
+        instance_json: Path,
+        instance_id: str = "inst-dev-example",
+        buddy: str = "dev",
+    ) -> dict[str, object]:
+        request = {
+            "protocol": PROTOCOL,
+            "instance_id": instance_id,
+            "active_buddy": buddy,
+            "method": method,
+            "payload": payload,
+        }
+        return runtime_broker.dispatch_runtime_request(
+            request=request,
+            instance_json_path=instance_json,
+            manifest_path=MANIFEST,
+        )
+
+    def _dispatch_tool(
+        self,
+        *,
+        tool: str,
+        action: str,
+        args: dict[str, object],
+        instance_json: Path,
+        instance_id: str = "inst-dev-example",
+        buddy: str = "dev",
+    ) -> dict[str, object]:
+        return self._dispatch_request(
+            method="env.tool",
+            payload={"tool": tool, "action": action, "args": args},
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy=buddy,
+        )
+
     def _dispatch(
         self,
         *,
@@ -67,18 +107,35 @@ class ArtifactManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_id: str = "inst-dev-example",
         buddy: str = "dev",
     ) -> dict[str, object]:
-        request = {
-            "protocol": PROTOCOL,
-            "instance_id": instance_id,
-            "active_buddy": buddy,
-            "method": "env.tool",
-            "payload": {"tool": "artifact", "action": action, "args": args},
-        }
-        return runtime_broker.dispatch_runtime_request(
-            request=request,
-            instance_json_path=instance_json,
-            manifest_path=MANIFEST,
+        return self._dispatch_tool(
+            tool="artifact",
+            action=action,
+            args=args,
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy=buddy,
         )
+
+    def _prepare(
+        self,
+        *,
+        text: str,
+        instance_json: Path,
+        instance_id: str = "inst-dev-example",
+        buddy: str = "dev",
+    ) -> dict[str, object]:
+        response = self._dispatch_request(
+            method="prepare",
+            payload={"text": text},
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy=buddy,
+        )
+        self.assertTrue(response.get("ok"), msg=response)
+        prepared = response.get("payload")
+        self.assertIsInstance(prepared, dict, msg=response)
+        assert isinstance(prepared, dict)
+        return prepared
 
     def _seed_task(
         self,
@@ -374,6 +431,99 @@ class ArtifactManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "revision_count": 2,
             },
         )
+
+    def test_create_revision_allows_taskless_prepare_source_run_after_explicit_task_selection(self) -> None:
+        instance_id = "inst-dev-taskless-source"
+        instance_json = self._instance_json(
+            instance_id=instance_id,
+            buddy="dev",
+            current_task_id=None,
+        )
+        prepared = self._prepare(
+            text="先调研再决定任务",
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="dev",
+        )
+        self.assertIsNone(prepared.get("current_task_id"))
+        run_envelope = prepared.get("run_envelope")
+        self.assertIsInstance(run_envelope, dict, msg=prepared)
+        assert isinstance(run_envelope, dict)
+        source_run_id = run_envelope.get("run_id")
+        self.assertIsInstance(source_run_id, str, msg=prepared)
+        assert isinstance(source_run_id, str)
+
+        task_id = "task-dev-selected-after-taskless-prepare"
+        created_task = self._dispatch_tool(
+            tool="task",
+            action="create",
+            args={"task_id": task_id, "title": "Selected after taskless prepare", "summary": "artifact target task"},
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="dev",
+        )
+        self.assertTrue(created_task.get("ok"), msg=created_task)
+        selected_task = self._dispatch_tool(
+            tool="task",
+            action="set_current",
+            args={"task_id": task_id},
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="dev",
+        )
+        self.assertTrue(selected_task.get("ok"), msg=selected_task)
+
+        created = self._dispatch(
+            action="create_revision",
+            args={
+                "artifact_id": "art-dev-taskless-source-r1",
+                "task_id": task_id,
+                "kind": "implementation-report",
+                "title": "Taskless Source Run Artifact",
+                "summary": "created after explicit task selection",
+                "content": {"body": "artifact created from taskless reservation"},
+                "source_run_id": source_run_id,
+            },
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="dev",
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+        artifact = env_store.get_artifact("art-dev-taskless-source-r1")
+        self.assertIsNotNone(artifact)
+        assert artifact is not None
+        self.assertEqual(artifact["task_id"], task_id)
+        self.assertEqual(artifact["source_run_id"], source_run_id)
+
+    def test_create_revision_rejects_mismatched_bound_reservation_task(self) -> None:
+        instance_json = self._instance_json(current_task_id="task-dev-bound-a")
+        self._seed_task(task_id="task-dev-bound-a", buddy="dev", title="Bound Task A")
+        self._seed_task(task_id="task-dev-bound-b", buddy="dev", title="Bound Task B")
+        self._seed_run_reservation(run_id="run-dev-bound-a-r1", task_id="task-dev-bound-a")
+        before_artifacts = copy.deepcopy(self._artifacts_snapshot())
+
+        rejected = self._dispatch(
+            action="create_revision",
+            args={
+                "artifact_id": "art-dev-bound-mismatch-r1",
+                "task_id": "task-dev-bound-b",
+                "kind": "implementation-report",
+                "title": "Bound Reservation Mismatch",
+                "summary": "must reject task mismatch",
+                "content": {"body": "should not write"},
+                "source_run_id": "run-dev-bound-a-r1",
+            },
+            instance_json=instance_json,
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual(rejected.get("permission_boundary"), "artifact.source_run")
+        error = rejected.get("error")
+        self.assertIsInstance(error, dict, msg=rejected)
+        assert isinstance(error, dict)
+        self.assertEqual(error.get("code"), "E_ARTIFACT_SOURCE_RUN")
+        self.assertIn("run reservation task mismatch", str(error.get("message")))
+        self.assertEqual(self._artifacts_snapshot(), before_artifacts)
+        self.assertIsNone(env_store.get_artifact("art-dev-bound-mismatch-r1"))
 
     def test_foreign_task_and_artifact_reject_without_content_leak_or_mutation(self) -> None:
         instance_json = self._instance_json(current_task_id="task-dev-current")

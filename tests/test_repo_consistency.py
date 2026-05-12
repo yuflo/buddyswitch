@@ -469,7 +469,7 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertTrue(contract_path.exists())
         payload = json.loads(contract_path.read_text(encoding="utf-8"))
         self.assertEqual(payload.get("contract_id"), "persist-buddy-run")
-        self.assertEqual(payload.get("contract_version"), "2026-05-06")
+        self.assertEqual(payload.get("contract_version"), "2026-05-12")
 
         legacy_path = ROOT / "framework" / "contracts" / "persist-skill-result.json"
         self.assertFalse(legacy_path.exists())

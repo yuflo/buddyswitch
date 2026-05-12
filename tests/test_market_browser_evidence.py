@@ -17,6 +17,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_profiles  # noqa: E402
+import env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -28,26 +29,14 @@ DEV_REQUEST = "实现 landing page hero 文案和 CTA 调整"
 TEST_REQUEST = "验证 landing page hero 和 CTA 行为"
 
 
-def _market_commit(tool_evidence: dict[str, str] | None = None) -> dict[str, object]:
+def _market_commit(
+    tool_evidence: dict[str, str] | None = None,
+    *,
+    artifact_ids: list[str] | None = None,
+) -> dict[str, object]:
     commit: dict[str, object] = {
         "execution_summary": "Market analyzed competitor landing pages and proposed positioning.",
         "working_notes": ["Market run for AI schedule tool landing page."],
-        "artifacts": [
-            {
-                "kind": "market-scan",
-                "title": "AI Schedule Tool Landing Page Market Brief",
-                "summary": "Summarizes competitor messaging and recommended angle.",
-                "content": {
-                    "research_question": "How should an AI schedule tool present itself?",
-                    "evidence": [{"source": "browser-cockpit-preflight", "claim": "preflight passed"}],
-                    "insights": ["Concrete workflow language is stronger than generic automation claims."],
-                    "assumptions": [],
-                    "risks": [],
-                    "conclusion": "Lead with reduced scheduling back-and-forth.",
-                    "recommended_next_step": "Design should shape a concrete before/after hero flow.",
-                },
-            }
-        ],
         "handoff": {
             "next_buddy": "design",
             "reason": "Design should convert positioning into page flow.",
@@ -55,6 +44,8 @@ def _market_commit(tool_evidence: dict[str, str] | None = None) -> dict[str, obj
         },
         "contributors": {"skills": ["research-scan"], "agents": []},
     }
+    if artifact_ids is not None:
+        commit["artifact_ids"] = artifact_ids
     if tool_evidence is not None:
         commit["tool_evidence"] = tool_evidence
     return commit
@@ -63,68 +54,24 @@ def _market_commit(tool_evidence: dict[str, str] | None = None) -> dict[str, obj
 def _pm_commit() -> dict[str, object]:
     return {
         "execution_summary": "PM created PRD.",
-        "artifacts": [
-            {
-                "kind": "prd",
-                "title": "PRD",
-                "summary": "prd",
-                "content": {"problem": "x"},
-            }
-        ],
     }
 
 
 def _design_commit() -> dict[str, object]:
     return {
         "execution_summary": "Design prepared the landing page handoff.",
-        "artifacts": [
-            {
-                "kind": "design-handoff",
-                "title": "Landing Page Design Handoff",
-                "summary": "Defines hero and CTA direction.",
-                "content": {
-                    "design_goal": "Make AI scheduling value concrete in hero copy.",
-                    "sections": ["hero", "proof", "cta"],
-                },
-            }
-        ],
     }
 
 
 def _dev_commit() -> dict[str, object]:
     return {
         "execution_summary": "Dev implemented landing page copy updates.",
-        "artifacts": [
-            {
-                "kind": "implementation-report",
-                "title": "Landing Page Implementation Report",
-                "summary": "Records source changes for hero and CTA copy.",
-                "content": {
-                    "implementation_notes": ["Updated hero copy and CTA wording."],
-                    "changed_files": ["projects/app/src/landing-page.md"],
-                },
-            }
-        ],
     }
 
 
 def _test_commit() -> dict[str, object]:
     return {
         "execution_summary": "Test validated landing page hero and CTA behavior.",
-        "artifacts": [
-            {
-                "kind": "test-report",
-                "title": "Landing Page Smoke Test Report",
-                "summary": "Reports smoke checks for hero and CTA.",
-                "content": {
-                    "test_scope": ["hero", "cta"],
-                    "checks_run": ["manual smoke"],
-                    "passed_items": ["hero renders", "cta is clickable"],
-                    "failed_items": [],
-                    "blocked_items": [],
-                },
-            }
-        ],
     }
 
 
@@ -322,6 +269,33 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "runs": sorted(path.name for path in self._runtime_path("buddyswitch/content/runs").glob("*.json")),
         }
 
+    def _seed_market_artifact(
+        self,
+        *,
+        task_id: str = "task-market-brief",
+        artifact_id: str = "art-market-brief-r1",
+    ) -> str:
+        env_store.create_task(
+            task_id,
+            "Market Brief Task",
+            buddy="market",
+            track_id=None,
+            status="active",
+            summary="seed task for market evidence commit tests",
+            initial_run_id="run-market-seed-r1",
+        )
+        env_store.create_artifact(
+            artifact_id=artifact_id,
+            title="AI Schedule Tool Market Brief",
+            buddy="market",
+            kind="market-scan",
+            task_id=task_id,
+            source_run_id="run-market-seed-r1",
+            summary="seeded market artifact",
+            content={"seeded": True},
+        )
+        return artifact_id
+
     def _start_cdp_server(self, state: _CDPState) -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.bind(("127.0.0.1", 0))
@@ -362,6 +336,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_market_persist_without_evidence_rejects_before_writes(self) -> None:
         instance_json = self._instance_json()
         context = self._prepare_market(instance_json=instance_json)
+        artifact_id = self._seed_market_artifact()
         before_runs = list(self._runtime_path("buddyswitch/content/runs").glob("*.json"))
         response = self._dispatch(
             request={
@@ -369,7 +344,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "persist",
-                "payload": {"context": context, "result": _market_commit()},
+                "payload": {"context": context, "result": _market_commit(artifact_ids=[artifact_id])},
             },
             instance_json=instance_json,
         )
@@ -381,13 +356,14 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_market_missing_evidence_rejection_names_exact_persist_fields_and_issue_option(self) -> None:
         instance_json = self._instance_json()
         context = self._prepare_market(instance_json=instance_json)
+        artifact_id = self._seed_market_artifact()
         rejected = self._dispatch(
             request={
                 "protocol": "buddyswitch-runtime-broker/v1",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "persist",
-                "payload": {"context": context, "result": _market_commit()},
+                "payload": {"context": context, "result": _market_commit(artifact_ids=[artifact_id])},
             },
             instance_json=instance_json,
         )
@@ -528,6 +504,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         instance_json = self._instance_json(browser_port=port)
         context = self._prepare_market(instance_json=instance_json)
+        artifact_id = self._seed_market_artifact()
         issue = self._dispatch(
             request={
                 "protocol": "buddyswitch-runtime-broker/v1",
@@ -549,7 +526,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "method": "persist",
                 "payload": {
                     "context": context,
-                    "result": _market_commit({"browser_cockpit_token": token}),
+                    "result": _market_commit({"browser_cockpit_token": token}, artifact_ids=[artifact_id]),
                 },
             },
             instance_json=instance_json,
@@ -587,7 +564,8 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(token_scope["context_revision"], context["context_revision"])
         self.assertEqual(token_scope["instance_id"], context["instance_id"])
         self.assertEqual(token_scope["buddy_id"], context["active_buddy"])
-        self.assertEqual(token_scope["task_id"], context["current_task_id"])
+        self.assertIsNone(context.get("current_task_id"))
+        self.assertIsNone(token_scope["task_id"])
         self.assertEqual(feedback["persist_field"], "tool_evidence.browser_cockpit_token")
         self.assertIn("persist_payload_hint", issue)
         self.assertEqual(issue["persist_payload_hint"]["tool_evidence_field"], "tool_evidence.browser_cockpit_token")
@@ -601,6 +579,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         instance_json = self._instance_json(browser_port=port)
         context_a = self._prepare_market(instance_json=instance_json)
+        artifact_id = self._seed_market_artifact()
         issue = self._dispatch(
             request={
                 "protocol": "buddyswitch-runtime-broker/v1",
@@ -643,7 +622,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "method": "persist",
                 "payload": {
                     "context": context_b,
-                    "result": _market_commit({"browser_cockpit_token": token}),
+                    "result": _market_commit({"browser_cockpit_token": token}, artifact_ids=[artifact_id]),
                 },
             },
             instance_json=instance_json,
@@ -656,6 +635,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_market_persist_with_handwritten_token_rejects_before_writes(self) -> None:
         instance_json = self._instance_json()
         context = self._prepare_market(instance_json=instance_json)
+        artifact_id = self._seed_market_artifact()
         before = self._state_snapshot()
         rejected = self._dispatch(
             request={
@@ -665,7 +645,10 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "method": "persist",
                 "payload": {
                     "context": context,
-                    "result": _market_commit({"browser_cockpit_token": "evidence-run-fake-handwritten"}),
+                    "result": _market_commit(
+                        {"browser_cockpit_token": "evidence-run-fake-handwritten"},
+                        artifact_ids=[artifact_id],
+                    ),
                 },
             },
             instance_json=instance_json,
@@ -694,6 +677,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_market_persist_with_approved_downgrade_token_records_reason(self) -> None:
         instance_json = self._instance_json()
         context = self._prepare_market(instance_json=instance_json)
+        artifact_id = self._seed_market_artifact()
         issue = self._dispatch(
             request={
                 "protocol": "buddyswitch-runtime-broker/v1",
@@ -718,7 +702,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "method": "persist",
                 "payload": {
                     "context": context,
-                    "result": _market_commit({"approved_downgrade_token": token}),
+                    "result": _market_commit({"approved_downgrade_token": token}, artifact_ids=[artifact_id]),
                 },
             },
             instance_json=instance_json,

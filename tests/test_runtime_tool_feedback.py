@@ -34,74 +34,74 @@ TEST_REQUEST = "验证 landing page hero 和 CTA 行为"
 def _pm_commit() -> dict[str, object]:
     return {
         "execution_summary": "PM wrote the PRD.",
-        "artifacts": [
-            {
-                "kind": "prd",
-                "title": "AI Schedule Tool Landing Page PRD",
-                "summary": "Defines product scope.",
-                "content": {"problem": "Scheduling back-and-forth is costly."},
-            }
-        ],
     }
+
+
+PM_ARTIFACT = {
+    "kind": "prd",
+    "title": "AI Schedule Tool Landing Page PRD",
+    "summary": "Defines product scope.",
+    "content": {"problem": "Scheduling back-and-forth is costly."},
+}
 
 
 def _market_commit(tool_evidence: dict[str, str] | None = None) -> dict[str, object]:
     commit: dict[str, object] = {
         "execution_summary": "Market analyzed competitor positioning.",
-        "artifacts": [
-            {
-                "kind": "market-scan",
-                "title": "AI Schedule Market Scan",
-                "summary": "Competitor positioning notes.",
-                "content": {"insights": ["Concrete workflow claims are stronger."]},
-            }
-        ],
     }
     if tool_evidence is not None:
         commit["tool_evidence"] = tool_evidence
     return commit
 
 
+MARKET_ARTIFACT = {
+    "kind": "market-scan",
+    "title": "AI Schedule Market Scan",
+    "summary": "Competitor positioning notes.",
+    "content": {"insights": ["Concrete workflow claims are stronger."]},
+}
+
+
 def _design_commit() -> dict[str, object]:
     return {
         "execution_summary": "Design prepared the landing page handoff.",
-        "artifacts": [
-            {
-                "kind": "design-handoff",
-                "title": "Landing Page Design Handoff",
-                "summary": "Hero and CTA direction.",
-                "content": {"sections": ["hero", "cta"]},
-            }
-        ],
     }
+
+
+DESIGN_ARTIFACT = {
+    "kind": "design-handoff",
+    "title": "Landing Page Design Handoff",
+    "summary": "Hero and CTA direction.",
+    "content": {"sections": ["hero", "cta"]},
+}
 
 
 def _dev_commit() -> dict[str, object]:
     return {
         "execution_summary": "Dev implemented landing page copy changes.",
-        "artifacts": [
-            {
-                "kind": "implementation-report",
-                "title": "Landing Page Implementation Report",
-                "summary": "Source changes recorded.",
-                "content": {"changed_files": ["projects/app/src/landing-page.md"]},
-            }
-        ],
     }
+
+
+DEV_ARTIFACT = {
+    "kind": "implementation-report",
+    "title": "Landing Page Implementation Report",
+    "summary": "Source changes recorded.",
+    "content": {"changed_files": ["projects/app/src/landing-page.md"]},
+}
 
 
 def _test_commit() -> dict[str, object]:
     return {
         "execution_summary": "Test validated landing page hero and CTA.",
-        "artifacts": [
-            {
-                "kind": "test-report",
-                "title": "Landing Page Test Report",
-                "summary": "Smoke test result.",
-                "content": {"passed_items": ["hero renders", "cta clickable"]},
-            }
-        ],
     }
+
+
+TEST_ARTIFACT = {
+    "kind": "test-report",
+    "title": "Landing Page Test Report",
+    "summary": "Smoke test result.",
+    "content": {"passed_items": ["hero renders", "cta clickable"]},
+}
 
 
 class _CDPState:
@@ -267,6 +267,140 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
         )
+
+    def _env_tool(
+        self,
+        *,
+        buddy: str,
+        instance_json: Path,
+        instance_id: str,
+        tool: str,
+        action: str,
+        args: dict[str, object],
+    ) -> dict[str, object]:
+        response = self._dispatch(
+            method="env.tool",
+            payload={"tool": tool, "action": action, "args": args},
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy=buddy,
+        )
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("tool"), tool)
+        return response
+
+    def _create_bound_task(
+        self,
+        *,
+        buddy: str,
+        instance_json: Path,
+        instance_id: str,
+        task_id: str,
+        title: str,
+    ) -> None:
+        self._env_tool(
+            buddy=buddy,
+            instance_json=instance_json,
+            instance_id=instance_id,
+            tool="task",
+            action="create",
+            args={"task_id": task_id, "title": title, "summary": f"{buddy} feedback fixture task."},
+        )
+        self._env_tool(
+            buddy=buddy,
+            instance_json=instance_json,
+            instance_id=instance_id,
+            tool="binding",
+            action="set_task",
+            args={"task_id": task_id},
+        )
+
+    def _create_track(self, *, instance_json: Path, instance_id: str, track_id: str) -> None:
+        self._env_tool(
+            buddy="pm",
+            instance_json=instance_json,
+            instance_id=instance_id,
+            tool="track",
+            action="create",
+            args={
+                "track_id": track_id,
+                "title": "PM Validation Track",
+                "status": "active",
+                "current_buddy": "pm",
+                "next_buddy": "market",
+            },
+        )
+
+    def _attach_task_to_track(
+        self,
+        *,
+        buddy: str,
+        instance_json: Path,
+        instance_id: str,
+        task_id: str,
+        track_id: str,
+    ) -> None:
+        self._env_tool(
+            buddy=buddy,
+            instance_json=instance_json,
+            instance_id=instance_id,
+            tool="track",
+            action="attach_task",
+            args={"track_id": track_id, "task_id": task_id},
+        )
+
+    def _create_artifact(
+        self,
+        *,
+        buddy: str,
+        instance_json: Path,
+        instance_id: str,
+        context: dict[str, object],
+        task_id: str,
+        spec: dict[str, object],
+    ) -> str:
+        run_envelope = context["run_envelope"]
+        self.assertIsInstance(run_envelope, dict)
+        assert isinstance(run_envelope, dict)
+        source_run_id = run_envelope["run_id"]
+        self.assertIsInstance(source_run_id, str)
+        kind = spec["kind"]
+        self.assertIsInstance(kind, str)
+        created = self._env_tool(
+            buddy=buddy,
+            instance_json=instance_json,
+            instance_id=instance_id,
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": f"art-{task_id}-{kind}-{source_run_id.replace('run-', '')[:8]}",
+                "task_id": task_id,
+                "kind": kind,
+                "title": spec["title"],
+                "summary": spec["summary"],
+                "content": spec["content"],
+                "source_run_id": source_run_id,
+            },
+        )
+        return str(created["artifact_id"])
+
+    def _audit_result(
+        self,
+        base: dict[str, object],
+        *,
+        task_id: str,
+        artifact_ids: list[str],
+        track_id: str | None = None,
+        tool_evidence: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        result = copy.deepcopy(base)
+        result["task_id"] = task_id
+        result["artifact_ids"] = artifact_ids
+        if track_id is not None:
+            result["track_id"] = track_id
+        if tool_evidence is not None:
+            result["tool_evidence"] = tool_evidence
+        return result
 
     def _prepare(
         self,
@@ -538,7 +672,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                         }
                     },
                 },
-                "env-profile.state_capability.track_effects",
+                "persist.state_effects",
             )
         )
 
@@ -556,8 +690,8 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "inst-dev-example",
                 "dev",
                 dev_context,
-                _pm_commit(),
-                "manifest.artifact_kinds",
+                {"execution_summary": "Dev tried to embed PM artifact content.", "artifacts": [PM_ARTIFACT]},
+                "persist.artifacts",
             )
         )
 
@@ -586,7 +720,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "pm",
                 pm_context,
                 invalid_task,
-                "env-profile.state_capability.task_effects",
+                "persist.state_effects",
             )
         )
 
@@ -607,7 +741,8 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertIn("allowed_next_actions", rejected)
                 self.assertIsInstance(rejected["allowed_next_actions"], list)
                 self.assertGreaterEqual(len(rejected["allowed_next_actions"]), 1)
-                self.assertIn("persist_payload_hint", rejected)
+                if "persist_payload_hint" in rejected:
+                    self.assertIsInstance(rejected["persist_payload_hint"], dict)
                 self.assertEqual(self._state_snapshot(), before)
 
     def test_persist_common_validation_failures_return_structured_feedback_and_keep_state_atomic(self) -> None:
@@ -620,42 +755,31 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         bound_pm_json = self._instance_json(instance_id="inst-pm-bound")
-        seed_context = self._prepare(
+        track_id = "track-pm-validation"
+        task_id = "task-pm-validation"
+        self._create_track(instance_json=bound_pm_json, instance_id="inst-pm-bound", track_id=track_id)
+        self._create_bound_task(
             buddy="pm",
-            instance_id="inst-pm-bound",
-            request_text=PM_REQUEST,
-            instance_json=bound_pm_json,
-        )
-        track_create_commit = {
-            "execution_summary": "PM created a track for follow-up lifecycle checks.",
-            "state_effects": {
-                "track": {
-                    "action": "create",
-                    "track_id": "track-pm-validation",
-                    "title": "PM Validation Track",
-                    "status": "active",
-                    "current_buddy": "pm",
-                    "next_buddy": "market",
-                }
-            },
-        }
-        seeded = self._dispatch(
-            method="persist",
-            payload={"context": seed_context, "result": track_create_commit},
             instance_json=bound_pm_json,
             instance_id="inst-pm-bound",
-            buddy="pm",
+            task_id=task_id,
+            title="PM Validation Task",
         )
-        self.assertTrue(seeded["ok"], msg=seeded)
-        seed_receipt = seeded["payload"]["receipt"]
+        self._attach_task_to_track(
+            buddy="pm",
+            instance_json=bound_pm_json,
+            instance_id="inst-pm-bound",
+            task_id=task_id,
+            track_id=track_id,
+        )
         bound_context = self._prepare(
             buddy="pm",
             instance_id="inst-pm-bound",
             request_text="继续当前track",
             instance_json=bound_pm_json,
         )
-        self.assertEqual(bound_context["current_task_id"], seed_receipt["task_id"])
-        self.assertEqual(bound_context["current_track_id"], seed_receipt["track_id"])
+        self.assertEqual(bound_context["current_task_id"], task_id)
+        self.assertEqual(bound_context["current_track_id"], track_id)
 
         missing_execution_summary = _pm_commit()
         missing_execution_summary.pop("execution_summary", None)
@@ -663,37 +787,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         empty_execution_summary = _pm_commit()
         empty_execution_summary["execution_summary"] = "   "
 
-        duplicate_kind = _pm_commit()
-        duplicate_kind["artifacts"] = [
-            duplicate_kind["artifacts"][0],  # type: ignore[index]
-            {
-                "kind": "prd",
-                "title": "Duplicate kind",
-                "content": {"note": "duplicate"},
-            },
-        ]
-
-        artifact_missing_fields = {
-            "execution_summary": "PM attempted malformed artifact payload.",
-            "artifacts": [{"kind": "prd", "summary": "missing title and content"}],
-        }
-
-        artifact_missing_kind = {
-            "execution_summary": "PM attempted artifact payload without a kind.",
-            "artifacts": [{"title": "Missing Kind", "content": {"note": "missing kind"}}],
-        }
-
-        invalid_artifact_kind = {
-            "execution_summary": "PM attempted to persist a Dev-owned artifact kind.",
-            "artifacts": [
-                {
-                    "kind": "implementation-report",
-                    "title": "Wrong Owner",
-                    "summary": "Invalid kind for PM.",
-                    "content": {"note": "wrong owner"},
-                }
-            ],
-        }
+        embedded_artifact = {"execution_summary": "PM attempted embedded artifact content.", "artifacts": [PM_ARTIFACT]}
 
         unsupported_task_key = {
             "execution_summary": "PM attempted unsupported task field.",
@@ -718,44 +812,36 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "persist.execution_summary",
             ),
             (
-                "missing-durable-signal",
+                "embedded-artifact-content",
                 unbound_pm_json,
                 "inst-pm-unbound",
                 base_context,
-                {"execution_summary": "PM provided no durable signal."},
-                "persist.durable_signal",
-            ),
-            (
-                "duplicate-artifact-kind",
-                unbound_pm_json,
-                "inst-pm-unbound",
-                base_context,
-                duplicate_kind,
-                "persist.artifacts.kind",
-            ),
-            (
-                "artifact-missing-fields",
-                unbound_pm_json,
-                "inst-pm-unbound",
-                base_context,
-                artifact_missing_fields,
+                embedded_artifact,
                 "persist.artifacts",
             ),
             (
-                "artifact-missing-kind",
+                "missing-task-association",
                 unbound_pm_json,
                 "inst-pm-unbound",
                 base_context,
-                artifact_missing_kind,
-                "persist.artifacts",
+                {"execution_summary": "PM associated a missing task.", "task_id": "task-missing-feedback"},
+                "persist.task_id",
             ),
             (
-                "invalid-artifact-kind-for-active-buddy",
+                "missing-track-association",
                 unbound_pm_json,
                 "inst-pm-unbound",
                 base_context,
-                invalid_artifact_kind,
-                "manifest.artifact_kinds",
+                {"execution_summary": "PM associated a missing track.", "track_id": "track-missing-feedback"},
+                "persist.track_id",
+            ),
+            (
+                "missing-artifact-association",
+                unbound_pm_json,
+                "inst-pm-unbound",
+                base_context,
+                {"execution_summary": "PM associated a missing artifact.", "artifact_ids": ["art-missing-feedback"]},
+                "persist.artifact_ids",
             ),
             (
                 "invalid-track-action",
@@ -766,7 +852,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "execution_summary": "PM attempted unsupported track action.",
                     "state_effects": {"track": {"action": "pause"}},
                 },
-                "env-profile.state_capability.track_effects",
+                "persist.state_effects",
             ),
             (
                 "track-create-when-already-bound",
@@ -777,7 +863,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "execution_summary": "PM attempted duplicate track create.",
                     "state_effects": {"track": {"action": "create"}},
                 },
-                "state_effects.track.create",
+                "persist.state_effects",
             ),
             (
                 "non-create-without-track-id",
@@ -788,7 +874,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "execution_summary": "PM attempted track update without existing track binding.",
                     "state_effects": {"track": {"action": "update", "summary": "missing target"}},
                 },
-                "state_effects.track.track_id",
+                "persist.state_effects",
             ),
             (
                 "track-update-references-missing-track",
@@ -805,7 +891,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                         }
                     },
                 },
-                "state_effects.track.track_id",
+                "persist.state_effects",
             ),
             (
                 "track-update-without-mutable-fields",
@@ -814,9 +900,9 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 bound_context,
                 {
                     "execution_summary": "PM attempted track update without mutable fields.",
-                    "state_effects": {"track": {"action": "update", "track_id": seed_receipt["track_id"]}},
+                    "state_effects": {"track": {"action": "update", "track_id": track_id}},
                 },
-                "state_effects.track",
+                "persist.state_effects",
             ),
             (
                 "handoff-missing-reason-context",
@@ -861,7 +947,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "state_effects": {
                         "track": {
                             "action": "advance",
-                            "track_id": seed_receipt["track_id"],
+                            "track_id": track_id,
                             "next_buddy": "design",
                         }
                     },
@@ -871,7 +957,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                         "context": "conflicting target",
                     },
                 },
-                "persist.handoff",
+                "persist.state_effects",
             ),
             (
                 "unsupported-task-key",
@@ -879,7 +965,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "inst-pm-unbound",
                 base_context,
                 unsupported_task_key,
-                "env-profile.state_capability.task_effects",
+                "persist.state_effects",
             ),
         )
 
@@ -900,7 +986,8 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertIn("allowed_next_actions", rejected)
                 self.assertIsInstance(rejected["allowed_next_actions"], list)
                 self.assertGreaterEqual(len(rejected["allowed_next_actions"]), 1)
-                self.assertIn("persist_payload_hint", rejected)
+                if "persist_payload_hint" in rejected:
+                    self.assertIsInstance(rejected["persist_payload_hint"], dict)
                 self.assertEqual(self._state_snapshot(), before)
 
     def test_stale_context_and_buddy_mismatch_feedback_tell_buddy_to_prepare_again(self) -> None:
@@ -989,17 +1076,38 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         port = self._start_cdp_server(state)
         market_json = self._instance_json(buddy="market", instance_id="inst-market-example", browser_port=port)
+        market_task_id = "task-market-feedback"
+        self._create_bound_task(
+            buddy="market",
+            instance_json=market_json,
+            instance_id="inst-market-example",
+            task_id=market_task_id,
+            title="Market Feedback Task",
+        )
         context = self._prepare(
             buddy="market",
             instance_id="inst-market-example",
             request_text=MARKET_REQUEST,
             instance_json=market_json,
         )
+        market_artifact_id = self._create_artifact(
+            buddy="market",
+            instance_json=market_json,
+            instance_id="inst-market-example",
+            context=context,
+            task_id=market_task_id,
+            spec=MARKET_ARTIFACT,
+        )
+        market_result = self._audit_result(
+            _market_commit(),
+            task_id=market_task_id,
+            artifact_ids=[market_artifact_id],
+        )
 
         before = self._state_snapshot()
         missing = self._dispatch(
             method="persist",
-            payload={"context": context, "result": _market_commit()},
+            payload={"context": context, "result": market_result},
             instance_json=market_json,
             instance_id="inst-market-example",
             buddy="market",
@@ -1013,7 +1121,10 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             method="persist",
             payload={
                 "context": context,
-                "result": _market_commit({"browser_cockpit_token": "handwritten-token"}),
+                "result": {
+                    **market_result,
+                    "tool_evidence": {"browser_cockpit_token": "handwritten-token"},
+                },
             },
             instance_json=market_json,
             instance_id="inst-market-example",
@@ -1056,7 +1167,10 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             method="persist",
             payload={
                 "context": context,
-                "result": _market_commit({"browser_cockpit_token": wrong_instance_token}),
+                "result": {
+                    **market_result,
+                    "tool_evidence": {"browser_cockpit_token": wrong_instance_token},
+                },
             },
             instance_json=market_json,
             instance_id="inst-market-example",
@@ -1088,9 +1202,12 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             method="persist",
             payload={
                 "context": context,
-                "result": _market_commit(
-                    {"browser_cockpit_token": downgrade_payload["tool_evidence"]["approved_downgrade_token"]}
-                ),
+                "result": {
+                    **market_result,
+                    "tool_evidence": {
+                        "browser_cockpit_token": downgrade_payload["tool_evidence"]["approved_downgrade_token"]
+                    },
+                },
             },
             instance_json=market_json,
             instance_id="inst-market-example",
@@ -1136,7 +1253,10 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         rejected = self._dispatch(
             method="persist",
-            payload={"context": market_context, "result": _market_commit()},
+            payload={
+                "context": market_context,
+                "result": {"execution_summary": "Market tried embedded artifact content.", "artifacts": [MARKET_ARTIFACT]},
+            },
             instance_json=market_json,
             instance_id="inst-market-top-level",
             buddy="market",

@@ -27,29 +27,6 @@ PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份P
 PM_COMMIT = {
     "execution_summary": "PM wrote the AI schedule tool landing page PRD and created the delivery track.",
     "working_notes": ["The user requested PRD creation and track binding in one PM run."],
-    "artifacts": [
-        {
-            "kind": "prd",
-            "title": "AI Schedule Tool Landing Page PRD",
-            "summary": "Defines landing page scope and acceptance criteria.",
-            "content": {
-                "problem": "Busy professionals need an AI-assisted way to reduce scheduling overhead.",
-                "requirements": ["Explain the core promise in the hero", "Show concrete scheduling workflows"],
-            },
-        }
-    ],
-    "state_effects": {
-        "track": {
-            "action": "create",
-            "track_id": "track-ai-schedule-landing-page",
-            "title": "AI Schedule Tool Landing Page",
-            "status": "active",
-            "current_buddy": "pm",
-            "next_buddy": "market",
-            "summary": "Cross-buddy landing page iteration for an AI schedule tool.",
-        },
-        "task": {"status": "done", "summary": "PM PRD is ready for market positioning research."},
-    },
     "handoff": {
         "next_buddy": "market",
         "reason": "Market should validate competitor landing page positioning before design.",
@@ -138,8 +115,9 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         run_path = self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")
         self.assertTrue(run_path.exists())
         persisted_instance = json.loads(instance_json.read_text(encoding="utf-8"))
-        self.assertEqual(persisted_instance["current_task_id"], receipt["task_id"])
-        self.assertEqual(persisted_instance["current_track_id"], receipt["track_id"])
+        self.assertEqual(persisted_instance, before_prepare_instance)
+        self.assertNotIn("task_id", receipt)
+        self.assertNotIn("track_id", receipt)
 
     def test_prepare_and_persist_enter_shared_runtime_lock(self) -> None:
         instance_json = self._instance_json()

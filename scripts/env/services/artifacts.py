@@ -220,6 +220,7 @@ def _source_run_error(
         task_id=task_id,
         allowed_next_actions=[
             "Use the reserved run_id from the active prepare context.",
+            "When prepare was taskless, use task.create and task.set_current before artifact.create_revision.",
             "Run prepare again when the source run reservation is missing or stale.",
         ],
     )
@@ -455,7 +456,8 @@ def _validate_source_run(
             task_id=task_id,
             artifact_id=artifact_id,
         )
-    if reservation.get("task_id") != task_id:
+    reserved_task_id = reservation.get("task_id")
+    if isinstance(reserved_task_id, str) and reserved_task_id and reserved_task_id != task_id:
         return None, _source_run_error(
             action=action,
             active_buddy=context["active_buddy"],

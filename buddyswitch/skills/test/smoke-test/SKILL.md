@@ -26,8 +26,8 @@ description: Use when the task is running smoke checks, regression verification,
 
 ## Outputs
 - A contribution to the current compact buddy-run commit.
-- When persisted by the locked buddy session, one authorized artifact entry under `artifacts[]`.
-- Commit JSON aligned to the active buddy schema under `framework/schemas/`.
+- Durable smoke test report content is written before persist through `artifact-tool` `artifact.create_revision`.
+- The final run commit references already-written artifacts with optional `artifact_ids` metadata.
 
 ## Steps
 
@@ -57,14 +57,15 @@ Contribute to one buddy-run commit. Do not call persist from inside the skill.
 Required top-level field:
 - `execution_summary`
 
-Use `artifacts` when this skill produces a durable artifact:
+Use `artifact-tool` before persist when this skill produces a durable artifact:
 - `kind`: `smoke-test`
 - `title`: concise artifact title
 - `summary`: short downstream selection summary
 - `content`: include `test_scope`, `checks_run`, `passed_items`, `failed_items`, `blocked_items`, `reproduction_notes`, and `readiness`
 
+After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
 Use optional `working_notes` for concise reasoning or verification notes.
-Use optional `state_effects.task` only for the current prepared task.
+Use optional `task_id` only as association metadata for an explicitly selected task.
 Use optional `handoff` when another manifest buddy should continue.
 
 ## Guardrails

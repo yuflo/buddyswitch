@@ -75,4 +75,4 @@ Other buddies:
 - `dev`: `implement-task`, plus shared `task-tool`, `track-tool`, and `artifact-tool`
 - `test`: `smoke-test`, plus shared `task-tool`, `track-tool`, and `artifact-tool`
 
-Track lifecycle mutations are explicit `state_effects.track` actions (`create|update|advance|archive`) validated against buddy permissions.
+Track lifecycle mutations and task-track linkage are explicit env tool actions validated against buddy permissions.

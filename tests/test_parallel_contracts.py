@@ -30,12 +30,13 @@ WORKSPACE_PROJECTION_CONTRACT = CONTRACTS_DIR / "workspace-projection.json"
 
 EXPECTED_PREPARE_TURN_CONTEXT_CONTRACT = {
     "contract_id": "prepare-turn-context",
-    "contract_version": "2026-05-03",
+    "contract_version": "2026-05-12",
     "response_key_order": [
         "ok",
         "context_revision",
         "instance_id",
         "active_buddy",
+        "binding_snapshot",
         "runtime_context",
         "context_save_path",
         "persist_command_hint",
@@ -66,8 +67,8 @@ EXPECTED_PREPARE_TURN_CONTEXT_CONTRACT = {
 
 EXPECTED_PERSIST_BUDDY_RUN_CONTRACT = {
     "contract_id": "persist-buddy-run",
-    "contract_version": "2026-05-06",
-    "request_boundary": "active_buddy + reserved run_id + current task/track context",
+    "contract_version": "2026-05-12",
+    "request_boundary": "active_buddy + reserved run envelope + optional task/track/artifact associations",
     "response_key_order": [
         "ok",
         "receipt",
@@ -78,8 +79,9 @@ EXPECTED_PERSIST_BUDDY_RUN_CONTRACT = {
     ],
     "commit_optional_keys": [
         "working_notes",
-        "artifacts",
-        "state_effects",
+        "task_id",
+        "track_id",
+        "artifact_ids",
         "handoff",
         "contributors",
         "tool_evidence",
@@ -87,8 +89,6 @@ EXPECTED_PERSIST_BUDDY_RUN_CONTRACT = {
     "receipt_required_keys": [
         "ok",
         "buddy_id",
-        "task_id",
-        "task_title",
         "artifact_ids",
         "run_id",
         "next_state",
@@ -96,9 +96,10 @@ EXPECTED_PERSIST_BUDDY_RUN_CONTRACT = {
         "related_run_ids",
     ],
     "receipt_optional_keys": [
+        "task_id",
+        "task_title",
         "track_id",
         "track_title",
-        "track_action",
         "handoff",
         "warnings",
     ],
@@ -242,26 +243,6 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         return {
             "execution_summary": "Implemented onboarding improvements and persisted dev report.",
             "working_notes": ["Focused on onboarding CTA behavior."],
-            "artifacts": [
-                {
-                    "kind": "implementation-report",
-                    "title": "Onboarding CTA Implementation Report",
-                    "summary": "Implementation details and verification notes.",
-                    "content": {
-                        "task_summary": "Updated CTA behavior.",
-                        "changed_files": ["projects/app/src/example.ts"],
-                        "implementation_notes": ["Kept state transitions stable."],
-                        "verification": {
-                            "checks_run": ["npm test"],
-                            "passed": ["Targeted unit tests"],
-                            "failed": [],
-                            "blocked": [],
-                        },
-                        "risks": [],
-                        "follow_ups": [],
-                    },
-                }
-            ],
             "contributors": {
                 "skills": ["implement-task"],
                 "agents": [],
@@ -285,7 +266,9 @@ class ResolveAndPersistContractTests(RuntimeWorkspaceTestMixin, unittest.TestCas
         self.assertTrue(payload["ok"])
         self.assertEqual(list(payload.keys()), contract["response_key_order"])
         self.assertEqual(payload["request_text"], request_text)
-        self.assertEqual(payload["current_task_id"], payload["task_context"]["task"]["id"])
+        self.assertIsNone(payload["current_task_id"])
+        self.assertIsNone(payload["task_context"])
+        self.assertEqual(payload["binding_snapshot"]["binding_state"], "unbound")
         self.assertEqual(payload["run_envelope"]["status"], "reserved")
         self.assertIn("turn_identity", payload["run_envelope"])
         for forbidden in (
