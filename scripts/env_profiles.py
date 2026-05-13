@@ -109,6 +109,51 @@ def _manifest_buddy_ids(manifest: dict[str, Any]) -> list[str]:
     return ids
 
 
+def _require_search_capability(
+    *,
+    tool_capability: dict[str, Any],
+    enums: dict[str, Any],
+    buddy_id: str,
+    browser_cockpit: str,
+) -> dict[str, str]:
+    search = _require_dict(tool_capability.get("search"), "tool_capability.search")
+    native_codex_web_search = _require_enum(
+        enums=enums,
+        key="tool_capability.search.native_codex_web_search",
+        value=search.get("native_codex_web_search"),
+        label="tool_capability.search.native_codex_web_search",
+    )
+    search_browser_cockpit = _require_enum(
+        enums=enums,
+        key="tool_capability.search.browser_cockpit",
+        value=search.get("browser_cockpit"),
+        label="tool_capability.search.browser_cockpit",
+    )
+    search_api = _require_enum(
+        enums=enums,
+        key="tool_capability.search.search_api",
+        value=search.get("search_api"),
+        label="tool_capability.search.search_api",
+    )
+    if native_codex_web_search != "disabled":
+        raise EnvProfileError("tool_capability.search.native_codex_web_search must be 'disabled'")
+    if search_browser_cockpit != browser_cockpit:
+        raise EnvProfileError(
+            "tool_capability.search.browser_cockpit must match tool_capability.browser_cockpit"
+        )
+    expected_search_api = "user-approved-only" if buddy_id == "market" else "available"
+    if search_api != expected_search_api:
+        raise EnvProfileError(
+            f"tool_capability.search.search_api mismatch for '{buddy_id}': "
+            f"expected {expected_search_api!r}, got {search_api!r}"
+        )
+    return {
+        "native_codex_web_search": native_codex_web_search,
+        "browser_cockpit": search_browser_cockpit,
+        "search_api": search_api,
+    }
+
+
 def validate_env_profile(
     profile: dict[str, Any],
     *,
@@ -250,6 +295,12 @@ def validate_env_profile(
         key="tool_capability.ordinary_web_fallback",
         value=tool_capability.get("ordinary_web_fallback"),
         label="tool_capability.ordinary_web_fallback",
+    )
+    _require_search_capability(
+        tool_capability=tool_capability,
+        enums=enums,
+        buddy_id=buddy_id,
+        browser_cockpit=browser_cockpit,
     )
 
     context_projection = _require_dict(profile.get("context_projection"), "context_projection")

@@ -261,6 +261,50 @@ default_tools_approval_mode = "ask"
             self.assertNotIn('default_tools_approval_mode = "ask"', text)
             self.assertEqual(text.count('default_tools_approval_mode = "approve"'), 2)
 
+    def test_patch_forces_web_search_disabled_and_removes_existing_web_search_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            shared_root = temp_root / "shared"
+            instance_root = shared_root / "instances" / "inst-pm-example"
+            workspace_dir = instance_root / "workspace"
+            project_workspace_dir = shared_root / "project" / "workspace"
+            config_path = temp_root / "config.toml"
+            config_path.write_text(
+                """
+web_search = "live"
+
+[features]
+plugins = false
+web_search = "cached"
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            for _ in range(2):
+                completed = self._run_patch(
+                    config_path=config_path,
+                    shared_root=shared_root,
+                    buddy="pm",
+                    instance_root=instance_root,
+                    workspace_dir=workspace_dir,
+                    project_workspace_dir=project_workspace_dir,
+                    home=instance_root / "home",
+                    codex_home=instance_root / "codex-home",
+                    xdg_config_home=instance_root / "xdg-config",
+                )
+                self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            config_text = config_path.read_text(encoding="utf-8")
+            parsed = tomllib.loads(config_text)
+            top_level_text = config_text.split("[", 1)[0]
+            features_text = config_text.split("[features]", 1)[1].split("\n[", 1)[0]
+            self.assertEqual(parsed["web_search"], "disabled")
+            self.assertEqual(config_text.count('web_search = "disabled"'), 1)
+            self.assertIn('web_search = "disabled"', top_level_text)
+            self.assertNotIn("web_search", features_text)
+            self.assertNotIn('"live"', config_text)
+            self.assertNotIn('"cached"', config_text)
+
     def test_profile_mode_with_broker_socket_includes_unix_socket_allowlist(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

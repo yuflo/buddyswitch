@@ -887,6 +887,9 @@ def _build_runtime_context(
     project_access = project.get("access")
     if not isinstance(project_access, str) or not project_access:
         raise ValueError("env profile project.access must be a non-empty string")
+    search_capability = tool_capability.get("search")
+    if not isinstance(search_capability, dict):
+        raise ValueError("env profile tool_capability.search must be an object")
 
     allowed_task_effects = state_capability.get("task_effects")
     if not isinstance(allowed_task_effects, list):
@@ -901,6 +904,7 @@ def _build_runtime_context(
         "browser_cockpit": tool_capability.get("browser_cockpit"),
         "market_research_evidence": tool_capability.get("market_research_evidence"),
         "ordinary_web_fallback": tool_capability.get("ordinary_web_fallback"),
+        "search": dict(search_capability),
     }
     if buddy.get("id") == "market":
         tool_requirements["evidence_next_action"] = (
@@ -968,6 +972,10 @@ def _build_runtime_context(
             "raw_state": {
                 "access": "broker-only",
                 "paths": list(_RUNTIME_RAW_STATE_PATHS),
+            },
+            "search": {
+                **search_capability,
+                "env_tool_source": "runtime_context.env_tools.search",
             },
         },
         "env_tools": _build_env_tools_desc(),

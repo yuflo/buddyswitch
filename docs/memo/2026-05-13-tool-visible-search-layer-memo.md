@@ -4,6 +4,8 @@ Date: 2026-05-13
 Worktree: `dev2258`
 Scope: BuddySwitch env tool layer, Codex native web search boundary, browser/search capability visibility, and cross-buddy tool convergence.
 
+Superseded note: this memo now reflects the active `search` env.tool surface; prior `search_manager` naming is retired and must not be used as an implementation guide.
+
 ## Background
 
 A Market run showed a concrete product problem: the Market buddy was expected to keep research browser-native, but later used Codex host-native search API instead of continuing through the browser cockpit path.
@@ -206,8 +208,8 @@ Skills should not carry the whole burden of controlling tools.
 
 Expected division:
 
-- `prepare.runtime_context.env_tools.search_manager` describes the tool envelope, operations, payload fields, backend model, and feedback source.
-- Search-related skills reference the `search_manager` tool surface.
+- `prepare.runtime_context.env_tools.search` describes the tool envelope, operations, payload fields, backend model, and feedback source.
+- Search-related skills reference the `search` tool surface.
 - Market research skills should directly select the browser-native search action instead of relying on profile text to imply a default.
 - Tool feedback should provide next actions when the host asks for a backend that is unavailable or requires approval.
 
@@ -233,7 +235,7 @@ The first implementation slice is acceptable when:
 
 1. BuddySwitch-launched Codex sessions do not expose native `web_search`.
 2. Obvious native search startup escapes are blocked or neutralized.
-3. `prepare.runtime_context.env_tools` includes `search_manager`.
+3. `prepare.runtime_context.env_tools` includes `search`.
 4. `env.tool` router accepts `tool = "search"`.
 5. `search.status` returns structured capability and backend feedback.
 6. Market research skill directly uses the browser-native search tool path for discovery.
@@ -248,7 +250,7 @@ Use focused tests before implementation:
 
 - launcher config patch test: managed config contains `web_search = "disabled"`;
 - launcher wrapper test: `--search` and `-c web_search=...` cannot start native Codex search in product mode;
-- prepare context test: `search_manager` appears in `runtime_context.env_tools`;
+- prepare context test: `search` appears in `runtime_context.env_tools`;
 - router test: `search.status` dispatches through `env.tool`;
 - response contract test: search success and rejection responses include machine-readable feedback;
 - profile test: all buddies expose a coherent search capability boundary;
@@ -268,12 +270,12 @@ Do not implement hidden routing rules that decide research flow for the model. T
 
 Implement the narrow P0 + P1 vertical slice:
 
-1. Add tests for native search disablement and `search_manager` visibility.
+1. Add tests for native search disablement and `search` visibility.
 2. Patch launcher-managed config and startup argument handling.
-3. Add `scripts/env/tools/search_manager.py` and `scripts/env/services/search.py`.
+3. Add `scripts/env/services/search.py` and register `search` handlers through the existing env tool registry/dispatch path.
 4. Register `search` in `scripts/env/tools/router.py`.
 5. Add `search` CLI support in `scripts/env/client.py`.
-6. Add `search_manager` to `turn_runtime._build_env_tools_desc()`.
+6. Add `search` to `turn_runtime._build_env_tools_desc()`.
 7. Add profile capability boundary fields and validation.
 8. Update the Market research skill and runtime `AGENTS.md` projection so tool choice is explicit at the skill/tool layer.
 9. Run focused tests.

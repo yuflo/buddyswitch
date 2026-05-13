@@ -1040,6 +1040,112 @@ exec "$real_git" "$@"
                 self.assertFalse((runtime_skills / removed).exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
 
+    def test_product_instance_start_rejects_native_search_args_before_codex_launch(self) -> None:
+        escape_args = (
+            ("--search",),
+            ("--search=live",),
+            ("-c", "web_search=live"),
+            ("-cweb_search=cached",),
+            ("--config", "web_search=live"),
+            ("--config=web_search=cached",),
+        )
+        for args in escape_args:
+            with self.subTest(args=args):
+                with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+                    temp_root_path = Path(temp_root)
+                    source_home_path = Path(source_home)
+                    source_codex_home = source_home_path / ".codex"
+                    source_codex_home.mkdir(parents=True, exist_ok=True)
+                    (source_codex_home / "auth.json").write_text(
+                        json.dumps(
+                            {
+                                "auth_mode": "apikey",
+                                "openai_api_key": "test-key",
+                                "tokens": None,
+                                "last_refresh": None,
+                                "agent_identity": None,
+                            },
+                            ensure_ascii=True,
+                            indent=2,
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+
+                    fake_bin = temp_root_path / "bin"
+                    fake_bin.mkdir(parents=True, exist_ok=True)
+                    self._write_fake_codex(fake_bin / "codex")
+                    self._write_fake_curl(fake_bin / "curl")
+                    self._write_fake_chrome(fake_bin / "fake-chrome")
+
+                    capture_path = temp_root_path / "capture.json"
+                    ready_file = temp_root_path / "browser-ready.flag"
+                    env = os.environ.copy()
+                    env["HOME"] = str(source_home_path)
+                    env.pop("CODEX_HOME", None)
+                    env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+                    env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+                    env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+                    env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+                    env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+                    completed = subprocess.run(
+                        [str(LAUNCHER), "instance", "start", "--buddy", "pm", "--", *args],
+                        cwd=ROOT,
+                        env=env,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+
+                    self.assertEqual(completed.returncode, 2, msg=completed.stderr)
+                    self.assertIn("Native Codex web_search is disabled", completed.stderr)
+                    self.assertIn("scripts/env/client.py search status", completed.stderr)
+                    self.assertIn("scripts/env/client.py search open-browser", completed.stderr)
+                    self.assertFalse(capture_path.exists(), "native search escape must not launch Codex")
+
+    def test_local_non_buddy_start_allows_codex_search_args(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            capture_path = temp_root_path / "capture.json"
+            home = temp_root_path / "home"
+            codex_home = temp_root_path / "codex-home"
+            xdg_config_home = temp_root_path / "xdg-config"
+            codex_home.mkdir(parents=True)
+            (codex_home / "auth.json").write_text("{}\n", encoding="utf-8")
+            (codex_home / "config.toml").write_text("", encoding="utf-8")
+
+            command = (
+                "source tools/launcher/env.sh\n"
+                "BUDDYSWITCH_HOME=\"$1\"\n"
+                "BUDDYSWITCH_CODEX_HOME=\"$2\"\n"
+                "BUDDYSWITCH_XDG_CONFIG_HOME=\"$3\"\n"
+                "buddyswitch_run_codex --search\n"
+            )
+            env = os.environ.copy()
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env.pop("BUDDYSWITCH_ACTIVE_BUDDY", None)
+            env.pop("BUDDYSWITCH_INSTANCE_ID", None)
+
+            completed = subprocess.run(
+                ["bash", "-lc", command, "buddyswitch-run-codex-test", str(home), str(codex_home), str(xdg_config_home)],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["argv"], ["--search"])
+            self.assertIsNone(payload["active_buddy"])
+            self.assertIsNone(payload["instance_id"])
+
     def test_start_execution_worktree_uses_design_buddy_prompt_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -1107,6 +1213,9 @@ exec "$real_git" "$@"
                 "## Runtime Boundary",
                 "project.access=read-only",
                 "hand off to Dev",
+                "env_tools.search",
+                "Native Codex `web_search` is unavailable",
+                "scripts/env/client.py search status",
                 "## Receipt",
                 "## Summary",
             ):

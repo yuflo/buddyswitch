@@ -13,6 +13,7 @@ from env.services import context as context_service
 from env.services import evidence as evidence_service
 from env.services import handoffs as handoff_service
 from env.services import runs as run_service
+from env.services import search as search_service
 from env.services import tasks as task_service
 from env.services import tracks as track_service
 from env.tools import responses as tool_responses
@@ -69,6 +70,11 @@ HANDLERS_BY_TOOL = {
     "evidence": {
         "issue_browser": evidence_service.issue_browser_for_active_instance,
         "approve_downgrade": evidence_service.approve_downgrade_for_active_instance,
+    },
+    "search": {
+        "status": search_service.status_for_active_instance,
+        "request": search_service.request_for_active_instance,
+        "open_browser": search_service.open_browser_for_active_instance,
     },
 }
 
@@ -136,7 +142,7 @@ def _service_context(
         "instance_payload": instance_payload,
         "manifest": manifest,
     }
-    if tool in {"run", "evidence"}:
+    if tool in {"run", "evidence", "search"}:
         context["manifest_path"] = manifest_path
     return context
 

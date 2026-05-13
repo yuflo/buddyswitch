@@ -729,6 +729,51 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("not issued by runtime broker", rejected["error"]["message"])
         self.assertEqual(self._state_snapshot(), before)
 
+    def test_search_tool_response_does_not_satisfy_market_browser_evidence_gate(self) -> None:
+        instance_json = self._instance_json(browser_port=9222)
+        context = self._prepare_market(instance_json=instance_json)
+        artifact_id = self._seed_market_artifact()
+        search_response = self._dispatch(
+            request={
+                "protocol": "buddyswitch-runtime-broker/v2",
+                "instance_id": "inst-market-example",
+                "active_buddy": "market",
+                "method": "env.tool",
+                "params": {
+                    "tool": "search",
+                    "action": "request",
+                    "args": {
+                        "query": "creator analytics pain",
+                        "backend": "browser",
+                        "engine": "google",
+                    },
+                },
+            },
+            instance_json=instance_json,
+        )
+        self.assertTrue(search_response["ok"], msg=search_response)
+        before = self._state_snapshot()
+        rejected = self._dispatch(
+            request={
+                "protocol": "buddyswitch-runtime-broker/v2",
+                "instance_id": "inst-market-example",
+                "active_buddy": "market",
+                "method": "persist",
+                "params": {
+                    "context": context,
+                    "result": _market_commit(
+                        {"search_response": json.dumps(search_response, ensure_ascii=True, sort_keys=True)},
+                        artifact_ids=[artifact_id],
+                    ),
+                },
+            },
+            instance_json=instance_json,
+        )
+        self.assertFalse(rejected["ok"], msg=rejected)
+        self.assertIn("tool_evidence", rejected["error"]["message"])
+        self.assertEqual(rejected["permission_boundary"], "market.browser_evidence")
+        self.assertEqual(self._state_snapshot(), before)
+
     def test_approved_downgrade_token_requires_reason(self) -> None:
         instance_json = self._instance_json()
         context = self._prepare_market(instance_json=instance_json)

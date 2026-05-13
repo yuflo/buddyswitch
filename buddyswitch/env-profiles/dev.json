@@ -23,7 +23,12 @@
   "tool_capability": {
     "browser_cockpit": "available",
     "market_research_evidence": "not-required",
-    "ordinary_web_fallback": "available"
+    "ordinary_web_fallback": "available",
+    "search": {
+      "native_codex_web_search": "disabled",
+      "browser_cockpit": "available",
+      "search_api": "available"
+    }
   },
   "context_projection": {
     "agents_md": "from-profile-and-contract",

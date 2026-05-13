@@ -6,7 +6,7 @@ description: Use when the task is building broad market reality, category struct
 # research-scan
 
 ## Execution Order
-1. Before any market research, run discovery in the visible `chrome-devtools-cockpit` browser and keep the workflow `browser-native`.
+1. Before any market research, call `python3 scripts/env/client.py search open-browser --query "<initial query>" --engine <google|reddit|x|web>`, then continue discovery in `chrome-devtools-cockpit` and keep the workflow `browser-native`.
 2. Read all selected upstream inputs before forming new market claims.
 3. If a critical source requires login, pause for mandatory takeover.
 4. Do not continue with snippet-only or text-only research when the skill contract requires browser-native work.
@@ -83,7 +83,7 @@ For each round, run this fixed loop:
 - This skill follows `framework/docs/browser-cockpit.md`.
 - It uses `chrome-devtools-cockpit` as the browser executor.
 - It runs in an instance headed cockpit (`browser_mode=headed-only`) with profile `instance-browser`.
-- Discovery mode is `browser-native`: search in the browser and continue into real result pages, details, comments, and related pages where relevant.
+- Discovery starts with `search.open_browser` to open the browser-native entry page, then continues into real result pages, details, comments, and related pages where relevant via `chrome-devtools-cockpit`.
 - Critical-source login is mandatory takeover, and fallback policy is no silent degrade.
 - Do not use silent search API/snippet/crawler fallback.
 - If browser-native access is genuinely blocked, only explicit user-approved one-off downgrade is allowed.

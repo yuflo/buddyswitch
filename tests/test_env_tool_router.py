@@ -191,7 +191,7 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         importlib.import_module("env.tools.dispatch")
 
         manager_suffix = "_" + "manager"
-        for tool in ("task", "track", "artifact", "context", "binding", "handoff", "run", "evidence"):
+        for tool in ("task", "track", "artifact", "context", "binding", "handoff", "run", "evidence", "search"):
             module_name = "env.tools." + tool + manager_suffix
             with self.subTest(module=module_name):
                 with self.assertRaises(ModuleNotFoundError):

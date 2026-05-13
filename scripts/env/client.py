@@ -196,6 +196,30 @@ def _parse_args() -> argparse.Namespace:
 
     get_raw = run_sub.add_parser("get-raw", help="Get raw committed run audit content")
     get_raw.add_argument("--run-id", required=True)
+
+    search = sub.add_parser(
+        "search",
+        help="Search env operations",
+        epilog=(
+            "request args: --query <query> --backend <browser|search_api> [--engine <google|web|reddit|x>]\n"
+            "open-browser args: --query <query> [--engine <google|web|reddit|x>]"
+        ),
+    )
+    search_sub = search.add_subparsers(dest="operation", required=True)
+
+    search_sub.add_parser("status", help="Get search capability boundary and backend status")
+
+    search_request = search_sub.add_parser(
+        "request",
+        help="Build search backend request feedback without opening browser page",
+    )
+    search_request.add_argument("--query", required=True)
+    search_request.add_argument("--backend", required=True, choices=("browser", "search_api"))
+    search_request.add_argument("--engine", choices=("google", "web", "reddit", "x"), default="google")
+
+    open_browser = search_sub.add_parser("open-browser", help="Open search page in instance browser through CDP")
+    open_browser.add_argument("--query", required=True)
+    open_browser.add_argument("--engine", choices=("google", "web", "reddit", "x"), default="google")
     return parser.parse_args()
 
 
@@ -343,6 +367,37 @@ def _run_args_from_cli(args: argparse.Namespace) -> dict[str, Any]:
     raise ValueError(f"unsupported run operation: {operation}")
 
 
+def _search_args_from_cli(args: argparse.Namespace) -> dict[str, Any]:
+    operation = args.operation
+    if operation == "status":
+        return {}
+    if operation == "request":
+        query = getattr(args, "query", None)
+        backend = getattr(args, "backend", None)
+        engine = getattr(args, "engine", None)
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query is required")
+        if not isinstance(backend, str) or not backend.strip():
+            raise ValueError("backend is required")
+        payload: dict[str, Any] = {
+            "query": query.strip(),
+            "backend": backend.strip(),
+        }
+        if isinstance(engine, str) and engine.strip():
+            payload["engine"] = engine.strip()
+        return payload
+    if operation == "open-browser":
+        query = getattr(args, "query", None)
+        engine = getattr(args, "engine", None)
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query is required")
+        payload = {"query": query.strip()}
+        if isinstance(engine, str) and engine.strip():
+            payload["engine"] = engine.strip()
+        return payload
+    raise ValueError(f"unsupported search operation: {operation}")
+
+
 def _dispatch_env_tool(
     tool: str,
     action: str,
@@ -430,6 +485,12 @@ def _dispatch_run(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _dispatch_search(args: argparse.Namespace) -> dict[str, Any]:
+    operation = str(args.operation)
+    action = _operation_to_action(operation)
+    return _dispatch_env_tool("search", action, _search_args_from_cli(args))
+
+
 def main() -> int:
     try:
         args = _parse_args()
@@ -449,6 +510,8 @@ def main() -> int:
             payload = _dispatch_evidence(args)
         elif args.resource == "run":
             payload = _dispatch_run(args)
+        elif args.resource == "search":
+            payload = _dispatch_search(args)
         else:
             raise ValueError(f"unsupported resource: {args.resource}")
     except RuntimeBrokerError as exc:

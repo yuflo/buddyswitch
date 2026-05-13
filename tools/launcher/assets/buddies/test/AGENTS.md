@@ -13,6 +13,7 @@ AGENTS.md is context projection only and not the permission source.
 - Allowed scratch root is `runs/raw/test/`.
 - Raw state is broker-only: do not edit `buddyswitch/objects/**` or `buddyswitch/content/runs/**` directly.
 - Env tool operations use `python3 scripts/env/client.py ...` through broker method `env.tool`.
+- Native Codex `web_search` is unavailable in BuddySwitch product sessions; use `env_tools.search` via `python3 scripts/env/client.py search status` and `python3 scripts/env/client.py search open-browser --query "<query>" --engine google`.
 - Use `python3 scripts/turn_runtime.py persist --context <context> --result <result>` after execution.
 - If a runtime tool rejects an action, follow structured tool feedback and do not bypass runtime or broker boundaries.
 

@@ -17,6 +17,7 @@ MUTATES_INSTANCE_BINDING = "instance_binding"
 MUTATES_RUNTIME_OBJECTS = "runtime_objects"
 MUTATES_RUN_COMMIT = "run_commit"
 MUTATES_BROKER_TOKEN = "broker_token"
+MUTATES_BROWSER_SESSION = "browser_session"
 
 TOOL_REGISTRY: list[dict[str, Any]] = [
     {
@@ -450,6 +451,79 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             },
         ],
     },
+    {
+        "tool": "search",
+        "cli_resource": "search",
+        "command": "python3 scripts/env/client.py search <operation>",
+        "scope": "runtime-visible search capability boundary and browser/search backend feedback",
+        "backend_model": {
+            "allowed_backends": ["browser", "search_api"],
+            "allowed_engines": ["google", "web", "reddit", "x"],
+            "native_codex_web_search": "disabled",
+            "search_api_provider": "not-configured",
+        },
+        "actions": [
+            {
+                "name": "status",
+                "payload_fields": [],
+                "kind": "read",
+                "mutates": MUTATES_NONE,
+                "required_permission": "none",
+                "authority": "env profile search boundary + instance browser endpoint",
+                "preconditions": ["active BuddySwitch product-mode instance"],
+                "returns": [
+                    "native_codex_web_search",
+                    "active_buddy",
+                    "available_backends",
+                    "backend_status",
+                    "capability_boundary",
+                    "permission_boundary",
+                    "allowed_next_actions",
+                    "command_hint",
+                ],
+            },
+            {
+                "name": "request",
+                "payload_fields": ["query", "backend", "engine"],
+                "kind": "request",
+                "mutates": MUTATES_NONE,
+                "required_permission": "none",
+                "authority": "env profile search boundary + instance browser endpoint",
+                "preconditions": ["backend is explicit", "query is non-empty"],
+                "returns": [
+                    "backend",
+                    "engine",
+                    "query",
+                    "target_url",
+                    "browser_endpoint",
+                    "required_cockpit_tool",
+                    "page_opened",
+                    "permission_boundary",
+                    "allowed_next_actions",
+                    "command_hint",
+                ],
+            },
+            {
+                "name": "open_browser",
+                "payload_fields": ["query", "engine"],
+                "kind": "open",
+                "mutates": MUTATES_BROWSER_SESSION,
+                "required_permission": "none",
+                "authority": "env profile search boundary + instance browser endpoint",
+                "preconditions": ["query is non-empty", "instance browser endpoint is available"],
+                "returns": [
+                    "engine",
+                    "query",
+                    "target_url",
+                    "browser_endpoint",
+                    "page_opened",
+                    "permission_boundary",
+                    "allowed_next_actions",
+                    "command_hint",
+                ],
+            },
+        ],
+    },
 ]
 
 
@@ -518,6 +592,8 @@ def env_tools_description() -> dict[str, dict[str, Any]]:
                 "persist_payload_hint",
             ],
         }
+        if isinstance(spec.get("backend_model"), dict):
+            rows[tool]["backend_model"] = dict(spec["backend_model"])
     return rows
 
 

@@ -31,6 +31,9 @@
     "tool_capability.browser_cockpit": ["required", "available", "unavailable"],
     "tool_capability.market_research_evidence": ["required", "not-required"],
     "tool_capability.ordinary_web_fallback": ["available", "user-approved-only"],
+    "tool_capability.search.native_codex_web_search": ["disabled"],
+    "tool_capability.search.browser_cockpit": ["required", "available", "unavailable"],
+    "tool_capability.search.search_api": ["available", "user-approved-only", "unavailable"],
     "context_projection.agents_md": ["from-profile-and-contract"],
     "context_projection.skills": ["active-buddy-only"]
   },

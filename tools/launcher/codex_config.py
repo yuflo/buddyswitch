@@ -16,6 +16,7 @@ PERMISSION_PROFILE_PREFIX = f"permissions.{PERMISSION_PROFILE}"
 MANAGED_COMMENT = "# BuddySwitch managed automation permissions"
 MCP_SERVER_PREFIX = "mcp_servers."
 MCP_TOOLS_APPROVAL_KEY = "default_tools_approval_mode"
+WEB_SEARCH_KEY = "web_search"
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,6 +58,7 @@ def render_managed_top_level_block() -> str:
     return (
         """
 # BuddySwitch managed automation permissions
+web_search = "disabled"
 sandbox_mode = "workspace-write"
 """.strip()
         + "\n"
@@ -68,6 +70,7 @@ def render_managed_permission_top_level_block() -> str:
     return (
         f"""
 # BuddySwitch managed automation permissions
+web_search = "disabled"
 default_permissions = {toml_string(PERMISSION_PROFILE)}
 """.strip()
         + "\n"
@@ -216,6 +219,10 @@ def strip_managed_sections(config_text: str) -> str:
             continue
 
         if current_section in (None, "features") and top_level_key_assignment(line, "default_permissions"):
+            index += 1
+            continue
+
+        if current_section in (None, "features") and top_level_key_assignment(line, WEB_SEARCH_KEY):
             index += 1
             continue
 

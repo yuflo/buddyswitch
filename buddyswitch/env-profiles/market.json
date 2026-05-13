@@ -23,7 +23,12 @@
   "tool_capability": {
     "browser_cockpit": "required",
     "market_research_evidence": "required",
-    "ordinary_web_fallback": "user-approved-only"
+    "ordinary_web_fallback": "user-approved-only",
+    "search": {
+      "native_codex_web_search": "disabled",
+      "browser_cockpit": "required",
+      "search_api": "user-approved-only"
+    }
   },
   "context_projection": {
     "agents_md": "from-profile-and-contract",

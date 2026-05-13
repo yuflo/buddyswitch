@@ -669,6 +669,7 @@ class RepoConsistencyTests(unittest.TestCase):
             "evidence": "evidence",
             "handoff": "handoff",
             "run": "run",
+            "search": "search",
             "task": "task",
             "track": "track",
         }
@@ -680,6 +681,11 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertEqual(desc["broker_method"], "env.tool")
                 self.assertEqual(desc["envelope"], {"tool": tool_name, "action": "<action>", "args": "<object>"})
                 self.assertIn("python3 scripts/env/client.py", desc["command"])
+                if tool_id == "search":
+                    backend_model = desc.get("backend_model")
+                    self.assertIsInstance(backend_model, dict, msg=desc)
+                    assert isinstance(backend_model, dict)
+                    self.assertEqual(backend_model.get("allowed_backends"), ["browser", "search_api"])
 
         active_contract_paths = self._active_runtime_contract_paths()
         active_contract_paths.extend(
@@ -694,6 +700,94 @@ class RepoConsistencyTests(unittest.TestCase):
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("env.tool", text)
                 self.assertNotIn("env" + "." + "task", text)
+
+    def test_search_tool_visible_surface_is_projected_without_native_web_search_bypass(self) -> None:
+        buddy_assets = sorted((ROOT / "tools" / "launcher" / "assets" / "buddies").rglob("AGENTS.md"))
+        self.assertEqual(len(buddy_assets), 5)
+        for path in buddy_assets:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertIn("env_tools.search", text)
+                self.assertIn("Native Codex `web_search` is unavailable", text)
+                self.assertIn("scripts/env/client.py search status", text)
+
+    def test_market_skills_start_research_with_search_open_browser_and_keep_evidence_gate(self) -> None:
+        market_skill_paths = [
+            ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "market" / "pmf-recon" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "market" / "customer-discovery" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "market" / "positioning-copy" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "market" / "channel-discovery" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "market" / "launch-prep" / "SKILL.md",
+        ]
+        for path in market_skill_paths:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertIn("scripts/env/client.py search open-browser", text)
+                self.assertIn("chrome-devtools-cockpit", text)
+                self.assertIn("Market artifact commits require broker-issued `tool_evidence`", text)
+
+    def test_native_search_bypass_is_not_active_in_product_surface(self) -> None:
+        guidance_paths: list[Path] = [
+            ROOT / "README.md",
+            ROOT / "framework" / "docs" / "browser-cockpit.md",
+        ]
+        guidance_paths.extend(sorted((ROOT / "tools" / "launcher" / "assets" / "buddies").rglob("AGENTS.md")))
+        guidance_paths.extend(sorted((ROOT / "buddyswitch" / "skills" / "market").rglob("SKILL.md")))
+
+        for path in guidance_paths:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=str(path.relative_to(ROOT)), token="web_search_live"):
+                self.assertNotIn('web_search = "live"', text)
+            with self.subTest(path=str(path.relative_to(ROOT)), token="web_search_cached"):
+                self.assertNotIn('web_search = "cached"', text)
+
+    def test_search_capability_boundaries_do_not_encode_workflow_defaults(self) -> None:
+        forbidden_keys = ("default_engine", "preferred_backend", "market_workflow", "route_research", "auto_backend")
+        profile_paths = sorted((ROOT / "buddyswitch" / "env-profiles").glob("*.json"))
+        for path in profile_paths:
+            text = path.read_text(encoding="utf-8")
+            for key in forbidden_keys:
+                with self.subTest(path=str(path.relative_to(ROOT)), key=key):
+                    self.assertNotIn(key, text)
+
+        env_tools = turn_runtime._build_env_tools_desc()
+        search = env_tools.get("search")
+        self.assertIsInstance(search, dict)
+        assert isinstance(search, dict)
+        search_text = json.dumps(search, ensure_ascii=True, sort_keys=True)
+        for key in forbidden_keys:
+            self.assertNotIn(key, search_text)
+
+    def test_search_layer_does_not_add_hidden_governance_or_policy_engine(self) -> None:
+        candidate_paths = [
+            ROOT / "scripts" / "env" / "services" / "search.py",
+            ROOT / "scripts" / "env" / "tools" / "contracts.py",
+            ROOT / "scripts" / "env" / "tools" / "dispatch.py",
+            ROOT / "framework" / "docs" / "browser-cockpit.md",
+        ]
+        forbidden_tokens = (
+            "search_policy",
+            "workflow_router",
+            "rule_engine",
+            "provenance_audit",
+            "hidden_governance",
+        )
+        for path in candidate_paths:
+            self.assertTrue(path.exists(), msg=f"missing required path: {path.relative_to(ROOT)}")
+            text = path.read_text(encoding="utf-8")
+            for token in forbidden_tokens:
+                with self.subTest(path=str(path.relative_to(ROOT)), token=token):
+                    self.assertNotIn(token, text)
+
+    def test_search_memo_no_longer_guides_manager_surface(self) -> None:
+        memo = ROOT / "docs" / "memo" / "2026-05-13-tool-visible-search-layer-memo.md"
+        text = memo.read_text(encoding="utf-8")
+        self.assertIn("Superseded note", text)
+        self.assertIn("prior `search_manager` naming is retired", text)
+        self.assertEqual(text.count("search_manager"), 1)
+        self.assertNotIn("scripts/env/tools/search_manager.py", text)
+        self.assertNotIn("env_tools.search_manager", text)
 
     def test_runtime_broker_v1_protocol_and_eof_framing_are_removed(self) -> None:
         runtime_paths = [

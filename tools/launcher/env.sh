@@ -347,7 +347,60 @@ temp_path.replace(instance_json)
 PY
 }
 
+buddyswitch_arg_sets_native_web_search() {
+  local value="$1"
+  case "${value}" in
+    web_search=*|*.web_search=*|*web_search=*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+buddyswitch_reject_native_search_args() {
+  local arg next
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    next="${2:-}"
+    case "${arg}" in
+      --search|--search=*)
+        echo "Native Codex web_search is disabled in BuddySwitch product sessions." >&2
+        echo "Use: python3 scripts/env/client.py search status" >&2
+        echo "Use: python3 scripts/env/client.py search open-browser --query '<query>' --engine google" >&2
+        return 2
+        ;;
+      -c|--config)
+        if [[ -n "${next}" ]] && buddyswitch_arg_sets_native_web_search "${next}"; then
+          echo "Native Codex web_search is disabled in BuddySwitch product sessions." >&2
+          echo "Use: python3 scripts/env/client.py search status" >&2
+          echo "Use: python3 scripts/env/client.py search open-browser --query '<query>' --engine google" >&2
+          return 2
+        fi
+        if [[ $# -ge 2 ]]; then
+          shift 2
+        else
+          shift
+        fi
+        continue
+        ;;
+      -c*|--config=*)
+        if buddyswitch_arg_sets_native_web_search "${arg}"; then
+          echo "Native Codex web_search is disabled in BuddySwitch product sessions." >&2
+          echo "Use: python3 scripts/env/client.py search status" >&2
+          echo "Use: python3 scripts/env/client.py search open-browser --query '<query>' --engine google" >&2
+          return 2
+        fi
+        ;;
+    esac
+    shift || true
+  done
+  return 0
+}
+
 buddyswitch_run_codex() {
+  if [[ -n "${BUDDYSWITCH_ACTIVE_BUDDY:-}" || -n "${BUDDYSWITCH_INSTANCE_ID:-}" ]]; then
+    buddyswitch_reject_native_search_args "$@" || return $?
+  fi
   HOME="${BUDDYSWITCH_HOME}" \
   CODEX_HOME="${BUDDYSWITCH_CODEX_HOME}" \
   XDG_CONFIG_HOME="${BUDDYSWITCH_XDG_CONFIG_HOME}" \

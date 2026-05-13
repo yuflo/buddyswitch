@@ -93,11 +93,34 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     tool_requirements["market_research_evidence"],
                     profile["tool_capability"]["market_research_evidence"],
                 )
+                self.assertEqual(tool_requirements["search"], profile["tool_capability"]["search"])
                 hint = runtime_context["persist_payload_hint"]
                 self.assertIn("execution_summary", hint["required"])
                 self.assertTrue(required_optional.issubset(set(hint["optional"])))
                 self.assertNotIn("state_effects", hint["optional"])
                 self.assertNotIn("artifacts", hint["optional"])
+
+    def test_prepare_projects_search_capability_boundary_for_each_buddy(self) -> None:
+        forbidden_workflow_keys = {
+            "default_engine",
+            "market_workflow",
+            "preferred_backend",
+            "route_research",
+            "auto_backend",
+        }
+        for buddy in self._manifest_buddy_order():
+            with self.subTest(buddy=buddy):
+                profile = env_profiles.require_env_profile(buddy, manifest_path=MANIFEST, repo_root=ROOT)
+                expected_search = profile["tool_capability"]["search"]
+                payload = self._prepare(buddy=buddy, request_text=REQUESTS_BY_BUDDY[buddy])
+                runtime_context = payload["runtime_context"]
+                self.assertEqual(runtime_context["tool_requirements"]["search"], expected_search)
+                capability = runtime_context["capability_boundary"]["search"]
+                self.assertEqual(capability["native_codex_web_search"], "disabled")
+                self.assertEqual(capability["browser_cockpit"], expected_search["browser_cockpit"])
+                self.assertEqual(capability["search_api"], expected_search["search_api"])
+                self.assertEqual(capability["env_tool_source"], "runtime_context.env_tools.search")
+                self.assertFalse(forbidden_workflow_keys.intersection(capability))
 
     def test_prepare_runtime_context_exposes_desc_for_commit_fields(self) -> None:
         payload = self._prepare(buddy="pm", request_text=REQUESTS_BY_BUDDY["pm"])

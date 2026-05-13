@@ -34,6 +34,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         *,
         instance_id: str,
         buddy: str,
+        browser_port: int | None = None,
     ) -> Path:
         path = self._runtime_path(f"{instance_id}.json")
         path.write_text(
@@ -45,7 +46,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                     "current_task_id": None,
                     "current_track_id": None,
                     "workspace_dir": str(self.runtime_root),
-                    "browser_port": None,
+                    "browser_port": browser_port,
                     "created_at": "2026-05-11T00:00:00Z",
                     "updated_at": "2026-05-11T00:00:00Z",
                 },
@@ -223,6 +224,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 market_instance_id,
                 "market",
             ),
+            ("search", "status", {}, dev_instance, dev_instance_id, "dev"),
         ]
 
         for tool, action, args, instance_json, instance_id, buddy in cases:
@@ -258,6 +260,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             ("handoff", "validate", {}, dev_instance, dev_instance_id, "dev"),
             ("run", "get_receipt", {}, dev_instance, dev_instance_id, "dev"),
             ("evidence", "approve_downgrade", {"context": market_context}, market_instance, market_instance_id, "market"),
+            ("search", "request", {"query": "x"}, dev_instance, dev_instance_id, "dev"),
         ]
 
         for tool, action, args, instance_json, instance_id, buddy in cases:

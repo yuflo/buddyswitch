@@ -291,6 +291,32 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(receipt, dict, msg=response)
         return response
 
+    def test_product_mode_env_tool_search_status_smoke(self) -> None:
+        instance_id = "inst-dev-search-status-smoke"
+        instance_json = self._instance_json(
+            buddy="dev",
+            instance_id=instance_id,
+            browser_port=9222,
+        )
+        response = self._env_tool(
+            buddy="dev",
+            instance_json=instance_json,
+            instance_id=instance_id,
+            tool="search",
+            action="status",
+            args={},
+        )
+        self.assertEqual(response.get("action"), "search.status")
+        self.assertEqual(response.get("native_codex_web_search"), "disabled")
+        backend_status = response.get("backend_status")
+        self.assertIsInstance(backend_status, dict, msg=response)
+        assert isinstance(backend_status, dict)
+        self.assertIn("browser", backend_status)
+        self.assertIn("search_api", backend_status)
+        self.assertIn("permission_boundary", response)
+        self.assertIn("allowed_next_actions", response)
+        self.assertIn("command_hint", response)
+
     def test_full_buddy_loop_uses_env_tool_and_persists_state(self) -> None:
         track_id = "track-phase8-env-layer-loop"
         task_ids = {

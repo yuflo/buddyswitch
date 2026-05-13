@@ -69,7 +69,9 @@ All six market skills use the same browser runtime contract:
 - If `browser-native` access is genuinely blocked, only one explicit `user-approved` one-off downgrade is allowed and must be recorded with evidence impact.
 
 4. Ordered host execution
-- For `market-browser-native`, discovery starts with `chrome-devtools-cockpit`; browser-external search is outside the default scope unless an explicit `user-approved` one-off downgrade is granted.
+- For `market-browser-native`, discovery starts with `env.tool search.open_browser` (`python3 scripts/env/client.py search open-browser ...`) and then continues in `chrome-devtools-cockpit`.
+- Native Codex `web_search` is outside BuddySwitch product-mode runtime surface.
+- Browser-external search is outside the default scope unless an explicit `user-approved` one-off downgrade is granted.
 - Active native skills used in the run are the host-facing browser contract for that run.
 - The host may not replace those contracts with manual reconstruction or ad hoc market-specific shortcuts.
 
@@ -95,3 +97,4 @@ The cockpit is not a second source of truth. Canonical BuddySwitch outputs remai
 - run audits in `buddyswitch/content/runs/*.json`
 
 Runtime browser state, cookies, tabs, or temporary captures are execution-time only and must not be treated as canonical state.
+`env.tool search` opens discovery pages and reports capability feedback only; it does not write canonical task/artifact/run state.
