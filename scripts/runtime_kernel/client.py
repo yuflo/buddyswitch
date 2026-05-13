@@ -10,7 +10,6 @@ import errno
 from dataclasses import dataclass
 from pathlib import Path
 import socket
-import subprocess
 from typing import Any
 import uuid
 
@@ -50,7 +49,6 @@ class RuntimeBrokerTimeouts:
 class BrokerRetryDecision:
     should_retry: bool
     reason: str
-    ensure_before_retry: bool
 
 
 def broker_unavailable_feedback(*, socket_path: Path | None = None) -> dict[str, Any]:
@@ -174,100 +172,23 @@ def _retry_decision(
         "E_RUNTIME_BROKER_CLIENT_DISCONNECTED",
     }
     if code not in retriable_codes and not retriable:
-        return BrokerRetryDecision(False, "non-retriable error", False)
-
-    ensure_needed = code in {"E_RUNTIME_BROKER_STALE_SOCKET"}
+        return BrokerRetryDecision(False, "non-retriable error")
 
     if method in {"ping", "status"}:
-        return BrokerRetryDecision(True, "read health request", ensure_needed)
+        return BrokerRetryDecision(True, "read health request")
 
     if method == "prepare":
-        return BrokerRetryDecision(False, "prepare does not auto-retry", False)
+        return BrokerRetryDecision(False, "prepare does not auto-retry")
 
     if method == "persist":
         if isinstance(idempotency_key, str) and idempotency_key.strip():
-            return BrokerRetryDecision(True, "persist with idempotency key", ensure_needed)
-        return BrokerRetryDecision(False, "persist missing idempotency key", False)
+            return BrokerRetryDecision(True, "persist with idempotency key")
+        return BrokerRetryDecision(False, "persist missing idempotency key")
 
     if _is_read_only_env_tool(method, params):
-        return BrokerRetryDecision(True, "read-only env.tool request", ensure_needed)
+        return BrokerRetryDecision(True, "read-only env.tool request")
 
-    return BrokerRetryDecision(False, "write operation does not auto-retry", False)
-
-
-def _ensure_runtime_broker(socket_path: Path) -> None:
-    instance_json_raw = os.environ.get("BUDDYSWITCH_INSTANCE_JSON")
-    if not isinstance(instance_json_raw, str) or not instance_json_raw.strip():
-        raise RuntimeBrokerError(
-            "E_RUNTIME_BROKER_UNAVAILABLE",
-            "BUDDYSWITCH_INSTANCE_JSON is required for runtime broker ensure.",
-            details=broker_unavailable_feedback(socket_path=socket_path),
-        )
-
-    instance_json = Path(instance_json_raw.strip())
-    instance_root = instance_json.parent
-    runtime_root = instance_root / "runtime"
-    pid_file = runtime_root / "runtime-broker.pid"
-    marker_file = runtime_root / "runtime-broker.socket"
-    log_file = runtime_root / "runtime-broker.log"
-
-    manifest_raw = os.environ.get("BUDDYSWITCH_MANIFEST_PATH")
-    if isinstance(manifest_raw, str) and manifest_raw.strip():
-        manifest_path = Path(manifest_raw.strip())
-    else:
-        manifest_path = Path(__file__).resolve().parents[2] / "buddyswitch" / "manifest.toml"
-
-    broker_script = Path(__file__).resolve().parent / "broker.py"
-    command = [
-        "python3",
-        str(broker_script),
-        "ensure",
-        "--socket",
-        str(socket_path),
-        "--pid-file",
-        str(pid_file),
-        "--marker-file",
-        str(marker_file),
-        "--log-file",
-        str(log_file),
-        "--instance-json",
-        str(instance_json),
-        "--manifest",
-        str(manifest_path),
-    ]
-
-    completed = subprocess.run(
-        command,
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=8,
-    )
-
-    output = completed.stdout.strip()
-    payload: dict[str, Any] = {}
-    if output:
-        try:
-            decoded = json.loads(output)
-            if isinstance(decoded, dict):
-                payload = decoded
-        except json.JSONDecodeError:
-            payload = {}
-
-    if completed.returncode != 0 or payload.get("ok") is not True:
-        error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
-        code = error.get("code") if isinstance(error.get("code"), str) else "E_RUNTIME_BROKER_UNAVAILABLE"
-        message = error.get("message") if isinstance(error.get("message"), str) else (
-            completed.stderr.strip() or "runtime broker ensure failed"
-        )
-        details = broker_unavailable_feedback(socket_path=socket_path)
-        if isinstance(payload, dict):
-            details.update({"ensure": payload})
-        raise RuntimeBrokerError(code, message, details=details)
-
-    ensured_socket = payload.get("socket_path")
-    if isinstance(ensured_socket, str) and ensured_socket.strip():
-        os.environ["BUDDYSWITCH_RUNTIME_BROKER_SOCKET"] = ensured_socket.strip()
+    return BrokerRetryDecision(False, "write operation does not auto-retry")
 
 
 def _request_once(
@@ -431,9 +352,6 @@ def request_runtime_broker(
             )
             if not decision.should_retry:
                 raise
-            if decision.ensure_before_retry:
-                _ensure_runtime_broker(socket_path)
-                socket_path = runtime_broker_socket_from_env()
             attempt += 1
             continue
 

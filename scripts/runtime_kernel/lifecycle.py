@@ -200,11 +200,37 @@ def ping_broker(
     }
 
 
+def _path_within_or_equal(candidate: Path, root: Path) -> bool:
+    candidate_resolved = candidate.resolve(strict=False)
+    root_resolved = root.resolve(strict=False)
+    if candidate_resolved == root_resolved:
+        return True
+    return root_resolved in candidate_resolved.parents
+
+
+def _cleanup_failed_startup_artifacts(paths: BrokerPaths) -> None:
+    for path in (paths.marker_file, paths.socket_path):
+        try:
+            if path.exists() or path.is_symlink():
+                path.unlink()
+        except OSError:
+            pass
+
+    pid = read_pid(paths.pid_file)
+    if not pid_is_live(pid):
+        try:
+            if paths.pid_file.exists() or paths.pid_file.is_symlink():
+                paths.pid_file.unlink()
+        except OSError:
+            pass
+
+
 def broker_status(
     paths: BrokerPaths,
     *,
     expected_instance_id: str,
     expected_active_buddy: str,
+    expected_workspace_root: Path | None = None,
 ) -> dict[str, Any]:
     pid = read_pid(paths.pid_file)
     pid_live = pid_is_live(pid)
@@ -222,6 +248,10 @@ def broker_status(
         "marker_value": marker_value,
         "log_file": str(paths.log_file),
         "healthy": False,
+        "runtime_root": None,
+        "cwd": None,
+        "env_store_root": None,
+        "runtime_workspace": None,
     }
 
     if marker_value and marker_value != str(paths.socket_path):
@@ -271,6 +301,15 @@ def broker_status(
     )
     if ping.get("ok") is True:
         result = ping.get("result") if isinstance(ping.get("result"), dict) else {}
+        runtime_root = result.get("runtime_root")
+        cwd = result.get("cwd")
+        env_store_root = result.get("env_store_root")
+        runtime_workspace = result.get("runtime_workspace")
+        status["runtime_root"] = runtime_root if isinstance(runtime_root, str) and runtime_root.strip() else None
+        status["cwd"] = cwd if isinstance(cwd, str) and cwd.strip() else None
+        status["env_store_root"] = env_store_root if isinstance(env_store_root, str) and env_store_root.strip() else None
+        status["runtime_workspace"] = runtime_workspace if isinstance(runtime_workspace, bool) else None
+
         ping_pid = result.get("pid")
         if not isinstance(ping_pid, int):
             status["error"] = {
@@ -306,6 +345,38 @@ def broker_status(
             status["ping"] = result
             return status
 
+        if status["runtime_workspace"] is not True:
+            status["error"] = {
+                "code": "E_RUNTIME_BROKER_PERMISSION",
+                "message": "runtime workspace marker is invalid",
+                "retriable": False,
+            }
+            status["ping"] = result
+            return status
+
+        if expected_workspace_root is not None:
+            expected_root = expected_workspace_root.resolve(strict=False)
+            for fact_name in ("runtime_root", "cwd", "env_store_root"):
+                fact_value = status.get(fact_name)
+                if not isinstance(fact_value, str) or not fact_value:
+                    status["error"] = {
+                        "code": "E_RUNTIME_BROKER_STALE_SOCKET",
+                        "message": f"runtime root mismatch: missing {fact_name}",
+                        "retriable": True,
+                    }
+                    status["ping"] = result
+                    return status
+                fact_path = Path(fact_value)
+                if not _path_within_or_equal(fact_path, expected_root):
+                    status["error"] = {
+                        "code": "E_RUNTIME_BROKER_STALE_SOCKET",
+                        "message": "runtime root mismatch: "
+                        f"{fact_name}={fact_value} expected under {expected_root}",
+                        "retriable": True,
+                    }
+                    status["ping"] = result
+                    return status
+
         status["healthy"] = True
         status["instance_id"] = result.get("instance_id")
         status["active_buddy"] = result.get("active_buddy")
@@ -314,8 +385,6 @@ def broker_status(
         return status
 
     status["error"] = ping.get("error")
-    return status
-
     return status
 
 
@@ -354,7 +423,7 @@ def start_broker_process(
             command,
             stdout=log_handle,
             stderr=log_handle,
-            cwd=Path(__file__).resolve().parents[2],
+            cwd=broker_script.parents[2],
         )
     return {
         "ok": True,
@@ -369,12 +438,14 @@ def ensure_broker(
     manifest_path: Path,
     expected_instance_id: str,
     expected_active_buddy: str,
+    expected_workspace_root: Path | None = None,
     startup_timeout_seconds: float = 3.0,
 ) -> dict[str, Any]:
     status = broker_status(
         paths,
         expected_instance_id=expected_instance_id,
         expected_active_buddy=expected_active_buddy,
+        expected_workspace_root=expected_workspace_root,
     )
     if status.get("healthy") is True:
         if not paths.marker_file.parent.exists():
@@ -394,6 +465,7 @@ def ensure_broker(
         manifest_path=manifest_path,
     )
     if started.get("ok") is not True:
+        cleanup_stale_broker_state(paths)
         return {
             "ok": False,
             "error": {
@@ -403,6 +475,7 @@ def ensure_broker(
                 "broker_status": {
                     "log_file": str(paths.log_file),
                     "socket_path": str(paths.socket_path),
+                    "pid_file": str(paths.pid_file),
                 },
             },
         }
@@ -419,18 +492,24 @@ def ensure_broker(
         if ping.get("ok") is True:
             paths.marker_file.parent.mkdir(parents=True, exist_ok=True)
             paths.marker_file.write_text(str(paths.socket_path), encoding="utf-8")
-            latest_status = broker_status(
-                paths,
-                expected_instance_id=expected_instance_id,
-                expected_active_buddy=expected_active_buddy,
-            )
-            if latest_status.get("healthy") is True:
-                return {
-                    "ok": True,
-                    "socket_path": str(paths.socket_path),
-                    "status": latest_status,
-                }
+
+        latest_status = broker_status(
+            paths,
+            expected_instance_id=expected_instance_id,
+            expected_active_buddy=expected_active_buddy,
+            expected_workspace_root=expected_workspace_root,
+        )
+        if latest_status.get("healthy") is True:
+            paths.marker_file.parent.mkdir(parents=True, exist_ok=True)
+            paths.marker_file.write_text(str(paths.socket_path), encoding="utf-8")
+            return {
+                "ok": True,
+                "socket_path": str(paths.socket_path),
+                "status": latest_status,
+            }
         time.sleep(0.1)
+
+    _cleanup_failed_startup_artifacts(paths)
 
     broker_status_payload: dict[str, Any] = {
         "log_file": str(paths.log_file),

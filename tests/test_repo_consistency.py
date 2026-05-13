@@ -820,6 +820,33 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn(" ensure ", launcher)
         self.assertNotIn("kill -0", launcher)
 
+    def test_runtime_broker_lifecycle_uses_workspace_root_not_source_root(self) -> None:
+        launcher = (ROOT / "tools" / "launcher" / "runtime_broker.sh").read_text(encoding="utf-8")
+        self.assertIn("BUDDYSWITCH_WORKSPACE_DIR", launcher)
+        self.assertIn('${BUDDYSWITCH_WORKSPACE_DIR}/scripts/runtime_kernel/broker.py', launcher)
+        self.assertIn('${BUDDYSWITCH_WORKSPACE_DIR}/buddyswitch/manifest.toml', launcher)
+        self.assertNotIn('${BUDDYSWITCH_REPO_ROOT}/scripts/runtime_kernel/broker.py', launcher)
+        self.assertNotIn('printf \'%s/buddyswitch/manifest.toml\\n\' "${BUDDYSWITCH_REPO_ROOT}"', launcher)
+
+        function_match = re.search(
+            r"_buddyswitch_runtime_broker_lifecycle_json\(\)\s*\{(?P<body>.*?)\n\}",
+            launcher,
+            flags=re.DOTALL,
+        )
+        self.assertIsNotNone(function_match, "missing _buddyswitch_runtime_broker_lifecycle_json function")
+        assert function_match is not None
+        function_body = function_match.group("body")
+        self.assertIn('cd "${BUDDYSWITCH_WORKSPACE_DIR}"', function_body)
+        self.assertNotIn('cd "${BUDDYSWITCH_REPO_ROOT}"', function_body)
+
+    def test_product_runtime_client_does_not_self_ensure_broker(self) -> None:
+        client_text = (ROOT / "scripts" / "runtime_kernel" / "client.py").read_text(encoding="utf-8")
+        self.assertNotIn("_ensure_runtime_broker", client_text)
+        self.assertNotRegex(client_text, r"broker\.py[^\n]*ensure")
+        self.assertNotIn("runtime-broker.pid", client_text)
+        self.assertNotIn("runtime-broker.socket", client_text)
+        self.assertNotIn("runtime-broker.log", client_text)
+
     def test_runtime_broker_structured_error_codes_are_covered(self) -> None:
         text = "\n".join(
             path.read_text(encoding="utf-8")
@@ -886,6 +913,23 @@ class RepoConsistencyTests(unittest.TestCase):
         ):
             with self.subTest(code=code):
                 self.assertIn(code, text)
+
+    def test_runtime_broker_v2_runbook_documents_root_fix_boundary(self) -> None:
+        runbook = ROOT / "framework" / "docs" / "runtime-broker-v2-runbook.md"
+        self.assertTrue(runbook.exists(), "framework/docs/runtime-broker-v2-runbook.md is required")
+        text = runbook.read_text(encoding="utf-8")
+        for required in (
+            "runtime workspace",
+            "env_store_root",
+            "Launcher-owned ensure",
+            "prepare`: no blind retry",
+            "instance open <instance-id>",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
+        for heading in ("Health Criteria", "Ensure Flow", "Retry Policy", "Error Codes"):
+            with self.subTest(heading=heading):
+                self.assertIn(heading, text)
 
     def test_env_tool_active_surface_residue_scan(self) -> None:
         target_roots = [

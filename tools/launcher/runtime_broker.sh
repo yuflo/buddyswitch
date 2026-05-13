@@ -29,18 +29,24 @@ buddyswitch_runtime_broker_socket_marker_file() {
 }
 
 _buddyswitch_runtime_broker_manifest_path() {
+  local manifest_path
   if [[ -n "${BUDDYSWITCH_MANIFEST_PATH:-}" ]]; then
-    printf '%s\n' "${BUDDYSWITCH_MANIFEST_PATH}"
-    return 0
+    manifest_path="${BUDDYSWITCH_MANIFEST_PATH}"
+  else
+    manifest_path="${BUDDYSWITCH_WORKSPACE_DIR}/buddyswitch/manifest.toml"
   fi
-  printf '%s/buddyswitch/manifest.toml\n' "${BUDDYSWITCH_REPO_ROOT}"
+  if [[ ! -f "${manifest_path}" ]]; then
+    echo "Runtime broker manifest missing in workspace: ${manifest_path}" >&2
+    return 1
+  fi
+  printf '%s\n' "${manifest_path}"
 }
 
 _buddyswitch_runtime_broker_script_path() {
   local broker_script
-  broker_script="${BUDDYSWITCH_REPO_ROOT}/scripts/runtime_kernel/broker.py"
+  broker_script="${BUDDYSWITCH_WORKSPACE_DIR}/scripts/runtime_kernel/broker.py"
   if [[ ! -f "${broker_script}" ]]; then
-    echo "Runtime broker script missing in repo: ${broker_script}" >&2
+    echo "Runtime broker script missing in workspace: ${broker_script}" >&2
     return 1
   fi
   printf '%s\n' "${broker_script}"
@@ -80,10 +86,10 @@ _buddyswitch_runtime_broker_lifecycle_json() {
   local marker_file="$4"
   local log_file="$5"
   local broker_script manifest_path
-  broker_script="$(_buddyswitch_runtime_broker_script_path)"
-  manifest_path="$(_buddyswitch_runtime_broker_manifest_path)"
+  broker_script="$(_buddyswitch_runtime_broker_script_path)" || return 1
+  manifest_path="$(_buddyswitch_runtime_broker_manifest_path)" || return 1
   (
-    cd "${BUDDYSWITCH_REPO_ROOT}"
+    cd "${BUDDYSWITCH_WORKSPACE_DIR}"
     python3 "${broker_script}" "${command}" \
       --socket "${socket_path}" \
       --pid-file "${pid_file}" \
@@ -92,6 +98,29 @@ _buddyswitch_runtime_broker_lifecycle_json() {
       --instance-json "${BUDDYSWITCH_INSTANCE_JSON}" \
       --manifest "${manifest_path}"
   )
+}
+
+_buddyswitch_runtime_broker_cleanup_local_files() {
+  local socket_path="$1"
+  local pid_file="$2"
+  local marker_file="$3"
+  rm -f "${pid_file}" "${marker_file}" "${socket_path}" >/dev/null 2>&1 || true
+}
+
+_buddyswitch_runtime_broker_lifecycle_available() {
+  local manifest_path
+  if [[ -z "${BUDDYSWITCH_WORKSPACE_DIR:-}" || ! -d "${BUDDYSWITCH_WORKSPACE_DIR}" ]]; then
+    return 1
+  fi
+  if [[ ! -f "${BUDDYSWITCH_WORKSPACE_DIR}/scripts/runtime_kernel/broker.py" ]]; then
+    return 1
+  fi
+  if [[ -n "${BUDDYSWITCH_MANIFEST_PATH:-}" ]]; then
+    manifest_path="${BUDDYSWITCH_MANIFEST_PATH}"
+  else
+    manifest_path="${BUDDYSWITCH_WORKSPACE_DIR}/buddyswitch/manifest.toml"
+  fi
+  [[ -f "${manifest_path}" ]]
 }
 
 buddyswitch_runtime_broker_is_active() {
@@ -143,11 +172,18 @@ buddyswitch_runtime_broker_stop() {
   pid_file="$(buddyswitch_runtime_broker_pid_file)"
   marker_path="$(buddyswitch_runtime_broker_socket_marker_file)"
   log_file="$(buddyswitch_runtime_broker_log_file)"
+  if ! _buddyswitch_runtime_broker_lifecycle_available; then
+    _buddyswitch_runtime_broker_cleanup_local_files "${socket_path}" "${pid_file}" "${marker_path}"
+    unset BUDDYSWITCH_RUNTIME_BROKER_SOCKET
+    return 0
+  fi
   output="$(_buddyswitch_runtime_broker_lifecycle_json "stop" "${socket_path}" "${pid_file}" "${marker_path}" "${log_file}")" || {
     if [[ -n "${output:-}" ]]; then
       echo "${output}" >&2
     fi
-    return 1
+    _buddyswitch_runtime_broker_cleanup_local_files "${socket_path}" "${pid_file}" "${marker_path}"
+    unset BUDDYSWITCH_RUNTIME_BROKER_SOCKET
+    return 0
   }
   unset BUDDYSWITCH_RUNTIME_BROKER_SOCKET
 }

@@ -10,7 +10,9 @@ import tempfile
 import unittest
 import contextlib
 import importlib
+import shutil
 import socket
+import subprocess
 import threading
 import time
 import uuid
@@ -766,13 +768,63 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         self.assertEqual(captured[0]["idempotency_key"], "persist:run-1:abc")
         self.assertEqual(captured[1]["idempotency_key"], "persist:run-1:abc")
 
-    def test_client_stale_socket_retry_ensures_once(self) -> None:
+    def test_client_does_not_retry_persist_without_idempotency_key(self) -> None:
+        client = _require_module("runtime_kernel.client")
+        reset_error = client.RuntimeBrokerError(
+            "E_RUNTIME_BROKER_CLIENT_DISCONNECTED",
+            "transport reset",
+            details={"retriable": True},
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
+                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "/tmp/runtime-broker.sock",
+            },
+            clear=False,
+        ), patch.object(client, "_request_once", side_effect=reset_error) as request_once:
+            with self.assertRaises(client.RuntimeBrokerError):
+                client.request_runtime_broker("persist", {"context": {}, "result": {}})
+        self.assertEqual(request_once.call_count, 1)
+
+    def test_client_stale_socket_reports_launcher_reopen_without_self_ensure(self) -> None:
+        client = _require_module("runtime_kernel.client")
+        with patch.dict(
+            os.environ,
+            {
+                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
+                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "/tmp/missing-runtime-broker.sock",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(client.RuntimeBrokerError) as raised:
+                client.request_runtime_broker("prepare", {"text": "x"})
+        self.assertIn(raised.exception.code, {"E_RUNTIME_BROKER_STALE_SOCKET", "E_RUNTIME_BROKER_UNAVAILABLE"})
+        self.assertEqual(raised.exception.details.get("permission_boundary"), "product-mode-runtime-broker")
+        self.assertEqual(raised.exception.details.get("stop_condition"), "stop_and_report_do_not_bypass_broker")
+        self.assertEqual(raised.exception.details.get("socket_path"), "/tmp/missing-runtime-broker.sock")
+        self.assertEqual(
+            raised.exception.details.get("command_hint"),
+            "./buddyswitch-codex instance open inst-pm-example",
+        )
+
+    def test_client_retries_read_only_env_tool_once_without_ensure(self) -> None:
         client = _require_module("runtime_kernel.client")
         stale_error = client.RuntimeBrokerError(
             "E_RUNTIME_BROKER_STALE_SOCKET",
             "stale socket",
             details={"retriable": True},
         )
+        ensure_name = "_ensure_runtime_broker"
+        ensure_side_effect = AssertionError("client must not self-ensure broker lifecycle")
+        ensure_patch = (
+            patch.object(client, ensure_name, side_effect=ensure_side_effect)
+            if hasattr(client, ensure_name)
+            else contextlib.nullcontext()
+        )
+
         with patch.dict(
             os.environ,
             {
@@ -784,16 +836,14 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         ), patch.object(
             client,
             "_request_once",
-            side_effect=[stale_error, {"ok": True, "receipt": {"run_id": "run-1"}}],
-        ) as request_once, patch.object(client, "_ensure_runtime_broker") as ensure_mock:
+            side_effect=[stale_error, {"ok": True, "items": []}],
+        ) as request_once, ensure_patch:
             result = client.request_runtime_broker(
-                "persist",
-                {"context": {"run_id": "run-1"}, "result": {"execution_summary": "done"}},
-                idempotency_key="persist:run-1:abc",
+                "env.tool",
+                {"tool": "task", "action": "list", "args": {}},
             )
-        self.assertEqual(result, {"ok": True, "receipt": {"run_id": "run-1"}})
+        self.assertEqual(result, {"ok": True, "items": []})
         self.assertEqual(request_once.call_count, 2)
-        ensure_mock.assert_called_once()
 
     def test_client_does_not_retry_prepare_after_transport_reset(self) -> None:
         protocol = _require_module("runtime_kernel.protocol")
@@ -831,6 +881,29 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         thread.join(timeout=2.0)
         self.assertEqual(len(captured), 1)
 
+    def test_client_does_not_retry_mutating_env_tool_after_transport_reset(self) -> None:
+        client = _require_module("runtime_kernel.client")
+        reset_error = client.RuntimeBrokerError(
+            "E_RUNTIME_BROKER_CLIENT_DISCONNECTED",
+            "transport reset",
+            details={"retriable": True},
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "BUDDYSWITCH_INSTANCE_ID": "inst-pm-example",
+                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "/tmp/runtime-broker.sock",
+            },
+            clear=False,
+        ), patch.object(client, "_request_once", side_effect=reset_error) as request_once:
+            with self.assertRaises(client.RuntimeBrokerError):
+                client.request_runtime_broker(
+                    "env.tool",
+                    {"tool": "task", "action": "create", "args": {"title": "x"}},
+                )
+        self.assertEqual(request_once.call_count, 1)
+
 
 class RuntimeBrokerLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -843,6 +916,163 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             marker_file=root / "runtime-broker.socket",
             log_file=root / "runtime-broker.log",
         )
+
+    @staticmethod
+    def _sync_runtime_surface(workspace_dir: Path) -> None:
+        runtime_surface = (
+            "scripts/turn_runtime.py",
+            "scripts/env_store.py",
+            "scripts/env",
+            "scripts/env_profiles.py",
+            "scripts/env_manifest.py",
+            "scripts/browser_evidence.py",
+            "scripts/runtime_kernel",
+            "buddyswitch/manifest.toml",
+            "buddyswitch/env-profiles",
+            "framework/contracts",
+        )
+        for relative in runtime_surface:
+            source = ROOT / relative
+            target = workspace_dir / relative
+            if source.is_dir():
+                shutil.copytree(source, target, dirs_exist_ok=True, symlinks=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
+
+    @staticmethod
+    def _write_instance_json(path: Path, *, workspace_dir: Path, instance_id: str = "inst-pm-root", buddy: str = "pm") -> None:
+        path.write_text(
+            json.dumps(
+                {
+                    "instance_id": instance_id,
+                    "buddy": buddy,
+                    "status": "active",
+                    "current_task_id": None,
+                    "current_track_id": None,
+                    "workspace_dir": str(workspace_dir),
+                    "browser_port": None,
+                    "created_at": "2026-05-13T00:00:00Z",
+                    "updated_at": "2026-05-13T00:00:00Z",
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def _run_broker_cli(
+        self,
+        *,
+        workspace_dir: Path,
+        command: str,
+        paths,
+        instance_json: Path,
+        manifest_path: Path,
+    ) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
+        broker_script = workspace_dir / "scripts" / "runtime_kernel" / "broker.py"
+        completed = subprocess.run(
+            [
+                "python3",
+                str(broker_script),
+                command,
+                "--socket",
+                str(paths.socket_path),
+                "--pid-file",
+                str(paths.pid_file),
+                "--marker-file",
+                str(paths.marker_file),
+                "--log-file",
+                str(paths.log_file),
+                "--instance-json",
+                str(instance_json),
+                "--manifest",
+                str(manifest_path),
+            ],
+            cwd=workspace_dir,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        payload: dict[str, object] = {}
+        if completed.stdout.strip():
+            decoded = json.loads(completed.stdout.strip())
+            self.assertIsInstance(decoded, dict, msg=completed.stdout)
+            payload = decoded
+        return completed, payload
+
+    def test_live_status_reports_workspace_root_facts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace_dir = Path(temp)
+            (workspace_dir / "AGENTS.md").write_text(
+                "# BuddySwitch Runtime Workspace\n",
+                encoding="utf-8",
+            )
+            self._sync_runtime_surface(workspace_dir)
+            runtime_dir = workspace_dir / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            paths = self._paths(runtime_dir)
+            instance_json = workspace_dir / "instance.json"
+            self._write_instance_json(instance_json, workspace_dir=workspace_dir)
+            manifest_path = workspace_dir / "buddyswitch" / "manifest.toml"
+
+            ensure_completed, ensure_payload = self._run_broker_cli(
+                workspace_dir=workspace_dir,
+                command="ensure",
+                paths=paths,
+                instance_json=instance_json,
+                manifest_path=manifest_path,
+            )
+            self.assertEqual(ensure_completed.returncode, 0, msg=ensure_completed.stderr)
+            self.assertTrue(ensure_payload.get("ok"), msg=ensure_payload)
+            try:
+                status_completed, status_payload = self._run_broker_cli(
+                    workspace_dir=workspace_dir,
+                    command="status",
+                    paths=paths,
+                    instance_json=instance_json,
+                    manifest_path=manifest_path,
+                )
+                self.assertEqual(status_completed.returncode, 0, msg=status_completed.stderr)
+                self.assertTrue(status_payload.get("healthy"), msg=status_payload)
+                self.assertIs(status_payload.get("runtime_workspace"), True)
+                self.assertEqual(
+                    Path(str(status_payload.get("env_store_root"))).resolve(strict=False),
+                    workspace_dir.resolve(strict=False),
+                )
+                self.assertEqual(
+                    Path(str(status_payload.get("runtime_root"))).resolve(strict=False),
+                    workspace_dir.resolve(strict=False),
+                )
+                self.assertEqual(
+                    Path(str(status_payload.get("cwd"))).resolve(strict=False),
+                    workspace_dir.resolve(strict=False),
+                )
+                ping = status_payload.get("ping")
+                self.assertIsInstance(ping, dict, msg=status_payload)
+                assert isinstance(ping, dict)
+                self.assertIs(ping.get("runtime_workspace"), True)
+                self.assertEqual(
+                    Path(str(ping.get("env_store_root"))).resolve(strict=False),
+                    workspace_dir.resolve(strict=False),
+                )
+                self.assertEqual(
+                    Path(str(ping.get("runtime_root"))).resolve(strict=False),
+                    workspace_dir.resolve(strict=False),
+                )
+                self.assertEqual(
+                    Path(str(ping.get("cwd"))).resolve(strict=False),
+                    workspace_dir.resolve(strict=False),
+                )
+            finally:
+                self._run_broker_cli(
+                    workspace_dir=workspace_dir,
+                    command="stop",
+                    paths=paths,
+                    instance_json=instance_json,
+                    manifest_path=manifest_path,
+                )
 
     def test_status_reports_unhealthy_when_pid_live_but_socket_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -863,6 +1093,41 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
         self.assertFalse(status["healthy"])
         self.assertEqual(status["socket_path"], str(paths.socket_path))
         self.assertEqual(status["marker_path"], str(paths.marker_file))
+
+    def test_status_rejects_ping_from_source_checkout_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace_dir = Path(temp) / "workspace"
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            paths = self._paths(Path(temp))
+            paths.pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+            paths.marker_file.write_text(str(paths.socket_path), encoding="utf-8")
+            with patch.object(self.lifecycle, "_socket_is_unix", return_value=True), patch.object(
+                self.lifecycle,
+                "ping_broker",
+                return_value={
+                    "ok": True,
+                    "result": {
+                        "protocol": BROKER_V2_PROTOCOL,
+                        "instance_id": "inst-pm-example",
+                        "active_buddy": "pm",
+                        "pid": os.getpid(),
+                        "socket_path": str(paths.socket_path),
+                        "runtime_root": str(ROOT),
+                        "cwd": str(ROOT),
+                        "env_store_root": str(ROOT),
+                        "runtime_workspace": False,
+                    },
+                },
+            ):
+                status = self.lifecycle.broker_status(
+                    paths,
+                    expected_instance_id="inst-pm-example",
+                    expected_active_buddy="pm",
+                    expected_workspace_root=workspace_dir,
+                )
+        self.assertFalse(status["healthy"])
+        self.assertIn(status["error"]["code"], {"E_RUNTIME_BROKER_STALE_SOCKET", "E_RUNTIME_BROKER_PERMISSION"})
+        self.assertRegex(status["error"]["message"], r"runtime root mismatch|runtime workspace marker is invalid")
 
     def test_status_reports_unhealthy_when_ping_result_missing_pid_or_socket_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -890,6 +1155,31 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
         self.assertEqual(status["error"]["code"], "E_RUNTIME_BROKER_STALE_SOCKET")
         self.assertIn("missing pid", status["error"]["message"])
 
+    def test_status_requires_successful_ping_before_healthy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            paths = self._paths(Path(temp))
+            paths.pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+            paths.marker_file.write_text(str(paths.socket_path), encoding="utf-8")
+            with patch.object(self.lifecycle, "_socket_is_unix", return_value=True), patch.object(
+                self.lifecycle,
+                "ping_broker",
+                return_value={
+                    "ok": False,
+                    "error": {
+                        "code": "E_RUNTIME_BROKER_UNAVAILABLE",
+                        "message": "runtime broker ping unavailable",
+                        "retriable": True,
+                    },
+                },
+            ):
+                status = self.lifecycle.broker_status(
+                    paths,
+                    expected_instance_id="inst-pm-example",
+                    expected_active_buddy="pm",
+                )
+        self.assertFalse(status["healthy"])
+        self.assertEqual(status["error"]["code"], "E_RUNTIME_BROKER_UNAVAILABLE")
+
     def test_ensure_cleans_stale_pid_marker_and_socket_before_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             paths = self._paths(Path(temp))
@@ -915,6 +1205,10 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                         "active_buddy": "pm",
                         "pid": os.getpid(),
                         "socket_path": str(paths.socket_path),
+                        "runtime_root": str(ROOT),
+                        "cwd": str(ROOT),
+                        "env_store_root": str(ROOT),
+                        "runtime_workspace": True,
                     },
                 }
 
@@ -935,13 +1229,30 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             self.assertEqual(paths.marker_file.read_text(encoding="utf-8"), str(paths.socket_path))
             self.assertTrue(result["status"]["healthy"], msg=result)
 
-    def test_ensure_failure_returns_log_path(self) -> None:
+    def test_ensure_timeout_removes_stale_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             paths = self._paths(Path(temp))
-            with patch.object(self.lifecycle, "start_broker_process", return_value={"ok": True, "pid": os.getpid()}), patch.object(
+            paths.pid_file.write_text("999999\n", encoding="utf-8")
+            paths.marker_file.write_text(str(paths.socket_path), encoding="utf-8")
+            paths.socket_path.write_text("stale socket", encoding="utf-8")
+            with patch.object(self.lifecycle, "_socket_is_unix", return_value=True), patch.object(
+                self.lifecycle, "start_broker_process", return_value={"ok": True, "pid": os.getpid()}
+            ), patch.object(
                 self.lifecycle,
                 "ping_broker",
-                return_value={"ok": False, "error": {"code": "E_RUNTIME_BROKER_UNAVAILABLE", "message": "not ready"}},
+                return_value={
+                    "ok": True,
+                    "result": {
+                        "protocol": BROKER_V2_PROTOCOL,
+                        "instance_id": "inst-pm-example",
+                        "active_buddy": "pm",
+                        "socket_path": str(paths.socket_path),
+                        "runtime_root": str(ROOT),
+                        "cwd": str(ROOT),
+                        "env_store_root": str(ROOT),
+                        "runtime_workspace": True,
+                    },
+                },
             ):
                 result = self.lifecycle.ensure_broker(
                     paths,
@@ -953,6 +1264,10 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 )
         self.assertFalse(result["ok"], msg=result)
         self.assertEqual(result["error"]["broker_status"]["log_file"], str(paths.log_file))
+        self.assertEqual(result["error"]["broker_status"]["socket_path"], str(paths.socket_path))
+        self.assertEqual(result["error"]["broker_status"]["pid_file"], str(paths.pid_file))
+        self.assertFalse(paths.marker_file.exists())
+        self.assertFalse(paths.socket_path.exists())
 
 
 class RuntimeBrokerPersistIdempotencyTests(RuntimeWorkspaceTestMixin, unittest.TestCase):

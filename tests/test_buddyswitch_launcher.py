@@ -145,6 +145,7 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             """#!/usr/bin/env python3
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -297,11 +298,81 @@ instance_payload = None
 if entry["instance_json"]:
     instance_payload = json.loads(Path(entry["instance_json"]).read_text(encoding="utf-8"))
 
+prepare_probe = None
+prepare_text = os.environ.get("BUDDYSWITCH_TEST_PREPARE_TEXT")
+if prepare_text:
+    prepare_result = subprocess.run(
+        ["python3", "scripts/turn_runtime.py", "prepare", prepare_text],
+        cwd=os.getcwd(),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    prepare_probe = {
+        "returncode": prepare_result.returncode,
+        "stdout": prepare_result.stdout,
+        "stderr": prepare_result.stderr,
+        "json": None,
+    }
+    if prepare_result.stdout.strip():
+        try:
+            prepare_probe["json"] = json.loads(prepare_result.stdout)
+        except json.JSONDecodeError as exc:
+            prepare_probe["json_error"] = str(exc)
+
+broker_status_probe = None
+if os.environ.get("BUDDYSWITCH_TEST_BROKER_STATUS") and entry["instance_json"]:
+    instance_json_path = Path(entry["instance_json"])
+    runtime_dir = instance_json_path.parent / "runtime"
+    status_result = subprocess.run(
+        [
+            "python3",
+            "scripts/runtime_kernel/broker.py",
+            "status",
+            "--socket",
+            entry["runtime_broker_socket"] or str(runtime_dir / "runtime-broker.sock"),
+            "--pid-file",
+            str(runtime_dir / "runtime-broker.pid"),
+            "--marker-file",
+            str(runtime_dir / "runtime-broker.socket"),
+            "--log-file",
+            str(runtime_dir / "runtime-broker.log"),
+            "--instance-json",
+            str(instance_json_path),
+            "--manifest",
+            str(Path(os.getcwd()) / "buddyswitch" / "manifest.toml"),
+        ],
+        cwd=os.getcwd(),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    broker_status_probe = {
+        "returncode": status_result.returncode,
+        "stdout": status_result.stdout,
+        "stderr": status_result.stderr,
+        "json": None,
+        "pid_file_text": (runtime_dir / "runtime-broker.pid").read_text(encoding="utf-8").strip()
+        if (runtime_dir / "runtime-broker.pid").exists()
+        else None,
+        "marker_file_text": (runtime_dir / "runtime-broker.socket").read_text(encoding="utf-8").strip()
+        if (runtime_dir / "runtime-broker.socket").exists()
+        else None,
+        "socket_exists": Path(entry["runtime_broker_socket"]).exists() if entry["runtime_broker_socket"] else False,
+    }
+    if status_result.stdout.strip():
+        try:
+            broker_status_probe["json"] = json.loads(status_result.stdout)
+        except json.JSONDecodeError as exc:
+            broker_status_probe["json_error"] = str(exc)
+
 payload = {
     **entry,
     "product_probe": product_probe,
     "projects_app_probe": projects_app_probe,
     "relative_probe": relative_probe,
+    "prepare_probe": prepare_probe,
+    "broker_status_probe": broker_status_probe,
     "launch_count": launch_count,
     "config_toml": (codex_home / "config.toml").read_text(encoding="utf-8"),
     "auth_json": json.loads((codex_home / "auth.json").read_text(encoding="utf-8")),
@@ -1639,6 +1710,100 @@ exec "$real_git" "$@"
                 local_path = workspace_dir / relative_path
                 self.assertTrue(local_path.is_dir(), f"missing instance-local runtime dir: {local_path}")
                 self.assertFalse(local_path.is_symlink(), f"instance-local runtime dir must not be projected: {local_path}")
+
+    def test_instance_start_first_prepare_runs_through_workspace_broker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_PREPARE_TEXT"] = "smoke prepare"
+            env["BUDDYSWITCH_TEST_BROKER_STATUS"] = "1"
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "continue"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            instance_root = source_home_path / ".codex-buddyswitch" / "instances" / payload["instance_id"]
+            workspace_dir = instance_root / "workspace"
+            self.assertEqual(payload["cwd"], str(workspace_dir.resolve()))
+            self.assertTrue(payload["runtime_broker_socket"])
+
+            prepare_probe = payload["prepare_probe"]
+            self.assertIsInstance(prepare_probe, dict)
+            self.assertEqual(prepare_probe["returncode"], 0, msg=prepare_probe)
+            prepare_payload = prepare_probe["json"]
+            self.assertIsInstance(prepare_payload, dict, msg=prepare_probe)
+            self.assertTrue(prepare_payload.get("ok"), msg=prepare_payload)
+            self.assertNotIn("protocol", prepare_payload)
+            self.assertNotIn("request_id", prepare_payload)
+            run_envelope = prepare_payload.get("run_envelope")
+            self.assertIsInstance(run_envelope, dict, msg=prepare_payload)
+            run_id = run_envelope.get("run_id")
+            self.assertIsInstance(run_id, str, msg=prepare_payload)
+            reserved_path = workspace_dir / "buddyswitch" / "content" / "runs" / "reserved" / f"{run_id}.json"
+            self.assertTrue(reserved_path.exists(), "prepare must reserve a run visible through the runtime workspace")
+            reservation = json.loads(reserved_path.read_text(encoding="utf-8"))
+            self.assertEqual(reservation["run_id"], run_id)
+            self.assertEqual(reservation["status"], "reserved")
+            self.assertEqual(reservation["instance_id"], payload["instance_id"])
+            context_save_path = prepare_payload.get("context_save_path")
+            self.assertIsInstance(context_save_path, str, msg=prepare_payload)
+            context_path = workspace_dir / context_save_path
+            self.assertTrue(context_path.exists(), "prepare must write the raw context path advertised in payload")
+            context_payload = json.loads(context_path.read_text(encoding="utf-8"))
+            self.assertEqual(context_payload["run_envelope"]["run_id"], run_id)
+
+            status_probe = payload["broker_status_probe"]
+            self.assertIsInstance(status_probe, dict)
+            self.assertEqual(status_probe["returncode"], 0, msg=status_probe)
+            status_payload = status_probe["json"]
+            self.assertIsInstance(status_payload, dict, msg=status_probe)
+            self.assertTrue(status_payload.get("healthy"), msg=status_payload)
+            self.assertEqual(
+                Path(str(status_payload.get("env_store_root"))).resolve(strict=False),
+                workspace_dir.resolve(strict=False),
+            )
+            self.assertIs(status_payload.get("runtime_workspace"), True)
 
     def test_start_with_buddy_allocates_next_browser_port_when_default_is_busy(self) -> None:
         busy_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -3507,6 +3672,105 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             stored = json.loads(Path(second_payload["instance_json"]).read_text(encoding="utf-8"))
             self.assertEqual(stored["status"], "inactive")
 
+    def test_instance_open_repairs_stale_broker_before_first_prepare(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_id = "inst-pm-open-stale-broker"
+            instance_root, workspace_dir = self._write_instance_record(shared_root, instance_id, browser_port=9222)
+            self._add_test_worktree(workspace_dir)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            ready_file = temp_root_path / "browser-ready.flag"
+            open_capture = temp_root_path / "capture-open.json"
+            base_env = os.environ.copy()
+            base_env["HOME"] = str(source_home_path)
+            base_env.pop("CODEX_HOME", None)
+            base_env["PATH"] = f"{fake_bin}{os.pathsep}{base_env.get('PATH', '')}"
+            base_env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            base_env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            base_env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+
+            runtime_dir = instance_root / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            pid_file = runtime_dir / "runtime-broker.pid"
+            socket_path = Path(tempfile.gettempdir()) / f"{instance_id}-stale.sock"
+            marker_file = runtime_dir / "runtime-broker.socket"
+            stale_pid = "999999"
+            pid_file.write_text(f"{stale_pid}\n", encoding="utf-8")
+            socket_path.write_text("stale socket placeholder\n", encoding="utf-8")
+            marker_file.write_text(str(socket_path), encoding="utf-8")
+
+            open_env = base_env.copy()
+            open_env["BUDDYSWITCH_TEST_CAPTURE"] = str(open_capture)
+            open_env["BUDDYSWITCH_TEST_PREPARE_TEXT"] = "smoke prepare"
+            open_env["BUDDYSWITCH_TEST_BROKER_STATUS"] = "1"
+            open_result = subprocess.run(
+                [str(LAUNCHER), "instance", "open", instance_id, "debug", "prompt-input", "continue"],
+                cwd=ROOT,
+                env=open_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(open_result.returncode, 0, msg=open_result.stderr)
+
+            payload = json.loads(open_capture.read_text(encoding="utf-8"))
+            prepare_probe = payload["prepare_probe"]
+            self.assertIsInstance(prepare_probe, dict)
+            self.assertEqual(prepare_probe["returncode"], 0, msg=prepare_probe)
+            prepare_payload = prepare_probe["json"]
+            self.assertIsInstance(prepare_payload, dict, msg=prepare_probe)
+            self.assertTrue(prepare_payload.get("ok"), msg=prepare_payload)
+            self.assertNotIn("protocol", prepare_payload)
+            run_id = prepare_payload["run_envelope"]["run_id"]
+            self.assertTrue(
+                (
+                    instance_root
+                    / "workspace"
+                    / "buddyswitch"
+                    / "content"
+                    / "runs"
+                    / "reserved"
+                    / f"{run_id}.json"
+                ).exists()
+            )
+
+            status_probe = payload["broker_status_probe"]
+            self.assertIsInstance(status_probe, dict)
+            self.assertEqual(status_probe["returncode"], 0, msg=status_probe)
+            status_payload = status_probe["json"]
+            self.assertIsInstance(status_payload, dict, msg=status_probe)
+            self.assertTrue(status_payload.get("healthy"), msg=status_payload)
+            self.assertNotEqual(status_probe["pid_file_text"], stale_pid)
+            self.assertEqual(status_probe["marker_file_text"], status_payload["socket_path"])
+            self.assertEqual(status_payload["socket_path"], status_payload["ping"]["socket_path"])
+            self.assertEqual(status_payload["pid"], status_payload["ping"]["pid"])
+            self.assertIs(status_probe["socket_exists"], True)
+
     def test_instance_open_refreshes_runtime_skills_and_removes_stale_skill(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -4116,6 +4380,44 @@ plugins = false
             self.assertFalse((instance_root / "runtime" / "runtime-broker.sock").exists())
             self.assertFalse((instance_root / "runtime" / "runtime-broker.socket").exists())
             self.assertFalse((temp_root_path / "capture.json").exists(), "Codex should not launch after bootstrap failure")
+
+    def test_instance_open_fails_before_codex_when_runtime_broker_surface_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_root, workspace_dir = self._write_instance_record(shared_root, "inst-pm-missing-broker-surface")
+            self._add_test_worktree(workspace_dir)
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            missing_manifest = workspace_dir / "buddyswitch" / "missing-manifest.toml"
+            capture_path = temp_root_path / "capture.json"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(temp_root_path / "browser-ready.flag")
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_MANIFEST_PATH"] = str(missing_manifest)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "open", "inst-pm-missing-broker-surface", "debug", "prompt-input", "continue"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn(f"Runtime broker manifest missing in workspace: {missing_manifest}", completed.stderr)
+            self.assertFalse(capture_path.exists(), "Codex should not launch when runtime broker surface is missing")
+            self.assertFalse((instance_root / "runtime" / "runtime-broker.pid").exists())
 
     def test_locked_instance_open_entrypoint_rejects_direct_invocation_without_lock(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:

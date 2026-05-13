@@ -180,7 +180,7 @@ def _paths_from_args(args: argparse.Namespace) -> lifecycle.BrokerPaths:
     )
 
 
-def _expected_identity(instance_json_path: Path) -> tuple[str, str]:
+def _expected_runtime_context(instance_json_path: Path) -> tuple[str, str, Path | None]:
     payload = json.loads(instance_json_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"instance record must be object: {instance_json_path}")
@@ -190,7 +190,11 @@ def _expected_identity(instance_json_path: Path) -> tuple[str, str]:
         raise ValueError(f"instance record missing instance_id: {instance_json_path}")
     if not isinstance(active_buddy, str) or not active_buddy.strip():
         raise ValueError(f"instance record missing buddy: {instance_json_path}")
-    return instance_id.strip(), active_buddy.strip()
+    workspace_dir = payload.get("workspace_dir")
+    workspace_root = None
+    if isinstance(workspace_dir, str) and workspace_dir.strip():
+        workspace_root = Path(workspace_dir.strip()).resolve(strict=False)
+    return instance_id.strip(), active_buddy.strip(), workspace_root
 
 
 def _run_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
@@ -214,7 +218,7 @@ def _run_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         payload = lifecycle.stop_broker(paths)
         return (0 if payload.get("ok") else 1), payload
 
-    expected_instance_id, expected_active_buddy = _expected_identity(args.instance_json)
+    expected_instance_id, expected_active_buddy, expected_workspace_root = _expected_runtime_context(args.instance_json)
 
     if args.command == "ping":
         payload = lifecycle.ping_broker(
@@ -229,6 +233,7 @@ def _run_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             paths,
             expected_instance_id=expected_instance_id,
             expected_active_buddy=expected_active_buddy,
+            expected_workspace_root=expected_workspace_root,
         )
         return (0 if payload.get("healthy") else 1), payload
 
@@ -239,6 +244,7 @@ def _run_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             manifest_path=args.manifest,
             expected_instance_id=expected_instance_id,
             expected_active_buddy=expected_active_buddy,
+            expected_workspace_root=expected_workspace_root,
         )
         return (0 if payload.get("ok") else 1), payload
 

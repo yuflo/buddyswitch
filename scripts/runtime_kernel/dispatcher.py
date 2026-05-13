@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
+import env_store
 import turn_runtime
 from env.tools import responses as tool_responses
 from env.tools.router import dispatch_env_tool_request
@@ -271,6 +272,8 @@ def _env_tool_dispatch(
 def _ping_dispatch(*, session: RuntimeBrokerSession, instance_record: dict[str, Any]) -> dict[str, Any]:
     instance_id = str(instance_record["instance_id"]).strip()
     active_buddy = str(instance_record["buddy"]).strip()
+    runtime_root = Path.cwd().resolve(strict=False)
+    env_store_root = env_store.ROOT.resolve(strict=False)
     return {
         "ok": True,
         "protocol": "buddyswitch-runtime-broker/v2",
@@ -278,6 +281,10 @@ def _ping_dispatch(*, session: RuntimeBrokerSession, instance_record: dict[str, 
         "active_buddy": active_buddy,
         "pid": os.getpid(),
         "socket_path": str(session.socket_path) if session.socket_path is not None else None,
+        "runtime_root": str(runtime_root),
+        "cwd": str(runtime_root),
+        "env_store_root": str(env_store_root),
+        "runtime_workspace": env_store.is_runtime_workspace(env_store.ROOT),
     }
 
 
