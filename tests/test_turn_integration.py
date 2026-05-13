@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import socket
 import sys
 import threading
 import unittest
+import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -300,6 +302,11 @@ def _make_cdp_handler(state: _CDPState) -> type[BaseHTTPRequestHandler]:
 
 
 class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    @staticmethod
+    def _result_hash(result: dict[str, object]) -> str:
+        body = json.dumps(result, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(body).hexdigest()
+
     def _session(self, *, buddy: str, payload: dict[str, object] | None = None) -> dict[str, object]:
         return {
             "instance_id": "instance-test",
@@ -358,17 +365,63 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_json: Path,
         instance_id: str,
     ) -> dict[str, object]:
-        return runtime_broker.dispatch_runtime_request(
-            request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+        request: dict[str, object] = {
+            "protocol": "buddyswitch-runtime-broker/v2",
+            "request_id": f"req-turn-integration-{uuid.uuid4().hex}",
+            "method": method,
+            "params": {
                 "instance_id": instance_id,
                 "active_buddy": buddy,
-                "method": method,
-                "payload": payload,
+                **payload,
             },
+            "deadline_ms": 35000,
+        }
+        if method == "persist":
+            context = payload.get("context")
+            result = payload.get("result")
+            if isinstance(context, dict) and isinstance(result, dict):
+                run_envelope = context.get("run_envelope")
+                run_id = None
+                if isinstance(run_envelope, dict):
+                    run_id_raw = run_envelope.get("run_id")
+                    if isinstance(run_id_raw, str) and run_id_raw:
+                        run_id = run_id_raw
+                    turn_identity = run_envelope.get("turn_identity")
+                    if run_id is None and isinstance(turn_identity, dict):
+                        turn_run_id = turn_identity.get("run_id")
+                        if isinstance(turn_run_id, str) and turn_run_id:
+                            run_id = turn_run_id
+                if isinstance(run_id, str):
+                    result_hash = self._result_hash(result)
+                    request["idempotency_key"] = f"persist:{run_id}:{result_hash}"
+                    request["result_hash"] = result_hash
+        envelope = runtime_broker.dispatch_runtime_request(
+            request=request,
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
         )
+        self.assertEqual(envelope.get("protocol"), "buddyswitch-runtime-broker/v2")
+        if envelope.get("ok") is True:
+            result = envelope.get("result")
+            self.assertIsInstance(result, dict, msg=envelope)
+            assert isinstance(result, dict)
+            return result
+        error = envelope.get("error")
+        self.assertIsInstance(error, dict, msg=envelope)
+        assert isinstance(error, dict)
+        response: dict[str, object] = {
+            "ok": False,
+            "error": {
+                "code": error.get("code"),
+                "message": error.get("message"),
+                "retriable": error.get("retriable"),
+            },
+        }
+        for key, value in envelope.items():
+            if key in {"protocol", "request_id", "ok", "error"}:
+                continue
+            response[key] = value
+        return response
 
     def _env_tool(
         self,
@@ -540,7 +593,10 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=instance_id,
         )
         self.assertTrue(response["ok"], msg=response)
-        return response["payload"]
+        payload = response.get("payload") if isinstance(response.get("payload"), dict) else response
+        self.assertIsInstance(payload, dict, msg=response)
+        assert isinstance(payload, dict)
+        return payload
 
     def _broker_persist(
         self,
@@ -559,7 +615,10 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=instance_id,
         )
         self.assertTrue(response["ok"], msg=response)
-        return response["payload"]
+        payload = response.get("payload") if isinstance(response.get("payload"), dict) else response
+        self.assertIsInstance(payload, dict, msg=response)
+        assert isinstance(payload, dict)
+        return payload
 
     def _issue_market_browser_evidence(
         self,

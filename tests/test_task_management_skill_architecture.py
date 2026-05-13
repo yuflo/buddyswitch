@@ -8,6 +8,7 @@ import json
 import re
 import sys
 import unittest
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +21,7 @@ import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-PROTOCOL = "buddyswitch-runtime-broker/v1"
+PROTOCOL = "buddyswitch-runtime-broker/v2"
 PM_REQUEST = "创建3个task关于为三款产品分别制作简单的landing page"
 
 
@@ -64,17 +65,43 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         instance_id: str,
         buddy: str,
     ) -> dict[str, object]:
-        return runtime_broker.dispatch_runtime_request(
+        envelope = runtime_broker.dispatch_runtime_request(
             request={
                 "protocol": PROTOCOL,
-                "instance_id": instance_id,
-                "active_buddy": buddy,
+                "request_id": f"req-task-arch-{uuid.uuid4().hex}",
                 "method": method,
-                "payload": payload,
+                "params": {
+                    "instance_id": instance_id,
+                    "active_buddy": buddy,
+                    **payload,
+                },
+                "deadline_ms": 35000,
             },
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
         )
+        self.assertEqual(envelope.get("protocol"), PROTOCOL)
+        if envelope.get("ok") is True:
+            result = envelope.get("result")
+            self.assertIsInstance(result, dict, msg=envelope)
+            assert isinstance(result, dict)
+            return result
+        error = envelope.get("error")
+        self.assertIsInstance(error, dict, msg=envelope)
+        assert isinstance(error, dict)
+        response: dict[str, object] = {
+            "ok": False,
+            "error": {
+                "code": error.get("code"),
+                "message": error.get("message"),
+                "retriable": error.get("retriable"),
+            },
+        }
+        for key, value in envelope.items():
+            if key in {"protocol", "request_id", "ok", "error"}:
+                continue
+            response[key] = value
+        return response
 
     def _env_tool(
         self,
@@ -111,7 +138,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
             buddy=buddy,
         )
         self.assertTrue(response.get("ok"), msg=response)
-        payload = response.get("payload")
+        payload = response.get("payload") if isinstance(response.get("payload"), dict) else response
         self.assertIsInstance(payload, dict, msg=response)
         assert isinstance(payload, dict)
         return payload

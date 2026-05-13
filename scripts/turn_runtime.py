@@ -37,7 +37,12 @@ from env_store import (
     require_runtime_workspace_write_root,
     run_content_path,
 )
-from runtime_kernel.client import RuntimeBrokerError, request_runtime_broker
+from runtime_kernel.client import (
+    RuntimeBrokerError,
+    canonical_result_hash,
+    make_persist_idempotency_key,
+    request_runtime_broker,
+)
 ROOT = env_store.ROOT
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -339,24 +344,34 @@ def _runtime_lock_timeout_seconds() -> float:
 
 
 @contextmanager
-def _hold_product_runtime_lock(product_session: dict[str, Any]):
+def _hold_product_runtime_lock(
+    product_session: dict[str, Any],
+    *,
+    mode: str = "write",
+    timeout_seconds: float | None = None,
+):
     shared_root = str(_product_runtime_shared_root(product_session)).rstrip("/")
     if not shared_root:
         raise ValueError("BUDDYSWITCH_SHARED_ROOT must not be empty")
-    timeout_seconds = _runtime_lock_timeout_seconds()
+    resolved_timeout_seconds = _runtime_lock_timeout_seconds() if timeout_seconds is None else timeout_seconds
     lock_path = Path(shared_root) / "run" / "locks" / "runtime.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
-    deadline = time.monotonic() + timeout_seconds
+    lock_flag = fcntl.LOCK_EX
+    if mode == "read":
+        lock_flag = fcntl.LOCK_SH
+    elif mode != "write":
+        raise ValueError(f"unsupported runtime lock mode: {mode}")
+    deadline = time.monotonic() + resolved_timeout_seconds
     try:
         while True:
             try:
-                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(lock_fd, lock_flag | fcntl.LOCK_NB)
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
                     raise TimeoutError(
-                        f"runtime state busy: could not acquire lock at {lock_path} within {timeout_seconds:.2f}s"
+                        f"runtime state busy: could not acquire lock at {lock_path} within {resolved_timeout_seconds:.2f}s"
                     )
                 time.sleep(_RUNTIME_LOCK_POLL_SECONDS)
         try:
@@ -1462,35 +1477,54 @@ def persist_buddy_run(
     )
 
 
+def _prepare_direct(text: str, *, manifest_path: Path, product_session: dict[str, Any] | None) -> dict[str, Any]:
+    if product_session is None:
+        return prepare_turn_context(text, manifest_path=manifest_path)
+    with _hold_product_runtime_lock(product_session):
+        refreshed_product_session = _load_product_mode_session(manifest_path)
+        if refreshed_product_session is None:
+            raise ValueError("product-mode env disappeared while acquiring runtime lock")
+        return prepare_turn_context(text, manifest_path=manifest_path)
+
+
+def _persist_direct(
+    context: dict[str, Any],
+    *,
+    result: dict[str, Any],
+    manifest_path: Path,
+    product_session: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if product_session is None:
+        return persist_buddy_run(
+            context,
+            result=result,
+            manifest_path=manifest_path,
+        )
+    with _hold_product_runtime_lock(product_session):
+        refreshed_product_session = _load_product_mode_session(manifest_path)
+        if refreshed_product_session is None:
+            raise ValueError("product-mode env disappeared while acquiring runtime lock")
+        _validate_product_persist_context_binding(context, refreshed_product_session)
+        return persist_buddy_run(
+            context,
+            result=result,
+            manifest_path=manifest_path,
+        )
+
+
 def _cmd_prepare(args: argparse.Namespace) -> int:
     try:
         product_session = _load_product_mode_session(args.manifest)
         if product_session is not None and os.environ.get("BUDDYSWITCH_RUNTIME_BROKER_MODE") != "server":
-            broker_response = request_runtime_broker("prepare", {"text": args.text})
-            if not isinstance(broker_response, dict) or not isinstance(broker_response.get("ok"), bool):
+            payload = request_runtime_broker("prepare", {"text": args.text})
+            if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
                 raise RuntimeBrokerError(
-                    "E_RUNTIME_BROKER_UNAVAILABLE",
-                    "runtime broker returned invalid response shape for prepare.",
+                    "E_RUNTIME_BROKER_PROTOCOL",
+                    "runtime broker returned invalid result shape for prepare.",
                 )
-            if broker_response["ok"]:
-                payload = broker_response.get("payload")
-                if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
-                    raise RuntimeBrokerError(
-                        "E_RUNTIME_BROKER_UNAVAILABLE",
-                        "runtime broker returned invalid payload shape for prepare.",
-                    )
-            else:
-                payload = broker_response
             print(json.dumps(payload, ensure_ascii=True, indent=2))
             return 0 if payload.get("ok") else 1
-        if product_session is None:
-            payload = prepare_turn_context(args.text, manifest_path=args.manifest)
-        else:
-            with _hold_product_runtime_lock(product_session):
-                product_session = _load_product_mode_session(args.manifest)
-                if product_session is None:
-                    raise ValueError("product-mode env disappeared while acquiring runtime lock")
-                payload = prepare_turn_context(args.text, manifest_path=args.manifest)
+        payload = _prepare_direct(args.text, manifest_path=args.manifest, product_session=product_session)
     except RuntimeBrokerError as exc:
         payload = runtime_error(exc.code, exc.message, exc.details)
     except RuntimeFeedbackError as exc:
@@ -1566,43 +1600,21 @@ def _cmd_persist(args: argparse.Namespace) -> int:
         result = _read_json_input(args.result, stdin_text=stdin_text if args.result == "-" else None)
         product_session = _load_product_mode_session(args.manifest)
         if product_session is not None and os.environ.get("BUDDYSWITCH_RUNTIME_BROKER_MODE") != "server":
-            broker_response = request_runtime_broker(
-                "persist",
-                {"context": context, "result": result},
-            )
-            if not isinstance(broker_response, dict) or not isinstance(broker_response.get("ok"), bool):
+            idempotency_key = make_persist_idempotency_key(context, result)
+            payload = request_runtime_broker("persist", {"context": context, "result": result}, idempotency_key=idempotency_key, result_hash=canonical_result_hash(result))
+            if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
                 raise RuntimeBrokerError(
-                    "E_RUNTIME_BROKER_UNAVAILABLE",
-                    "runtime broker returned invalid response shape for persist.",
+                    "E_RUNTIME_BROKER_PROTOCOL",
+                    "runtime broker returned invalid result shape for persist.",
                 )
-            if broker_response["ok"]:
-                payload = broker_response.get("payload")
-                if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
-                    raise RuntimeBrokerError(
-                        "E_RUNTIME_BROKER_UNAVAILABLE",
-                        "runtime broker returned invalid payload shape for persist.",
-                    )
-            else:
-                payload = broker_response
             print(json.dumps(payload, ensure_ascii=True, indent=2))
             return 0 if payload.get("ok") else 1
-        if product_session is None:
-            payload = persist_buddy_run(
-                context,
-                result=result,
-                manifest_path=args.manifest,
-            )
-        else:
-            with _hold_product_runtime_lock(product_session):
-                product_session = _load_product_mode_session(args.manifest)
-                if product_session is None:
-                    raise ValueError("product-mode env disappeared while acquiring runtime lock")
-                _validate_product_persist_context_binding(context, product_session)
-                payload = persist_buddy_run(
-                    context,
-                    result=result,
-                    manifest_path=args.manifest,
-                )
+        payload = _persist_direct(
+            context,
+            result=result,
+            manifest_path=args.manifest,
+            product_session=product_session,
+        )
     except RuntimeBrokerError as exc:
         payload = runtime_error(exc.code, exc.message, exc.details)
     except RuntimeFeedbackError as exc:

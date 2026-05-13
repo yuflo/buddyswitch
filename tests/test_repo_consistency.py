@@ -695,6 +695,104 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("env.tool", text)
                 self.assertNotIn("env" + "." + "task", text)
 
+    def test_runtime_broker_v1_protocol_and_eof_framing_are_removed(self) -> None:
+        runtime_paths = [
+            ROOT / "scripts" / "runtime_kernel" / "client.py",
+            ROOT / "scripts" / "runtime_kernel" / "broker.py",
+            ROOT / "scripts" / "runtime_kernel" / "server.py",
+            ROOT / "scripts" / "runtime_kernel" / "protocol.py",
+            ROOT / "scripts" / "turn_runtime.py",
+            ROOT / "scripts" / "env" / "client.py",
+            ROOT / "scripts" / "browser_evidence.py",
+        ]
+        for path in runtime_paths:
+            if not path.exists():
+                self.fail(f"required runtime broker v2 path is missing: {path.relative_to(ROOT)}")
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=str(path.relative_to(ROOT)), token="v1-protocol"):
+                self.assertNotIn("buddyswitch-runtime-broker/v1", text)
+            with self.subTest(path=str(path.relative_to(ROOT)), token="payload-envelope"):
+                self.assertNotIn('request["payload"]', text)
+                self.assertNotIn('request.get("payload")', text)
+
+        broker_text = (ROOT / "scripts" / "runtime_kernel" / "broker.py").read_text(encoding="utf-8")
+        self.assertNotIn("shutdown(socket.SHUT_WR)", broker_text)
+        self.assertNotIn("while True:\n            conn, _ = server.accept()", broker_text)
+
+    def test_runtime_broker_launcher_health_delegates_to_python_lifecycle(self) -> None:
+        launcher = (ROOT / "tools" / "launcher" / "runtime_broker.sh").read_text(encoding="utf-8")
+        self.assertIn("broker.py", launcher)
+        self.assertIn(" status ", launcher)
+        self.assertIn(" ensure ", launcher)
+        self.assertNotIn("kill -0", launcher)
+
+    def test_runtime_broker_structured_error_codes_are_covered(self) -> None:
+        text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in [
+                ROOT / "tests" / "test_runtime_broker.py",
+                ROOT / "tests" / "test_run_env_tool.py",
+                ROOT / "scripts" / "runtime_kernel" / "protocol.py",
+                ROOT / "scripts" / "runtime_kernel" / "server.py",
+                ROOT / "scripts" / "runtime_kernel" / "dispatcher.py",
+                ROOT / "scripts" / "runtime_kernel" / "lifecycle.py",
+                ROOT / "scripts" / "env" / "services" / "runs.py",
+            ]
+            if path.exists()
+        )
+        for code in (
+            "E_RUNTIME_BROKER_BUSY",
+            "E_RUNTIME_BROKER_DEADLINE_EXCEEDED",
+            "E_RUNTIME_BROKER_CLIENT_DISCONNECTED",
+            "E_RUNTIME_BROKER_STALE_SOCKET",
+            "E_RUNTIME_BROKER_PROTOCOL",
+            "E_RUNTIME_BROKER_PERMISSION",
+            "E_RUNTIME_PERSIST_CONFLICT",
+            "E_RUNTIME_IDEMPOTENCY_REQUIRED",
+        ):
+            with self.subTest(code=code):
+                self.assertIn(code, text)
+
+    def test_product_mode_prepare_persist_do_not_bypass_runtime_broker(self) -> None:
+        text = (ROOT / "scripts" / "turn_runtime.py").read_text(encoding="utf-8")
+        prepare_start = text.index("def _cmd_prepare")
+        persist_start = text.index("def _cmd_persist")
+        parser_start = text.index("def build_parser", persist_start)
+        prepare_block = text[prepare_start:persist_start]
+        persist_block = text[persist_start:parser_start]
+        self.assertIn('request_runtime_broker("prepare"', prepare_block)
+        self.assertNotIn("prepare_turn_context(", prepare_block)
+        self.assertIn('request_runtime_broker("persist"', persist_block)
+        self.assertNotIn("persist_buddy_run(", persist_block)
+
+    def test_runtime_broker_does_not_add_workflow_or_rule_engine(self) -> None:
+        runtime_root = ROOT / "scripts" / "runtime_kernel"
+        self.assertTrue(runtime_root.exists())
+        filenames = {path.name for path in runtime_root.glob("*.py")}
+        for forbidden in ("workflow", "rule_engine", "plugin", "router_policy"):
+            with self.subTest(forbidden=forbidden):
+                self.assertFalse(any(forbidden in name for name in filenames))
+        text = "\n".join(path.read_text(encoding="utf-8") for path in runtime_root.glob("*.py"))
+        for forbidden_import in ("import grpc", "import http.server", "import sqlite3"):
+            with self.subTest(forbidden_import=forbidden_import):
+                self.assertNotIn(forbidden_import, text)
+
+    def test_runtime_broker_v2_runbook_documents_health_retry_and_errors(self) -> None:
+        runbook = ROOT / "framework" / "docs" / "runtime-broker-v2-runbook.md"
+        self.assertTrue(runbook.exists(), "framework/docs/runtime-broker-v2-runbook.md is required")
+        text = runbook.read_text(encoding="utf-8")
+        for heading in ("Health Criteria", "Ensure Flow", "Retry Policy", "Error Codes"):
+            with self.subTest(heading=heading):
+                self.assertIn(heading, text)
+        for code in (
+            "E_RUNTIME_BROKER_BUSY",
+            "E_RUNTIME_BROKER_DEADLINE_EXCEEDED",
+            "E_RUNTIME_PERSIST_CONFLICT",
+            "E_RUNTIME_IDEMPOTENCY_REQUIRED",
+        ):
+            with self.subTest(code=code):
+                self.assertIn(code, text)
+
     def test_env_tool_active_surface_residue_scan(self) -> None:
         target_roots = [
             ROOT / "README.md",

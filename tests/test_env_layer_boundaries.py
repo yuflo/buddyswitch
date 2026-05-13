@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 
 try:
@@ -25,7 +26,7 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 CODEX_CONFIG = ROOT / "tools" / "launcher" / "codex_config.py"
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-PROTOCOL = "buddyswitch-runtime-broker/v1"
+PROTOCOL = "buddyswitch-runtime-broker/v2"
 PERMISSION_PROFILE = "buddyswitch-runtime"
 
 
@@ -107,17 +108,45 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return path
 
     def _dispatch_dev_task_create(self, args: dict[str, object]) -> dict[str, object]:
-        return runtime_broker.dispatch_runtime_request(
+        envelope = runtime_broker.dispatch_runtime_request(
             request={
                 "protocol": PROTOCOL,
-                "instance_id": "inst-dev-boundary",
-                "active_buddy": "dev",
+                "request_id": f"req-env-layer-{uuid.uuid4().hex}",
                 "method": "env.tool",
-                "payload": {"tool": "task", "action": "create", "args": args},
+                "params": {
+                    "instance_id": "inst-dev-boundary",
+                    "active_buddy": "dev",
+                    "tool": "task",
+                    "action": "create",
+                    "args": args,
+                },
+                "deadline_ms": 35000,
             },
             instance_json_path=self._instance_json(),
             manifest_path=MANIFEST,
         )
+        self.assertEqual(envelope.get("protocol"), PROTOCOL)
+        if envelope.get("ok") is True:
+            payload = envelope.get("result")
+            self.assertIsInstance(payload, dict, msg=envelope)
+            assert isinstance(payload, dict)
+            return payload
+        error = envelope.get("error")
+        self.assertIsInstance(error, dict, msg=envelope)
+        assert isinstance(error, dict)
+        payload = {
+            "ok": False,
+            "error": {
+                "code": error.get("code"),
+                "message": error.get("message"),
+                "retriable": error.get("retriable"),
+            },
+        }
+        for key, value in envelope.items():
+            if key in {"protocol", "request_id", "ok", "error"}:
+                continue
+            payload[key] = value
+        return payload
 
     def test_dev_project_workspace_is_writable_and_non_dev_project_workspace_is_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

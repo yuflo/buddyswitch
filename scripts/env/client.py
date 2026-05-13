@@ -13,14 +13,46 @@ SCRIPTS_ROOT = Path(__file__).resolve().parents[1]
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
-from runtime_kernel.client import RuntimeBrokerError, broker_unavailable_feedback, request_runtime_broker
+from runtime_kernel.client import (
+    RuntimeBrokerError,
+    broker_unavailable_feedback,
+    canonical_result_hash,
+    make_persist_idempotency_key,
+    request_runtime_broker,
+)
 
 
 def _error_payload(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-    error: dict[str, Any] = {"code": code, "message": message}
-    if extra:
-        error.update(extra)
-    return {"ok": False, "error": error}
+    payload: dict[str, Any] = {
+        "ok": False,
+        "error": {"code": code, "message": message},
+    }
+    if not extra:
+        return payload
+
+    top_level_keys = {
+        "tool",
+        "action",
+        "permission_boundary",
+        "allowed_next_actions",
+        "allowed_next_action_options",
+        "command_hint",
+        "stop_condition",
+        "persist_payload_hint",
+        "request_id",
+        "retriable",
+        "retry_after_ms",
+        "feedback",
+        "broker_status",
+    }
+    for key, value in extra.items():
+        if key in {"code", "message"}:
+            continue
+        if key in top_level_keys:
+            payload[key] = value
+        else:
+            payload["error"][key] = value
+    return payload
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:
@@ -311,9 +343,21 @@ def _run_args_from_cli(args: argparse.Namespace) -> dict[str, Any]:
     raise ValueError(f"unsupported run operation: {operation}")
 
 
-def _dispatch_env_tool(tool: str, action: str, args: dict[str, Any]) -> dict[str, Any]:
+def _dispatch_env_tool(
+    tool: str,
+    action: str,
+    args: dict[str, Any],
+    *,
+    envelope_idempotency_key: str | None = None,
+    envelope_result_hash: str | None = None,
+) -> dict[str, Any]:
     payload = {"tool": tool, "action": action, "args": args}
-    response = request_runtime_broker("env.tool", payload)
+    response = request_runtime_broker(
+        "env.tool",
+        payload,
+        idempotency_key=envelope_idempotency_key,
+        result_hash=envelope_result_hash,
+    )
     if not isinstance(response, dict) or not isinstance(response.get("ok"), bool):
         return _error_payload(
             "E_RUNTIME_BROKER_UNAVAILABLE",
@@ -368,7 +412,22 @@ def _dispatch_evidence(args: argparse.Namespace) -> dict[str, Any]:
 def _dispatch_run(args: argparse.Namespace) -> dict[str, Any]:
     operation = str(args.operation)
     action = _operation_to_action(operation)
-    return _dispatch_env_tool("run", action, _run_args_from_cli(args))
+    payload_args = _run_args_from_cli(args)
+    envelope_idempotency_key: str | None = None
+    envelope_result_hash: str | None = None
+    if action == "commit":
+        context = payload_args.get("context")
+        result = payload_args.get("result")
+        if isinstance(context, dict) and isinstance(result, dict):
+            envelope_idempotency_key = make_persist_idempotency_key(context, result)
+            envelope_result_hash = canonical_result_hash(result)
+    return _dispatch_env_tool(
+        "run",
+        action,
+        payload_args,
+        envelope_idempotency_key=envelope_idempotency_key,
+        envelope_result_hash=envelope_result_hash,
+    )
 
 
 def main() -> int:

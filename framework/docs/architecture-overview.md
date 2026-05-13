@@ -40,7 +40,8 @@ If another turn is needed, use `receipt.next_state` or `receipt.handoff` to comp
 
 - Product mode is locked to one buddy instance.
 - User text does not override active buddy binding.
-- Runtime broker is the only product-mode state writer.
+- Runtime broker v2 (`scripts/runtime_kernel/broker.py`) is the only product-mode state writer.
+- Runtime broker is a local Unix socket RPC gateway with explicit request/response envelopes, not a workflow orchestrator or rule framework.
 - Env tool operations route through broker method `env.tool` and `python3 scripts/env/client.py`.
 - Runtime writes happen only in canonical BuddySwitch object/run paths.
 - Raw state paths are broker-only from host sandbox perspective.

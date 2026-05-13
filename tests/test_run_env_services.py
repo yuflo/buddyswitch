@@ -31,7 +31,13 @@ class RunServiceOwnershipTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload = persist_buddy_run_request(context, result=result, manifest_path=MANIFEST)
 
         self.assertEqual(payload, expected)
-        commit.assert_called_once_with(context, result=result, manifest_path=MANIFEST)
+        commit.assert_called_once_with(
+            context,
+            result=result,
+            manifest_path=MANIFEST,
+            idempotency_key=None,
+            result_hash=None,
+        )
 
     def test_turn_runtime_public_persist_delegates_to_run_service(self) -> None:
         context = {"ok": True, "run_envelope": {"run_id": "run-public-delegate"}}

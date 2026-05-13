@@ -58,6 +58,11 @@ python3 scripts/turn_runtime.py persist \
 ## Product-Mode Routing
 
 - In product mode, host CLI calls route through the launcher-managed runtime broker (`BUDDYSWITCH_RUNTIME_BROKER_SOCKET`).
+- Broker wire protocol is `buddyswitch-runtime-broker/v2` with `Content-Length` framed JSON.
+- Every request includes `protocol`, `request_id`, `method`, `params`, `deadline_ms`; write requests include `idempotency_key`.
+- Successful broker responses return `ok=true` with business payload under `result`; failures return `ok=false` with structured `error`.
+- Lifecycle health is ping-based (`broker.py status|ensure|ping`) and requires pid/socket/marker/ping consistency.
+- `persist` in product mode is idempotent by key `persist:<run_id>:<canonical_result_hash>`.
 - Broker unavailability returns `ok=false` with `error.code=E_RUNTIME_BROKER_UNAVAILABLE`.
 - Product mode has no direct host state-write fallback.
 - Direct function calls (`prepare_turn_context`, `persist_buddy_run`) remain test/debug internals and broker server dispatch internals.

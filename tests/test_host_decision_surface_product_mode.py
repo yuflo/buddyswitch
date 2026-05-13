@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import unittest
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +20,7 @@ import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-PROTOCOL = "buddyswitch-runtime-broker/v1"
+PROTOCOL = "buddyswitch-runtime-broker/v2"
 PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
 MARKET_REQUEST = "调研 AI 日程工具 landing page 竞品表达和定位方式"
 DESIGN_REQUEST = "基于现有 PRD 和市场简报，整理 landing page 原型方向"
@@ -90,6 +92,11 @@ MARKET_ARTIFACTS = [
 
 
 class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    @staticmethod
+    def _result_hash(result: dict[str, object]) -> str:
+        body = json.dumps(result, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(body).hexdigest()
+
     def _instance_json(
         self,
         *,
@@ -130,17 +137,63 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         instance_id: str,
         buddy: str,
     ) -> dict[str, object]:
-        return runtime_broker.dispatch_runtime_request(
-            request={
-                "protocol": PROTOCOL,
+        request: dict[str, object] = {
+            "protocol": PROTOCOL,
+            "request_id": f"req-host-ds-{uuid.uuid4().hex}",
+            "method": method,
+            "params": {
                 "instance_id": instance_id,
                 "active_buddy": buddy,
-                "method": method,
-                "payload": payload,
+                **payload,
             },
+            "deadline_ms": 35000,
+        }
+        if method == "persist":
+            context = payload.get("context")
+            result = payload.get("result")
+            if isinstance(context, dict) and isinstance(result, dict):
+                run_envelope = context.get("run_envelope")
+                run_id = None
+                if isinstance(run_envelope, dict):
+                    run_id_raw = run_envelope.get("run_id")
+                    if isinstance(run_id_raw, str) and run_id_raw:
+                        run_id = run_id_raw
+                    turn_identity = run_envelope.get("turn_identity")
+                    if run_id is None and isinstance(turn_identity, dict):
+                        turn_run_id = turn_identity.get("run_id")
+                        if isinstance(turn_run_id, str) and turn_run_id:
+                            run_id = turn_run_id
+                if isinstance(run_id, str):
+                    result_hash = self._result_hash(result)
+                    request["idempotency_key"] = f"persist:{run_id}:{result_hash}"
+                    request["result_hash"] = result_hash
+        envelope = runtime_broker.dispatch_runtime_request(
+            request=request,
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
         )
+        self.assertEqual(envelope.get("protocol"), PROTOCOL)
+        if envelope.get("ok") is True:
+            result = envelope.get("result")
+            self.assertIsInstance(result, dict, msg=envelope)
+            assert isinstance(result, dict)
+            return result
+        error = envelope.get("error")
+        self.assertIsInstance(error, dict, msg=envelope)
+        assert isinstance(error, dict)
+        response: dict[str, object] = {
+            "ok": False,
+            "error": {
+                "code": error.get("code"),
+                "message": error.get("message"),
+                "retriable": error.get("retriable"),
+            },
+        }
+        for key, value in envelope.items():
+            if key in {"protocol", "request_id", "ok", "error"}:
+                continue
+            response[key] = value
+        return response
 
     def _env_tool(
         self,
@@ -285,7 +338,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             buddy=buddy,
         )
         self.assertTrue(prepared.get("ok"), msg=prepared)
-        payload = prepared.get("payload")
+        payload = prepared.get("payload") if isinstance(prepared.get("payload"), dict) else prepared
         self.assertIsInstance(payload, dict, msg=prepared)
         assert isinstance(payload, dict)
         return payload
@@ -307,7 +360,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             buddy=buddy,
         )
         self.assertTrue(persisted.get("ok"), msg=persisted)
-        payload = persisted.get("payload")
+        payload = persisted.get("payload") if isinstance(persisted.get("payload"), dict) else persisted
         self.assertIsInstance(payload, dict, msg=persisted)
         assert isinstance(payload, dict)
         return payload

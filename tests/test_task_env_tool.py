@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 import unittest
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +23,7 @@ import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-PROTOCOL = "buddyswitch-runtime-broker/v1"
+PROTOCOL = "buddyswitch-runtime-broker/v2"
 ENV_CLIENT = ROOT / "scripts" / "env" / "client.py"
 
 
@@ -70,16 +71,44 @@ class TaskManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         payload: dict[str, object] = {"tool": "task", "action": action, "args": args}
         request = {
             "protocol": PROTOCOL,
-            "instance_id": instance_id,
-            "active_buddy": buddy,
+            "request_id": f"req-task-env-{uuid.uuid4().hex}",
             "method": "env.tool",
-            "payload": payload,
+            "params": {
+                "instance_id": instance_id,
+                "active_buddy": buddy,
+                **payload,
+            },
+            "deadline_ms": 35000,
         }
-        return runtime_broker.dispatch_runtime_request(
+        envelope = runtime_broker.dispatch_runtime_request(
             request=request,
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
         )
+        self.assertIsInstance(envelope, dict)
+        assert isinstance(envelope, dict)
+        self.assertEqual(envelope.get("protocol"), PROTOCOL)
+        if envelope.get("ok") is True:
+            result = envelope.get("result")
+            self.assertIsInstance(result, dict, msg=envelope)
+            assert isinstance(result, dict)
+            return result
+        error = envelope.get("error")
+        self.assertIsInstance(error, dict, msg=envelope)
+        assert isinstance(error, dict)
+        response: dict[str, object] = {
+            "ok": False,
+            "error": {
+                "code": error.get("code"),
+                "message": error.get("message"),
+                "retriable": error.get("retriable"),
+            },
+        }
+        for key, value in envelope.items():
+            if key in {"protocol", "request_id", "ok", "error"}:
+                continue
+            response[key] = value
+        return response
 
     def _seed_task(
         self,
@@ -368,10 +397,16 @@ class TaskManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         bad_payload_request = {
             "protocol": PROTOCOL,
-            "instance_id": "inst-dev-example",
-            "active_buddy": "dev",
+            "request_id": "req-task-malformed-payload",
             "method": "env.tool",
-            "payload": {"tool": "task", "action": "update", "args": "bad"},
+            "params": {
+                "instance_id": "inst-dev-example",
+                "active_buddy": "dev",
+                "tool": "task",
+                "action": "update",
+                "args": "bad",
+            },
+            "deadline_ms": 35000,
         }
         bad_payload = runtime_broker.dispatch_runtime_request(
             request=bad_payload_request,

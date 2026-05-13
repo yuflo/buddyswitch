@@ -11,6 +11,8 @@ def persist_buddy_run_request(
     *,
     result: dict[str, Any],
     manifest_path: "Path | None" = None,
+    idempotency_key: str | None = None,
+    result_hash: str | None = None,
 ) -> dict[str, Any]:
     from env.services import runs as run_service
 
@@ -22,4 +24,6 @@ def persist_buddy_run_request(
         context,
         result=result,
         manifest_path=manifest_path,
+        idempotency_key=idempotency_key,
+        result_hash=result_hash,
     )

@@ -40,7 +40,7 @@ from tests.test_turn_integration import (  # noqa: E402
 )
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-PROTOCOL = "buddyswitch-runtime-broker/v1"
+PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 def _clone(payload: dict[str, object]) -> dict[str, object]:
@@ -86,17 +86,17 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         *,
         buddy: str,
         method: str,
-        payload: dict[str, object],
+        params: dict[str, object],
         instance_json: Path,
         instance_id: str,
     ) -> dict[str, object]:
         return runtime_broker.dispatch_runtime_request(
             request={
                 "protocol": PROTOCOL,
-                "instance_id": instance_id,
-                "active_buddy": buddy,
+                "request_id": f"req-{instance_id}-{method.replace('.', '-')}",
                 "method": method,
-                "payload": payload,
+                "params": {**params, "instance_id": instance_id, "active_buddy": buddy},
+                "deadline_ms": 35000,
             },
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
@@ -115,14 +115,18 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         response = self._dispatch(
             buddy=buddy,
             method="env.tool",
-            payload={"tool": tool, "action": action, "args": args},
+            params={"tool": tool, "action": action, "args": args},
             instance_json=instance_json,
             instance_id=instance_id,
         )
         self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("tool"), tool)
+        self.assertEqual(response.get("protocol"), PROTOCOL)
+        result = response.get("result")
+        self.assertIsInstance(result, dict, msg=response)
+        assert isinstance(result, dict)
+        self.assertEqual(result.get("tool"), tool)
         self.env_tool_calls.append((buddy, tool, action))
-        return response
+        return result
 
     def _prepare(
         self,
@@ -135,15 +139,16 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         response = self._dispatch(
             buddy=buddy,
             method="prepare",
-            payload={"text": text},
+            params={"text": text},
             instance_json=instance_json,
             instance_id=instance_id,
         )
         self.assertTrue(response.get("ok"), msg=response)
-        payload = response.get("payload")
-        self.assertIsInstance(payload, dict, msg=response)
-        assert isinstance(payload, dict)
-        return payload
+        self.assertEqual(response.get("protocol"), PROTOCOL)
+        result = response.get("result")
+        self.assertIsInstance(result, dict, msg=response)
+        assert isinstance(result, dict)
+        return result
 
     def _start_cdp_server(self, state: _CDPState) -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:

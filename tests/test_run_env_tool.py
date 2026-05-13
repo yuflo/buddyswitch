@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import sys
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,7 +23,7 @@ import turn_runtime  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-PROTOCOL = "buddyswitch-runtime-broker/v1"
+PROTOCOL = "buddyswitch-runtime-broker/v2"
 INSTANCE_ID = "inst-pm-run-example"
 PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
 
@@ -40,6 +42,11 @@ def _pm_commit() -> dict[str, object]:
             "agents": [],
         },
     }
+
+
+def _result_hash(result: dict[str, object]) -> str:
+    body = json.dumps(result, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()
 
 
 class RunManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -96,18 +103,57 @@ class RunManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_id: str = INSTANCE_ID,
         buddy: str = "pm",
     ) -> dict[str, object]:
-        request = {
-            "protocol": PROTOCOL,
+        params: dict[str, object] = {
             "instance_id": instance_id,
             "active_buddy": buddy,
-            "method": "env.tool",
-            "payload": {"tool": "run", "action": action, "args": args},
+            "tool": "run",
+            "action": action,
+            "args": args,
         }
-        return runtime_broker.dispatch_runtime_request(
+        request: dict[str, object] = {
+            "protocol": PROTOCOL,
+            "request_id": f"req-run-tool-{uuid.uuid4().hex}",
+            "method": "env.tool",
+            "params": params,
+            "deadline_ms": 35000,
+        }
+        if action == "commit":
+            context = args.get("context")
+            result = args.get("result")
+            if isinstance(context, dict) and isinstance(result, dict):
+                run_id = str(context["run_envelope"]["turn_identity"]["run_id"])
+                result_hash = _result_hash(result)
+                request["idempotency_key"] = f"persist:{run_id}:{result_hash}"
+                request["result_hash"] = result_hash
+        envelope = runtime_broker.dispatch_runtime_request(
             request=request,
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
         )
+        self.assertIsInstance(envelope, dict)
+        assert isinstance(envelope, dict)
+        self.assertEqual(envelope.get("protocol"), PROTOCOL)
+        if envelope.get("ok") is True:
+            payload = envelope.get("result")
+            self.assertIsInstance(payload, dict, msg=envelope)
+            assert isinstance(payload, dict)
+            return payload
+        error = envelope.get("error")
+        self.assertIsInstance(error, dict, msg=envelope)
+        assert isinstance(error, dict)
+        payload = {
+            "ok": False,
+            "error": {
+                "code": error.get("code"),
+                "message": error.get("message"),
+                "retriable": error.get("retriable"),
+            },
+        }
+        for key, value in envelope.items():
+            if key in {"protocol", "request_id", "ok", "error"}:
+                continue
+            payload[key] = value
+        return payload
 
     def _runtime_state_snapshot(self) -> dict[str, object]:
         def _load_dir(dir_path: Path) -> dict[str, object]:
@@ -190,6 +236,77 @@ class RunManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("permission_boundary"), "persist.state_effects")
         self.assertEqual(self._runtime_state_snapshot(), state_before)
         self.assertEqual(self._load_instance(instance_json), instance_before)
+
+    def test_duplicate_run_commit_returns_existing_receipt_for_same_idempotency_key(self) -> None:
+        from env.services import runs as run_service
+
+        context = self._prepare()
+        result = _pm_commit()
+        run_id = context["run_envelope"]["turn_identity"]["run_id"]
+        result_hash = _result_hash(result)
+        idempotency_key = f"persist:{run_id}:{result_hash}"
+
+        first = run_service.commit_buddy_run(
+            context,
+            result=result,
+            manifest_path=MANIFEST,
+            idempotency_key=idempotency_key,
+            result_hash=result_hash,
+        )
+        run_path = self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")
+        first_audit = json.loads(run_path.read_text(encoding="utf-8"))
+
+        second = run_service.commit_buddy_run(
+            context,
+            result=result,
+            manifest_path=MANIFEST,
+            idempotency_key=idempotency_key,
+            result_hash=result_hash,
+        )
+        second_audit = json.loads(run_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(second["receipt"], first["receipt"])
+        self.assertEqual(second_audit, first_audit)
+        self.assertEqual(first_audit["idempotency_key"], idempotency_key)
+        self.assertEqual(first_audit["result_hash"], result_hash)
+        self.assertNotIn("idempotency_key", second["receipt"])
+        self.assertNotIn("result_hash", second["receipt"])
+
+    def test_duplicate_run_commit_conflicts_for_different_result_hash(self) -> None:
+        from env.services import runs as run_service
+        import turn_runtime
+
+        context = self._prepare()
+        first_result = _pm_commit()
+        run_id = context["run_envelope"]["turn_identity"]["run_id"]
+        first_hash = _result_hash(first_result)
+        first_key = f"persist:{run_id}:{first_hash}"
+        run_service.commit_buddy_run(
+            context,
+            result=first_result,
+            manifest_path=MANIFEST,
+            idempotency_key=first_key,
+            result_hash=first_hash,
+        )
+        run_path = self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")
+        first_audit = json.loads(run_path.read_text(encoding="utf-8"))
+
+        conflicting_result = _pm_commit()
+        conflicting_result["execution_summary"] = "PM wrote a different summary for the same prepared run."
+        conflicting_hash = _result_hash(conflicting_result)
+        conflicting_key = f"persist:{run_id}:{conflicting_hash}"
+
+        with self.assertRaises(turn_runtime.RuntimeFeedbackError) as raised:
+            run_service.commit_buddy_run(
+                context,
+                result=conflicting_result,
+                manifest_path=MANIFEST,
+                idempotency_key=conflicting_key,
+                result_hash=conflicting_hash,
+            )
+
+        self.assertEqual(raised.exception.code, "E_RUNTIME_PERSIST_CONFLICT")
+        self.assertEqual(json.loads(run_path.read_text(encoding="utf-8")), first_audit)
 
 
 if __name__ == "__main__":

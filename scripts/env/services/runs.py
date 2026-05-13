@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -463,6 +464,60 @@ def _normalize_commit(
     }
 
 
+def _canonical_result_hash(result: dict[str, Any]) -> str:
+    body = json.dumps(result, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()
+
+
+def _context_run_id(context: dict[str, Any]) -> str | None:
+    run_envelope = context.get("run_envelope")
+    if not isinstance(run_envelope, dict):
+        return None
+    turn_identity = run_envelope.get("turn_identity")
+    if isinstance(turn_identity, dict):
+        run_id = turn_identity.get("run_id")
+        if isinstance(run_id, str) and run_id.strip():
+            return run_id.strip()
+    run_id = run_envelope.get("run_id")
+    if isinstance(run_id, str) and run_id.strip():
+        return run_id.strip()
+    return None
+
+
+def _load_run_audit_if_exists(run_id: str) -> dict[str, Any] | None:
+    path = env_store.STATE_ROOT / env_store.run_content_path(run_id)
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"run content is invalid: {run_id}")
+    return payload
+
+
+def _receipt_from_run_audit(audit: dict[str, Any]) -> dict[str, Any]:
+    receipt: dict[str, Any] = {
+        "ok": True,
+        "buddy_id": audit.get("buddy_id"),
+        "artifact_ids": audit.get("artifact_ids", []),
+        "run_id": audit.get("run_id"),
+        "next_state": audit.get("next_state"),
+        "receipt_paths": audit.get("receipt_paths"),
+        "related_run_ids": audit.get("related_run_ids", []),
+    }
+    task_id = audit.get("task_id")
+    if isinstance(task_id, str) and task_id:
+        receipt["task_id"] = task_id
+        receipt["task_title"] = audit.get("task_title")
+    track_id = audit.get("track_id")
+    if isinstance(track_id, str) and track_id:
+        receipt["track_id"] = track_id
+        receipt["track_title"] = audit.get("track_title")
+    handoff = audit.get("handoff")
+    if isinstance(handoff, dict):
+        receipt["handoff"] = handoff
+    return receipt
+
+
 def validate_run_result(
     context: dict[str, Any],
     *,
@@ -492,8 +547,48 @@ def commit_buddy_run(
     *,
     result: dict[str, Any],
     manifest_path: Path = DEFAULT_MANIFEST,
+    idempotency_key: str | None = None,
+    result_hash: str | None = None,
 ) -> dict[str, Any]:
     rt = _runtime()
+    context_run_id = _context_run_id(context)
+    if context_run_id is None:
+        raise ValueError("context run_id is required")
+
+    provided_idempotency_key = idempotency_key.strip() if isinstance(idempotency_key, str) and idempotency_key.strip() else None
+    provided_result_hash = result_hash.strip() if isinstance(result_hash, str) and result_hash.strip() else None
+    computed_result_hash = _canonical_result_hash(result)
+    if provided_result_hash is not None and provided_result_hash != computed_result_hash:
+        raise ValueError("result_hash does not match canonical result hash")
+
+    existing_audit = _load_run_audit_if_exists(context_run_id)
+    if existing_audit is not None:
+        stored_idempotency_key = existing_audit.get("idempotency_key")
+        stored_result_hash = existing_audit.get("result_hash")
+        if (
+            isinstance(stored_idempotency_key, str)
+            and stored_idempotency_key
+            and isinstance(stored_result_hash, str)
+            and stored_result_hash
+            and provided_idempotency_key == stored_idempotency_key
+            and computed_result_hash == stored_result_hash
+        ):
+            existing_receipt = _receipt_from_run_audit(existing_audit)
+            refreshed_context = rt._post_persist_refreshed_context_unavailable(existing_receipt)
+            return {
+                "ok": True,
+                "receipt": existing_receipt,
+                "refreshed_context": refreshed_context,
+            }
+        rt._raise_runtime_feedback(
+            "E_RUNTIME_PERSIST_CONFLICT",
+            f"persist conflict for run_id '{context_run_id}': stored result differs from retry payload",
+            permission_boundary="persist.idempotency",
+            allowed_next_actions=[
+                "Rerun prepare to obtain a fresh run context before persisting a different result.",
+            ],
+        )
+
     normalized = _normalize_commit(context, result=result, manifest_path=manifest_path)
     run_id = normalized["run_id"]
     task = normalized["task"]
@@ -538,6 +633,8 @@ def commit_buddy_run(
         "receipt_paths": receipt_paths,
         "related_run_ids": related_run_ids,
         "writes": writes,
+        "idempotency_key": provided_idempotency_key,
+        "result_hash": computed_result_hash,
     }
     if isinstance(task, dict):
         run_audit["task_title"] = task.get("title")
@@ -545,25 +642,7 @@ def commit_buddy_run(
         run_audit["track_title"] = track.get("title")
     env_store.save_run_content(run_id, run_audit)
 
-    receipt: dict[str, Any] = {
-        "ok": True,
-        "buddy_id": normalized["active_buddy"],
-        "artifact_ids": normalized["artifact_ids"],
-        "run_id": run_id,
-        "next_state": next_state,
-        "receipt_paths": receipt_paths,
-        "related_run_ids": related_run_ids,
-    }
-    if isinstance(task_id, str):
-        receipt["task_id"] = task_id
-        if isinstance(task, dict):
-            receipt["task_title"] = task.get("title")
-    if isinstance(track_id, str):
-        receipt["track_id"] = track_id
-        if isinstance(track, dict):
-            receipt["track_title"] = track.get("title")
-    if isinstance(handoff, dict):
-        receipt["handoff"] = handoff
+    receipt = _receipt_from_run_audit(run_audit)
 
     reservation_clear_warning = clear_run_reservation(run_id)
     if reservation_clear_warning is not None:
@@ -612,26 +691,7 @@ def get_run_receipt(*, run_id: str, active_buddy: str) -> dict[str, Any]:
     buddy_id = audit.get("buddy_id")
     if isinstance(buddy_id, str) and buddy_id != active_buddy:
         raise ValueError(f"run belongs to buddy '{buddy_id}', not active buddy '{active_buddy}'")
-    receipt: dict[str, Any] = {
-        "ok": True,
-        "buddy_id": audit.get("buddy_id"),
-        "artifact_ids": audit.get("artifact_ids", []),
-        "run_id": audit.get("run_id"),
-        "next_state": audit.get("next_state"),
-        "receipt_paths": audit.get("receipt_paths"),
-        "related_run_ids": audit.get("related_run_ids", []),
-    }
-    task_id = audit.get("task_id")
-    if isinstance(task_id, str) and task_id:
-        receipt["task_id"] = task_id
-        receipt["task_title"] = audit.get("task_title")
-    track_id = audit.get("track_id")
-    if isinstance(track_id, str) and track_id:
-        receipt["track_id"] = track_id
-        receipt["track_title"] = audit.get("track_title")
-    handoff = audit.get("handoff")
-    if isinstance(handoff, dict):
-        receipt["handoff"] = handoff
+    receipt = _receipt_from_run_audit(audit)
     return {
         "ok": True,
         "run_id": audit.get("run_id"),
@@ -666,6 +726,8 @@ def commit_for_active_instance(*, args: dict[str, Any], context: RunServiceConte
         prepared_context,
         result=result,
         manifest_path=context["manifest_path"] or DEFAULT_MANIFEST,
+        idempotency_key=args.get("idempotency_key") if isinstance(args.get("idempotency_key"), str) else None,
+        result_hash=args.get("result_hash") if isinstance(args.get("result_hash"), str) else None,
     )
     return {"tool": "run", "action": action, **payload}
 

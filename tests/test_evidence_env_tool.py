@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import unittest
+import uuid
 from http.server import HTTPServer
 from pathlib import Path
 
@@ -28,7 +29,7 @@ from tests.test_market_browser_evidence import (  # noqa: E402
 )
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-PROTOCOL = "buddyswitch-runtime-broker/v1"
+PROTOCOL = "buddyswitch-runtime-broker/v2"
 INSTANCE_ID = "inst-market-evidence-example"
 ENV_CLIENT = ROOT / "scripts" / "env" / "client.py"
 
@@ -73,32 +74,69 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_id: str = INSTANCE_ID,
         buddy: str = "market",
     ) -> dict[str, object]:
-        return runtime_broker.dispatch_runtime_request(
+        envelope = runtime_broker.dispatch_runtime_request(
             request={
                 "protocol": PROTOCOL,
-                "instance_id": instance_id,
-                "active_buddy": buddy,
+                "request_id": f"req-evidence-env-{uuid.uuid4().hex}",
                 "method": "env.tool",
-                "payload": {"tool": "evidence", "action": action, "args": args},
+                "params": {
+                    "instance_id": instance_id,
+                    "active_buddy": buddy,
+                    "tool": "evidence",
+                    "action": action,
+                    "args": args,
+                },
+                "deadline_ms": 35000,
             },
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
         )
+        self.assertEqual(envelope.get("protocol"), PROTOCOL)
+        if envelope.get("ok") is True:
+            payload = envelope.get("result")
+            self.assertIsInstance(payload, dict, msg=envelope)
+            assert isinstance(payload, dict)
+            return payload
+        error = envelope.get("error")
+        self.assertIsInstance(error, dict, msg=envelope)
+        assert isinstance(error, dict)
+        payload: dict[str, object] = {
+            "ok": False,
+            "error": {
+                "code": error.get("code"),
+                "message": error.get("message"),
+                "retriable": error.get("retriable"),
+            },
+        }
+        for key, value in envelope.items():
+            if key in {"protocol", "request_id", "ok", "error"}:
+                continue
+            payload[key] = value
+        return payload
 
     def _prepare_market(self, *, instance_json: Path, instance_id: str = INSTANCE_ID) -> dict[str, object]:
-        prepared = runtime_broker.dispatch_runtime_request(
+        envelope = runtime_broker.dispatch_runtime_request(
             request={
                 "protocol": PROTOCOL,
-                "instance_id": instance_id,
-                "active_buddy": "market",
+                "request_id": f"req-evidence-prepare-{uuid.uuid4().hex}",
                 "method": "prepare",
-                "payload": {"text": MARKET_REQUEST},
+                "params": {
+                    "instance_id": instance_id,
+                    "active_buddy": "market",
+                    "text": MARKET_REQUEST,
+                },
+                "deadline_ms": 35000,
             },
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
         )
+        self.assertEqual(envelope.get("protocol"), PROTOCOL)
+        self.assertTrue(envelope.get("ok"), msg=envelope)
+        prepared = envelope.get("result")
+        self.assertIsInstance(prepared, dict, msg=envelope)
+        assert isinstance(prepared, dict)
         self.assertTrue(prepared.get("ok"), msg=prepared)
-        payload = prepared.get("payload")
+        payload = prepared.get("payload") if isinstance(prepared.get("payload"), dict) else prepared
         self.assertIsInstance(payload, dict, msg=prepared)
         assert isinstance(payload, dict)
         return payload

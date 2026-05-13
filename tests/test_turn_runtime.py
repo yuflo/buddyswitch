@@ -143,7 +143,7 @@ class TurnRuntimeBuddyRunTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         first = self._persist(context, {"execution_summary": "first persist"})
         run_id = first["receipt"]["run_id"]
         before = json.loads(self._runtime_path(f"buddyswitch/content/runs/{run_id}.json").read_text(encoding="utf-8"))
-        with self.assertRaisesRegex(ValueError, "run_id already committed"):
+        with self.assertRaisesRegex(ValueError, "persist conflict for run_id"):
             turn_runtime.persist_buddy_run(context, result={"execution_summary": "replay"}, manifest_path=MANIFEST)
         after = json.loads(self._runtime_path(f"buddyswitch/content/runs/{run_id}.json").read_text(encoding="utf-8"))
         self.assertEqual(after, before)

@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import socket
 import threading
 import sys
 import unittest
+import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -186,6 +188,11 @@ def _make_cdp_handler(state: _CDPState) -> type[BaseHTTPRequestHandler]:
 
 
 class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    @staticmethod
+    def _result_hash(result: dict[str, object]) -> str:
+        body = json.dumps(result, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(body).hexdigest()
+
     def _instance_json(
         self,
         *,
@@ -221,11 +228,73 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         request: dict[str, object],
         instance_json: Path,
     ) -> dict[str, object]:
-        return runtime_broker.dispatch_runtime_request(
-            request=request,
+        method = request.get("method")
+        self.assertIsInstance(method, str, msg=request)
+        assert isinstance(method, str)
+        self.assertNotIn("payload", request)
+        params_raw = request.get("params")
+        self.assertIsInstance(params_raw, dict, msg=request)
+        assert isinstance(params_raw, dict)
+        params = dict(params_raw)
+        request_instance = request.get("instance_id")
+        request_buddy = request.get("active_buddy")
+        if isinstance(request_instance, str):
+            params.setdefault("instance_id", request_instance)
+        if isinstance(request_buddy, str):
+            params.setdefault("active_buddy", request_buddy)
+        runtime_request: dict[str, object] = {
+            "protocol": "buddyswitch-runtime-broker/v2",
+            "request_id": f"req-market-browser-{uuid.uuid4().hex}",
+            "method": method,
+            "params": params,
+            "deadline_ms": 35000,
+        }
+        if method == "persist" and isinstance(params, dict):
+            context = params.get("context")
+            result = params.get("result")
+            if isinstance(context, dict) and isinstance(result, dict):
+                run_envelope = context.get("run_envelope")
+                run_id = None
+                if isinstance(run_envelope, dict):
+                    run_id_raw = run_envelope.get("run_id")
+                    if isinstance(run_id_raw, str) and run_id_raw:
+                        run_id = run_id_raw
+                    turn_identity = run_envelope.get("turn_identity")
+                    if run_id is None and isinstance(turn_identity, dict):
+                        turn_run_id = turn_identity.get("run_id")
+                        if isinstance(turn_run_id, str) and turn_run_id:
+                            run_id = turn_run_id
+                if isinstance(run_id, str):
+                    result_hash = self._result_hash(result)
+                    runtime_request["idempotency_key"] = f"persist:{run_id}:{result_hash}"
+                    runtime_request["result_hash"] = result_hash
+        envelope = runtime_broker.dispatch_runtime_request(
+            request=runtime_request,
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
         )
+        self.assertEqual(envelope.get("protocol"), "buddyswitch-runtime-broker/v2")
+        if envelope.get("ok") is True:
+            result = envelope.get("result")
+            self.assertIsInstance(result, dict, msg=envelope)
+            assert isinstance(result, dict)
+            return result
+        error = envelope.get("error")
+        self.assertIsInstance(error, dict, msg=envelope)
+        assert isinstance(error, dict)
+        payload: dict[str, object] = {
+            "ok": False,
+            "error": {
+                "code": error.get("code"),
+                "message": error.get("message"),
+                "retriable": error.get("retriable"),
+            },
+        }
+        for key, value in envelope.items():
+            if key in {"protocol", "request_id", "ok", "error"}:
+                continue
+            payload[key] = value
+        return payload
 
     def _evidence_payload(
         self,
@@ -246,16 +315,19 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _prepare_market(self, *, instance_json: Path, instance_id: str = "inst-market-example") -> dict[str, object]:
         response = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": instance_id,
                 "active_buddy": "market",
                 "method": "prepare",
-                "payload": {"text": MARKET_REQUEST},
+                "params": {"text": MARKET_REQUEST},
             },
             instance_json=instance_json,
         )
         self.assertTrue(response["ok"], msg=response)
-        return response["payload"]
+        payload = response.get("payload") if isinstance(response.get("payload"), dict) else response
+        self.assertIsInstance(payload, dict, msg=response)
+        assert isinstance(payload, dict)
+        return payload
 
     def _evidence_token_paths(self, instance_json: Path) -> list[Path]:
         root = instance_json.parent / "runtime" / "evidence-tokens"
@@ -340,11 +412,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         before_runs = list(self._runtime_path("buddyswitch/content/runs").glob("*.json"))
         response = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "persist",
-                "payload": {"context": context, "result": _market_commit(artifact_ids=[artifact_id])},
+                "params": {"context": context, "result": _market_commit(artifact_ids=[artifact_id])},
             },
             instance_json=instance_json,
         )
@@ -359,11 +431,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         artifact_id = self._seed_market_artifact()
         rejected = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "persist",
-                "payload": {"context": context, "result": _market_commit(artifact_ids=[artifact_id])},
+                "params": {"context": context, "result": _market_commit(artifact_ids=[artifact_id])},
             },
             instance_json=instance_json,
         )
@@ -383,23 +455,23 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_json = self._instance_json(buddy="pm", instance_id="inst-pm-example")
         prepared = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-pm-example",
                 "active_buddy": "pm",
                 "method": "prepare",
-                "payload": {"text": PM_REQUEST},
+                "params": {"text": PM_REQUEST},
             },
             instance_json=instance_json,
         )
         self.assertTrue(prepared["ok"], msg=prepared)
         issue = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-pm-example",
                 "active_buddy": "pm",
                 "method": "env.tool",
-                "payload": self._evidence_payload(
-                    context=prepared["payload"],
+                "params": self._evidence_payload(
+                    context=prepared,
                     mode="browser-cockpit-preflight",
                 ),
             },
@@ -415,11 +487,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         context.pop("run_envelope", None)
         issue = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "env.tool",
-                "payload": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
+                "params": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
             },
             instance_json=instance_json,
         )
@@ -435,11 +507,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         context = self._prepare_market(instance_json=instance_json)
         issue = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "env.tool",
-                "payload": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
+                "params": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
             },
             instance_json=instance_json,
         )
@@ -454,11 +526,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         context = self._prepare_market(instance_json=instance_json)
         issue = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "env.tool",
-                "payload": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
+                "params": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
             },
             instance_json=instance_json,
         )
@@ -482,11 +554,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         context = self._prepare_market(instance_json=instance_json)
         issue = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "env.tool",
-                "payload": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
+                "params": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
             },
             instance_json=instance_json,
         )
@@ -507,11 +579,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         artifact_id = self._seed_market_artifact()
         issue = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "env.tool",
-                "payload": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
+                "params": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
             },
             instance_json=instance_json,
         )
@@ -520,11 +592,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         persisted = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "persist",
-                "payload": {
+                "params": {
                     "context": context,
                     "result": _market_commit({"browser_cockpit_token": token}, artifact_ids=[artifact_id]),
                 },
@@ -532,7 +604,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=instance_json,
         )
         self.assertTrue(persisted["ok"], msg=persisted)
-        run_id = persisted["payload"]["receipt"]["run_id"]
+        run_id = persisted["receipt"]["run_id"]
         run_payload = json.loads(
             self._runtime_path(f"buddyswitch/content/runs/{run_id}.json").read_text(encoding="utf-8")
         )
@@ -549,11 +621,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         context = self._prepare_market(instance_json=instance_json)
         issue = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "env.tool",
-                "payload": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
+                "params": self._evidence_payload(context=context, mode="browser-cockpit-preflight"),
             },
             instance_json=instance_json,
         )
@@ -582,22 +654,22 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         artifact_id = self._seed_market_artifact()
         issue = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "env.tool",
-                "payload": self._evidence_payload(context=context_a, mode="browser-cockpit-preflight"),
+                "params": self._evidence_payload(context=context_a, mode="browser-cockpit-preflight"),
             },
             instance_json=instance_json,
         )
         token = issue["tool_evidence"]["browser_cockpit_token"]
         consumed_a = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "persist",
-                "payload": {
+                "params": {
                     "context": context_a,
                     "result": {
                         "execution_summary": "Market consumed the first run before preparing another context.",
@@ -616,11 +688,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         before_rejected = self._state_snapshot()
         rejected = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "persist",
-                "payload": {
+                "params": {
                     "context": context_b,
                     "result": _market_commit({"browser_cockpit_token": token}, artifact_ids=[artifact_id]),
                 },
@@ -639,11 +711,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         before = self._state_snapshot()
         rejected = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "persist",
-                "payload": {
+                "params": {
                     "context": context,
                     "result": _market_commit(
                         {"browser_cockpit_token": "evidence-run-fake-handwritten"},
@@ -662,11 +734,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         context = self._prepare_market(instance_json=instance_json)
         issue = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "env.tool",
-                "payload": self._evidence_payload(context=context, mode="approved-downgrade", reason=" "),
+                "params": self._evidence_payload(context=context, mode="approved-downgrade", reason=" "),
             },
             instance_json=instance_json,
         )
@@ -680,11 +752,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         artifact_id = self._seed_market_artifact()
         issue = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "env.tool",
-                "payload": self._evidence_payload(
+                "params": self._evidence_payload(
                     context=context,
                     mode="approved-downgrade",
                     reason="Browser-native cockpit blocked; user approved one-off downgrade.",
@@ -696,11 +768,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         token = issue["tool_evidence"]["approved_downgrade_token"]
         persisted = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-market-example",
                 "active_buddy": "market",
                 "method": "persist",
-                "payload": {
+                "params": {
                     "context": context,
                     "result": _market_commit({"approved_downgrade_token": token}, artifact_ids=[artifact_id]),
                 },
@@ -708,7 +780,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=instance_json,
         )
         self.assertTrue(persisted["ok"], msg=persisted)
-        run_id = persisted["payload"]["receipt"]["run_id"]
+        run_id = persisted["receipt"]["run_id"]
         run_payload = json.loads(
             self._runtime_path(f"buddyswitch/content/runs/{run_id}.json").read_text(encoding="utf-8")
         )
@@ -719,22 +791,22 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_json = self._instance_json(buddy="pm", instance_id="inst-pm-example")
         prepared = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-pm-example",
                 "active_buddy": "pm",
                 "method": "prepare",
-                "payload": {"text": PM_REQUEST},
+                "params": {"text": PM_REQUEST},
             },
             instance_json=instance_json,
         )
         self.assertTrue(prepared["ok"], msg=prepared)
         persisted = self._dispatch(
             request={
-                "protocol": "buddyswitch-runtime-broker/v1",
+                "protocol": "buddyswitch-runtime-broker/v2",
                 "instance_id": "inst-pm-example",
                 "active_buddy": "pm",
                 "method": "persist",
-                "payload": {"context": prepared["payload"], "result": _pm_commit()},
+                "params": {"context": prepared, "result": _pm_commit()},
             },
             instance_json=instance_json,
         )
@@ -752,22 +824,22 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 instance_json = self._instance_json(buddy=buddy, instance_id=instance_id)
                 prepared = self._dispatch(
                     request={
-                        "protocol": "buddyswitch-runtime-broker/v1",
+                        "protocol": "buddyswitch-runtime-broker/v2",
                         "instance_id": instance_id,
                         "active_buddy": buddy,
                         "method": "prepare",
-                        "payload": {"text": request_text},
+                        "params": {"text": request_text},
                     },
                     instance_json=instance_json,
                 )
                 self.assertTrue(prepared["ok"], msg=prepared)
                 persisted = self._dispatch(
                     request={
-                        "protocol": "buddyswitch-runtime-broker/v1",
+                        "protocol": "buddyswitch-runtime-broker/v2",
                         "instance_id": instance_id,
                         "active_buddy": buddy,
                         "method": "persist",
-                        "payload": {"context": prepared["payload"], "result": commit_factory()},
+                        "params": {"context": prepared, "result": commit_factory()},
                     },
                     instance_json=instance_json,
                 )

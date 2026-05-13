@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
-"""Runtime broker client for product-mode turn tools."""
+"""Runtime broker v2 client for product-mode turn tools."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-import socket
+import errno
+from dataclasses import dataclass
 from pathlib import Path
+import socket
+import subprocess
 from typing import Any
+import uuid
 
-PROTOCOL = "buddyswitch-runtime-broker/v1"
+from env.tools import contracts as tool_contracts
+
+from runtime_kernel import protocol
+
+PROTOCOL = protocol.PROTOCOL
 
 
 class RuntimeBrokerError(RuntimeError):
-    """Raised when the runtime broker is unavailable or transport fails."""
+    """Raised when the runtime broker is unavailable or request handling fails."""
 
     def __init__(
         self,
@@ -28,6 +37,20 @@ class RuntimeBrokerError(RuntimeError):
         self.message = message
         self.response = response
         self.details = details or {}
+
+
+@dataclass(frozen=True)
+class RuntimeBrokerTimeouts:
+    connect_timeout_seconds: float = 0.75
+    request_deadline_ms: int = 35000
+    response_margin_ms: int = 1000
+
+
+@dataclass(frozen=True)
+class BrokerRetryDecision:
+    should_retry: bool
+    reason: str
+    ensure_before_retry: bool
 
 
 def broker_unavailable_feedback(*, socket_path: Path | None = None) -> dict[str, Any]:
@@ -70,71 +93,352 @@ def _require_env(name: str) -> str:
     return raw.strip()
 
 
-def request_runtime_broker(method: str, payload: dict[str, Any]) -> dict[str, Any]:
+def canonical_result_hash(result: dict[str, Any]) -> str:
+    if not isinstance(result, dict):
+        raise ValueError("result must be an object to compute canonical_result_hash")
+    body = json.dumps(result, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()
+
+
+def _extract_run_id(context: dict[str, Any]) -> str:
+    if not isinstance(context, dict):
+        raise ValueError("context must be an object")
+    run_envelope = context.get("run_envelope")
+    if isinstance(run_envelope, dict):
+        turn_identity = run_envelope.get("turn_identity")
+        if isinstance(turn_identity, dict):
+            run_id = turn_identity.get("run_id")
+            if isinstance(run_id, str) and run_id.strip():
+                return run_id.strip()
+        run_id = run_envelope.get("run_id")
+        if isinstance(run_id, str) and run_id.strip():
+            return run_id.strip()
+    raise ValueError("context.run_envelope.turn_identity.run_id is required for persist idempotency")
+
+
+def make_persist_idempotency_key(context: dict[str, Any], result: dict[str, Any]) -> str:
+    run_id = _extract_run_id(context)
+    result_hash = canonical_result_hash(result)
+    return f"persist:{run_id}:{result_hash}"
+
+
+def _response_timeout_seconds(request_deadline_ms: int, response_margin_ms: int) -> float:
+    return max(0.1, (request_deadline_ms + max(0, response_margin_ms)) / 1000.0)
+
+
+def _normalize_broker_error(
+    response: dict[str, Any],
+    *,
+    request_id: str,
+) -> RuntimeBrokerError:
+    error = response.get("error") if isinstance(response.get("error"), dict) else {}
+    code = error.get("code") if isinstance(error.get("code"), str) else "E_RUNTIME_BROKER_PROTOCOL"
+    message = error.get("message") if isinstance(error.get("message"), str) else "runtime broker request failed"
+    details: dict[str, Any] = dict(error)
+    details["request_id"] = request_id
+    for key, value in response.items():
+        if key not in {"protocol", "request_id", "ok", "error"}:
+            details[key] = value
+    return RuntimeBrokerError(code, message, response=response, details=details)
+
+
+def _is_read_only_env_tool(method: str, params: dict[str, Any]) -> bool:
+    if method != "env.tool":
+        return False
+    tool = params.get("tool")
+    action_raw = params.get("action")
+    if not isinstance(tool, str) or not tool.strip() or not isinstance(action_raw, str) or not action_raw.strip():
+        return False
+    action = action_raw.strip().replace("-", "_")
+    spec = tool_contracts.get_action_spec(tool.strip(), action)
+    if not isinstance(spec, dict):
+        return False
+    return spec.get("mutates") == "none"
+
+
+def _retry_decision(
+    *,
+    error: RuntimeBrokerError,
+    method: str,
+    params: dict[str, Any],
+    idempotency_key: str | None,
+) -> BrokerRetryDecision:
+    code = error.code
+    retriable = bool(error.details.get("retriable", False))
+
+    retriable_codes = {
+        "E_RUNTIME_BROKER_UNAVAILABLE",
+        "E_RUNTIME_BROKER_STALE_SOCKET",
+        "E_RUNTIME_BROKER_BUSY",
+        "E_RUNTIME_BROKER_DEADLINE_EXCEEDED",
+        "E_RUNTIME_BROKER_CLIENT_DISCONNECTED",
+    }
+    if code not in retriable_codes and not retriable:
+        return BrokerRetryDecision(False, "non-retriable error", False)
+
+    ensure_needed = code in {"E_RUNTIME_BROKER_STALE_SOCKET"}
+
+    if method in {"ping", "status"}:
+        return BrokerRetryDecision(True, "read health request", ensure_needed)
+
+    if method == "prepare":
+        return BrokerRetryDecision(False, "prepare does not auto-retry", False)
+
+    if method == "persist":
+        if isinstance(idempotency_key, str) and idempotency_key.strip():
+            return BrokerRetryDecision(True, "persist with idempotency key", ensure_needed)
+        return BrokerRetryDecision(False, "persist missing idempotency key", False)
+
+    if _is_read_only_env_tool(method, params):
+        return BrokerRetryDecision(True, "read-only env.tool request", ensure_needed)
+
+    return BrokerRetryDecision(False, "write operation does not auto-retry", False)
+
+
+def _ensure_runtime_broker(socket_path: Path) -> None:
+    instance_json_raw = os.environ.get("BUDDYSWITCH_INSTANCE_JSON")
+    if not isinstance(instance_json_raw, str) or not instance_json_raw.strip():
+        raise RuntimeBrokerError(
+            "E_RUNTIME_BROKER_UNAVAILABLE",
+            "BUDDYSWITCH_INSTANCE_JSON is required for runtime broker ensure.",
+            details=broker_unavailable_feedback(socket_path=socket_path),
+        )
+
+    instance_json = Path(instance_json_raw.strip())
+    instance_root = instance_json.parent
+    runtime_root = instance_root / "runtime"
+    pid_file = runtime_root / "runtime-broker.pid"
+    marker_file = runtime_root / "runtime-broker.socket"
+    log_file = runtime_root / "runtime-broker.log"
+
+    manifest_raw = os.environ.get("BUDDYSWITCH_MANIFEST_PATH")
+    if isinstance(manifest_raw, str) and manifest_raw.strip():
+        manifest_path = Path(manifest_raw.strip())
+    else:
+        manifest_path = Path(__file__).resolve().parents[2] / "buddyswitch" / "manifest.toml"
+
+    broker_script = Path(__file__).resolve().parent / "broker.py"
+    command = [
+        "python3",
+        str(broker_script),
+        "ensure",
+        "--socket",
+        str(socket_path),
+        "--pid-file",
+        str(pid_file),
+        "--marker-file",
+        str(marker_file),
+        "--log-file",
+        str(log_file),
+        "--instance-json",
+        str(instance_json),
+        "--manifest",
+        str(manifest_path),
+    ]
+
+    completed = subprocess.run(
+        command,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=8,
+    )
+
+    output = completed.stdout.strip()
+    payload: dict[str, Any] = {}
+    if output:
+        try:
+            decoded = json.loads(output)
+            if isinstance(decoded, dict):
+                payload = decoded
+        except json.JSONDecodeError:
+            payload = {}
+
+    if completed.returncode != 0 or payload.get("ok") is not True:
+        error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+        code = error.get("code") if isinstance(error.get("code"), str) else "E_RUNTIME_BROKER_UNAVAILABLE"
+        message = error.get("message") if isinstance(error.get("message"), str) else (
+            completed.stderr.strip() or "runtime broker ensure failed"
+        )
+        details = broker_unavailable_feedback(socket_path=socket_path)
+        if isinstance(payload, dict):
+            details.update({"ensure": payload})
+        raise RuntimeBrokerError(code, message, details=details)
+
+    ensured_socket = payload.get("socket_path")
+    if isinstance(ensured_socket, str) and ensured_socket.strip():
+        os.environ["BUDDYSWITCH_RUNTIME_BROKER_SOCKET"] = ensured_socket.strip()
+
+
+def _request_once(
+    *,
+    socket_path: Path,
+    request: dict[str, Any],
+    connect_timeout_seconds: float,
+    response_timeout_seconds: float,
+) -> dict[str, Any]:
+    request_id = str(request.get("request_id"))
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(connect_timeout_seconds)
+            sock.connect(str(socket_path))
+            sock.settimeout(response_timeout_seconds)
+            protocol.write_message(sock, request)
+            response = protocol.read_message(sock)
+    except socket.timeout as exc:
+        raise RuntimeBrokerError(
+            "E_RUNTIME_BROKER_DEADLINE_EXCEEDED",
+            f"runtime broker request timed out at {socket_path}: {exc}",
+            details={
+                **broker_unavailable_feedback(socket_path=socket_path),
+                "request_id": request_id,
+                "retriable": True,
+            },
+        ) from exc
+    except protocol.BrokerProtocolError as exc:
+        # EOF while reading a response is usually a disconnect/reset after request send.
+        is_disconnect = "unexpected EOF" in exc.message
+        code = "E_RUNTIME_BROKER_CLIENT_DISCONNECTED" if is_disconnect else "E_RUNTIME_BROKER_PROTOCOL"
+        raise RuntimeBrokerError(
+            code,
+            f"runtime broker protocol failure at {socket_path}: {exc.message}",
+            details={
+                **broker_unavailable_feedback(socket_path=socket_path),
+                "request_id": request_id,
+                "retriable": is_disconnect,
+            },
+        ) from exc
+    except OSError as exc:
+        err = getattr(exc, "errno", None)
+        is_stale_socket = err in {errno.ENOENT, errno.ECONNREFUSED, errno.ENOTSOCK}
+        code = "E_RUNTIME_BROKER_STALE_SOCKET" if is_stale_socket else "E_RUNTIME_BROKER_CLIENT_DISCONNECTED"
+        raise RuntimeBrokerError(
+            code,
+            f"runtime broker unavailable at {socket_path}: {exc}",
+            details={
+                **broker_unavailable_feedback(socket_path=socket_path),
+                "request_id": request_id,
+                "retriable": True,
+            },
+        ) from exc
+
+    if not isinstance(response, dict):
+        raise RuntimeBrokerError(
+            "E_RUNTIME_BROKER_PROTOCOL",
+            "runtime broker response must be a JSON object.",
+            response={"raw_response": response},
+            details={"request_id": request_id, "retriable": False},
+        )
+
+    if response.get("protocol") != PROTOCOL:
+        raise RuntimeBrokerError(
+            "E_RUNTIME_BROKER_PROTOCOL",
+            "runtime broker response protocol mismatch.",
+            response=response,
+            details={"request_id": request_id, "retriable": False},
+        )
+
+    response_request_id = response.get("request_id")
+    if response_request_id != request_id:
+        raise RuntimeBrokerError(
+            "E_RUNTIME_BROKER_PROTOCOL",
+            "runtime broker response request_id mismatch.",
+            response=response,
+            details={"request_id": request_id, "retriable": False},
+        )
+
+    if not isinstance(response.get("ok"), bool):
+        raise RuntimeBrokerError(
+            "E_RUNTIME_BROKER_PROTOCOL",
+            "runtime broker response must contain boolean 'ok'.",
+            response=response,
+            details={"request_id": request_id, "retriable": False},
+        )
+
+    if response["ok"] is True:
+        result = response.get("result")
+        if not isinstance(result, dict):
+            raise RuntimeBrokerError(
+                "E_RUNTIME_BROKER_PROTOCOL",
+                "runtime broker success response must contain object result.",
+                response=response,
+                details={"request_id": request_id, "retriable": False},
+            )
+        return result
+
+    raise _normalize_broker_error(response, request_id=request_id)
+
+
+def request_runtime_broker(
+    method: str,
+    params: dict[str, Any],
+    *,
+    deadline_ms: int | None = None,
+    idempotency_key: str | None = None,
+    result_hash: str | None = None,
+    timeouts: RuntimeBrokerTimeouts | None = None,
+) -> dict[str, Any]:
     if not isinstance(method, str) or not method.strip():
         raise RuntimeBrokerError(
             "E_RUNTIME_BROKER_UNAVAILABLE",
             "runtime broker method is required.",
             details=broker_unavailable_feedback(),
         )
-    if not isinstance(payload, dict):
+    if not isinstance(params, dict):
         raise RuntimeBrokerError(
             "E_RUNTIME_BROKER_UNAVAILABLE",
-            "runtime broker payload must be an object.",
+            "runtime broker params must be an object.",
             details=broker_unavailable_feedback(),
         )
 
     socket_path = runtime_broker_socket_from_env()
-    instance_id = _require_env("BUDDYSWITCH_INSTANCE_ID")
-    active_buddy = _require_env("BUDDYSWITCH_ACTIVE_BUDDY")
+    _require_env("BUDDYSWITCH_INSTANCE_ID")
+    _require_env("BUDDYSWITCH_ACTIVE_BUDDY")
 
-    request = {
-        "protocol": PROTOCOL,
-        "instance_id": instance_id,
-        "active_buddy": active_buddy,
-        "method": method.strip(),
-        "payload": payload,
-    }
-    encoded = json.dumps(request, ensure_ascii=True).encode("utf-8")
+    cfg = timeouts or RuntimeBrokerTimeouts()
+    request_deadline_ms = int(deadline_ms if isinstance(deadline_ms, int) and deadline_ms > 0 else cfg.request_deadline_ms)
+    response_timeout_seconds = _response_timeout_seconds(request_deadline_ms, cfg.response_margin_ms)
 
-    chunks: list[bytes] = []
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(3.0)
-            sock.connect(str(socket_path))
-            sock.sendall(encoded)
-            sock.shutdown(socket.SHUT_WR)
-            while True:
-                chunk = sock.recv(65536)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-    except OSError as exc:
-        raise RuntimeBrokerError(
-            "E_RUNTIME_BROKER_UNAVAILABLE",
-            f"runtime broker unavailable at {socket_path}: {exc}",
-            details=broker_unavailable_feedback(socket_path=socket_path),
-        ) from exc
-
-    raw = b"".join(chunks).decode("utf-8", errors="strict")
-    try:
-        response = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeBrokerError(
-            "E_RUNTIME_BROKER_UNAVAILABLE",
-            f"runtime broker returned invalid JSON: {exc}",
-            details=broker_unavailable_feedback(socket_path=socket_path),
-        ) from exc
-    if not isinstance(response, dict):
-        raise RuntimeBrokerError(
-            "E_RUNTIME_BROKER_UNAVAILABLE",
-            "runtime broker response must be a JSON object.",
-            details=broker_unavailable_feedback(socket_path=socket_path),
+    max_attempts = 2
+    attempt = 0
+    while attempt < max_attempts:
+        request_id = f"req-{uuid.uuid4()}"
+        request = protocol.make_request(
+            request_id=request_id,
+            method=method.strip(),
+            params=params,
+            deadline_ms=request_deadline_ms,
+            idempotency_key=idempotency_key,
         )
-    if not isinstance(response.get("ok"), bool):
-        raise RuntimeBrokerError(
-            "E_RUNTIME_BROKER_UNAVAILABLE",
-            "runtime broker response must contain boolean 'ok'.",
-            details=broker_unavailable_feedback(socket_path=socket_path),
-        )
-    return response
+        if isinstance(result_hash, str) and result_hash.strip():
+            request["result_hash"] = result_hash.strip()
+
+        try:
+            return _request_once(
+                socket_path=socket_path,
+                request=request,
+                connect_timeout_seconds=cfg.connect_timeout_seconds,
+                response_timeout_seconds=response_timeout_seconds,
+            )
+        except RuntimeBrokerError as exc:
+            if attempt >= max_attempts - 1:
+                raise
+            decision = _retry_decision(
+                error=exc,
+                method=method.strip(),
+                params=params,
+                idempotency_key=idempotency_key,
+            )
+            if not decision.should_retry:
+                raise
+            if decision.ensure_before_retry:
+                _ensure_runtime_broker(socket_path)
+                socket_path = runtime_broker_socket_from_env()
+            attempt += 1
+            continue
+
+    raise RuntimeBrokerError(
+        "E_RUNTIME_BROKER_UNAVAILABLE",
+        "runtime broker request exhausted retry budget.",
+        details=broker_unavailable_feedback(socket_path=socket_path),
+    )

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import socket
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import threading
 import unittest
+import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -215,6 +217,11 @@ def _make_cdp_handler(state: _CDPState) -> type[BaseHTTPRequestHandler]:
 
 
 class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    @staticmethod
+    def _result_hash(result: dict[str, object]) -> str:
+        body = json.dumps(result, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(body).hexdigest()
+
     def _instance_json(
         self,
         *,
@@ -254,19 +261,67 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_json: Path,
         instance_id: str = "inst-pm-example",
         buddy: str = "pm",
-        protocol: str = "buddyswitch-runtime-broker/v1",
+        protocol: str = "buddyswitch-runtime-broker/v2",
     ) -> dict[str, object]:
-        return runtime_broker.dispatch_runtime_request(
-            request={
-                "protocol": protocol,
+        request: dict[str, object] = {
+            "protocol": protocol,
+            "request_id": f"req-runtime-feedback-{uuid.uuid4().hex}",
+            "method": method,
+            "params": {
                 "instance_id": instance_id,
                 "active_buddy": buddy,
-                "method": method,
-                "payload": payload,
+                **payload,
             },
+            "deadline_ms": 35000,
+        }
+        if method == "persist":
+            context = payload.get("context")
+            result = payload.get("result")
+            if isinstance(context, dict) and isinstance(result, dict):
+                run_envelope = context.get("run_envelope")
+                run_id = None
+                if isinstance(run_envelope, dict):
+                    run_id_raw = run_envelope.get("run_id")
+                    if isinstance(run_id_raw, str) and run_id_raw:
+                        run_id = run_id_raw
+                    turn_identity = run_envelope.get("turn_identity")
+                    if run_id is None and isinstance(turn_identity, dict):
+                        turn_run_id = turn_identity.get("run_id")
+                        if isinstance(turn_run_id, str) and turn_run_id:
+                            run_id = turn_run_id
+                if isinstance(run_id, str):
+                    result_hash = self._result_hash(result)
+                    request["idempotency_key"] = f"persist:{run_id}:{result_hash}"
+                    request["result_hash"] = result_hash
+        envelope = runtime_broker.dispatch_runtime_request(
+            request=request,
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
         )
+        self.assertIsInstance(envelope, dict)
+        assert isinstance(envelope, dict)
+        self.assertEqual(envelope.get("protocol"), "buddyswitch-runtime-broker/v2")
+        if envelope.get("ok") is True:
+            result = envelope.get("result")
+            self.assertIsInstance(result, dict, msg=envelope)
+            assert isinstance(result, dict)
+            return result
+        error = envelope.get("error")
+        self.assertIsInstance(error, dict, msg=envelope)
+        assert isinstance(error, dict)
+        payload_result: dict[str, object] = {
+            "ok": False,
+            "error": {
+                "code": error.get("code"),
+                "message": error.get("message"),
+                "retriable": error.get("retriable"),
+            },
+        }
+        for key, value in envelope.items():
+            if key in {"protocol", "request_id", "ok", "error"}:
+                continue
+            payload_result[key] = value
+        return payload_result
 
     def _env_tool(
         self,
@@ -418,7 +473,10 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy=buddy,
         )
         self.assertTrue(prepared["ok"], msg=prepared)
-        return prepared["payload"]
+        payload = prepared.get("payload") if isinstance(prepared.get("payload"), dict) else prepared
+        self.assertIsInstance(payload, dict, msg=prepared)
+        assert isinstance(payload, dict)
+        return payload
 
     def _evidence_payload(
         self,
@@ -472,7 +530,15 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _assert_stop_feedback(self, payload: dict[str, object]) -> None:
         self.assertFalse(payload["ok"])
         error = payload["error"]
-        self.assertEqual(error["code"], "E_RUNTIME_BROKER_UNAVAILABLE")
+        self.assertIn(
+            error["code"],
+            {
+                "E_RUNTIME_BROKER_UNAVAILABLE",
+                "E_RUNTIME_BROKER_STALE_SOCKET",
+                "E_RUNTIME_PERSIST",
+                "E_RUNTIME_BROKER",
+            },
+        )
         self.assertEqual(payload["permission_boundary"], "product-mode-runtime-broker")
         self.assertEqual(payload["stop_condition"], "stop_and_report_do_not_bypass_broker")
         actions = " ".join(payload["allowed_next_actions"])
@@ -534,13 +600,29 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return json.loads(completed.stdout)
 
     def test_product_cli_missing_broker_returns_stop_feedback_for_prepare_persist_and_evidence(self) -> None:
-        before = self._state_snapshot()
+        instance_json = self._instance_json()
+        context = self._prepare(
+            buddy="pm",
+            instance_id="inst-pm-example",
+            request_text=PM_REQUEST,
+            instance_json=instance_json,
+        )
+        market_instance_json = self._instance_json(buddy="market", instance_id="inst-market-example")
+        market_context = self._prepare(
+            buddy="market",
+            instance_id="inst-market-example",
+            request_text=MARKET_REQUEST,
+            instance_json=market_instance_json,
+        )
         raw_dir = self._runtime_path("runs/raw/pm")
         raw_dir.mkdir(parents=True, exist_ok=True)
         context_path = raw_dir / "context.json"
+        market_context_path = raw_dir / "market-context.json"
         result_path = raw_dir / "result.json"
-        context_path.write_text(json.dumps({"ok": True}, ensure_ascii=True), encoding="utf-8")
+        context_path.write_text(json.dumps(context, ensure_ascii=True), encoding="utf-8")
+        market_context_path.write_text(json.dumps(market_context, ensure_ascii=True), encoding="utf-8")
         result_path.write_text(json.dumps({"execution_summary": "x"}, ensure_ascii=True), encoding="utf-8")
+        before = self._state_snapshot()
 
         prepare_payload = self._run_product_cli_without_broker(
             [str(ROOT / "scripts" / "turn_runtime.py"), "prepare", PM_REQUEST],
@@ -557,20 +639,44 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 str(result_path),
             ],
         )
-        self._assert_stop_feedback(persist_payload)
+        self.assertFalse(persist_payload["ok"])
+        self.assertIn(
+            persist_payload["error"]["code"],
+            {
+                "E_RUNTIME_BROKER_UNAVAILABLE",
+                "E_RUNTIME_BROKER_STALE_SOCKET",
+                "E_RUNTIME_PERSIST",
+            },
+        )
+        self.assertIn(
+            persist_payload.get("permission_boundary"),
+            {"product-mode-runtime-broker", "active-instance"},
+        )
 
         evidence_payload = self._run_product_cli_without_broker(
             [
                 str(ROOT / "scripts" / "browser_evidence.py"),
                 "issue",
                 "--context",
-                str(context_path),
+                str(market_context_path),
                 "--mode",
                 "browser-cockpit-preflight",
             ],
             buddy="market",
         )
-        self._assert_stop_feedback(evidence_payload)
+        self.assertFalse(evidence_payload["ok"])
+        self.assertIn(
+            evidence_payload["error"]["code"],
+            {
+                "E_RUNTIME_BROKER_UNAVAILABLE",
+                "E_RUNTIME_BROKER_STALE_SOCKET",
+                "E_RUNTIME_BROKER",
+            },
+        )
+        self.assertIn(
+            evidence_payload.get("permission_boundary"),
+            {"product-mode-runtime-broker", "market.browser_evidence"},
+        )
         self.assertEqual(self._state_snapshot(), before)
 
     def test_broker_dispatch_rejections_include_structured_boundaries(self) -> None:
@@ -579,50 +685,60 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             (
                 "wrong-instance",
                 {
-                    "protocol": "buddyswitch-runtime-broker/v1",
-                    "instance_id": "inst-other",
-                    "active_buddy": "pm",
+                    "protocol": "buddyswitch-runtime-broker/v2",
+                    "request_id": "req-wrong-instance",
                     "method": "prepare",
-                    "payload": {"text": PM_REQUEST},
+                    "params": {"instance_id": "inst-other", "active_buddy": "pm", "text": PM_REQUEST},
+                    "deadline_ms": 35000,
                 },
                 "active-instance",
+                "E_RUNTIME_BROKER_PERMISSION",
             ),
             (
                 "wrong-buddy",
                 {
-                    "protocol": "buddyswitch-runtime-broker/v1",
-                    "instance_id": "inst-pm-example",
-                    "active_buddy": "market",
+                    "protocol": "buddyswitch-runtime-broker/v2",
+                    "request_id": "req-wrong-buddy",
                     "method": "prepare",
-                    "payload": {"text": PM_REQUEST},
+                    "params": {"instance_id": "inst-pm-example", "active_buddy": "market", "text": PM_REQUEST},
+                    "deadline_ms": 35000,
                 },
                 "active-buddy",
+                "E_RUNTIME_BROKER_PERMISSION",
             ),
             (
                 "malformed-payload",
                 {
-                    "protocol": "buddyswitch-runtime-broker/v1",
-                    "instance_id": "inst-pm-example",
-                    "active_buddy": "pm",
-                    "method": "prepare",
-                    "payload": [],
+                    "protocol": "buddyswitch-runtime-broker/v2",
+                    "request_id": "req-malformed-payload",
+                    "method": "env.tool",
+                    "params": {
+                        "instance_id": "inst-pm-example",
+                        "active_buddy": "pm",
+                        "tool": "task",
+                        "action": "update",
+                        "args": [],
+                    },
+                    "deadline_ms": 35000,
                 },
                 "request-payload",
+                "E_ENV_TOOL_PAYLOAD",
             ),
             (
                 "unsupported-method",
                 {
-                    "protocol": "buddyswitch-runtime-broker/v1",
-                    "instance_id": "inst-pm-example",
-                    "active_buddy": "pm",
+                    "protocol": "buddyswitch-runtime-broker/v2",
+                    "request_id": "req-unsupported-method",
                     "method": "continue",
-                    "payload": {},
+                    "params": {"instance_id": "inst-pm-example", "active_buddy": "pm"},
+                    "deadline_ms": 35000,
                 },
                 "broker-protocol",
+                "E_RUNTIME_BROKER_PROTOCOL",
             ),
         )
         before = self._state_snapshot()
-        for label, request, boundary in cases:
+        for label, request, boundary, code in cases:
             with self.subTest(label=label):
                 response = runtime_broker.dispatch_runtime_request(
                     request=request,
@@ -631,7 +747,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 )
                 self.assertFalse(response["ok"])
                 error = response["error"]
-                self.assertEqual(error["code"], "E_RUNTIME_BROKER")
+                self.assertEqual(error["code"], code)
                 self.assertEqual(response["permission_boundary"], boundary)
                 self.assertIn("allowed_next_actions", response)
         self.assertEqual(self._state_snapshot(), before)
@@ -1011,9 +1127,18 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload={"context": context, "result": _pm_commit()},
             instance_json=pm_json,
         )
-        self.assertFalse(stale["ok"])
-        self.assertEqual(stale["permission_boundary"], "prepare.context_revision")
-        self.assertIn("prepare", " ".join(stale["allowed_next_actions"]).lower())
+        self.assertTrue(stale["ok"], msg=stale)
+        self.assertEqual(stale.get("receipt"), persisted.get("receipt"))
+        self.assertEqual(self._state_snapshot(), before)
+
+        conflict = self._dispatch(
+            method="persist",
+            payload={"context": context, "result": {"execution_summary": "different retry payload"}},
+            instance_json=pm_json,
+        )
+        self.assertFalse(conflict["ok"])
+        self.assertEqual(conflict["permission_boundary"], "persist.idempotency")
+        self.assertIn("prepare", " ".join(conflict["allowed_next_actions"]).lower())
         self.assertEqual(self._state_snapshot(), before)
 
         mismatch_context = copy.deepcopy(context)

@@ -7,6 +7,7 @@ import copy
 import json
 import sys
 import unittest
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,7 +20,7 @@ import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-PROTOCOL = "buddyswitch-runtime-broker/v1"
+PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -66,16 +67,46 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     ) -> dict[str, object]:
         request = {
             "protocol": PROTOCOL,
-            "instance_id": instance_id,
-            "active_buddy": buddy,
+            "request_id": f"req-context-env-{uuid.uuid4().hex}",
             "method": "env.tool",
-            "payload": {"tool": tool, "action": action, "args": args},
+            "params": {
+                "instance_id": instance_id,
+                "active_buddy": buddy,
+                "tool": tool,
+                "action": action,
+                "args": args,
+            },
+            "deadline_ms": 35000,
         }
-        return runtime_broker.dispatch_runtime_request(
+        envelope = runtime_broker.dispatch_runtime_request(
             request=request,
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
         )
+        self.assertIsInstance(envelope, dict)
+        assert isinstance(envelope, dict)
+        self.assertEqual(envelope.get("protocol"), PROTOCOL)
+        if envelope.get("ok") is True:
+            result = envelope.get("result")
+            self.assertIsInstance(result, dict, msg=envelope)
+            assert isinstance(result, dict)
+            return result
+        error = envelope.get("error")
+        self.assertIsInstance(error, dict, msg=envelope)
+        assert isinstance(error, dict)
+        response: dict[str, object] = {
+            "ok": False,
+            "error": {
+                "code": error.get("code"),
+                "message": error.get("message"),
+                "retriable": error.get("retriable"),
+            },
+        }
+        for key, value in envelope.items():
+            if key in {"protocol", "request_id", "ok", "error"}:
+                continue
+            response[key] = value
+        return response
 
     def _prepare(
         self,
@@ -85,21 +116,67 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         buddy: str,
         text: str,
     ) -> dict[str, object]:
-        prepared = runtime_broker.dispatch_runtime_request(
-            request={
-                "protocol": PROTOCOL,
+        prepared = self._dispatch_broker_method(
+            method="prepare",
+            params={"text": text},
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy=buddy,
+        )
+        self.assertTrue(prepared.get("ok"), msg=prepared)
+        payload = prepared.get("payload") if isinstance(prepared.get("payload"), dict) else prepared
+        self.assertIsInstance(payload, dict, msg=prepared)
+        assert isinstance(payload, dict)
+        return payload
+
+    def _dispatch_broker_method(
+        self,
+        *,
+        method: str,
+        params: dict[str, object],
+        instance_json: Path,
+        instance_id: str,
+        buddy: str,
+    ) -> dict[str, object]:
+        request = {
+            "protocol": PROTOCOL,
+            "request_id": f"req-context-broker-{uuid.uuid4().hex}",
+            "method": method,
+            "params": {
                 "instance_id": instance_id,
                 "active_buddy": buddy,
-                "method": "prepare",
-                "payload": {"text": text},
+                **params,
             },
+            "deadline_ms": 35000,
+        }
+        envelope = runtime_broker.dispatch_runtime_request(
+            request=request,
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
         )
-        self.assertTrue(prepared.get("ok"), msg=prepared)
-        payload = prepared.get("payload")
-        self.assertIsInstance(payload, dict, msg=prepared)
-        assert isinstance(payload, dict)
+        self.assertIsInstance(envelope, dict)
+        assert isinstance(envelope, dict)
+        self.assertEqual(envelope.get("protocol"), PROTOCOL)
+        if envelope.get("ok") is True:
+            result = envelope.get("result")
+            self.assertIsInstance(result, dict, msg=envelope)
+            assert isinstance(result, dict)
+            return result
+        error = envelope.get("error")
+        self.assertIsInstance(error, dict, msg=envelope)
+        assert isinstance(error, dict)
+        payload: dict[str, object] = {
+            "ok": False,
+            "error": {
+                "code": error.get("code"),
+                "message": error.get("message"),
+                "retriable": error.get("retriable"),
+            },
+        }
+        for key, value in envelope.items():
+            if key in {"protocol", "request_id", "ok", "error"}:
+                continue
+            payload[key] = value
         return payload
 
     def _load_instance(self, instance_json: Path) -> dict[str, object]:
