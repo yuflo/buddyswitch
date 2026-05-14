@@ -155,6 +155,12 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertEqual(error.get("code"), error_code)
                 self.assertNotEqual(error.get("code"), "E_ENV_TOOL_ROUTER")
                 self.assertEqual(response.get("permission_boundary"), boundary)
+                self.assertIsInstance(response.get("human_summary"), str, msg=response)
+                self.assertIsInstance(response.get("why_blocked"), str, msg=response)
+                self.assertIsInstance(response.get("impact"), str, msg=response)
+                self.assertIs(response.get("state_changed"), False, msg=response)
+                self.assertIsInstance(response.get("retryable"), bool, msg=response)
+                self.assertIsInstance(response.get("retry_guidance"), str, msg=response)
                 self.assertEqual(self._tasks_snapshot(), before_tasks)
                 self.assertEqual(self._load_instance(instance_json), before_instance)
 
@@ -228,6 +234,24 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             for token in forbidden_tokens:
                 with self.subTest(path=str(path.relative_to(ROOT)), token=token):
                     self.assertNotIn(token, text)
+
+    def test_runtime_feedback_error_bool_fields_are_type_safe(self) -> None:
+        dispatch = importlib.import_module("env.tools.dispatch")
+        payload = dispatch._runtime_feedback_error(
+            tool="run",
+            action="run.commit",
+            active_buddy="pm",
+            code="E_RUNTIME_PERSIST",
+            message="synthetic runtime feedback",
+            details={
+                "state_changed": "false",
+                "retryable": "false",
+                "allowed_next_actions": ["Retry after fix."],
+            },
+        )
+        self.assertFalse(payload.get("ok"), msg=payload)
+        self.assertIs(payload.get("state_changed"), False, msg=payload)
+        self.assertIs(payload.get("retryable"), False, msg=payload)
 
 
 if __name__ == "__main__":

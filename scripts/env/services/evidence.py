@@ -35,21 +35,24 @@ def _allowed(*actions: str) -> list[str]:
 
 
 def _payload_error(*, action: str, context: EvidenceServiceContext, message: str) -> dict[str, Any]:
-    return {
-        "ok": False,
-        "tool": "evidence",
-        "action": action,
-        "error": {
-            "code": "E_EVIDENCE_PAYLOAD",
-            "message": message,
-        },
-        "permission_boundary": "request-payload",
-        "active_buddy": context["active_buddy"],
-        "allowed_next_actions": [
+    return tool_responses.rejection(
+        tool="evidence",
+        action=action,
+        active_buddy=context["active_buddy"],
+        code="E_EVIDENCE_PAYLOAD",
+        message=message,
+        permission_boundary="request-payload",
+        human_summary="Evidence payload is invalid.",
+        why_blocked=message,
+        impact="No broker evidence token was issued and no runtime object state changed.",
+        state_changed=False,
+        retryable=True,
+        retry_guidance="Fix evidence payload fields and retry.",
+        allowed_next_actions=[
             'Send env.tool payload as {"tool":"evidence","action":"<action>","args":{...}}.',
             "Use prepare.runtime_context.env_tools.evidence.payload_fields to shape args.",
         ],
-        "allowed_next_action_options": [
+        allowed_next_action_options=[
             tool_responses.next_action_option(
                 tool="evidence",
                 action="issue_browser",
@@ -63,7 +66,7 @@ def _payload_error(*, action: str, context: EvidenceServiceContext, message: str
                 reason="Issue approved downgrade token only when fallback is explicitly approved.",
             ),
         ],
-    }
+    )
 
 
 def _now_iso() -> str:
@@ -341,14 +344,25 @@ def _issue(
         reason=reason,
         browser_url=browser_url,
     )
-    return {
-        "tool": "evidence",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "allowed_next_actions": [
+    semantic_extra = dict(payload)
+    semantic_extra.pop("ok", None)
+    evidence_token = payload.get("tool_evidence", {}) if isinstance(payload.get("tool_evidence"), dict) else {}
+    token_value = evidence_token.get("browser_cockpit_token") or evidence_token.get("approved_downgrade_token")
+    mode_label = "browser evidence" if mode == "browser-cockpit-preflight" else "approved downgrade evidence"
+    state_changes = [{"object_type": "evidence_token", "object_id": token_value, "change": "issued"}] if isinstance(token_value, str) else []
+    return tool_responses.success(
+        tool="evidence",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary=f"Issued {mode_label} token for the prepared run.",
+        state_changed=True,
+        durability="broker_token",
+        state_changes=state_changes,
+        created_ids=[token_value] if isinstance(token_value, str) else [],
+        allowed_next_actions=[
             "Include the issued evidence token in the next artifact-producing persist payload.",
         ],
-        "allowed_next_action_options": [
+        allowed_next_action_options=[
             tool_responses.next_action_option(
                 tool="run",
                 action="commit",
@@ -356,8 +370,8 @@ def _issue(
                 reason="Commit the prepared run with the issued tool_evidence token.",
             ),
         ],
-        **payload,
-    }
+        extra=semantic_extra,
+    )
 
 
 def issue_browser_for_active_instance(*, args: dict[str, Any], context: EvidenceServiceContext) -> dict[str, Any]:

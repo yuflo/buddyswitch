@@ -141,9 +141,31 @@ Context descriptors are projection metadata. They are not direct full-body artif
 
 Runtime AGENTS guidance should point to these runtime context surfaces instead of duplicating payload recipes or capability matrices.
 
-`runtime_context.env_tools` is the compact source for broker-routed env tool operations. Shared env slices are executed through `python3 scripts/env/client.py <resource> <operation>` and routed through broker method `env.tool` with envelope `{tool, action, args}`. Active slices include `task-tool`, `track-tool`, `artifact-tool`, `context`, `binding`, `handoff`, `run`, and `evidence`.
+`runtime_context.env_tools` is the compact source for broker-routed env tool operations. Shared env slices are executed through `python3 scripts/env/client.py <resource> <operation>` and routed through broker method `env.tool` with envelope `{tool, action, args}`. Active slices include `task`, `track`, `artifact`, `context`, `binding`, `handoff`, `run`, `evidence`, and `search`.
 
-`runtime_context.operation_semantics` is a registry-derived map keyed by `"<tool>.<action>"` (for example `track.list`, `run.commit`). Each row includes `kind`, `mutates`, `required_permission`, `authority`, `requires`, and `returns`.
+Each `runtime_context.env_tools[tool]` row includes capability semantics for host decisions:
+
+- `title`
+- `plain_description`
+- `use_when`
+- `do_not_use_when`
+- `capability_boundary` (`identity_source`, `authority_source`, `raw_state_access`)
+
+Each action row under `runtime_context.env_tools[tool].action_semantics[action]` includes:
+
+- `title`
+- `plain_description`
+- `use_when`
+- `do_not_use_when`
+- `inputs_explained` (must cover every `payload_fields` entry exactly)
+- `side_effects` (`mutates`, `writes`, `does_not_write`, `durability`, `idempotency`)
+- `risk_hints` (`read_only`, `destructive`, `idempotent`, `open_world`, `requires_human_approval`, `external_effect`)
+- `success_means`
+- `common_failures`
+
+`runtime_context.operation_semantics` is a registry-derived machine map keyed by `"<tool>.<action>"` (for example `track.list`, `run.commit`). Each row includes `kind`, `mutates`, `required_permission`, `authority`, `requires`, `returns`, and `risk_hints`.
+
+`operation_semantics` remains machine contract source and must not be replaced by prompt prose. Capability/action semantics are host guidance, not runtime enforcement.
 
 Permission enforcement, active-buddy ownership checks, PM-only track lifecycle authority, artifact-kind scope, artifact source-run validation, instance binding writes, context validation, handoff target validation, run reservation validation, run commit persistence, Market evidence issuance, browser ready-page enforcement, and evidence token scope are implemented in runtime tool/service code, not in prompt wording.
 
@@ -182,14 +204,27 @@ State writes in product mode are broker-owned. Run reservation and commit writes
 
 ## Structured Tool Feedback
 
-When `prepare`, `persist`, or broker-routed evidence tools reject a request, responses keep `ok=false`, `error.code`, and `error.message` and may add structured feedback fields:
+When `prepare`, `persist`, or broker-routed env tools reject a request, responses keep `ok=false`, `error.code`, and `error.message` and include structured feedback fields:
 
 - `permission_boundary`
+- `human_summary`
+- `why_blocked`
+- `impact`
+- `state_changed`
+- `retryable`
+- `retry_guidance`
 - `stop_condition`
 - `allowed_next_actions`
 - `allowed_next_action_options`
 - `command_hint`
 - `persist_payload_hint`
+
+Env-tool success responses include explicit effect semantics:
+
+- `effect_summary`
+- `state_changed`
+- `durability`
+- optional `state_changes`, `created_ids`, `updated_ids`, `binding_changed`, `read_scope`, `validation_only`, `follow_up_affordances`
 
 Common persist validation failures should return structured `E_RUNTIME_PERSIST` feedback with actionable `permission_boundary` and `allowed_next_actions` (for example `persist.execution_summary`, `persist.state_effects`, `persist.artifacts`, `persist.task_id`, `persist.handoff`).
 

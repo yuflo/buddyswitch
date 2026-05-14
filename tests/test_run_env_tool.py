@@ -205,6 +205,18 @@ class RunManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsNone(next_state.get("task_id"))
         self.assertIsNone(next_state.get("track_id"))
         self.assertIsNone(next_state.get("next_buddy"))
+        state_changes = response.get("state_changes")
+        self.assertIsInstance(state_changes, list, msg=response)
+        assert isinstance(state_changes, list)
+        self.assertTrue(
+            any(
+                isinstance(row, dict)
+                and row.get("object_type") == "run_reservation"
+                and row.get("change") == "consumed"
+                for row in state_changes
+            ),
+            msg=response,
+        )
 
         instance_payload = self._load_instance(instance_json)
         self.assertEqual(instance_payload, instance_before)
@@ -669,6 +681,36 @@ class RunManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(env_store.get_task("task-dev-run-untracked"), task_before)
         self.assertEqual(env_store.get_track("track-dev-run-commit-main"), track_before)
         self.assertFalse(self._runtime_path(f"buddyswitch/content/runs/{run_id}.json").exists())
+
+    def test_stale_run_context_rejections_explain_no_commit_impact(self) -> None:
+        context = self._prepare()
+        instance_json = self._instance_json()
+        state_before = copy.deepcopy(self._runtime_state_snapshot())
+        stale_context = copy.deepcopy(context)
+        stale_context["context_revision"] = "ctx-stale-for-test"
+
+        validate_rejected = self._dispatch(
+            action="validate_result",
+            args={"context": stale_context, "result": _pm_commit()},
+            instance_json=instance_json,
+        )
+        self.assertFalse(validate_rejected.get("ok"), msg=validate_rejected)
+        self.assertEqual(validate_rejected.get("tool"), "run")
+        self.assertEqual(validate_rejected.get("action"), "run.validate_result")
+        self.assertFalse(validate_rejected.get("state_changed"), msg=validate_rejected)
+        self.assertIn(validate_rejected.get("permission_boundary"), {"prepare.context_revision", "run.service"})
+
+        commit_rejected = self._dispatch(
+            action="commit",
+            args={"context": stale_context, "result": _pm_commit()},
+            instance_json=instance_json,
+        )
+        self.assertFalse(commit_rejected.get("ok"), msg=commit_rejected)
+        self.assertEqual(commit_rejected.get("tool"), "run")
+        self.assertEqual(commit_rejected.get("action"), "run.commit")
+        self.assertFalse(commit_rejected.get("state_changed"), msg=commit_rejected)
+        self.assertIn(commit_rejected.get("permission_boundary"), {"prepare.context_revision", "run.service", "persist.context"})
+        self.assertEqual(self._runtime_state_snapshot(), state_before)
 
 
 if __name__ == "__main__":

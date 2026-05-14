@@ -60,24 +60,31 @@ def _error_payload(
     message: str,
     permission_boundary: str,
     allowed_next_actions: list[str],
+    human_summary: str | None = None,
+    why_blocked: str | None = None,
+    impact: str = "No handoff, track, task, or run state was changed.",
+    retryable: bool = True,
+    retry_guidance: str | None = None,
     allowed_next_action_options: list[dict[str, Any]] | None = None,
     track_id: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "ok": False,
-        "tool": "handoff",
-        "action": action,
-        "error": {
-            "code": code,
-            "message": message,
-        },
-        "permission_boundary": permission_boundary,
-        "active_buddy": active_buddy,
-        "allowed_next_actions": allowed_next_actions,
-    }
-    if isinstance(allowed_next_action_options, list):
-        payload["allowed_next_action_options"] = allowed_next_action_options
+    payload = tool_responses.rejection(
+        tool="handoff",
+        action=action,
+        active_buddy=active_buddy,
+        code=code,
+        message=message,
+        permission_boundary=permission_boundary,
+        human_summary=human_summary or message,
+        why_blocked=why_blocked or message,
+        impact=impact,
+        state_changed=False,
+        retryable=retryable,
+        retry_guidance=retry_guidance or "Fix handoff payload/context preconditions and retry.",
+        allowed_next_actions=allowed_next_actions,
+        allowed_next_action_options=allowed_next_action_options,
+    )
     if isinstance(track_id, str) and track_id.strip():
         payload["track_id"] = track_id.strip()
     if isinstance(extra, dict):
@@ -92,6 +99,10 @@ def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str,
         code="E_HANDOFF_PAYLOAD",
         message=message,
         permission_boundary="request-payload",
+        human_summary="Handoff payload is invalid.",
+        why_blocked=message,
+        retryable=True,
+        retry_guidance="Provide required handoff fields and retry.",
         allowed_next_actions=[
             "Provide track_id, source_task_id, target_buddy, artifact_ids, reason, and context.",
             "Use handoff.list and track.get to inspect current handoff state before retrying.",
@@ -479,10 +490,6 @@ def list_handoffs_for_active_buddy(*, args: dict[str, Any], context: HandoffServ
     )
 
     payload: dict[str, Any] = {
-        "ok": True,
-        "tool": "handoff",
-        "action": action,
-        "active_buddy": context["active_buddy"],
         "track_id": track_id,
         "handoffs": rows,
         "current_binding": _current_binding(context),
@@ -491,12 +498,21 @@ def list_handoffs_for_active_buddy(*, args: dict[str, Any], context: HandoffServ
             {"tool": "handoff", "action": "create"},
         ],
         "command_hint": track_relations.command_hint("handoff", "create"),
-        "allowed_next_actions": [
+    }
+    return tool_responses.success(
+        tool="handoff",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary=f"Listed {len(rows)} handoff rows for track '{track_id}' without mutating state.",
+        state_changed=False,
+        durability="none",
+        read_scope="Explicit handoff records plus recent run-audit handoff summaries.",
+        allowed_next_actions=[
             "Use handoff.validate before creating a new explicit handoff record.",
             "Use track.get and artifact.get to inspect referenced source artifacts.",
         ],
-    }
-    return payload
+        extra=payload,
+    )
 
 
 def validate_handoff(*, args: dict[str, Any], context: HandoffServiceContext) -> dict[str, Any]:
@@ -516,31 +532,43 @@ def validate_handoff(*, args: dict[str, Any], context: HandoffServiceContext) ->
     assert isinstance(normalized, dict)
     track = env_store.get_track(str(normalized["track_id"]))
     track_next_buddy = track.get("next_buddy") if isinstance(track, dict) else None
-    return {
-        "ok": True,
-        "tool": "handoff",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "track_id": normalized["track_id"],
-        "handoff": normalized,
-        "track_alignment": {
-            "track_id": normalized["track_id"],
-            "requested_next_buddy": normalized["target_buddy"],
-            "track_next_buddy": track_next_buddy,
-            "target_matches_track_next_buddy": track_next_buddy in {None, normalized["target_buddy"]},
-        },
-        "discoverability": _discoverability(),
-        "current_binding": _current_binding(context),
-        "next_actions": [
-            {"tool": "handoff", "action": "create"},
-            {"tool": "run", "action": "validate_result"},
+    return tool_responses.success(
+        tool="handoff",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary="Validated handoff payload and discoverability alignment without writing state.",
+        state_changed=False,
+        durability="none",
+        validation_only=True,
+        follow_up_affordances=[
+            tool_responses.follow_up_affordance(
+                tool="handoff",
+                action="create",
+                reason="Create explicit handoff record from validated payload.",
+            )
         ],
-        "command_hint": track_relations.command_hint("handoff", "create"),
-        "allowed_next_actions": [
+        allowed_next_actions=[
             "Use handoff.create with the validated payload when ready.",
             "Use run.validate_result before run.commit when handoff payload is included in result.",
         ],
-    }
+        extra={
+            "track_id": normalized["track_id"],
+            "handoff": normalized,
+            "track_alignment": {
+                "track_id": normalized["track_id"],
+                "requested_next_buddy": normalized["target_buddy"],
+                "track_next_buddy": track_next_buddy,
+                "target_matches_track_next_buddy": track_next_buddy in {None, normalized["target_buddy"]},
+            },
+            "discoverability": _discoverability(),
+            "current_binding": _current_binding(context),
+            "next_actions": [
+                {"tool": "handoff", "action": "create"},
+                {"tool": "run", "action": "validate_result"},
+            ],
+            "command_hint": track_relations.command_hint("handoff", "create"),
+        },
+    )
 
 
 def create_handoff_for_active_buddy(*, args: dict[str, Any], context: HandoffServiceContext) -> dict[str, Any]:
@@ -574,28 +602,34 @@ def create_handoff_for_active_buddy(*, args: dict[str, Any], context: HandoffSer
         status="active",
     )
 
-    return {
-        "ok": True,
-        "tool": "handoff",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "track_id": normalized["track_id"],
-        "handoff": record,
-        "current_binding": _current_binding(context),
-        "next_actions": [
-            {"tool": "run", "action": "validate_result"},
-            {"tool": "handoff", "action": "list", "args": {"track_id": normalized["track_id"]}},
-        ],
-        "command_hint": track_relations.command_hint(
-            "handoff",
-            "list",
-            {"track_id": normalized["track_id"]},
-        ),
-        "allowed_next_actions": [
+    return tool_responses.success(
+        tool="handoff",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary=f"Created explicit handoff record '{record['id']}' without mutating track lifecycle fields.",
+        state_changed=True,
+        durability="runtime_object",
+        state_changes=[{"object_type": "handoff", "object_id": record["id"], "change": "created"}],
+        created_ids=[str(record["id"])],
+        allowed_next_actions=[
             "Use run.validate_result or run.commit to include this handoff in run audit when needed.",
             "Use handoff.list to verify recipient-facing handoff visibility.",
         ],
-    }
+        extra={
+            "track_id": normalized["track_id"],
+            "handoff": record,
+            "current_binding": _current_binding(context),
+            "next_actions": [
+                {"tool": "run", "action": "validate_result"},
+                {"tool": "handoff", "action": "list", "args": {"track_id": normalized["track_id"]}},
+            ],
+            "command_hint": track_relations.command_hint(
+                "handoff",
+                "list",
+                {"track_id": normalized["track_id"]},
+            ),
+        },
+    )
 
 
 __all__ = [

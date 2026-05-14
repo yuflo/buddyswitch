@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import env_store
+from env.tools import responses as tool_responses
 
 _IDENTITY_FIELDS = {"active_buddy", "buddy", "instance_id"}
 _SET_TASK_FIELDS = {"task_id"} | _IDENTITY_FIELDS
@@ -49,26 +50,62 @@ def _error_payload(
     message: str,
     permission_boundary: str,
     allowed_next_actions: list[str],
+    human_summary: str | None = None,
+    why_blocked: str | None = None,
+    impact: str = "No launcher instance binding or runtime object state was changed.",
+    retryable: bool = True,
+    retry_guidance: str | None = None,
     task_id: str | None = None,
     track_id: str | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "ok": False,
-        "tool": "binding",
-        "action": action,
-        "error": {
-            "code": code,
-            "message": message,
-        },
-        "permission_boundary": permission_boundary,
-        "active_buddy": active_buddy,
-        "allowed_next_actions": allowed_next_actions,
-    }
+    payload = tool_responses.rejection(
+        tool="binding",
+        action=action,
+        active_buddy=active_buddy,
+        code=code,
+        message=message,
+        permission_boundary=permission_boundary,
+        human_summary=human_summary or message,
+        why_blocked=why_blocked or message,
+        impact=impact,
+        state_changed=False,
+        retryable=retryable,
+        retry_guidance=retry_guidance or "Fix payload or binding preconditions and retry.",
+        allowed_next_actions=allowed_next_actions,
+    )
     if isinstance(task_id, str) and task_id.strip():
         payload["task_id"] = task_id.strip()
     if isinstance(track_id, str) and track_id.strip():
         payload["track_id"] = track_id.strip()
     return payload
+
+
+def _success_payload(
+    *,
+    action: str,
+    context: BindingServiceContext,
+    effect_summary: str,
+    state_changed: bool,
+    durability: str,
+    allowed_next_actions: list[str],
+    state_changes: list[dict[str, Any]] | None = None,
+    binding_changed: bool | None = None,
+    read_scope: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return tool_responses.success(
+        tool="binding",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary=effect_summary,
+        state_changed=state_changed,
+        durability=durability,
+        state_changes=state_changes,
+        binding_changed=binding_changed,
+        read_scope=read_scope,
+        allowed_next_actions=allowed_next_actions,
+        extra=extra,
+    )
 
 
 def _payload_error(
@@ -85,6 +122,10 @@ def _payload_error(
         code="E_BINDING_PAYLOAD",
         message=message,
         permission_boundary="request-payload",
+        human_summary="Binding request payload is invalid.",
+        why_blocked=message,
+        retryable=True,
+        retry_guidance="Fix payload fields and retry the binding action.",
         task_id=task_id,
         track_id=track_id,
         allowed_next_actions=[
@@ -101,6 +142,10 @@ def _task_lookup_error(*, action: str, active_buddy: str, task_id: str) -> dict[
         code="E_TASK_NOT_FOUND",
         message=f"task not found: {task_id}",
         permission_boundary="task.lookup",
+        human_summary="Requested task id was not found.",
+        why_blocked=f"task_id '{task_id}' does not reference an existing task.",
+        retryable=True,
+        retry_guidance="Inspect active-buddy tasks and retry with a valid task_id.",
         task_id=task_id,
         allowed_next_actions=[
             "Use task.list to inspect active-buddy task ids.",
@@ -116,6 +161,10 @@ def _task_scope_error(*, action: str, active_buddy: str, task_id: str, task_budd
         code="E_TASK_BUDDY_SCOPE",
         message=f"task belongs to buddy '{task_buddy}', not active buddy '{active_buddy}'",
         permission_boundary="task.buddy_scope",
+        human_summary="Task belongs to another buddy.",
+        why_blocked="Non-owner task cannot be bound as current task for the active buddy instance.",
+        retryable=False,
+        retry_guidance="Select an active-buddy-owned task or use collaboration handoff paths.",
         task_id=task_id,
         allowed_next_actions=[
             "Choose a task owned by the active buddy.",
@@ -131,6 +180,10 @@ def _track_lookup_error(*, action: str, active_buddy: str, track_id: str) -> dic
         code="E_TRACK_NOT_FOUND",
         message=f"track not found: {track_id}",
         permission_boundary="track.lookup",
+        human_summary="Requested track id was not found.",
+        why_blocked=f"track_id '{track_id}' does not reference an existing track.",
+        retryable=True,
+        retry_guidance="List available tracks and retry with a valid track_id.",
         track_id=track_id,
         allowed_next_actions=[
             "Use track.list to inspect available track ids.",
@@ -146,6 +199,10 @@ def _track_authority_error(*, action: str, active_buddy: str, track_id: str | No
         code="E_TRACK_LIFECYCLE_AUTHORITY",
         message=f"active buddy '{active_buddy}' cannot bind an arbitrary track",
         permission_boundary="track.lifecycle_authority",
+        human_summary="Standalone track binding is PM-only.",
+        why_blocked="Non-PM buddies cannot set arbitrary current_track_id without task-derived linkage.",
+        retryable=False,
+        retry_guidance="Use PM to set standalone track binding, or bind an owned task to derive track context.",
         track_id=track_id,
         allowed_next_actions=[
             "Use PM to bind a standalone track.",
@@ -208,17 +265,19 @@ def get_binding(*, args: dict[str, Any], context: BindingServiceContext) -> dict
     )
     if fields_error is not None:
         return fields_error
-    return {
-        "ok": True,
-        "tool": "binding",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "current_binding": current_binding(context),
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary="Read current launcher instance binding without changing state.",
+        state_changed=False,
+        durability="none",
+        read_scope="Instance binding snapshot only.",
+        allowed_next_actions=[
             "Use binding.set_task to bind an active-buddy-owned task.",
             "Use context.get to inspect the current binding context.",
         ],
-    }
+        extra={"current_binding": current_binding(context)},
+    )
 
 
 def set_task_binding(*, args: dict[str, Any], context: BindingServiceContext) -> dict[str, Any]:
@@ -254,19 +313,30 @@ def set_task_binding(*, args: dict[str, Any], context: BindingServiceContext) ->
     track_id = task.get("track_id")
     normalized_track_id = track_id if isinstance(track_id, str) and track_id.strip() else None
     binding = write_instance_binding(context=context, task_id=task_id, track_id=normalized_track_id)
-    return {
-        "ok": True,
-        "tool": "binding",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "task_id": task_id,
-        "track_id": normalized_track_id,
-        "current_binding": binding,
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Set current binding to task '{task_id}' and derived track '{normalized_track_id}'.",
+        state_changed=True,
+        durability="instance_binding",
+        state_changes=[
+            {
+                "object_type": "instance_binding",
+                "object_id": context["instance_id"],
+                "change": "current_task_id/current_track_id updated",
+            }
+        ],
+        binding_changed=True,
+        allowed_next_actions=[
             "Use binding.get to confirm active instance binding.",
             "Use context.get to inspect refreshed task and track context.",
         ],
-    }
+        extra={
+            "task_id": task_id,
+            "track_id": normalized_track_id,
+            "current_binding": binding,
+        },
+    )
 
 
 def set_track_binding(*, args: dict[str, Any], context: BindingServiceContext) -> dict[str, Any]:
@@ -294,18 +364,29 @@ def set_track_binding(*, args: dict[str, Any], context: BindingServiceContext) -
         return _track_authority_error(action=action, active_buddy=context["active_buddy"], track_id=track_id)
 
     binding = write_instance_binding(context=context, task_id=None, track_id=track_id)
-    return {
-        "ok": True,
-        "tool": "binding",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "track_id": track_id,
-        "current_binding": binding,
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Set standalone track binding to '{track_id}' for PM lifecycle context.",
+        state_changed=True,
+        durability="instance_binding",
+        state_changes=[
+            {
+                "object_type": "instance_binding",
+                "object_id": context["instance_id"],
+                "change": "current_track_id updated and current_task_id cleared",
+            }
+        ],
+        binding_changed=True,
+        allowed_next_actions=[
             "Use binding.get to confirm active instance binding.",
             "Use context.get to inspect refreshed track context.",
         ],
-    }
+        extra={
+            "track_id": track_id,
+            "current_binding": binding,
+        },
+    )
 
 
 def clear_binding(*, args: dict[str, Any], context: BindingServiceContext) -> dict[str, Any]:
@@ -319,14 +400,23 @@ def clear_binding(*, args: dict[str, Any], context: BindingServiceContext) -> di
     if fields_error is not None:
         return fields_error
     binding = write_instance_binding(context=context, task_id=None, track_id=None)
-    return {
-        "ok": True,
-        "tool": "binding",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "current_binding": binding,
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary="Cleared current task and track binding for the active instance without deleting any objects.",
+        state_changed=True,
+        durability="instance_binding",
+        state_changes=[
+            {
+                "object_type": "instance_binding",
+                "object_id": context["instance_id"],
+                "change": "current_task_id/current_track_id cleared",
+            }
+        ],
+        binding_changed=True,
+        allowed_next_actions=[
             "Use task.list to inspect active-buddy tasks.",
             "Use binding.set_task to bind the next task.",
         ],
-    }
+        extra={"current_binding": binding},
+    )

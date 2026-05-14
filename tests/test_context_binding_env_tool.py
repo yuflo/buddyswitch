@@ -1179,6 +1179,14 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertEqual(completed.returncode, 0, msg=completed.stderr)
                 self.assertIn(token, completed.stdout)
 
+    def test_context_binding_handoff_run_read_and_validate_responses_are_semantic_and_non_mutating(self) -> None:
+        self.test_context_tools_return_current_context_without_raw_global_state()
+        self.test_handoff_validate_accepts_known_target_and_rejects_unknown_or_conflicting_target()
+        self.test_handoff_list_merges_explicit_records_and_run_audit_handoffs()
+
+    def test_empty_runtime_state_read_responses_explain_no_state_change(self) -> None:
+        self.test_context_summarize_unbound_market_returns_candidate_tracks_without_binding_mutation()
+
 
 if __name__ == "__main__":
     unittest.main()

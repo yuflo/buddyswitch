@@ -11,6 +11,7 @@ import env_store
 from env_manifest import buddy_permissions
 from env.services import bindings as binding_service
 from env.services import track_relations
+from env.tools import responses as tool_responses
 
 _TASK_PUBLIC_FIELDS = (
     "id",
@@ -50,23 +51,67 @@ def _error_payload(
     message: str,
     permission_boundary: str,
     allowed_next_actions: list[str],
+    human_summary: str | None = None,
+    why_blocked: str | None = None,
+    impact: str = "No task records or instance binding state were changed.",
+    retryable: bool = True,
+    retry_guidance: str | None = None,
     task_id: str | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "ok": False,
-        "tool": "task",
-        "action": action,
-        "error": {
-            "code": code,
-            "message": message,
-        },
-        "permission_boundary": permission_boundary,
-        "active_buddy": active_buddy,
-        "allowed_next_actions": allowed_next_actions,
-    }
+    payload = tool_responses.rejection(
+        tool="task",
+        action=action,
+        active_buddy=active_buddy,
+        code=code,
+        message=message,
+        permission_boundary=permission_boundary,
+        human_summary=human_summary or message,
+        why_blocked=why_blocked or message,
+        impact=impact,
+        state_changed=False,
+        retryable=retryable,
+        retry_guidance=retry_guidance or "Fix payload or state preconditions, then retry the action.",
+        allowed_next_actions=allowed_next_actions,
+    )
     if isinstance(task_id, str) and task_id.strip():
         payload["task_id"] = task_id.strip()
     return payload
+
+
+def _success_payload(
+    *,
+    action: str,
+    context: TaskServiceContext,
+    effect_summary: str,
+    state_changed: bool,
+    durability: str,
+    allowed_next_actions: list[str],
+    state_changes: list[dict[str, Any]] | None = None,
+    created_ids: list[str] | None = None,
+    updated_ids: list[str] | None = None,
+    binding_changed: bool | None = None,
+    read_scope: str | None = None,
+    validation_only: bool | None = None,
+    follow_up_affordances: list[dict[str, Any]] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return tool_responses.success(
+        tool="task",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary=effect_summary,
+        state_changed=state_changed,
+        durability=durability,
+        allowed_next_actions=allowed_next_actions,
+        state_changes=state_changes,
+        created_ids=created_ids,
+        updated_ids=updated_ids,
+        binding_changed=binding_changed,
+        read_scope=read_scope,
+        validation_only=validation_only,
+        follow_up_affordances=follow_up_affordances,
+        extra=extra,
+    )
 
 
 def _permission_error(*, action: str, active_buddy: str, permission: str) -> dict[str, Any]:
@@ -76,6 +121,10 @@ def _permission_error(*, action: str, active_buddy: str, permission: str) -> dic
         code="E_TASK_PERMISSION",
         message=f"active buddy '{active_buddy}' is missing required permission '{permission}'",
         permission_boundary="manifest.permission",
+        human_summary="Active buddy cannot use this task action.",
+        why_blocked=f"The active buddy is missing required permission '{permission}'.",
+        retryable=False,
+        retry_guidance="Switch to a buddy that owns this permission, or use an allowed action for the current buddy.",
         allowed_next_actions=[
             "Use only task actions allowed by the active buddy manifest permissions.",
             "Switch to a buddy that owns this task action before retrying.",
@@ -90,6 +139,10 @@ def _payload_error(*, action: str, active_buddy: str, message: str, task_id: str
         code="E_TASK_PAYLOAD",
         message=message,
         permission_boundary="request-payload",
+        human_summary="Task request payload is invalid.",
+        why_blocked=message,
+        retryable=True,
+        retry_guidance="Fix the payload fields for this action and retry.",
         task_id=task_id,
         allowed_next_actions=[
             'Fix the env.tool envelope fields (`tool`, `action`, `args`) and retry.',
@@ -105,6 +158,10 @@ def _scope_error(*, action: str, active_buddy: str, task_id: str, task_buddy: st
         code="E_TASK_BUDDY_SCOPE",
         message=f"task belongs to buddy '{task_buddy}', not active buddy '{active_buddy}'",
         permission_boundary="task.buddy_scope",
+        human_summary="Task belongs to another buddy.",
+        why_blocked="Only the owning buddy can mutate or bind this task directly.",
+        retryable=False,
+        retry_guidance="Choose a task owned by the active buddy or continue through track/handoff collaboration paths.",
         task_id=task_id,
         allowed_next_actions=[
             "Choose a task owned by the active buddy.",
@@ -121,6 +178,10 @@ def _lookup_error(*, action: str, active_buddy: str, task_id: str) -> dict[str, 
         code="E_TASK_NOT_FOUND",
         message=f"task not found: {task_id}",
         permission_boundary="task.lookup",
+        human_summary="Requested task id was not found.",
+        why_blocked=f"task_id '{task_id}' does not reference an existing task record.",
+        retryable=True,
+        retry_guidance="List candidate tasks or create a new task, then retry with a valid task_id.",
         task_id=task_id,
         allowed_next_actions=[
             "Use task.list to get active-buddy task ids.",
@@ -143,6 +204,10 @@ def _relation_error(
         code="E_TASK_TRACK_RELATION",
         message=f"active buddy '{active_buddy}' cannot read task '{task_id}' without a readable track relation",
         permission_boundary="task.track_relation",
+        human_summary="Task read is blocked by missing collaboration relation.",
+        why_blocked="The active buddy is neither the owner nor a readable participant on the task track.",
+        retryable=True,
+        retry_guidance="Inspect track relation and join the track before retrying task read.",
         task_id=task_id,
         allowed_next_actions=[
             "Use track.list and track.get to inspect related tracks first.",
@@ -348,19 +413,24 @@ def create_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCo
         summary=summary,
         initial_run_id=None,
     )
-    return {
-        "ok": True,
-        "tool": "task",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "task_id": task["id"],
-        "task": _task_summary(task),
-        "current_binding": _current_binding(context),
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Created task '{task['id']}' for the active buddy.",
+        state_changed=True,
+        durability="runtime_object",
+        state_changes=[{"object_type": "task", "object_id": task["id"], "change": "created"}],
+        created_ids=[str(task["id"])],
+        allowed_next_actions=[
             "Use task.update to change title, summary, or status.",
             "Use task.set_current to bind this task to the active instance.",
         ],
-    }
+        extra={
+            "task_id": task["id"],
+            "task": _task_summary(task),
+            "current_binding": _current_binding(context),
+        },
+    )
 
 
 def list_tasks_for_active_buddy(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
@@ -394,23 +464,27 @@ def list_tasks_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCon
         row["relation"] = decision.get("relation")
         task_rows.append(row)
     task_rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("id") or "")), reverse=True)
-    return {
-        "ok": True,
-        "tool": "task",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "tasks": task_rows,
-        "current_binding": _current_binding(context),
-        "next_actions": [
-            {"tool": "task", "action": "get", "args": {"task_id": "<task-id>"}},
-            {"tool": "artifact", "action": "get", "args": {"artifact_id": "<artifact-id>"}},
-        ],
-        "command_hint": track_relations.command_hint("task", "get", {"task_id": "<task-id>"}),
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Listed {len(task_rows)} readable task summaries for active buddy '{context['active_buddy']}'.",
+        state_changed=False,
+        durability="none",
+        read_scope="Active-buddy task summaries and relation-readable task rows; no full artifact bodies were read.",
+        allowed_next_actions=[
             "Use task.get with a returned task_id to inspect one task.",
             "Use artifact.get with task artifact ids for full content reads.",
         ],
-    }
+        extra={
+            "tasks": task_rows,
+            "current_binding": _current_binding(context),
+            "next_actions": [
+                {"tool": "task", "action": "get", "args": {"task_id": "<task-id>"}},
+                {"tool": "artifact", "action": "get", "args": {"artifact_id": "<artifact-id>"}},
+            ],
+            "command_hint": track_relations.command_hint("task", "get", {"task_id": "<task-id>"}),
+        },
+    )
 
 
 def get_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
@@ -445,24 +519,28 @@ def get_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceConte
         )
     summary = _task_summary(task, active_buddy=context["active_buddy"])
     summary["relation"] = decision.get("relation")
-    return {
-        "ok": True,
-        "tool": "task",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "task_id": task["id"],
-        "task": summary,
-        "relation": decision.get("relation"),
-        "current_binding": _current_binding(context),
-        "next_actions": [
-            {"tool": "artifact", "action": "get", "args": {"artifact_id": "<artifact-id>"}},
-        ],
-        "command_hint": track_relations.command_hint("artifact", "get", {"artifact_id": "<artifact-id>"}),
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Read task '{task['id']}' summary for active buddy decision use.",
+        state_changed=False,
+        durability="none",
+        read_scope="Task summary plus relation context; full artifact bodies remain behind artifact.get.",
+        allowed_next_actions=[
             "Use artifact.get with returned artifact ids for full body reads.",
             "Use task.set_current only when selecting active-buddy owned work.",
         ],
-    }
+        extra={
+            "task_id": task["id"],
+            "task": summary,
+            "relation": decision.get("relation"),
+            "current_binding": _current_binding(context),
+            "next_actions": [
+                {"tool": "artifact", "action": "get", "args": {"artifact_id": "<artifact-id>"}},
+            ],
+            "command_hint": track_relations.command_hint("artifact", "get", {"artifact_id": "<artifact-id>"}),
+        },
+    )
 
 
 def get_current_task(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
@@ -483,18 +561,22 @@ def get_current_task(*, args: dict[str, Any], context: TaskServiceContext) -> di
     binding = _current_binding(context)
     task_id = binding.get("current_task_id")
     if not isinstance(task_id, str) or not task_id.strip():
-        return {
-            "ok": True,
-            "tool": "task",
-            "action": action,
-            "active_buddy": context["active_buddy"],
-            "task": None,
-            "current_binding": binding,
-            "allowed_next_actions": [
+        return _success_payload(
+            action=action,
+            context=context,
+            effect_summary="No current task binding exists for the active instance.",
+            state_changed=False,
+            durability="none",
+            read_scope="Instance binding only; no task object was read because current_task_id is empty.",
+            allowed_next_actions=[
                 "Use task.list to inspect active-buddy tasks.",
                 "Use task.set_current with an active-buddy task_id.",
             ],
-        }
+            extra={
+                "task": None,
+                "current_binding": binding,
+            },
+        )
 
     task = env_store.get_task(task_id.strip())
     if task is None:
@@ -507,19 +589,23 @@ def get_current_task(*, args: dict[str, Any], context: TaskServiceContext) -> di
             task_id=task_id.strip(),
             task_buddy=str(task_buddy or ""),
         )
-    return {
-        "ok": True,
-        "tool": "task",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "task_id": task["id"],
-        "task": _task_summary(task),
-        "current_binding": binding,
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Read current bound task '{task['id']}' from active instance binding.",
+        state_changed=False,
+        durability="none",
+        read_scope="Current instance task binding and owned task summary.",
+        allowed_next_actions=[
             "Use task.update to adjust this task status or summary.",
             "Use task.set_current to switch to another active-buddy task.",
         ],
-    }
+        extra={
+            "task_id": task["id"],
+            "task": _task_summary(task),
+            "current_binding": binding,
+        },
+    )
 
 
 def set_current_task(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
@@ -549,19 +635,30 @@ def set_current_task(*, args: dict[str, Any], context: TaskServiceContext) -> di
         track_id=normalized_track_id,
     )
 
-    return {
-        "ok": True,
-        "tool": "task",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "task_id": task_id,
-        "task": _task_summary(task),
-        "current_binding": _current_binding(context),
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Set current instance task binding to '{task_id}'.",
+        state_changed=True,
+        durability="instance_binding",
+        state_changes=[
+            {
+                "object_type": "instance_binding",
+                "object_id": context["instance_id"],
+                "change": "current_task_id/current_track_id updated",
+            }
+        ],
+        binding_changed=True,
+        allowed_next_actions=[
             "Use task.get_current to confirm active instance binding.",
             "Continue task work using the current binding context.",
         ],
-    }
+        extra={
+            "task_id": task_id,
+            "task": _task_summary(task),
+            "current_binding": _current_binding(context),
+        },
+    )
 
 
 def update_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
@@ -625,19 +722,24 @@ def update_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCo
         )
 
     updated = env_store.update_task(task["id"], patch)
-    return {
-        "ok": True,
-        "tool": "task",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "task_id": updated["id"],
-        "task": _task_summary(updated),
-        "current_binding": _current_binding(context),
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Updated task '{updated['id']}' fields: {', '.join(sorted(patch.keys()))}.",
+        state_changed=True,
+        durability="runtime_object",
+        state_changes=[{"object_type": "task", "object_id": updated["id"], "change": "updated"}],
+        updated_ids=[str(updated["id"])],
+        allowed_next_actions=[
             "Use task.get to confirm the persisted task fields.",
             "Use task.archive when this task should be closed without deletion.",
         ],
-    }
+        extra={
+            "task_id": updated["id"],
+            "task": _task_summary(updated),
+            "current_binding": _current_binding(context),
+        },
+    )
 
 
 def archive_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
@@ -658,16 +760,21 @@ def archive_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceC
         return error
     assert task is not None
     archived = env_store.update_task(task["id"], {"status": "archived"})
-    return {
-        "ok": True,
-        "tool": "task",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "task_id": archived["id"],
-        "task": _task_summary(archived),
-        "current_binding": _current_binding(context),
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Archived task '{archived['id']}' by status update; task was not deleted.",
+        state_changed=True,
+        durability="runtime_object",
+        state_changes=[{"object_type": "task", "object_id": archived["id"], "change": "status set to archived"}],
+        updated_ids=[str(archived["id"])],
+        allowed_next_actions=[
             "Use task.get to inspect archived task context.",
             "Use task.list to continue with another active-buddy task.",
         ],
-    }
+        extra={
+            "task_id": archived["id"],
+            "task": _task_summary(archived),
+            "current_binding": _current_binding(context),
+        },
+    )

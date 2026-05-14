@@ -95,20 +95,28 @@ def _runtime_feedback_error(
     message: str,
     details: dict[str, Any],
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "ok": False,
-        "tool": tool,
-        "action": action,
-        "error": {
-            "code": code,
-            "message": message,
-        },
-        "active_buddy": active_buddy,
-        **details,
-    }
-    if "allowed_next_actions" in payload and "allowed_next_action_options" not in payload:
+    missing = object()
+
+    def _extract_bool_field(*, key: str, default: bool, invalid_default: bool) -> bool:
+        raw = extra.pop(key, missing)
+        if raw is missing:
+            return default
+        if isinstance(raw, bool):
+            return raw
+        return invalid_default
+
+    extra = dict(details)
+    permission_boundary = str(extra.pop("permission_boundary", "runtime.feedback"))
+    allowed_next_actions_raw = extra.pop("allowed_next_actions", [])
+    allowed_next_actions = (
+        list(allowed_next_actions_raw)
+        if isinstance(allowed_next_actions_raw, list)
+        else ["Retry after fixing runtime preconditions."]
+    )
+    options = extra.pop("allowed_next_action_options", None)
+    if not isinstance(options, list) and allowed_next_actions:
         if tool == "run":
-            payload["allowed_next_action_options"] = [
+            options = [
                 tool_responses.next_action_option(
                     tool="context",
                     action="summarize",
@@ -117,7 +125,7 @@ def _runtime_feedback_error(
                 )
             ]
         elif tool == "evidence":
-            payload["allowed_next_action_options"] = [
+            options = [
                 tool_responses.next_action_option(
                     tool="evidence",
                     action="issue_browser",
@@ -125,7 +133,29 @@ def _runtime_feedback_error(
                     reason="Issue browser evidence for the prepared run before retrying.",
                 )
             ]
-    return payload
+    state_changed = _extract_bool_field(key="state_changed", default=False, invalid_default=False)
+    retryable = _extract_bool_field(key="retryable", default=True, invalid_default=False)
+    retry_guidance = str(extra.pop("retry_guidance", "Fix runtime preconditions and retry safely."))
+    human_summary = str(extra.pop("human_summary", message))
+    why_blocked = str(extra.pop("why_blocked", message))
+    impact = str(extra.pop("impact", "No runtime state changed before this rejection."))
+    return tool_responses.rejection(
+        tool=tool,
+        action=action,
+        active_buddy=active_buddy,
+        code=code,
+        message=message,
+        permission_boundary=permission_boundary,
+        human_summary=human_summary,
+        why_blocked=why_blocked,
+        impact=impact,
+        state_changed=state_changed,
+        retryable=retryable,
+        retry_guidance=retry_guidance,
+        allowed_next_actions=allowed_next_actions,
+        allowed_next_action_options=options if isinstance(options, list) else None,
+        extra=extra if extra else None,
+    )
 
 
 def _service_context(
@@ -166,6 +196,12 @@ def _runtime_feedback_from_exception(
             message=str(error),
             details={
                 "permission_boundary": "run.service",
+                "human_summary": "Run service rejected the request before commit.",
+                "why_blocked": str(error),
+                "impact": "No run commit or runtime object mutation occurred.",
+                "state_changed": False,
+                "retryable": True,
+                "retry_guidance": "Fix run payload or refresh context, then retry run.validate_result or run.commit.",
                 "allowed_next_actions": [
                     "Use prepare.runtime_context.env_tools.run payload hints and retry.",
                     "Rerun prepare if the context or reserved run is stale.",
@@ -180,6 +216,12 @@ def _runtime_feedback_from_exception(
         message=str(error),
         details={
             "permission_boundary": "market.browser_evidence",
+            "human_summary": "Evidence service rejected the request before token issuance.",
+            "why_blocked": str(error),
+            "impact": "No evidence token was issued and no runtime objects were changed.",
+            "state_changed": False,
+            "retryable": True,
+            "retry_guidance": "Fix evidence payload or browser readiness, then retry evidence action.",
             "allowed_next_actions": [
                 "Use prepare.runtime_context.env_tools.evidence payload hints and retry.",
                 "Rerun prepare if the context or browser cockpit readiness is stale.",

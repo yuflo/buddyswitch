@@ -238,6 +238,13 @@ def runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) 
     }
     if extra:
         payload.update(extra)
+    if "permission_boundary" in payload:
+        payload.setdefault("human_summary", message)
+        payload.setdefault("why_blocked", message)
+        payload.setdefault("impact", "No BuddySwitch runtime object state was changed.")
+        payload.setdefault("state_changed", False)
+        payload.setdefault("retryable", True)
+        payload.setdefault("retry_guidance", "Fix the reported issue and retry.")
     if "allowed_next_actions" in payload and "allowed_next_action_options" not in payload:
         payload["allowed_next_action_options"] = [
             tool_responses.next_action_option(

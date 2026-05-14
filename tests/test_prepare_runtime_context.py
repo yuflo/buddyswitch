@@ -16,6 +16,7 @@ if str(SCRIPTS) not in sys.path:
 import env_profiles  # noqa: E402
 import env_store  # noqa: E402
 import turn_runtime  # noqa: E402
+from env.tools import contracts as tool_contracts  # noqa: E402
 from env_manifest import load_manifest  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -197,6 +198,34 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("list", env_tools["handoff"]["operations"])
         self.assertIn("validate", env_tools["handoff"]["operations"])
         self.assertIn("create", env_tools["handoff"]["operations"])
+
+    def test_prepare_projects_env_tool_semantics_for_each_buddy(self) -> None:
+        expected_tools = {row["tool"] for row in tool_contracts.TOOL_REGISTRY}
+        expected_actions = {
+            row["tool"]: {action["name"] for action in row["actions"]}
+            for row in tool_contracts.TOOL_REGISTRY
+        }
+        expected_operation_semantics = {
+            f"{row['tool']}.{action['name']}"
+            for row in tool_contracts.TOOL_REGISTRY
+            for action in row["actions"]
+        }
+
+        for buddy in self._manifest_buddy_order():
+            with self.subTest(buddy=buddy):
+                payload = self._prepare(buddy=buddy, request_text=REQUESTS_BY_BUDDY[buddy])
+                runtime_context = payload["runtime_context"]
+                env_tools = runtime_context["env_tools"]
+                self.assertEqual(set(env_tools), expected_tools)
+                self.assertEqual(set(runtime_context["operation_semantics"]), expected_operation_semantics)
+                for tool in sorted(expected_tools):
+                    tool_row = env_tools[tool]
+                    self.assertIn("action_semantics", tool_row)
+                    self.assertEqual(set(tool_row["action_semantics"]), expected_actions[tool])
+                    for action in sorted(expected_actions[tool]):
+                        semantic = tool_row["action_semantics"][action]
+                        self.assertIn("title", semantic)
+                        self.assertIn("inputs_explained", semantic)
 
 
 if __name__ == "__main__":

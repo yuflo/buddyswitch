@@ -32,23 +32,29 @@ def _error_payload(
     message: str,
     permission_boundary: str,
     allowed_next_actions: list[str],
+    human_summary: str | None = None,
+    why_blocked: str | None = None,
+    impact: str = "No runtime context or object state was changed.",
+    retryable: bool = True,
+    retry_guidance: str | None = None,
     allowed_next_action_options: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "ok": False,
-        "tool": "context",
-        "action": action,
-        "error": {
-            "code": code,
-            "message": message,
-        },
-        "permission_boundary": permission_boundary,
-        "active_buddy": active_buddy,
-        "allowed_next_actions": allowed_next_actions,
-    }
-    if isinstance(allowed_next_action_options, list):
-        payload["allowed_next_action_options"] = allowed_next_action_options
-    return payload
+    return tool_responses.rejection(
+        tool="context",
+        action=action,
+        active_buddy=active_buddy,
+        code=code,
+        message=message,
+        permission_boundary=permission_boundary,
+        human_summary=human_summary or message,
+        why_blocked=why_blocked or message,
+        impact=impact,
+        state_changed=False,
+        retryable=retryable,
+        retry_guidance=retry_guidance or "Refresh context payload or active instance state, then retry.",
+        allowed_next_actions=allowed_next_actions,
+        allowed_next_action_options=allowed_next_action_options,
+    )
 
 
 def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
@@ -58,6 +64,10 @@ def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str,
         code="E_CONTEXT_PAYLOAD",
         message=message,
         permission_boundary="request-payload",
+        human_summary="Context request payload is invalid.",
+        why_blocked=message,
+        retryable=True,
+        retry_guidance="Fix context payload fields and retry.",
         allowed_next_actions=[
             'Fix the env.tool envelope fields (`tool`, `action`, `args`) and retry.',
             "Use context.list_sources to inspect available context sections.",
@@ -93,6 +103,10 @@ def _context_boundary_error(
         code=code,
         message=message,
         permission_boundary=permission_boundary,
+        human_summary="Prepared context does not match active runtime state.",
+        why_blocked=message,
+        retryable=True,
+        retry_guidance="Rerun prepare in the active instance and retry with the refreshed context.",
         allowed_next_actions=[
             "Rerun prepare in the active launcher-managed instance.",
             "Use the refreshed context returned by prepare for the next action.",
@@ -829,15 +843,18 @@ def _validate_context_payload(
     try:
         validated = rt._validate_prepared_run_context(args_context)
     except rt.RuntimeFeedbackError as exc:
-        return {
-            "ok": False,
-            "tool": "context",
-            "action": action,
-            "error": {"code": exc.code, "message": exc.message},
-            "permission_boundary": exc.details.get("permission_boundary", "prepare.context_revision"),
-            "active_buddy": context["active_buddy"],
-            "allowed_next_actions": exc.details.get("allowed_next_actions", []),
-        }
+        return _error_payload(
+            action=action,
+            active_buddy=context["active_buddy"],
+            code=exc.code,
+            message=exc.message,
+            permission_boundary=str(exc.details.get("permission_boundary", "prepare.context_revision")),
+            human_summary="Prepared context validation failed for the active runtime state.",
+            why_blocked=exc.message,
+            retryable=True,
+            retry_guidance="Rerun prepare and retry with the refreshed context payload.",
+            allowed_next_actions=list(exc.details.get("allowed_next_actions", [])),
+        )
     except (ValueError, TypeError) as exc:
         return _context_boundary_error(
             action=action,
@@ -920,19 +937,21 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
     sections = current_context_sections(context)
     response_sections = dict(sections)
     response_sections.pop("context_sources_desc", None)
-    return {
-        "ok": True,
-        "tool": "context",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        **response_sections,
-        "allowed_next_actions": [
+    return tool_responses.success(
+        tool="context",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary="Returned active instance context sections and decision surface without mutating state.",
+        state_changed=False,
+        durability="none",
+        read_scope="Active runtime context snapshot sections; this is not a direct foreign artifact full-body API.",
+        allowed_next_actions=[
             "Use context.summarize for compact scan-friendly context.",
             "Use track.get to inspect artifact ids and relation context.",
             "Use artifact.get --artifact-id <artifact-id> for full-body reads.",
             "Use track.join --track-id <track-id> when relation is missing.",
         ],
-        "allowed_next_action_options": [
+        allowed_next_action_options=[
             tool_responses.next_action_option(
                 tool="context",
                 action="summarize",
@@ -946,7 +965,8 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
                 reason="Inspect structured source descriptors for context sections.",
             ),
         ],
-    }
+        extra=response_sections,
+    )
 
 
 def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict[str, Any]:
@@ -971,21 +991,20 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
     ):
         candidate_tracks = _build_candidate_track_rows(active_buddy=context["active_buddy"])
 
-    return {
-        "ok": True,
-        "tool": "context",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "current_binding": sections["current_binding"],
-        "current_context_summary": sections["current_context_summary"],
-        "decision_surface": decision_surface,
-        "candidate_tracks": candidate_tracks,
-        "allowed_next_actions": [
+    return tool_responses.success(
+        tool="context",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary="Returned compact context summary and candidate tracks without mutating state.",
+        state_changed=False,
+        durability="none",
+        read_scope="Current binding, context summary, and decision-surface projection only.",
+        allowed_next_actions=[
             "Use track.get --track-id <track-id> to inspect source artifact ids.",
             "Use artifact.get --artifact-id <artifact-id> for direct full-body reads.",
             "Use track.join --track-id <track-id> when artifact.get reports missing relation.",
         ],
-        "allowed_next_action_options": [
+        allowed_next_action_options=[
             tool_responses.next_action_option(
                 tool="track",
                 action="get",
@@ -999,7 +1018,13 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
                 reason="Inspect candidate tracks for cross-buddy continuation context.",
             ),
         ],
-    }
+        extra={
+            "current_binding": sections["current_binding"],
+            "current_context_summary": sections["current_context_summary"],
+            "decision_surface": decision_surface,
+            "candidate_tracks": candidate_tracks,
+        },
+    )
 
 
 def list_sources(*, args: dict[str, Any], context: ContextServiceContext) -> dict[str, Any]:
@@ -1012,17 +1037,19 @@ def list_sources(*, args: dict[str, Any], context: ContextServiceContext) -> dic
     )
     if fields_error is not None:
         return fields_error
-    return {
-        "ok": True,
-        "tool": "context",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "sources": context_sources_desc(),
-        "allowed_next_actions": [
+    return tool_responses.success(
+        tool="context",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary="Listed context source descriptors for active runtime sections without changing state.",
+        state_changed=False,
+        durability="none",
+        read_scope="Context section descriptor metadata only.",
+        allowed_next_actions=[
             "Use context.get to read full current context.",
             "Use context.summarize for compact context.",
         ],
-        "allowed_next_action_options": [
+        allowed_next_action_options=[
             tool_responses.next_action_option(
                 tool="context",
                 action="get",
@@ -1036,4 +1063,5 @@ def list_sources(*, args: dict[str, Any], context: ContextServiceContext) -> dic
                 reason="Read compact current context summary for quick orientation.",
             ),
         ],
-    }
+        extra={"sources": context_sources_desc()},
+    )

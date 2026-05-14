@@ -17,6 +17,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_manifest  # noqa: E402
 import turn_runtime  # noqa: E402
+from env.tools import contracts as tool_contracts  # noqa: E402
 
 
 class RepoConsistencyTests(unittest.TestCase):
@@ -700,6 +701,94 @@ class RepoConsistencyTests(unittest.TestCase):
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("env.tool", text)
                 self.assertNotIn("env" + "." + "task", text)
+
+    def test_env_semantic_contract_is_runtime_visible_not_docs_only(self) -> None:
+        env_tools = turn_runtime._build_env_tools_desc()
+        self.assertEqual(tool_contracts.semantic_contract_errors(), [])
+        self.assertEqual(set(env_tools), {row["tool"] for row in tool_contracts.TOOL_REGISTRY})
+
+        required_projection_keys = {
+            "title",
+            "plain_description",
+            "use_when",
+            "do_not_use_when",
+            "capability_boundary",
+            "action_semantics",
+        }
+        required_action_keys = {
+            "title",
+            "plain_description",
+            "use_when",
+            "do_not_use_when",
+            "inputs_explained",
+            "side_effects",
+            "risk_hints",
+            "success_means",
+            "common_failures",
+        }
+        for tool_spec in tool_contracts.TOOL_REGISTRY:
+            tool_id = tool_spec["tool"]
+            row = env_tools[tool_id]
+            with self.subTest(tool=tool_id):
+                self.assertTrue(required_projection_keys.issubset(set(row)))
+                action_semantics = row["action_semantics"]
+                self.assertIsInstance(action_semantics, dict)
+                for action in tool_spec["actions"]:
+                    action_id = action["name"]
+                    key = f"{tool_id}.{action_id}"
+                    with self.subTest(action=key):
+                        self.assertIn(action_id, action_semantics)
+                        semantic = action_semantics[action_id]
+                        self.assertTrue(required_action_keys.issubset(set(semantic)))
+
+        runtime_doc = (ROOT / "framework" / "docs" / "turn-runtime-spec.md").read_text(encoding="utf-8")
+        self.assertIn("runtime_context.env_tools", runtime_doc)
+        self.assertIn("action_semantics", runtime_doc)
+
+    def test_env_semantic_contract_avoids_heavy_abstraction_and_enforcement_drift(self) -> None:
+        forbidden_tokens = (
+            "tool_search_subsystem",
+            "workflow_engine",
+            "permission_language",
+            "schema_generation_framework",
+            "semantic_v1",
+            "semantic_v2",
+        )
+        scan_roots = [
+            ROOT / "scripts",
+            ROOT / "framework",
+            ROOT / "tests",
+            ROOT / "buddyswitch",
+            ROOT / "tools",
+        ]
+        for root in scan_roots:
+            for path in root.rglob("*"):
+                if not path.is_file() or path.suffix not in {".py", ".md", ".json", ".toml", ".sh"}:
+                    continue
+                path_rel = str(path.relative_to(ROOT))
+                if path_rel == "tests/test_repo_consistency.py":
+                    continue
+                if path_rel.startswith("docs/spec/"):
+                    continue
+                text = path.read_text(encoding="utf-8")
+                for token in forbidden_tokens:
+                    with self.subTest(path=path_rel, token=token):
+                        self.assertNotIn(token, text)
+                if path.name == "mcp_server.py":
+                    self.fail(f"forbidden file present: {path_rel}")
+
+    def test_turn_runtime_spec_documents_projected_env_semantic_contract(self) -> None:
+        runtime_doc = (ROOT / "framework" / "docs" / "turn-runtime-spec.md").read_text(encoding="utf-8")
+        self.assertIn("runtime_context.env_tools", runtime_doc)
+        self.assertIn("operation_semantics", runtime_doc)
+        self.assertIn("effect_summary", runtime_doc)
+        self.assertIn("state_changed", runtime_doc)
+        self.assertIn("durability", runtime_doc)
+        self.assertIn("human_summary", runtime_doc)
+        self.assertIn("why_blocked", runtime_doc)
+        self.assertIn("impact", runtime_doc)
+        self.assertIn("retry_guidance", runtime_doc)
+        self.assertNotIn("read scripts/env/services", runtime_doc.lower())
 
     def test_search_tool_visible_surface_is_projected_without_native_web_search_bypass(self) -> None:
         buddy_assets = sorted((ROOT / "tools" / "launcher" / "assets" / "buddies").rglob("AGENTS.md"))

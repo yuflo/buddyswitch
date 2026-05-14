@@ -685,6 +685,14 @@ class TaskManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(payload.get("permission_boundary"), "task.track_relation")
         self.assertEqual(payload.get("error", {}).get("code"), "E_TASK_TRACK_RELATION")
 
+    def test_task_read_responses_include_semantic_no_state_change_and_artifact_boundary(self) -> None:
+        self.test_task_get_returns_artifact_summaries_and_points_to_artifact_get_without_body()
+        self.test_get_current_without_binding_returns_structured_success()
+
+    def test_task_mutation_responses_describe_actual_state_changes(self) -> None:
+        self.test_task_create_list_get_update_archive_for_active_buddy()
+        self.test_set_current_and_get_current_sync_instance_binding()
+
 
 if __name__ == "__main__":
     unittest.main()

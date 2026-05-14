@@ -416,6 +416,12 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_ENGINE")
                 self.assertEqual(response.get("allowed_engines"), ["google", "web", "reddit", "x"])
 
+    def test_browser_and_search_dependency_rejections_include_semantic_impact(self) -> None:
+        self.test_search_request_search_api_returns_market_approval_required()
+        self.test_search_request_search_api_returns_non_market_provider_unavailable()
+        self.test_search_open_browser_returns_recovery_feedback_when_browser_missing()
+        self.test_search_open_browser_reports_cdp_open_failure_with_target_url()
+
 
 if __name__ == "__main__":
     unittest.main()

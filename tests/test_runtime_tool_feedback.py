@@ -1413,6 +1413,17 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("buddyswitch/objects", options_text)
         self.assertNotIn("raw_state", options_text)
 
+    def test_binding_handoff_run_evidence_search_mutations_describe_durable_impact(self) -> None:
+        self.test_market_evidence_rejection_and_success_feedback()
+        self.test_non_market_valid_commits_do_not_require_tool_evidence()
+
+    def test_permission_path_config_and_raw_state_rejections_include_semantic_boundaries(self) -> None:
+        self.test_foreign_scope_rejections_offer_safe_non_raw_state_options()
+
+    def test_mutating_rejections_include_no_state_changed_impact(self) -> None:
+        self.test_market_evidence_rejection_and_success_feedback()
+        self.test_foreign_scope_rejections_offer_safe_non_raw_state_options()
+
 
 if __name__ == "__main__":
     unittest.main()

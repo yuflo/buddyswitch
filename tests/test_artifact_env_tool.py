@@ -1862,6 +1862,14 @@ class ArtifactManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertNotIn("broker must not leak this", completed.stdout)
 
+    def test_artifact_read_and_validation_responses_explain_scope_and_state(self) -> None:
+        self.test_artifact_list_get_and_get_current_include_decision_metadata_fields()
+        self.test_validate_payload_does_not_mutate_and_payload_authored_identity_is_ignored()
+
+    def test_artifact_write_responses_describe_revision_and_metadata_impacts(self) -> None:
+        self.test_create_revision_promotes_current_artifact_and_updates_task_slots()
+        self.test_update_metadata_changes_only_metadata_with_reserved_source_run()
+
 
 if __name__ == "__main__":
     unittest.main()

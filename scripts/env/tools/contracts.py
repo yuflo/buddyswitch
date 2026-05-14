@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from env.tools import semantics
+
 # Allowed mutability surface values used by operation semantics.
 MUTATES_NONE = "none"
 MUTATES_INSTANCE_BINDING = "instance_binding"
@@ -607,21 +609,33 @@ def supported_tools() -> set[str]:
     return {row.get("tool") for row in TOOL_REGISTRY if isinstance(row.get("tool"), str)}
 
 
+def semantic_contract_errors() -> list[str]:
+    return semantics.semantic_coverage_errors(TOOL_REGISTRY)
+
+
 def env_tools_description() -> dict[str, dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
     for spec in TOOL_REGISTRY:
         tool = spec.get("tool")
         if not isinstance(tool, str) or not tool:
             continue
+        capability_row = semantics.capability_semantics(tool)
         operations: list[str] = []
         payload_fields: dict[str, list[str]] = {}
+        action_semantics: dict[str, dict[str, Any]] = {}
         for action_spec in spec.get("actions", []):
             action = action_spec.get("name")
             if not isinstance(action, str) or not action:
                 continue
             operations.append(action)
             payload_fields[action] = list(action_spec.get("payload_fields", []))
+            action_semantics[action] = semantics.action_semantics(tool, action)
         rows[tool] = {
+            "title": capability_row.get("title", ""),
+            "plain_description": capability_row.get("plain_description", ""),
+            "use_when": list(capability_row.get("use_when", [])),
+            "do_not_use_when": list(capability_row.get("do_not_use_when", [])),
+            "capability_boundary": dict(capability_row.get("capability_boundary", {})),
             "command": spec.get("command"),
             "scope": spec.get("scope"),
             "broker_method": "env.tool",
@@ -633,6 +647,7 @@ def env_tools_description() -> dict[str, dict[str, Any]]:
             "cli_resource": spec.get("cli_resource"),
             "operations": operations,
             "payload_fields": payload_fields,
+            "action_semantics": action_semantics,
             "feedback_source": "runtime/tool response fields",
             "authoritative_fields": [
                 "permission_boundary",
@@ -666,5 +681,6 @@ def operation_semantics() -> dict[str, dict[str, Any]]:
                 "authority": action_spec.get("authority"),
                 "requires": list(action_spec.get("preconditions", [])),
                 "returns": list(action_spec.get("returns", [])),
+                "risk_hints": semantics.action_semantics(tool, action).get("risk_hints", {}),
             }
     return rows

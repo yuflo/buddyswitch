@@ -571,6 +571,55 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         handoffs = design_context["runtime_context"]["current_context_summary"]["recent_handoffs"]
         self.assertTrue(any(row.get("next_buddy") == "design" for row in handoffs))
 
+    def test_runtime_env_tool_semantics_support_direct_source_intake_decision(self) -> None:
+        self.test_bound_market_sees_pm_prd_handoff_track_relation_evidence_and_design_handoff_constraints()
+
+    def test_join_recovery_response_explains_safe_next_step_and_impact(self) -> None:
+        self.test_fresh_market_discovers_pm_handoff_track_without_inbox_or_binding_mutation()
+
+    def test_artifact_validate_create_and_run_validate_commit_explain_state_impact(self) -> None:
+        self.test_full_buddy_loop_uses_decision_surface_and_persists_market_scan_to_design_handoff()
+
+    def test_search_browser_semantics_mark_open_world_and_browser_session_effect(self) -> None:
+        instance_id = "inst-market-search-semantic"
+        instance_json = self._instance_json(buddy="market", instance_id=instance_id)
+        context = self._prepare(
+            buddy="market",
+            instance_id=instance_id,
+            instance_json=instance_json,
+            text=MARKET_REQUEST,
+        )
+        search_tool = context["runtime_context"]["env_tools"]["search"]
+        self.assertTrue(search_tool["action_semantics"]["open_browser"]["risk_hints"]["open_world"])
+        self.assertTrue(search_tool["action_semantics"]["request"]["risk_hints"]["open_world"])
+        status = self._dispatch(
+            method="env.tool",
+            payload={"tool": "search", "action": "status", "args": {}},
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="market",
+        )
+        self.assertTrue(status.get("ok"), msg=status)
+        self.assertFalse(status.get("state_changed"), msg=status)
+        self.assertEqual(status.get("durability"), "none")
+
+    def test_non_pm_lifecycle_rejection_explains_authority_without_service_code(self) -> None:
+        track_id, _ = self._seed_pm_handoff()
+        dev_instance_id = "inst-dev-track-authority"
+        dev_instance = self._instance_json(buddy="dev", instance_id=dev_instance_id, current_track_id=track_id)
+        rejected = self._dispatch(
+            method="env.tool",
+            payload={"tool": "track", "action": "update", "args": {"track_id": track_id, "summary": "dev try"}},
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            buddy="dev",
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual(rejected.get("permission_boundary"), "track.lifecycle_authority")
+        self.assertFalse(rejected.get("retryable"), msg=rejected)
+        self.assertFalse(rejected.get("state_changed"), msg=rejected)
+        self.assertIsInstance(rejected.get("why_blocked"), str, msg=rejected)
+
 
 if __name__ == "__main__":
     unittest.main()

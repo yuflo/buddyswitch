@@ -11,6 +11,7 @@ from typing import Any, TypedDict
 import env_store
 from env_manifest import buddy_permissions, get_buddy
 from env.services import track_relations
+from env.tools import responses as tool_responses
 
 _ARTIFACT_PUBLIC_FIELDS = (
     "id",
@@ -61,26 +62,70 @@ def _error_payload(
     message: str,
     permission_boundary: str,
     allowed_next_actions: list[str],
+    human_summary: str | None = None,
+    why_blocked: str | None = None,
+    impact: str = "No artifact, task, track, or binding state was changed.",
+    retryable: bool = True,
+    retry_guidance: str | None = None,
     artifact_id: str | None = None,
     task_id: str | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "ok": False,
-        "tool": "artifact",
-        "action": action,
-        "error": {
-            "code": code,
-            "message": message,
-        },
-        "permission_boundary": permission_boundary,
-        "active_buddy": active_buddy,
-        "allowed_next_actions": allowed_next_actions,
-    }
+    payload = tool_responses.rejection(
+        tool="artifact",
+        action=action,
+        active_buddy=active_buddy,
+        code=code,
+        message=message,
+        permission_boundary=permission_boundary,
+        human_summary=human_summary or message,
+        why_blocked=why_blocked or message,
+        impact=impact,
+        state_changed=False,
+        retryable=retryable,
+        retry_guidance=retry_guidance or "Fix payload or artifact access preconditions, then retry.",
+        allowed_next_actions=allowed_next_actions,
+    )
     if isinstance(artifact_id, str) and artifact_id.strip():
         payload["artifact_id"] = artifact_id.strip()
     if isinstance(task_id, str) and task_id.strip():
         payload["task_id"] = task_id.strip()
     return payload
+
+
+def _success_payload(
+    *,
+    action: str,
+    context: ArtifactServiceContext,
+    effect_summary: str,
+    state_changed: bool,
+    durability: str,
+    allowed_next_actions: list[str],
+    state_changes: list[dict[str, Any]] | None = None,
+    created_ids: list[str] | None = None,
+    updated_ids: list[str] | None = None,
+    binding_changed: bool | None = None,
+    read_scope: str | None = None,
+    validation_only: bool | None = None,
+    follow_up_affordances: list[dict[str, Any]] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return tool_responses.success(
+        tool="artifact",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary=effect_summary,
+        state_changed=state_changed,
+        durability=durability,
+        state_changes=state_changes,
+        created_ids=created_ids,
+        updated_ids=updated_ids,
+        binding_changed=binding_changed,
+        read_scope=read_scope,
+        validation_only=validation_only,
+        follow_up_affordances=follow_up_affordances,
+        allowed_next_actions=allowed_next_actions,
+        extra=extra,
+    )
 
 
 def _permission_error(*, action: str, active_buddy: str, permission: str) -> dict[str, Any]:
@@ -90,6 +135,10 @@ def _permission_error(*, action: str, active_buddy: str, permission: str) -> dic
         code="E_ARTIFACT_PERMISSION",
         message=f"active buddy '{active_buddy}' is missing required permission '{permission}'",
         permission_boundary="manifest.permission",
+        human_summary="Active buddy cannot use this artifact action.",
+        why_blocked=f"Missing required permission '{permission}'.",
+        retryable=False,
+        retry_guidance="Switch to a buddy with this artifact permission or use an allowed action.",
         allowed_next_actions=[
             "Use only artifact actions allowed by the active buddy manifest permissions.",
             "Switch to a buddy that owns this artifact action before retrying.",
@@ -111,6 +160,10 @@ def _payload_error(
         code="E_ARTIFACT_PAYLOAD",
         message=message,
         permission_boundary="request-payload",
+        human_summary="Artifact request payload is invalid.",
+        why_blocked=message,
+        retryable=True,
+        retry_guidance="Fix artifact payload fields and retry.",
         artifact_id=artifact_id,
         task_id=task_id,
         allowed_next_actions=[
@@ -127,6 +180,10 @@ def _task_scope_error(*, action: str, active_buddy: str, task_id: str, task_budd
         code="E_TASK_BUDDY_SCOPE",
         message=f"task belongs to buddy '{task_buddy}', not active buddy '{active_buddy}'",
         permission_boundary="task.buddy_scope",
+        human_summary="Task belongs to another buddy.",
+        why_blocked="Artifact writes require active-buddy task ownership.",
+        retryable=False,
+        retry_guidance="Choose an active-buddy-owned task or continue through collaboration handoff paths.",
         task_id=task_id,
         allowed_next_actions=[
             "Choose a task owned by the active buddy.",
@@ -148,6 +205,10 @@ def _artifact_scope_error(
         code="E_ARTIFACT_BUDDY_SCOPE",
         message=f"artifact '{artifact_id}' does not belong to active buddy '{active_buddy}'",
         permission_boundary="artifact.buddy_scope",
+        human_summary="Artifact belongs to another buddy.",
+        why_blocked="Only owned artifacts can be updated by metadata or revision write actions.",
+        retryable=False,
+        retry_guidance="Use artifact.get for read-only collaboration intake, or switch to an owned artifact for mutation.",
         artifact_id=artifact_id,
         task_id=task_id,
         allowed_next_actions=[
@@ -164,6 +225,10 @@ def _artifact_lookup_error(*, action: str, active_buddy: str, artifact_id: str) 
         code="E_ARTIFACT_NOT_FOUND",
         message=f"artifact not found: {artifact_id}",
         permission_boundary="artifact.lookup",
+        human_summary="Requested artifact id was not found.",
+        why_blocked=f"artifact_id '{artifact_id}' does not reference an existing artifact.",
+        retryable=True,
+        retry_guidance="List readable artifacts and retry with a valid artifact_id.",
         artifact_id=artifact_id,
         allowed_next_actions=[
             "Use artifact.list --track-id <track-id> to inspect readable artifact ids.",
@@ -189,6 +254,10 @@ def _task_lookup_error(*, action: str, active_buddy: str, task_id: str) -> dict[
         code="E_TASK_NOT_FOUND",
         message=f"task not found: {task_id}",
         permission_boundary="task.lookup",
+        human_summary="Requested task id was not found.",
+        why_blocked=f"task_id '{task_id}' does not reference an existing task.",
+        retryable=True,
+        retry_guidance="Inspect current task binding or create/bind a task, then retry.",
         task_id=task_id,
         allowed_next_actions=[
             "Use task.get_current to inspect the active task binding.",
@@ -206,6 +275,10 @@ def _kind_error(*, action: str, context: ArtifactServiceContext, kind: str, task
         code="E_ARTIFACT_KIND",
         message=f"artifact kind '{kind}' is not allowed for active buddy '{context['active_buddy']}'",
         permission_boundary="manifest.artifact_kinds",
+        human_summary="Artifact kind is not allowed for this buddy.",
+        why_blocked=f"kind '{kind}' is outside the active buddy artifact_kinds policy.",
+        retryable=True,
+        retry_guidance="Retry with an allowed artifact kind or hand off to the buddy that owns the requested kind.",
         task_id=task_id,
         allowed_next_actions=[
             f"Use one allowed artifact kind for buddy '{context['active_buddy']}'.",
@@ -228,6 +301,10 @@ def _source_run_error(
         code="E_ARTIFACT_SOURCE_RUN",
         message=message,
         permission_boundary="artifact.source_run",
+        human_summary="Artifact source run validation failed.",
+        why_blocked=message,
+        retryable=True,
+        retry_guidance="Use the reserved run_id from current prepare context, or rerun prepare when reservation is stale.",
         artifact_id=artifact_id,
         task_id=task_id,
         allowed_next_actions=[
@@ -388,6 +465,10 @@ def _artifact_read_rejection(
         code="E_ARTIFACT_READ_SCOPE",
         message=str(decision.get("why") or "artifact read is blocked"),
         permission_boundary=str(decision.get("permission_boundary") or "artifact.track_relation"),
+        human_summary="Artifact full-body read is blocked for the active buddy.",
+        why_blocked=str(decision.get("why") or "artifact read is blocked"),
+        retryable=True,
+        retry_guidance="Establish track relation or handoff authorization, then retry artifact.get.",
         artifact_id=artifact_id,
         task_id=decision.get("source_task_id") if isinstance(decision.get("source_task_id"), str) else None,
         allowed_next_actions=[
@@ -672,26 +753,30 @@ def list_artifacts_for_track(*, args: dict[str, Any], context: ArtifactServiceCo
         return payload
     relation = track_relations.track_relation_for_buddy(track, context["active_buddy"])
     rows = track_relations.current_artifact_rows_for_track(track_id, context["active_buddy"])
-    return {
-        "ok": True,
-        "tool": "artifact",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "track_id": track_id,
-        "relation": relation.get("relation"),
-        "artifacts": rows,
-        "current_binding": _current_binding(context),
-        "next_actions": [
-            {"tool": "track", "action": "get", "args": {"track_id": track_id}},
-            {"tool": "artifact", "action": "get", "args": {"artifact_id": "<artifact-id>"}},
-            {"tool": "track", "action": "join", "args": {"track_id": track_id}},
-        ],
-        "command_hint": track_relations.command_hint("track", "get", {"track_id": track_id}),
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Listed {len(rows)} current artifact summaries for track '{track_id}'.",
+        state_changed=False,
+        durability="none",
+        read_scope="Track-scoped artifact summary rows only; no artifact content bodies were returned.",
+        allowed_next_actions=[
             "Use artifact.get --artifact-id <artifact-id> for full-body reads.",
             "Use track.join --track-id <track-id> when readable_by_current_buddy is false.",
         ],
-    }
+        extra={
+            "track_id": track_id,
+            "relation": relation.get("relation"),
+            "artifacts": rows,
+            "current_binding": _current_binding(context),
+            "next_actions": [
+                {"tool": "track", "action": "get", "args": {"track_id": track_id}},
+                {"tool": "artifact", "action": "get", "args": {"artifact_id": "<artifact-id>"}},
+                {"tool": "track", "action": "join", "args": {"track_id": track_id}},
+            ],
+            "command_hint": track_relations.command_hint("track", "get", {"track_id": track_id}),
+        },
+    )
 
 
 def get_artifact_for_active_buddy(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
@@ -750,21 +835,25 @@ def get_artifact_for_active_buddy(*, args: dict[str, Any], context: ArtifactServ
             "Use artifact.list with the source track to inspect readable current artifacts only.",
             "Use handoff.list to inspect explicit cross-buddy handoff authorization context.",
         ]
-    return {
-        "ok": True,
-        "tool": "artifact",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "artifact_id": artifact["id"],
-        "task_id": artifact["task_id"],
-        "artifact": _artifact_summary(artifact, include_content=True),
-        "relation": relation,
-        "readable_by_current_buddy": True,
-        "current_binding": _current_binding(context),
-        "next_actions": next_actions,
-        "command_hint": command_hint,
-        "allowed_next_actions": allowed_next_actions,
-    }
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Read full body for artifact '{artifact['id']}' with relation '{relation}'.",
+        state_changed=False,
+        durability="none",
+        read_scope="Full artifact body read for an authorized artifact id.",
+        allowed_next_actions=allowed_next_actions,
+        extra={
+            "artifact_id": artifact["id"],
+            "task_id": artifact["task_id"],
+            "artifact": _artifact_summary(artifact, include_content=True),
+            "relation": relation,
+            "readable_by_current_buddy": True,
+            "current_binding": _current_binding(context),
+            "next_actions": next_actions,
+            "command_hint": command_hint,
+        },
+    )
 
 
 def get_current_artifacts_for_active_task(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
@@ -783,16 +872,20 @@ def get_current_artifacts_for_active_task(*, args: dict[str, Any], context: Arti
 
     current_task_id = context["instance_payload"].get("current_task_id")
     if not isinstance(current_task_id, str) or not current_task_id.strip():
-        return {
-            "ok": True,
-            "tool": "artifact",
-            "action": action,
-            "active_buddy": context["active_buddy"],
-            "task_id": None,
-            "artifacts": [],
-            "current_binding": _current_binding(context),
-            "allowed_next_actions": ["Use task.set_current before reading current artifact revisions."],
-        }
+        return _success_payload(
+            action=action,
+            context=context,
+            effect_summary="No current task binding exists, so there are no current artifacts to read.",
+            state_changed=False,
+            durability="none",
+            read_scope="Instance binding only; no task artifact slots were read.",
+            allowed_next_actions=["Use task.set_current before reading current artifact revisions."],
+            extra={
+                "task_id": None,
+                "artifacts": [],
+                "current_binding": _current_binding(context),
+            },
+        )
     task, error = _owned_task(context=context, action=action, args={"task_id": current_task_id})
     if error is not None:
         return error
@@ -818,19 +911,23 @@ def get_current_artifacts_for_active_task(*, args: dict[str, Any], context: Arti
         if artifact_id in artifact_map
     ]
     rows.sort(key=lambda row: (str(row.get("kind") or ""), str(row.get("id") or "")))
-    return {
-        "ok": True,
-        "tool": "artifact",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "task_id": task["id"],
-        "artifacts": rows,
-        "current_binding": _current_binding(context),
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Read {len(rows)} current artifact revisions for task '{task['id']}'.",
+        state_changed=False,
+        durability="none",
+        read_scope="Current task artifact-slot projection with full bodies for owned current revisions.",
+        allowed_next_actions=[
             "Use artifact.get for a specific full artifact record.",
             "Use artifact.create_revision to replace the current revision for a kind.",
         ],
-    }
+        extra={
+            "task_id": task["id"],
+            "artifacts": rows,
+            "current_binding": _current_binding(context),
+        },
+    )
 
 
 def validate_artifact_payload(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
@@ -850,17 +947,28 @@ def validate_artifact_payload(*, args: dict[str, Any], context: ArtifactServiceC
     if error is not None:
         return error
     assert normalized is not None
-    return {
-        "ok": True,
-        "tool": "artifact",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "task_id": normalized["task_id"],
-        "artifact_id": normalized["artifact_id"],
-        "normalized": {key: value for key, value in normalized.items() if key != "content"},
-        "current_binding": _current_binding(context),
-        "allowed_next_actions": ["Use artifact.create_revision with the validated payload when ready to write."],
-    }
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary="Validated artifact payload and source-run constraints without writing state.",
+        state_changed=False,
+        durability="none",
+        validation_only=True,
+        allowed_next_actions=["Use artifact.create_revision with the validated payload when ready to write."],
+        follow_up_affordances=[
+            tool_responses.follow_up_affordance(
+                tool="artifact",
+                action="create_revision",
+                reason="Persist a new artifact revision from this validated payload.",
+            )
+        ],
+        extra={
+            "task_id": normalized["task_id"],
+            "artifact_id": normalized["artifact_id"],
+            "normalized": {key: value for key, value in normalized.items() if key != "content"},
+            "current_binding": _current_binding(context),
+        },
+    )
 
 
 def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
@@ -890,20 +998,29 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
         summary=normalized["summary"],
         content=normalized["content"],
     )
-    return {
-        "ok": True,
-        "tool": "artifact",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "task_id": artifact["task_id"],
-        "artifact_id": artifact["id"],
-        "artifact": _artifact_summary(artifact, include_content=True),
-        "current_binding": _current_binding(context),
-        "allowed_next_actions": [
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Created artifact revision '{artifact['id']}' and updated current task artifact slot.",
+        state_changed=True,
+        durability="runtime_object",
+        state_changes=[
+            {"object_type": "artifact", "object_id": artifact["id"], "change": "revision created"},
+            {"object_type": "task", "object_id": artifact["task_id"], "change": "artifact slot current revision updated"},
+        ],
+        created_ids=[str(artifact["id"])],
+        updated_ids=[str(artifact["task_id"])],
+        allowed_next_actions=[
             "Use artifact.get_current to confirm the promoted current revision.",
             "Include the artifact in the run result/audit path before completing the turn.",
         ],
-    }
+        extra={
+            "task_id": artifact["task_id"],
+            "artifact_id": artifact["id"],
+            "artifact": _artifact_summary(artifact, include_content=True),
+            "current_binding": _current_binding(context),
+        },
+    )
 
 
 def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
@@ -955,14 +1072,19 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
         )
 
     updated = env_store.update_artifact(str(artifact["id"]), patch)
-    return {
-        "ok": True,
-        "tool": "artifact",
-        "action": action,
-        "active_buddy": context["active_buddy"],
-        "task_id": updated["task_id"],
-        "artifact_id": updated["id"],
-        "artifact": _artifact_summary(updated, include_content=True),
-        "current_binding": _current_binding(context),
-        "allowed_next_actions": ["Use artifact.get to confirm metadata changes."],
-    }
+    return _success_payload(
+        action=action,
+        context=context,
+        effect_summary=f"Updated metadata on artifact '{updated['id']}' without changing content body.",
+        state_changed=True,
+        durability="runtime_object",
+        state_changes=[{"object_type": "artifact", "object_id": updated["id"], "change": "metadata updated"}],
+        updated_ids=[str(updated["id"])],
+        allowed_next_actions=["Use artifact.get to confirm metadata changes."],
+        extra={
+            "task_id": updated["task_id"],
+            "artifact_id": updated["id"],
+            "artifact": _artifact_summary(updated, include_content=True),
+            "current_binding": _current_binding(context),
+        },
+    )

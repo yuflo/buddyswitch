@@ -19,9 +19,23 @@ def _runtime_error(code: str, message: str, extra: dict[str, Any] | None = None)
             "code": code,
             "message": message,
         },
+        "permission_boundary": "runtime.broker",
+        "human_summary": message,
+        "why_blocked": message,
+        "impact": "No evidence token was issued and no runtime state was changed.",
+        "state_changed": False,
+        "retryable": True,
+        "retry_guidance": "Fix broker/context inputs and retry.",
     }
     if extra:
         payload.update(extra)
+    payload.setdefault("permission_boundary", "runtime.broker")
+    payload.setdefault("human_summary", message)
+    payload.setdefault("why_blocked", message)
+    payload.setdefault("impact", "No evidence token was issued and no runtime state was changed.")
+    payload.setdefault("state_changed", False)
+    payload.setdefault("retryable", True)
+    payload.setdefault("retry_guidance", "Fix broker/context inputs and retry.")
     return payload
 
 

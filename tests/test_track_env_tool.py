@@ -503,6 +503,18 @@ class TrackManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(first.get("task_id"), "task-dev-join-reuse")
         self.assertEqual(second.get("task_id"), "task-dev-join-reuse")
         self.assertFalse(second.get("created_task"), msg=second)
+        second_state_changes = second.get("state_changes")
+        self.assertIsInstance(second_state_changes, list, msg=second)
+        assert isinstance(second_state_changes, list)
+        self.assertTrue(
+            all(
+                not (isinstance(row, dict) and row.get("object_type") == "task")
+                for row in second_state_changes
+            ),
+            msg=second,
+        )
+        second_updated_ids = second.get("updated_ids")
+        self.assertIn(second_updated_ids, (None, []), msg=second)
         track = env_store.get_track("track-join-reuse")
         self.assertIsNotNone(track)
         assert track is not None
@@ -1036,6 +1048,20 @@ class TrackManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(payload.get("action"), "track.archive")
         self.assertEqual(payload.get("permission_boundary"), "track.lifecycle_authority")
         self.assertEqual(env_store.get_track("track-live")["status"], "active")
+
+    def test_track_read_responses_include_semantic_orientation_scope(self) -> None:
+        self.test_track_list_returns_discovery_summary_with_deterministic_candidate_order()
+        self.test_track_get_returns_track_context_summary_without_foreign_full_artifact_content()
+        self.test_get_current_reads_active_instance_track_binding()
+
+    def test_track_mutation_responses_describe_lifecycle_join_and_membership_impacts(self) -> None:
+        self.test_pm_track_lifecycle_operations_use_env_tool_and_persist()
+        self.test_track_join_creates_attaches_and_selects_active_buddy_task_without_lifecycle_mutation()
+        self.test_attach_and_detach_task_keep_task_track_backlinks_consistent()
+
+    def test_duplicate_and_ambiguous_mutations_explain_no_state_change_and_recovery(self) -> None:
+        self.test_track_join_reuses_single_existing_active_buddy_task_idempotently()
+        self.test_track_join_rejects_multiple_existing_active_buddy_tasks_with_explicit_task_recovery()
 
 
 if __name__ == "__main__":

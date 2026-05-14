@@ -15,6 +15,7 @@ import env_store
 from env_manifest import DEFAULT_MANIFEST, load_manifest, require_buddy
 from env.services import handoffs as handoff_service
 from env.services import track_relations
+from env.tools import responses as tool_responses
 
 
 class RunServiceContext(TypedDict):
@@ -843,6 +844,10 @@ def commit_for_active_instance(*, args: dict[str, Any], context: RunServiceConte
 
     product_session = _product_session_from_context(context)
     rt._validate_product_persist_context_binding(prepared_context, product_session)
+    prepared_run_id = _context_run_id(prepared_context)
+    reservation_existed_before_commit = (
+        isinstance(prepared_run_id, str) and bool(prepared_run_id) and reserved_run_path(prepared_run_id).exists()
+    )
     payload = commit_buddy_run(
         prepared_context,
         result=result,
@@ -850,7 +855,37 @@ def commit_for_active_instance(*, args: dict[str, Any], context: RunServiceConte
         idempotency_key=args.get("idempotency_key") if isinstance(args.get("idempotency_key"), str) else None,
         result_hash=args.get("result_hash") if isinstance(args.get("result_hash"), str) else None,
     )
-    return {"tool": "run", "action": action, **payload}
+    receipt = payload.get("receipt") if isinstance(payload.get("receipt"), dict) else {}
+    run_id = receipt.get("run_id")
+    state_changes = [{"object_type": "run_commit", "object_id": run_id, "change": "run audit committed"}] if isinstance(run_id, str) else []
+    if reservation_existed_before_commit and isinstance(prepared_run_id, str):
+        reservation_exists_after_commit = reserved_run_path(prepared_run_id).exists()
+        if not reservation_exists_after_commit:
+            state_changes.append(
+                {
+                    "object_type": "run_reservation",
+                    "object_id": prepared_run_id,
+                    "change": "consumed",
+                }
+            )
+    return tool_responses.success(
+        tool="run",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary=f"Committed durable run audit for run_id '{run_id or 'unknown'}'.",
+        state_changed=True,
+        durability="run_commit",
+        state_changes=state_changes,
+        created_ids=[run_id] if isinstance(run_id, str) else [],
+        allowed_next_actions=[
+            "Use run.get_receipt to read compact persisted receipt fields.",
+            "Use context.get or rerun prepare for refreshed runtime context.",
+        ],
+        extra={
+            "receipt": receipt,
+            "refreshed_context": payload.get("refreshed_context"),
+        },
+    )
 
 
 def validate_result_for_active_instance(*, args: dict[str, Any], context: RunServiceContext) -> dict[str, Any]:
@@ -866,7 +901,30 @@ def validate_result_for_active_instance(*, args: dict[str, Any], context: RunSer
         result=result,
         manifest_path=context["manifest_path"] or DEFAULT_MANIFEST,
     )
-    return {"tool": "run", "action": action, **payload}
+    return tool_responses.success(
+        tool="run",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary="Validated run payload against prepared context without committing run state.",
+        state_changed=False,
+        durability="none",
+        validation_only=True,
+        follow_up_affordances=[
+            tool_responses.follow_up_affordance(
+                tool="run",
+                action="commit",
+                reason="Persist validated result as durable run audit.",
+            )
+        ],
+        allowed_next_actions=list(payload.get("allowed_next_actions", []))
+        or ["Use run.commit with the same context and result when ready to persist."],
+        extra={
+            "run_id": payload.get("run_id"),
+            "durable_signals": payload.get("durable_signals"),
+            "validated_handoff": payload.get("validated_handoff"),
+            "retired_field_rejections": payload.get("retired_field_rejections", []),
+        },
+    )
 
 
 def get_receipt_for_active_instance(*, args: dict[str, Any], context: RunServiceContext) -> dict[str, Any]:
@@ -875,7 +933,21 @@ def get_receipt_for_active_instance(*, args: dict[str, Any], context: RunService
     if not isinstance(run_id, str) or not run_id.strip():
         return _payload_error(action=action, context=context, message="run_id is required")
     payload = get_run_receipt(run_id=run_id.strip(), active_buddy=context["active_buddy"])
-    return {"tool": "run", "action": action, **payload}
+    return tool_responses.success(
+        tool="run",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary=f"Read run receipt for run_id '{payload.get('run_id')}'.",
+        state_changed=False,
+        durability="none",
+        read_scope="Committed run receipt fields only.",
+        allowed_next_actions=list(payload.get("allowed_next_actions", []))
+        or ["Use context.get or prepare again for current context state."],
+        extra={
+            "run_id": payload.get("run_id"),
+            "receipt": payload.get("receipt"),
+        },
+    )
 
 
 def get_raw_for_active_instance(*, args: dict[str, Any], context: RunServiceContext) -> dict[str, Any]:
@@ -884,30 +956,49 @@ def get_raw_for_active_instance(*, args: dict[str, Any], context: RunServiceCont
     if not isinstance(run_id, str) or not run_id.strip():
         return _payload_error(action=action, context=context, message="run_id is required")
     payload = get_raw_run(run_id=run_id.strip(), active_buddy=context["active_buddy"])
-    return {"tool": "run", "action": action, **payload}
+    return tool_responses.success(
+        tool="run",
+        action=action,
+        active_buddy=context["active_buddy"],
+        effect_summary=f"Read raw committed run audit for run_id '{payload.get('run_id')}'.",
+        state_changed=False,
+        durability="none",
+        read_scope="Full committed run audit payload.",
+        allowed_next_actions=list(payload.get("allowed_next_actions", []))
+        or ["Use run.get_receipt when only receipt fields are needed."],
+        extra={
+            "run_id": payload.get("run_id"),
+            "run": payload.get("run"),
+        },
+    )
 
 
 def _payload_error(*, action: str, context: RunServiceContext, message: str) -> dict[str, Any]:
-    return {
-        "ok": False,
-        "tool": "run",
-        "action": action,
-        "error": {
-            "code": "E_RUN_PAYLOAD",
-            "message": message,
-        },
-        "permission_boundary": "request-payload",
-        "active_buddy": context["active_buddy"],
-        "allowed_next_actions": [
+    return tool_responses.rejection(
+        tool="run",
+        action=action,
+        active_buddy=context["active_buddy"],
+        code="E_RUN_PAYLOAD",
+        message=message,
+        permission_boundary="request-payload",
+        human_summary="Run payload is invalid.",
+        why_blocked=message,
+        impact="No run audit, reservation, or runtime object state was changed.",
+        state_changed=False,
+        retryable=True,
+        retry_guidance="Fix required run payload fields and retry.",
+        allowed_next_actions=[
             'Send env.tool payload as {"tool":"run","action":"<action>","args":{...}}.',
             "Use prepare.runtime_context.env_tools.run.payload_fields to shape args.",
         ],
-        "next_actions": [
-            {"tool": "context", "action": "summarize"},
-            {"tool": "run", "action": "validate_result"},
-        ],
-        "command_hint": track_relations.command_hint("context", "summarize"),
-        "relation": "none",
-        "missing_preconditions": ["run action payload must include required fields"],
-        "no_content_leak": True,
-    }
+        extra={
+            "next_actions": [
+                {"tool": "context", "action": "summarize"},
+                {"tool": "run", "action": "validate_result"},
+            ],
+            "command_hint": track_relations.command_hint("context", "summarize"),
+            "relation": "none",
+            "missing_preconditions": ["run action payload must include required fields"],
+            "no_content_leak": True,
+        },
+    )
