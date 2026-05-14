@@ -129,6 +129,8 @@ Required top-level sections:
 
 `runtime_context.context_sources_desc` is a structured descriptor map keyed by source id (`request_text`, `task_context.task`, `task_context.artifacts`, `track_context.track`, `track_context.recent_handoffs`, `current_context_summary`). Each descriptor includes `description`, `content`, `scope`, `nullable`, and `decision_use`, with optional `source_of_truth`, `summary_projection`, `max_items`, and `sorted_by`.
 
+Context descriptors are projection metadata. They are not direct full-body artifact read APIs. Use `artifact.get --artifact-id <artifact-id>` for full artifact content reads.
+
 `runtime_context.decision_surface` is the host-facing decision summary for the active binding. It includes:
 
 - `binding_state` (`unbound`, `bound_task_only`, `bound_track_only`, `bound_task_and_track`, `stale`)
@@ -152,6 +154,7 @@ Discovery is descriptive and read-only. It does not mutate active instance bindi
 - `track.list` returns per-row `discovery` semantics and `discovery_summary.candidate_track_ids`.
 - `track.get` returns `track_context_summary` with compact task/current-artifact metadata.
 - Track-context artifact summaries expose decision metadata (`id`, `kind`, `title`, `summary`, `source_buddy`, `source_run`, `revision`, `is_current`, `currentness`) and must not include foreign full artifact `content`.
+- Full artifact body reads on visible ids must route through `artifact.get`. Missing relation recovery should route through `track.join` or `handoff.list`.
 
 ## Persist Contract
 

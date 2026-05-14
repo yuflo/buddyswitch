@@ -10,6 +10,7 @@ from typing import Any, TypedDict
 
 import env_store
 from env_manifest import buddy_permissions, get_buddy
+from env.services import track_relations
 
 _ARTIFACT_PUBLIC_FIELDS = (
     "id",
@@ -28,9 +29,10 @@ _READ_PERMISSION = "artifact.read"
 _CREATE_PERMISSION = "artifact.create"
 _UPDATE_PERMISSION = "artifact.update"
 _IDENTITY_FIELDS = {"active_buddy", "buddy", "instance_id"}
-_LIST_FIELDS: set[str] = set()
+_LIST_FIELDS: set[str] = {"track_id"}
 _GET_FIELDS = {"artifact_id"}
 _GET_CURRENT_FIELDS = {"kind"}
+_TRACK_ID_FIELDS = {"track_id"}
 _CREATE_FIELDS = {
     "artifact_id",
     "task_id",
@@ -113,7 +115,7 @@ def _payload_error(
         task_id=task_id,
         allowed_next_actions=[
             'Fix the env.tool envelope fields (`tool`, `action`, `args`) and retry.',
-            "Use artifact.list to inspect current-task artifact ids before retrying.",
+            "Use track.list then artifact.list --track-id to inspect readable artifact ids.",
         ],
     )
 
@@ -150,7 +152,7 @@ def _artifact_scope_error(
         task_id=task_id,
         allowed_next_actions=[
             "Choose an artifact produced for the active buddy task.",
-            "Use prepare context for upstream cross-buddy artifacts instead of direct artifact tool reads.",
+            "Cross-buddy artifacts are read-only sources; use artifact.get for reads and keep writes on owned artifacts.",
         ],
     )
 
@@ -164,10 +166,20 @@ def _artifact_lookup_error(*, action: str, active_buddy: str, artifact_id: str) 
         permission_boundary="artifact.lookup",
         artifact_id=artifact_id,
         allowed_next_actions=[
-            "Use artifact.list to inspect current-task artifact ids.",
-            "Create a new revision when no artifact exists for this task.",
+            "Use artifact.list --track-id <track-id> to inspect readable artifact ids.",
+            "Use task.get --task-id <task-id> to inspect task artifact summaries.",
         ],
-    )
+    ) | {
+        "why": "artifact id is unknown",
+        "relation": "none",
+        "missing_preconditions": ["artifact_id must reference an existing artifact"],
+        "next_actions": [
+            {"tool": "track", "action": "list"},
+            {"tool": "artifact", "action": "list"},
+        ],
+        "command_hint": track_relations.command_hint("track", "list"),
+        "no_content_leak": True,
+    }
 
 
 def _task_lookup_error(*, action: str, active_buddy: str, task_id: str) -> dict[str, Any]:
@@ -325,7 +337,7 @@ def _owned_task(
     return task, None
 
 
-def _owned_artifact(
+def _owned_artifact_for_write(
     *,
     context: ArtifactServiceContext,
     action: str,
@@ -349,6 +361,52 @@ def _owned_artifact(
             task_id=task_id if isinstance(task_id, str) else None,
         )
     return artifact, None
+
+
+def _artifact_read_rejection(
+    *,
+    context: ArtifactServiceContext,
+    artifact_id: str,
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    track_id = decision.get("track_id")
+    command = (
+        track_relations.command_hint("track", "join", {"track_id": track_id})
+        if isinstance(track_id, str) and track_id
+        else track_relations.command_hint("track", "list")
+    )
+    next_actions: list[dict[str, Any]] = []
+    if isinstance(track_id, str) and track_id:
+        next_actions.append({"tool": "track", "action": "join", "args": {"track_id": track_id}})
+        next_actions.append({"tool": "artifact", "action": "list", "args": {"track_id": track_id}})
+    else:
+        next_actions.append({"tool": "track", "action": "list"})
+    next_actions.append({"tool": "handoff", "action": "list", "args": {"track_id": track_id}})
+    payload = _error_payload(
+        action="artifact.get",
+        active_buddy=context["active_buddy"],
+        code="E_ARTIFACT_READ_SCOPE",
+        message=str(decision.get("why") or "artifact read is blocked"),
+        permission_boundary=str(decision.get("permission_boundary") or "artifact.track_relation"),
+        artifact_id=artifact_id,
+        task_id=decision.get("source_task_id") if isinstance(decision.get("source_task_id"), str) else None,
+        allowed_next_actions=[
+            "Use track.get to inspect relation and artifact summaries.",
+            "Use track.join to establish active-buddy participation before retrying artifact.get.",
+            "Use handoff.list to inspect explicit handoff authorization context.",
+        ],
+    )
+    payload.update(
+        {
+            "why": str(decision.get("why") or "artifact read is blocked"),
+            "relation": str(decision.get("relation") or "none"),
+            "missing_preconditions": list(decision.get("missing_preconditions") or []),
+            "next_actions": next_actions,
+            "command_hint": command,
+            "no_content_leak": True,
+        }
+    )
+    return payload
 
 
 def _artifact_summary(artifact: dict[str, Any], *, include_content: bool) -> dict[str, Any]:
@@ -568,7 +626,7 @@ def _normalized_create_payload(
     }, None
 
 
-def list_artifacts_for_current_task(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
+def list_artifacts_for_track(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
     action = "artifact.list"
     permission_error = _require_permission(context, _READ_PERMISSION, action)
     if permission_error is not None:
@@ -581,37 +639,57 @@ def list_artifacts_for_current_task(*, args: dict[str, Any], context: ArtifactSe
     )
     if fields_error is not None:
         return fields_error
-
-    current_task_id = context["instance_payload"].get("current_task_id")
-    if not isinstance(current_task_id, str) or not current_task_id.strip():
-        return {
-            "ok": True,
-            "tool": "artifact",
-            "action": action,
-            "active_buddy": context["active_buddy"],
-            "task_id": None,
-            "artifacts": [],
-            "current_binding": _current_binding(context),
-            "allowed_next_actions": [
-                "Use task.set_current before listing current-task artifacts.",
-                "Use prepare context for upstream artifacts already selected for this turn.",
+    track_id_raw = args.get("track_id")
+    if not isinstance(track_id_raw, str) or not track_id_raw.strip():
+        return _payload_error(action=action, active_buddy=context["active_buddy"], message="track_id is required")
+    try:
+        track_id = env_store.require_id(track_id_raw.strip(), "track id")
+    except ValueError as exc:
+        return _payload_error(action=action, active_buddy=context["active_buddy"], message=str(exc))
+    track = env_store.get_track(track_id)
+    if track is None:
+        payload = _error_payload(
+            action=action,
+            active_buddy=context["active_buddy"],
+            code="E_TRACK_NOT_FOUND",
+            message=f"track not found: {track_id}",
+            permission_boundary="track.lookup",
+            allowed_next_actions=[
+                "Use track.list to inspect available track ids.",
+                "Retry artifact.list with a valid track id.",
             ],
-        }
-    task, error = _owned_task(context=context, action=action, args={"task_id": current_task_id})
-    if error is not None:
-        return error
-    assert task is not None
+        )
+        payload.update(
+            {
+                "track_id": track_id,
+                "relation": "none",
+                "missing_preconditions": ["track_id must reference an existing track"],
+                "next_actions": [{"tool": "track", "action": "list"}],
+                "command_hint": track_relations.command_hint("track", "list"),
+                "no_content_leak": True,
+            }
+        )
+        return payload
+    relation = track_relations.track_relation_for_buddy(track, context["active_buddy"])
+    rows = track_relations.current_artifact_rows_for_track(track_id, context["active_buddy"])
     return {
         "ok": True,
         "tool": "artifact",
         "action": action,
         "active_buddy": context["active_buddy"],
-        "task_id": task["id"],
-        "artifacts": _artifact_rows_for_task(task, include_content=False),
+        "track_id": track_id,
+        "relation": relation.get("relation"),
+        "artifacts": rows,
         "current_binding": _current_binding(context),
+        "next_actions": [
+            {"tool": "track", "action": "get", "args": {"track_id": track_id}},
+            {"tool": "artifact", "action": "get", "args": {"artifact_id": "<artifact-id>"}},
+            {"tool": "track", "action": "join", "args": {"track_id": track_id}},
+        ],
+        "command_hint": track_relations.command_hint("track", "get", {"track_id": track_id}),
         "allowed_next_actions": [
-            "Use artifact.get with a returned artifact_id to inspect full content.",
-            "Use artifact.create_revision to write a new current revision for the active task.",
+            "Use artifact.get --artifact-id <artifact-id> for full-body reads.",
+            "Use track.join --track-id <track-id> when readable_by_current_buddy is false.",
         ],
     }
 
@@ -629,10 +707,49 @@ def get_artifact_for_active_buddy(*, args: dict[str, Any], context: ArtifactServ
     )
     if fields_error is not None:
         return fields_error
-    artifact, error = _owned_artifact(context=context, action=action, args=args)
-    if error is not None:
-        return error
-    assert artifact is not None
+    artifact_id, parse_error = _required_artifact_id(action=action, active_buddy=context["active_buddy"], args=args)
+    if parse_error is not None:
+        parse_error["no_content_leak"] = True
+        parse_error["relation"] = "none"
+        parse_error["missing_preconditions"] = ["artifact_id must be a valid id"]
+        parse_error["why"] = parse_error.get("error", {}).get("message", "invalid artifact id")
+        parse_error["next_actions"] = [{"tool": "track", "action": "list"}]
+        parse_error["command_hint"] = track_relations.command_hint("track", "list")
+        return parse_error
+    assert isinstance(artifact_id, str)
+    artifact = env_store.get_artifact(artifact_id)
+    if artifact is None:
+        return _artifact_lookup_error(action=action, active_buddy=context["active_buddy"], artifact_id=artifact_id)
+    decision = track_relations.artifact_read_decision(artifact, context["active_buddy"])
+    if not bool(decision.get("allowed")):
+        return _artifact_read_rejection(context=context, artifact_id=artifact_id, decision=decision)
+    relation = str(decision.get("relation") or "none")
+    track_id = decision.get("track_id") if isinstance(decision.get("track_id"), str) else None
+    if relation == "owner":
+        next_actions = [
+            {"tool": "artifact", "action": "create_revision", "args": {"task_id": artifact.get("task_id")}},
+            {"tool": "artifact", "action": "update_metadata", "args": {"artifact_id": artifact.get("id")}},
+        ]
+        command_hint = track_relations.command_hint("artifact", "create_revision")
+        allowed_next_actions = [
+            "Use artifact.create_revision instead of overwriting artifact content in place.",
+            "Use artifact.update_metadata for title or summary changes only.",
+        ]
+    else:
+        next_actions = []
+        if isinstance(track_id, str) and track_id:
+            next_actions.append({"tool": "track", "action": "get", "args": {"track_id": track_id}})
+            next_actions.append({"tool": "artifact", "action": "list", "args": {"track_id": track_id}})
+            next_actions.append({"tool": "handoff", "action": "list", "args": {"track_id": track_id}})
+            command_hint = track_relations.command_hint("track", "get", {"track_id": track_id})
+        else:
+            next_actions.append({"tool": "track", "action": "list"})
+            command_hint = track_relations.command_hint("track", "list")
+        allowed_next_actions = [
+            "Use track.get to inspect track context and buddy relation for this foreign artifact.",
+            "Use artifact.list with the source track to inspect readable current artifacts only.",
+            "Use handoff.list to inspect explicit cross-buddy handoff authorization context.",
+        ]
     return {
         "ok": True,
         "tool": "artifact",
@@ -641,11 +758,12 @@ def get_artifact_for_active_buddy(*, args: dict[str, Any], context: ArtifactServ
         "artifact_id": artifact["id"],
         "task_id": artifact["task_id"],
         "artifact": _artifact_summary(artifact, include_content=True),
+        "relation": relation,
+        "readable_by_current_buddy": True,
         "current_binding": _current_binding(context),
-        "allowed_next_actions": [
-            "Use artifact.create_revision instead of overwriting artifact content in place.",
-            "Use artifact.update_metadata for title or summary changes only.",
-        ],
+        "next_actions": next_actions,
+        "command_hint": command_hint,
+        "allowed_next_actions": allowed_next_actions,
     }
 
 
@@ -801,7 +919,7 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
     )
     if fields_error is not None:
         return fields_error
-    artifact, error = _owned_artifact(context=context, action=action, args=args)
+    artifact, error = _owned_artifact_for_write(context=context, action=action, args=args)
     if error is not None:
         return error
     assert artifact is not None

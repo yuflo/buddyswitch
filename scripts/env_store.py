@@ -24,11 +24,13 @@ OBJECTS_ROOT = STATE_ROOT / "buddyswitch" / "objects"
 TRACKS_DIR = OBJECTS_ROOT / "tracks"
 TASKS_DIR = OBJECTS_ROOT / "tasks"
 ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
+HANDOFF_OBJECTS_DIR = OBJECTS_ROOT / "handoffs"
 CONTENT_ROOT = STATE_ROOT / "buddyswitch" / "content"
 RUN_CONTENT_DIR = CONTENT_ROOT / "runs"
 RUNTIME_WORKSPACE_AGENTS_HEADER = "# BuddySwitch Runtime Workspace"
 VALID_TRACK_STATUS = ("active", "blocked", "done", "archived")
 VALID_TASK_STATUS = ("active", "blocked", "done", "archived")
+VALID_HANDOFF_STATUS = ("active", "superseded", "archived")
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
@@ -73,6 +75,7 @@ def ensure_runtime_dirs() -> None:
     TRACKS_DIR.mkdir(parents=True, exist_ok=True)
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    HANDOFF_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
     RUN_CONTENT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -101,6 +104,10 @@ def task_file(task_id: str) -> Path:
 
 def artifact_file(artifact_id: str) -> Path:
     return ARTIFACT_OBJECTS_DIR / f"{require_id(artifact_id, 'artifact id')}.json"
+
+
+def handoff_file(handoff_id: str) -> Path:
+    return HANDOFF_OBJECTS_DIR / f"{require_id(handoff_id, 'handoff id')}.json"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -299,6 +306,63 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def validate_handoff_record(record: dict[str, Any]) -> dict[str, Any]:
+    handoff_id = require_id(record.get("id", ""), "handoff.id")
+    track_id = require_id(record.get("track_id", ""), "handoff.track_id")
+    source_buddy = record.get("source_buddy")
+    target_buddy = record.get("target_buddy")
+    source_task_id = require_id(record.get("source_task_id", ""), "handoff.source_task_id")
+    source_run_id = require_id(record.get("source_run_id", ""), "handoff.source_run_id")
+    artifact_ids = record.get("artifact_ids", [])
+    historical_artifact_ids = record.get("historical_artifact_ids", [])
+    reason = record.get("reason")
+    context = record.get("context")
+    status = record.get("status")
+    created_at = record.get("created_at")
+    updated_at = record.get("updated_at")
+
+    if not isinstance(source_buddy, str) or not source_buddy.strip():
+        raise ValueError("handoff.source_buddy must be a non-empty string")
+    if not isinstance(target_buddy, str) or not target_buddy.strip():
+        raise ValueError("handoff.target_buddy must be a non-empty string")
+    if status not in VALID_HANDOFF_STATUS:
+        raise ValueError(f"handoff.status must be one of {', '.join(VALID_HANDOFF_STATUS)}")
+    if not isinstance(artifact_ids, list) or any(not isinstance(item, str) or not item.strip() for item in artifact_ids):
+        raise ValueError("handoff.artifact_ids must be a list of non-empty strings")
+    if not isinstance(historical_artifact_ids, list) or any(
+        not isinstance(item, str) or not item.strip() for item in historical_artifact_ids
+    ):
+        raise ValueError("handoff.historical_artifact_ids must be a list of non-empty strings")
+    for artifact_id in artifact_ids:
+        require_id(artifact_id, "handoff.artifact_ids[]")
+    for artifact_id in historical_artifact_ids:
+        require_id(artifact_id, "handoff.historical_artifact_ids[]")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("handoff.reason must be a non-empty string")
+    if not isinstance(context, str) or not context.strip():
+        raise ValueError("handoff.context must be a non-empty string")
+    if not isinstance(created_at, str) or not created_at:
+        raise ValueError("handoff.created_at must be a non-empty string")
+    if not isinstance(updated_at, str) or not updated_at:
+        raise ValueError("handoff.updated_at must be a non-empty string")
+
+    return {
+        "id": handoff_id,
+        "track_id": track_id,
+        "source_buddy": source_buddy.strip(),
+        "target_buddy": target_buddy.strip(),
+        "source_task_id": source_task_id,
+        "source_run_id": source_run_id,
+        "artifact_ids": list(dict.fromkeys(artifact_ids)),
+        "historical_artifact_ids": list(dict.fromkeys(historical_artifact_ids)),
+        "reason": reason.strip(),
+        "context": context.strip(),
+        "status": status,
+        "created_at": created_at,
+        "updated_at": updated_at,
+    }
+
+
 def _artifact_kind_name(task: dict[str, Any], artifact: dict[str, Any] | None = None) -> str:
     if artifact is not None:
         kind = artifact.get("kind")
@@ -338,6 +402,14 @@ def list_artifacts() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in ARTIFACT_OBJECTS_DIR.glob("*.json"):
         rows.append(validate_artifact(_read_json(path)))
+    rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
+    return rows
+
+
+def list_handoffs() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for path in HANDOFF_OBJECTS_DIR.glob("*.json"):
+        rows.append(validate_handoff_record(_read_json(path)))
     rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
     return rows
 
@@ -427,6 +499,13 @@ def get_artifact(artifact_id: str) -> dict[str, Any] | None:
     return validate_artifact(_read_json(path))
 
 
+def get_handoff(handoff_id: str) -> dict[str, Any] | None:
+    path = handoff_file(handoff_id)
+    if not path.exists():
+        return None
+    return validate_handoff_record(_read_json(path))
+
+
 def save_track(track: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_track(track)
     ensure_runtime_dirs()
@@ -445,6 +524,13 @@ def save_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     ensure_runtime_dirs()
     normalized = validate_artifact(artifact)
     _write_json(artifact_file(normalized["id"]), normalized)
+    return normalized
+
+
+def save_handoff(record: dict[str, Any]) -> dict[str, Any]:
+    ensure_runtime_dirs()
+    normalized = validate_handoff_record(record)
+    _write_json(handoff_file(normalized["id"]), normalized)
     return normalized
 
 
@@ -745,6 +831,41 @@ def create_artifact(
     artifact = save_artifact(artifact)
     add_artifact_to_task(task_id, resolved_id, summary=summary or None)
     return artifact
+
+
+def create_handoff(
+    *,
+    handoff_id: str,
+    track_id: str,
+    source_buddy: str,
+    target_buddy: str,
+    source_task_id: str,
+    source_run_id: str,
+    artifact_ids: list[str],
+    historical_artifact_ids: list[str],
+    reason: str,
+    context: str,
+    status: str = "active",
+) -> dict[str, Any]:
+    require_id(handoff_id, "handoff id")
+    if get_handoff(handoff_id) is not None:
+        raise ValueError(f"handoff already exists: {handoff_id}")
+    payload = {
+        "id": handoff_id,
+        "track_id": require_id(track_id, "handoff.track_id"),
+        "source_buddy": source_buddy,
+        "target_buddy": target_buddy,
+        "source_task_id": require_id(source_task_id, "handoff.source_task_id"),
+        "source_run_id": require_id(source_run_id, "handoff.source_run_id"),
+        "artifact_ids": artifact_ids,
+        "historical_artifact_ids": historical_artifact_ids,
+        "reason": reason,
+        "context": context,
+        "status": status,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    return save_handoff(payload)
 
 
 def update_artifact(

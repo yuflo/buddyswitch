@@ -31,6 +31,7 @@ HANDLERS_BY_TOOL = {
     "track": {
         "list": track_service.list_tracks_for_active_buddy,
         "get": track_service.get_track_for_active_buddy,
+        "join": track_service.join_track_for_active_buddy,
         "get_current": track_service.get_current_track,
         "create": track_service.create_track_for_pm,
         "update": track_service.update_track_for_pm,
@@ -40,7 +41,7 @@ HANDLERS_BY_TOOL = {
         "detach_task": track_service.detach_task_from_track,
     },
     "artifact": {
-        "list": artifact_service.list_artifacts_for_current_task,
+        "list": artifact_service.list_artifacts_for_track,
         "get": artifact_service.get_artifact_for_active_buddy,
         "get_current": artifact_service.get_current_artifacts_for_active_task,
         "validate_payload": artifact_service.validate_artifact_payload,
@@ -59,7 +60,9 @@ HANDLERS_BY_TOOL = {
         "clear": binding_service.clear_binding,
     },
     "handoff": {
+        "list": handoff_service.list_handoffs_for_active_buddy,
         "validate": handoff_service.validate_handoff,
+        "create": handoff_service.create_handoff_for_active_buddy,
     },
     "run": {
         "commit": run_service.commit_for_active_instance,

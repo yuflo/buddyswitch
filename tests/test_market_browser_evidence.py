@@ -447,6 +447,56 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             set(hint["tool_evidence"]["accepted_fields"]),
             {"browser_cockpit_token", "approved_downgrade_token"},
         )
+
+    def test_market_missing_evidence_boundary_survives_legacy_handoff_with_inferable_source_ids(self) -> None:
+        instance_json = self._instance_json()
+        context = self._prepare_market(instance_json=instance_json)
+        track_id = "track-market-evidence-inferable"
+        task_id = "task-market-evidence-inferable"
+        artifact_id = "art-market-evidence-inferable-r1"
+        env_store.create_track(
+            track_id,
+            "Market Evidence Inferable",
+            status="active",
+            current_buddy="pm",
+            next_buddy="market",
+            summary="legacy handoff inferable by top-level ids",
+        )
+        env_store.create_task(
+            task_id,
+            "Market Evidence Inferable Task",
+            buddy="market",
+            track_id=track_id,
+            status="active",
+            summary="",
+            initial_run_id="run-market-evidence-inferable-r1",
+        )
+        env_store.create_artifact(
+            artifact_id=artifact_id,
+            title="Market Evidence Inferable Artifact",
+            buddy="market",
+            kind="market-scan",
+            task_id=task_id,
+            source_run_id="run-market-evidence-inferable-r1",
+            summary="inferable",
+            content={"seeded": True},
+        )
+
+        result = _market_commit(artifact_ids=[artifact_id])
+        result["task_id"] = task_id
+        result["track_id"] = track_id
+        rejected = self._dispatch(
+            request={
+                "protocol": "buddyswitch-runtime-broker/v2",
+                "instance_id": "inst-market-example",
+                "active_buddy": "market",
+                "method": "persist",
+                "params": {"context": context, "result": result},
+            },
+            instance_json=instance_json,
+        )
+        self.assertFalse(rejected["ok"], msg=rejected)
+        self.assertEqual(rejected["permission_boundary"], "market.browser_evidence")
         self._assert_structured_options(rejected)
         option_pairs = {(row["tool"], row["action"]) for row in rejected["allowed_next_action_options"]}
         self.assertIn(("evidence", "issue_browser"), option_pairs)

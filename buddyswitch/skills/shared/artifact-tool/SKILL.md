@@ -1,22 +1,23 @@
 ---
 name: artifact-tool
-description: Use when you need to inspect active-task artifacts, validate artifact payloads, create new artifact revisions, or update artifact metadata through runtime-owned env tools.
+description: Use when you need track-scoped artifact summaries, direct artifact-id full reads, revision writes for owned tasks, or metadata updates through runtime-owned env tools.
 ---
 
 # artifact-tool
 
 ## Purpose
 - Manage artifact reads and revision writes through the broker-routed env tool path.
-- Keep artifact mutation scoped to the launcher-locked active buddy, active-buddy tasks, allowed artifact kinds, and reserved source run.
+- Use `artifact get --artifact-id` as the full-body read entrypoint.
+- Keep mutation scoped to launcher-locked active buddy tasks, allowed artifact kinds, and reserved source run.
 - Use revision creation for content changes; do not overwrite artifact content in place.
 
 ## Use when
-- The active buddy needs to list or inspect artifacts for its current task.
+- The active buddy needs track-level summary rows: `artifact list --track-id <track-id>`.
+- The active buddy needs a full artifact body by id: `artifact get --artifact-id <artifact-id>`.
 - A new artifact revision should be created for the active buddy's task.
 - Runtime/tool feedback asks for an artifact env tool command.
 
 ## Do Not Use When
-- You only need upstream artifacts already included in `prepare.runtime_context`.
 - You need to delete artifacts; cleanup remains an admin/runtime maintenance concern.
 - You are committing the full run result; use the runtime persist path for the run audit.
 
@@ -27,7 +28,7 @@ description: Use when you need to inspect active-task artifacts, validate artifa
 - Follow structured feedback fields: `permission_boundary`, `allowed_next_actions`, `stop_condition`, and `command_hint`.
 
 ## Common Operations
-- `list`
+- `list --track-id <track-id>`
 - `get --artifact-id <artifact-id>`
 - `get-current [--kind <artifact-kind>]`
 - `validate-payload --payload <json>`
@@ -46,3 +47,5 @@ description: Use when you need to inspect active-task artifacts, validate artifa
 - For rejected operations, follow `allowed_next_actions` instead of retrying with guessed payloads.
 - Do not edit state files directly.
 - Do not call persist from inside the skill.
+
+If `artifact.get` is rejected, read `why/relation/missing_preconditions/next_actions/command_hint`. The normal recovery path is `track.join --track-id <track-id>` then retry `artifact.get`.

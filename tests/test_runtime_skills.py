@@ -863,6 +863,16 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
             skills["artifact-tool"].get("path"),
             "buddyswitch/skills/shared/artifact-tool",
         )
+        self.assertIn("handoff-tool", skills)
+        self.assertEqual(
+            skills["handoff-tool"].get("path"),
+            "buddyswitch/skills/shared/handoff-tool",
+        )
+        self.assertIn("run-tool", skills)
+        self.assertEqual(
+            skills["run-tool"].get("path"),
+            "buddyswitch/skills/shared/run-tool",
+        )
         for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
             self.assertNotIn(removed, skills)
 
@@ -875,8 +885,49 @@ class RuntimeSkillsInstallerTests(unittest.TestCase):
                 self.assertEqual(skill_ids.count("task-tool"), 1)
                 self.assertEqual(skill_ids.count("track-tool"), 1)
                 self.assertEqual(skill_ids.count("artifact-tool"), 1)
+                self.assertEqual(skill_ids.count("handoff-tool"), 1)
+                self.assertEqual(skill_ids.count("run-tool"), 1)
                 for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
                     self.assertNotIn(removed, skill_ids)
+
+    def test_shared_tool_skills_project_direct_id_guidance(self) -> None:
+        skill_paths = {
+            "track": ROOT / "buddyswitch" / "skills" / "shared" / "track-tool" / "SKILL.md",
+            "artifact": ROOT / "buddyswitch" / "skills" / "shared" / "artifact-tool" / "SKILL.md",
+            "task": ROOT / "buddyswitch" / "skills" / "shared" / "task-tool" / "SKILL.md",
+            "handoff": ROOT / "buddyswitch" / "skills" / "shared" / "handoff-tool" / "SKILL.md",
+            "run": ROOT / "buddyswitch" / "skills" / "shared" / "run-tool" / "SKILL.md",
+        }
+        for name, path in skill_paths.items():
+            with self.subTest(skill=name):
+                self.assertTrue(path.exists(), msg=f"missing skill: {path.relative_to(ROOT)}")
+
+        track_text = skill_paths["track"].read_text(encoding="utf-8")
+        artifact_text = skill_paths["artifact"].read_text(encoding="utf-8")
+        task_text = skill_paths["task"].read_text(encoding="utf-8")
+        handoff_text = skill_paths["handoff"].read_text(encoding="utf-8")
+        run_text = skill_paths["run"].read_text(encoding="utf-8")
+
+        self.assertIn("track join --track-id", track_text)
+        self.assertIn("artifact get --artifact-id", artifact_text)
+        self.assertIn("task get --task-id", task_text)
+        self.assertIn("handoff create --payload", handoff_text)
+        self.assertIn("run validate-result", run_text)
+
+        forbidden = (
+            "context.get_track_artifacts",
+            "context.inspect_track_outputs",
+            "context.explain_track_access",
+            "context.validate_sources_available",
+        )
+        for token in forbidden:
+            with self.subTest(token=token):
+                self.assertNotIn(token, artifact_text)
+                self.assertNotIn(token, track_text)
+
+
+class RuntimeSkillsTests(RuntimeSkillsInstallerTests):
+    """Compatibility alias for targeted test selection."""
 
 
 if __name__ == "__main__":

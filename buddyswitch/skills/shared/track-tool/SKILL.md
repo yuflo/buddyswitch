@@ -1,18 +1,18 @@
 ---
 name: track-tool
-description: Use when you need to inspect tracks, attach or detach active-buddy tasks, or ask PM to mutate track lifecycle through runtime-owned env tools.
+description: Use when you need to discover tracks, inspect one track by id, join a track for active-buddy work, or execute PM-owned lifecycle updates through runtime-owned env tools.
 ---
 
 # track-tool
 
 ## Purpose
-- Manage track coordination through the broker-routed env tool path.
-- Read track context from any buddy with runtime `track.read` authority.
-- Mutate lifecycle state only when the runtime accepts the active buddy as PM.
+- Manage track coordination through broker-routed env tools.
+- Use direct-id commands as the default source-intake path: `track list -> track get -> artifact get`.
+- Use `track join` to create/reuse/select active-buddy task linkage without mutating PM lifecycle fields.
 
 ## Use when
-- The demand is explicitly about creating, updating, advancing, archiving, or inspecting tracks.
-- The active buddy needs to attach or detach one of its own tasks from an existing track.
+- The demand is explicitly about creating, updating, advancing, archiving, joining, or inspecting tracks.
+- The active buddy sees a `track_id` and needs current artifact ids and relation status.
 - Runtime/tool feedback asks for a track env tool command.
 
 ## Do Not Use When
@@ -28,13 +28,17 @@ description: Use when you need to inspect tracks, attach or detach active-buddy 
 ## Common Operations
 - `list`
 - `get --track-id <track-id>`
+- `join --track-id <track-id> [--task-id <task-id>]`
+- `python3 scripts/env/client.py track join --track-id <track-id> [--task-id <task-id>]`
 - `get-current`
 - `create --payload <json>`
 - `update --payload <json>`
 - `advance --payload <json>`
 - `archive --track-id <track-id>`
-- `attach-task --track-id <track-id> --task-id <task-id>`
-- `detach-task --track-id <track-id> --task-id <task-id>`
+- `attach-task --track-id <track-id> --task-id <task-id>` (maintenance)
+- `detach-task --track-id <track-id> --task-id <task-id>` (maintenance)
+
+`attach-task` and `detach-task` are maintenance operations, not the normal source-intake path.
 
 ## Verification
 - Contribute to one buddy-run commit.

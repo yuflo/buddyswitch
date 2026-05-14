@@ -13,6 +13,8 @@ from typing import Any, TypedDict
 import env_profiles
 import env_store
 from env_manifest import DEFAULT_MANIFEST, load_manifest, require_buddy
+from env.services import handoffs as handoff_service
+from env.services import track_relations
 
 
 class RunServiceContext(TypedDict):
@@ -214,6 +216,20 @@ def _known_buddy_ids(manifest: dict[str, Any]) -> set[str]:
     }
 
 
+def _non_empty_str(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    return candidate if candidate else None
+
+
+def _handoff_target_from_args(handoff_args: dict[str, Any]) -> str | None:
+    target = _non_empty_str(handoff_args.get("target_buddy"))
+    if target is not None:
+        return target
+    return _non_empty_str(handoff_args.get("next_buddy"))
+
+
 def _reject_retired_persist_fields(*, rt: Any, result: dict[str, Any]) -> None:
     if "skill_id" in result:
         rt._raise_runtime_feedback(
@@ -232,8 +248,8 @@ def _reject_retired_persist_fields(*, rt: Any, result: dict[str, Any]) -> None:
             allowed_next_actions=[
                 "python3 scripts/env/client.py task update --payload <json-file>",
                 "python3 scripts/env/client.py track update --payload <json-file>",
-                "python3 scripts/env/client.py track attach-task --payload <json-file>",
-                "python3 scripts/env/client.py track detach-task --payload <json-file>",
+                "python3 scripts/env/client.py track advance --payload <json-file>",
+                "python3 scripts/env/client.py track join --track-id <track-id>",
             ],
         )
     if "artifacts" in result:
@@ -307,11 +323,24 @@ def _validate_association_metadata(
         seen.add(artifact_id)
         artifact = env_store.get_artifact(artifact_id)
         if artifact is None:
+            track_hint = (
+                f"python3 scripts/env/client.py artifact list --track-id {track['id']}"
+                if isinstance(track, dict) and isinstance(track.get("id"), str)
+                else None
+            )
+            task_hint = (
+                f"python3 scripts/env/client.py task get --task-id {task['id']}"
+                if isinstance(task, dict) and isinstance(task.get("id"), str)
+                else None
+            )
+            hints = [hint for hint in (track_hint, task_hint) if isinstance(hint, str)]
+            if not hints:
+                hints = ["python3 scripts/env/client.py track list"]
             rt._raise_runtime_feedback(
                 "E_RUNTIME_PERSIST",
                 f"artifact not found: {artifact_id}",
                 permission_boundary="persist.artifact_ids",
-                allowed_next_actions=["Use artifact.list_revisions to inspect valid artifact ids before associating them."],
+                allowed_next_actions=hints,
             )
         artifact_task_id = artifact.get("task_id")
         if not isinstance(artifact_task_id, str) or not artifact_task_id:
@@ -427,7 +456,94 @@ def _normalize_commit(
     handoff = result.get("handoff")
     normalized_handoff: dict[str, Any] | None = None
     if handoff is not None:
-        normalized_handoff = rt._validate_handoff(handoff, _known_buddy_ids(manifest))
+        if not isinstance(handoff, dict):
+            raise ValueError("handoff must be an object when provided")
+        handoff_args = dict(handoff)
+        if "track_id" not in handoff_args and isinstance(track, dict):
+            handoff_args["track_id"] = track.get("id")
+        if "source_task_id" not in handoff_args and isinstance(task, dict):
+            handoff_args["source_task_id"] = task.get("id")
+        if "source_run_id" not in handoff_args:
+            handoff_args["source_run_id"] = validated_context.get("run_id")
+        if "artifact_ids" not in handoff_args and artifact_ids:
+            handoff_args["artifact_ids"] = list(artifact_ids)
+        if "historical_artifact_ids" not in handoff_args:
+            handoff_args["historical_artifact_ids"] = []
+
+        target_buddy = _handoff_target_from_args(handoff_args)
+        reason = _non_empty_str(handoff_args.get("reason"))
+        handoff_context_text = _non_empty_str(handoff_args.get("context"))
+        if target_buddy is None:
+            rt._raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                "handoff.next_buddy (or handoff.target_buddy) is required",
+                permission_boundary="persist.handoff",
+                allowed_next_actions=[
+                    "Provide handoff.next_buddy and handoff.reason/context in result.handoff.",
+                ],
+            )
+        if reason is None or handoff_context_text is None:
+            rt._raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                "handoff.reason and handoff.context must be non-empty strings",
+                permission_boundary="persist.handoff",
+                allowed_next_actions=[
+                    "Provide handoff.reason and handoff.context as non-empty strings.",
+                ],
+            )
+        known_buddies = _known_buddy_ids(manifest)
+        if target_buddy not in known_buddies:
+            rt._raise_runtime_feedback(
+                "E_RUNTIME_PERSIST",
+                f"target_buddy must reference a manifest buddy id; got '{target_buddy}'",
+                permission_boundary="manifest.buddies",
+                allowed_next_actions=[
+                    "Use one of the manifest buddy ids as target_buddy/next_buddy.",
+                ],
+            )
+
+        has_track = _non_empty_str(handoff_args.get("track_id")) is not None
+        has_source_task = _non_empty_str(handoff_args.get("source_task_id")) is not None
+        has_artifacts = isinstance(handoff_args.get("artifact_ids"), list) and bool(handoff_args.get("artifact_ids"))
+        strict_handoff_payload = has_track and has_source_task and has_artifacts
+
+        # Preserve legacy audit-only handoff shape when strict source linkage cannot be inferred.
+        if not strict_handoff_payload:
+            normalized_handoff = {
+                "next_buddy": target_buddy,
+                "reason": reason,
+                "context": handoff_context_text,
+            }
+        else:
+            handoff_context: handoff_service.HandoffServiceContext = {
+                "active_buddy": active_buddy,
+                "instance_id": str(validated_context.get("instance_id") or ""),
+                "instance_json": Path(validated_context.get("instance_json") or "."),
+                "instance_payload": {
+                    "current_task_id": task.get("id") if isinstance(task, dict) else None,
+                    "current_track_id": track.get("id") if isinstance(track, dict) else None,
+                },
+                "manifest": manifest,
+            }
+            normalized_handoff, handoff_error = handoff_service._validate_handoff_payload(
+                args=handoff_args,
+                context=handoff_context,
+                action="run.validate_result",
+                mutate=False,
+            )
+            if handoff_error is not None:
+                error_row = handoff_error.get("error") if isinstance(handoff_error.get("error"), dict) else {}
+                message = str(error_row.get("message") or "handoff validation failed")
+                boundary = str(handoff_error.get("permission_boundary") or "persist.handoff")
+                if boundary == "request-payload":
+                    boundary = "persist.handoff"
+                rt._raise_runtime_feedback(
+                    "E_RUNTIME_PERSIST",
+                    message,
+                    permission_boundary=boundary,
+                    allowed_next_actions=list(handoff_error.get("allowed_next_actions") or []),
+                )
+            assert isinstance(normalized_handoff, dict)
 
     contributors = result.get("contributors")
     normalized_contributors = {"skills": [], "agents": []}
@@ -528,6 +644,7 @@ def validate_run_result(
     task = normalized["task"]
     track = normalized["track"]
     artifact_ids = normalized["artifact_ids"]
+    validated_handoff = normalized["handoff"] if isinstance(normalized.get("handoff"), dict) else None
     return {
         "ok": True,
         "run_id": normalized["run_id"],
@@ -536,8 +653,12 @@ def validate_run_result(
             "task_association": task.get("id") if isinstance(task, dict) else None,
             "track_association": track.get("id") if isinstance(track, dict) else None,
             "artifact_refs": artifact_ids,
-            "handoff": normalized["handoff"] is not None,
+            "handoff": validated_handoff is not None,
+            "validated_handoff": validated_handoff,
+            "retired_field_rejections": [],
         },
+        "validated_handoff": validated_handoff,
+        "retired_field_rejections": [],
         "allowed_next_actions": ["Use run.commit with the same context and result when ready to persist."],
     }
 
@@ -781,4 +902,12 @@ def _payload_error(*, action: str, context: RunServiceContext, message: str) -> 
             'Send env.tool payload as {"tool":"run","action":"<action>","args":{...}}.',
             "Use prepare.runtime_context.env_tools.run.payload_fields to shape args.",
         ],
+        "next_actions": [
+            {"tool": "context", "action": "summarize"},
+            {"tool": "run", "action": "validate_result"},
+        ],
+        "command_hint": track_relations.command_hint("context", "summarize"),
+        "relation": "none",
+        "missing_preconditions": ["run action payload must include required fields"],
+        "no_content_leak": True,
     }

@@ -166,6 +166,9 @@ class TrackManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             rows[path.name] = json.loads(path.read_text(encoding="utf-8"))
         return rows
 
+    def _load_instance(self, instance_json: Path) -> dict[str, object]:
+        return json.loads(instance_json.read_text(encoding="utf-8"))
+
     def _write_handoff_run(
         self,
         *,
@@ -439,6 +442,133 @@ class TrackManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(missing_task.get("ok"), msg=missing_task)
         self.assertEqual(missing_task.get("permission_boundary"), "task.lookup")
 
+    def test_track_join_creates_attaches_and_selects_active_buddy_task_without_lifecycle_mutation(self) -> None:
+        self._seed_track(
+            track_id="track-join-create",
+            title="Track Join Create",
+            current_buddy="pm",
+            next_buddy="dev",
+            summary="join create",
+        )
+        before = copy.deepcopy(env_store.get_track("track-join-create"))
+        assert before is not None
+        instance_json = self._instance_json(instance_id="inst-dev-join-create", buddy="dev")
+        joined = self._dispatch(
+            action="join",
+            args={"track_id": "track-join-create"},
+            instance_json=instance_json,
+            instance_id="inst-dev-join-create",
+            buddy="dev",
+        )
+        self.assertTrue(joined.get("ok"), msg=joined)
+        self.assertTrue(joined.get("created_task"), msg=joined)
+        task_id = joined.get("task_id")
+        self.assertIsInstance(task_id, str, msg=joined)
+        assert isinstance(task_id, str)
+        task = env_store.get_task(task_id)
+        self.assertIsNotNone(task)
+        assert task is not None
+        self.assertEqual(task.get("buddy"), "dev")
+        self.assertEqual(task.get("track_id"), "track-join-create")
+        instance_payload = self._load_instance(instance_json)
+        self.assertEqual(instance_payload.get("current_task_id"), task_id)
+        self.assertEqual(instance_payload.get("current_track_id"), "track-join-create")
+        after = env_store.get_track("track-join-create")
+        self.assertIsNotNone(after)
+        assert after is not None
+        for key in ("status", "current_buddy", "next_buddy", "title", "summary"):
+            self.assertEqual(after.get(key), before.get(key))
+        self.assertIn(task_id, after.get("task_ids", []))
+
+    def test_track_join_reuses_single_existing_active_buddy_task_idempotently(self) -> None:
+        self._seed_track(track_id="track-join-reuse", title="Track Join Reuse", current_buddy="pm", next_buddy="dev")
+        self._seed_task(task_id="task-dev-join-reuse", buddy="dev", title="Dev Join Reuse", track_id="track-join-reuse")
+        instance_json = self._instance_json(instance_id="inst-dev-join-reuse", buddy="dev")
+        first = self._dispatch(
+            action="join",
+            args={"track_id": "track-join-reuse"},
+            instance_json=instance_json,
+            instance_id="inst-dev-join-reuse",
+            buddy="dev",
+        )
+        second = self._dispatch(
+            action="join",
+            args={"track_id": "track-join-reuse"},
+            instance_json=instance_json,
+            instance_id="inst-dev-join-reuse",
+            buddy="dev",
+        )
+        self.assertTrue(first.get("ok"), msg=first)
+        self.assertTrue(second.get("ok"), msg=second)
+        self.assertEqual(first.get("task_id"), "task-dev-join-reuse")
+        self.assertEqual(second.get("task_id"), "task-dev-join-reuse")
+        self.assertFalse(second.get("created_task"), msg=second)
+        track = env_store.get_track("track-join-reuse")
+        self.assertIsNotNone(track)
+        assert track is not None
+        self.assertEqual(track.get("task_ids", []).count("task-dev-join-reuse"), 1)
+
+    def test_track_join_rejects_multiple_existing_active_buddy_tasks_with_explicit_task_recovery(self) -> None:
+        self._seed_track(track_id="track-join-ambiguous", title="Track Join Ambiguous", current_buddy="pm", next_buddy="dev")
+        self._seed_task(task_id="task-dev-join-a", buddy="dev", title="Dev Join A", track_id="track-join-ambiguous")
+        self._seed_task(task_id="task-dev-join-b", buddy="dev", title="Dev Join B", track_id="track-join-ambiguous")
+        instance_json = self._instance_json(instance_id="inst-dev-join-ambiguous", buddy="dev")
+        rejected = self._dispatch(
+            action="join",
+            args={"track_id": "track-join-ambiguous"},
+            instance_json=instance_json,
+            instance_id="inst-dev-join-ambiguous",
+            buddy="dev",
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual(rejected.get("permission_boundary"), "track.join_ambiguity")
+        candidates = rejected.get("candidate_task_ids")
+        self.assertIsInstance(candidates, list, msg=rejected)
+        assert isinstance(candidates, list)
+        self.assertEqual(set(candidates), {"task-dev-join-a", "task-dev-join-b"})
+        self.assertIn("--task-id", str(rejected.get("command_hint")))
+
+        selected = self._dispatch(
+            action="join",
+            args={"track_id": "track-join-ambiguous", "task_id": "task-dev-join-a"},
+            instance_json=instance_json,
+            instance_id="inst-dev-join-ambiguous",
+            buddy="dev",
+        )
+        self.assertTrue(selected.get("ok"), msg=selected)
+        self.assertEqual(selected.get("task_id"), "task-dev-join-a")
+
+    def test_track_join_rejects_foreign_or_other_track_task_without_mutation(self) -> None:
+        self._seed_track(track_id="track-join-main", title="Track Join Main", current_buddy="pm", next_buddy="dev")
+        self._seed_track(track_id="track-join-other", title="Track Join Other", current_buddy="pm", next_buddy="dev")
+        self._seed_task(task_id="task-pm-join-foreign", buddy="pm", title="PM Foreign", track_id="track-join-main")
+        self._seed_task(task_id="task-dev-join-other", buddy="dev", title="Dev Other Track", track_id="track-join-other")
+        instance_json = self._instance_json(instance_id="inst-dev-join-reject", buddy="dev")
+        before_tracks = copy.deepcopy(self._tracks_snapshot())
+        before_tasks = copy.deepcopy(self._tasks_snapshot())
+
+        foreign = self._dispatch(
+            action="join",
+            args={"track_id": "track-join-main", "task_id": "task-pm-join-foreign"},
+            instance_json=instance_json,
+            instance_id="inst-dev-join-reject",
+            buddy="dev",
+        )
+        self.assertFalse(foreign.get("ok"), msg=foreign)
+        self.assertEqual(foreign.get("permission_boundary"), "task.buddy_scope")
+
+        other_track = self._dispatch(
+            action="join",
+            args={"track_id": "track-join-main", "task_id": "task-dev-join-other"},
+            instance_json=instance_json,
+            instance_id="inst-dev-join-reject",
+            buddy="dev",
+        )
+        self.assertFalse(other_track.get("ok"), msg=other_track)
+        self.assertEqual(other_track.get("permission_boundary"), "track.task_linkage")
+        self.assertEqual(self._tracks_snapshot(), before_tracks)
+        self.assertEqual(self._tasks_snapshot(), before_tasks)
+
     def test_get_current_reads_active_instance_track_binding(self) -> None:
         self._seed_track(track_id="track-current", title="Current Track", current_buddy="pm")
         instance_json = self._instance_json(current_track_id="track-current")
@@ -551,6 +681,76 @@ class TrackManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("recent_handoff.next_buddy == active_buddy", reasons)
         self.assertIn("track.next_buddy == active_buddy", reasons)
 
+    def test_track_list_uses_active_explicit_handoff_for_discovery_and_latest_summary_without_run_audit(self) -> None:
+        self._seed_track(
+            track_id="track-explicit-handoff-only",
+            title="Explicit Handoff Only",
+            current_buddy="pm",
+            next_buddy="design",
+            summary="explicit handoff target should drive discovery for market",
+        )
+        self._seed_task(
+            task_id="task-pm-explicit-handoff-only",
+            buddy="pm",
+            title="PM Explicit Source",
+            track_id="track-explicit-handoff-only",
+        )
+        env_store.create_handoff(
+            handoff_id="handoff-explicit-market-r1",
+            track_id="track-explicit-handoff-only",
+            source_buddy="pm",
+            target_buddy="market",
+            source_task_id="task-pm-explicit-handoff-only",
+            source_run_id="run-pm-explicit-handoff-r1",
+            artifact_ids=["art-pm-explicit-handoff-r1"],
+            historical_artifact_ids=[],
+            reason="Market should continue from explicit handoff record.",
+            context="Use explicit handoff context only.",
+            status="active",
+        )
+        self._seed_track(
+            track_id="track-explicit-handoff-unrelated",
+            title="Explicit Handoff Unrelated",
+            current_buddy="pm",
+            next_buddy="design",
+            summary="no market relevance",
+        )
+
+        instance_json = self._instance_json(instance_id="inst-market-explicit-handoff", buddy="market")
+        listed = self._dispatch(
+            action="list",
+            args={},
+            instance_json=instance_json,
+            instance_id="inst-market-explicit-handoff",
+            buddy="market",
+        )
+        self.assertTrue(listed.get("ok"), msg=listed)
+        discovery_summary = listed.get("discovery_summary")
+        self.assertIsInstance(discovery_summary, dict, msg=listed)
+        assert isinstance(discovery_summary, dict)
+        candidate_ids = discovery_summary.get("candidate_track_ids")
+        self.assertIsInstance(candidate_ids, list, msg=listed)
+        assert isinstance(candidate_ids, list)
+        self.assertIn("track-explicit-handoff-only", candidate_ids)
+
+        rows = listed.get("tracks")
+        self.assertIsInstance(rows, list, msg=listed)
+        assert isinstance(rows, list)
+        target_row = next(
+            row for row in rows if isinstance(row, dict) and row.get("id") == "track-explicit-handoff-only"
+        )
+        self.assertTrue(target_row.get("latest_handoff_summary"), msg=target_row)
+        latest = target_row.get("latest_handoff_summary")
+        self.assertIsInstance(latest, dict, msg=target_row)
+        assert isinstance(latest, dict)
+        self.assertEqual(latest.get("source_type"), "handoff_record")
+        self.assertEqual(latest.get("target_buddy"), "market")
+        self.assertEqual(latest.get("source_run_id"), "run-pm-explicit-handoff-r1")
+        discovery = target_row.get("discovery")
+        self.assertIsInstance(discovery, dict, msg=target_row)
+        assert isinstance(discovery, dict)
+        self.assertTrue(discovery.get("latest_handoff_to_active_buddy"), msg=target_row)
+
     def test_track_get_returns_track_context_summary_without_foreign_full_artifact_content(self) -> None:
         self._seed_track(
             track_id="track-context-summary",
@@ -615,6 +815,79 @@ class TrackManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for key in ("id", "kind", "title", "summary", "source_buddy", "source_run", "revision", "currentness"):
             self.assertIn(key, art_row)
         self.assertNotIn("content", art_row)
+
+    def test_track_get_returns_current_artifact_rows_with_readability_and_next_actions(self) -> None:
+        self._seed_track(
+            track_id="track-landing",
+            title="Landing Page Track",
+            current_buddy="pm",
+            next_buddy="dev",
+            summary="pm + design source rows",
+        )
+        self._seed_task(
+            task_id="task-pm-prd",
+            buddy="pm",
+            title="PM PRD Task",
+            track_id="track-landing",
+        )
+        self._seed_task(
+            task_id="task-design-handoff",
+            buddy="design",
+            title="Design Handoff Task",
+            track_id="track-landing",
+        )
+        env_store.create_artifact(
+            artifact_id="art-pm-prd-r1",
+            title="PM PRD",
+            buddy="pm",
+            kind="prd",
+            task_id="task-pm-prd",
+            source_run_id="run-pm-prd-r1",
+            summary="pm prd summary",
+            content={"body": "pm body must not leak from summary"},
+        )
+        env_store.create_artifact(
+            artifact_id="art-design-handoff-r1",
+            title="Design Handoff",
+            buddy="design",
+            kind="design-handoff",
+            task_id="task-design-handoff",
+            source_run_id="run-design-handoff-r1",
+            summary="design summary",
+            content={"body": "design body must not leak from summary"},
+        )
+        instance_json = self._instance_json(instance_id="inst-dev-track-get", buddy="dev")
+        response = self._dispatch(
+            action="get",
+            args={"track_id": "track-landing"},
+            instance_json=instance_json,
+            instance_id="inst-dev-track-get",
+            buddy="dev",
+        )
+        self.assertTrue(response.get("ok"), msg=response)
+        rows = response.get("current_artifacts")
+        self.assertIsInstance(rows, list, msg=response)
+        assert isinstance(rows, list)
+        artifact_ids = {row.get("artifact_id") for row in rows if isinstance(row, dict)}
+        self.assertEqual(artifact_ids, {"art-pm-prd-r1", "art-design-handoff-r1"})
+        for row in rows:
+            self.assertIsInstance(row, dict, msg=response)
+            assert isinstance(row, dict)
+            for key in (
+                "artifact_id",
+                "kind",
+                "title",
+                "summary",
+                "source_buddy",
+                "source_task_id",
+                "source_run_id",
+                "revision",
+                "currentness",
+                "readable_by_current_buddy",
+                "next_action",
+            ):
+                self.assertIn(key, row)
+            self.assertNotIn("content", row)
 
     def test_invalid_buddy_refs_reject_without_partial_mutation(self) -> None:
         self._seed_track(track_id="track-refs", title="Ref Track", current_buddy="pm")

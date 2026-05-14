@@ -238,7 +238,7 @@ class EnvManifestV2Tests(unittest.TestCase):
 
         self.assertEqual(
             authority["routing_skills"],
-            ["write-prd", "track-tool", "artifact-tool", "task-tool"],
+            ["write-prd", "track-tool", "artifact-tool", "task-tool", "handoff-tool", "run-tool"],
         )
         for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
             self.assertNotIn(removed, manifest_skill_ids)

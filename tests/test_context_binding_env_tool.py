@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import subprocess
 import sys
 import unittest
 import uuid
@@ -21,6 +23,7 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
+ENV_CLIENT = ROOT / "scripts" / "env" / "client.py"
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -559,6 +562,15 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_handoff_validate_accepts_known_target_and_rejects_unknown_or_conflicting_target(self) -> None:
         self._seed_track(track_id="track-handoff", title="Handoff Track", current_buddy="pm", next_buddy="market")
+        self._seed_task(task_id="task-pm-handoff", buddy="pm", title="PM Handoff Task", track_id="track-handoff")
+        self._seed_artifact(
+            artifact_id="art-pm-handoff-prd-r1",
+            task_id="task-pm-handoff",
+            buddy="pm",
+            kind="prd",
+            title="PM Handoff PRD",
+            source_run_id="run-pm-handoff-r1",
+        )
         instance_json = self._instance_json(instance_id="inst-pm-example", buddy="pm", current_track_id="track-handoff")
         before = self._load_instance(instance_json)
 
@@ -566,9 +578,14 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             tool="handoff",
             action="validate",
             args={
-                "next_buddy": "market",
+                "track_id": "track-handoff",
+                "source_task_id": "task-pm-handoff",
+                "source_run_id": "run-pm-handoff-r1",
+                "target_buddy": "market",
                 "reason": "Market should validate positioning.",
                 "context": "Use the PRD and current track summary.",
+                "artifact_ids": ["art-pm-handoff-prd-r1"],
+                "historical_artifact_ids": [],
             },
             instance_json=instance_json,
             instance_id="inst-pm-example",
@@ -584,9 +601,13 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             tool="handoff",
             action="validate",
             args={
-                "next_buddy": "unknown",
+                "track_id": "track-handoff",
+                "source_task_id": "task-pm-handoff",
+                "source_run_id": "run-pm-handoff-r1",
+                "target_buddy": "unknown",
                 "reason": "Unknown buddy should fail.",
                 "context": "No mutation should happen.",
+                "artifact_ids": ["art-pm-handoff-prd-r1"],
             },
             instance_json=instance_json,
             instance_id="inst-pm-example",
@@ -600,16 +621,23 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             tool="handoff",
             action="validate",
             args={
-                "next_buddy": "design",
+                "track_id": "track-handoff",
+                "source_task_id": "task-pm-handoff",
+                "source_run_id": "run-pm-handoff-r1",
+                "target_buddy": "design",
                 "reason": "Conflicts with current track next buddy.",
                 "context": "No mutation should happen.",
+                "artifact_ids": ["art-pm-handoff-prd-r1"],
             },
             instance_json=instance_json,
             instance_id="inst-pm-example",
             buddy="pm",
         )
-        self.assertFalse(conflict.get("ok"), msg=conflict)
-        self.assertEqual(conflict.get("permission_boundary"), "handoff.track_transition")
+        self.assertTrue(conflict.get("ok"), msg=conflict)
+        alignment = conflict.get("track_alignment")
+        self.assertIsInstance(alignment, dict, msg=conflict)
+        assert isinstance(alignment, dict)
+        self.assertFalse(alignment.get("target_matches_track_next_buddy"))
         self.assertEqual(self._load_instance(instance_json), before)
 
     def test_context_get_and_summarize_return_same_decision_surface_for_active_binding(self) -> None:
@@ -737,9 +765,13 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             tool="handoff",
             action="validate",
             args={
-                "next_buddy": "market",
+                "track_id": track_id,
+                "source_task_id": "task-pm-handoff-seeded",
+                "source_run_id": "run-pm-seeded-r1",
+                "target_buddy": "market",
                 "reason": "Market should continue from PM output.",
                 "context": "Use PM PRD plus run audit context.",
+                "artifact_ids": ["art-pm-seeded-prd-r1"],
             },
             instance_json=instance_json,
             instance_id="inst-pm-handoff-semantic",
@@ -749,10 +781,10 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("track_alignment", accepted)
         self.assertIn("discoverability", accepted)
         self.assertTrue(accepted["track_alignment"]["target_matches_track_next_buddy"])
-        self.assertEqual(accepted["discoverability"]["available_after"], "run.commit")
+        self.assertEqual(accepted["discoverability"]["available_after"], "handoff.create or run.commit")
         self.assertEqual(
             accepted["discoverability"]["discovery_surfaces"],
-            ["track.list", "track.get", "context.summarize"],
+            ["track.list", "track.get", "handoff.list"],
         )
         self.assertEqual(self._load_instance(instance_json), before)
 
@@ -767,18 +799,385 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             tool="handoff",
             action="validate",
             args={
-                "next_buddy": "design",
+                "track_id": track_id,
+                "source_task_id": "task-pm-handoff-seeded",
+                "source_run_id": "run-pm-seeded-r1",
+                "target_buddy": "design",
                 "reason": "Force a conflicting next buddy.",
                 "context": "This should return suggested_next_buddy.",
+                "artifact_ids": ["art-pm-seeded-prd-r1"],
             },
             instance_json=instance_json,
             instance_id="inst-pm-handoff-conflict-semantic",
             buddy="pm",
         )
-        self.assertFalse(conflict.get("ok"), msg=conflict)
-        self.assertEqual(conflict.get("permission_boundary"), "handoff.track_transition")
+        self.assertTrue(conflict.get("ok"), msg=conflict)
         self.assertIn("track_alignment", conflict)
-        self.assertEqual(conflict["track_alignment"]["suggested_next_buddy"], "market")
+        self.assertFalse(conflict["track_alignment"]["target_matches_track_next_buddy"])
+        self.assertEqual(conflict["track_alignment"]["track_next_buddy"], "market")
+
+    def test_handoff_list_merges_explicit_records_and_run_audit_handoffs(self) -> None:
+        track_id, source_task_id = self._seed_pm_track_with_market_handoff()
+        env_store.create_handoff(
+            handoff_id="handoff-track-pm-handoff-seeded-pm-to-dev-r1",
+            track_id=track_id,
+            source_buddy="pm",
+            target_buddy="dev",
+            source_task_id=source_task_id,
+            source_run_id="run-pm-seeded-r1",
+            artifact_ids=["art-pm-seeded-prd-r1"],
+            historical_artifact_ids=[],
+            reason="Dev should continue from PM PRD.",
+            context="Use PM PRD source.",
+            status="active",
+        )
+        dev_instance = self._instance_json(instance_id="inst-dev-handoff-list", buddy="dev")
+        listed = self._dispatch(
+            tool="handoff",
+            action="list",
+            args={"track_id": track_id},
+            instance_json=dev_instance,
+            instance_id="inst-dev-handoff-list",
+            buddy="dev",
+        )
+        self.assertTrue(listed.get("ok"), msg=listed)
+        rows = listed.get("handoffs")
+        self.assertIsInstance(rows, list, msg=listed)
+        assert isinstance(rows, list)
+        source_types = {row.get("source_type") for row in rows if isinstance(row, dict)}
+        self.assertIn("handoff_record", source_types)
+        self.assertIn("run_audit", source_types)
+
+        explicit_rows = [row for row in rows if isinstance(row, dict) and row.get("source_type") == "handoff_record"]
+        self.assertTrue(explicit_rows, msg=rows)
+        explicit = explicit_rows[0]
+        self.assertEqual(explicit.get("target_buddy"), "dev")
+        self.assertTrue(explicit.get("read_authorizes_active_buddy"))
+
+        unrelated_instance = self._instance_json(instance_id="inst-test-handoff-list", buddy="test")
+        unrelated = self._dispatch(
+            tool="handoff",
+            action="list",
+            args={"track_id": track_id},
+            instance_json=unrelated_instance,
+            instance_id="inst-test-handoff-list",
+            buddy="test",
+        )
+        self.assertTrue(unrelated.get("ok"), msg=unrelated)
+        unrelated_rows = unrelated.get("handoffs")
+        self.assertIsInstance(unrelated_rows, list, msg=unrelated)
+        assert isinstance(unrelated_rows, list)
+        explicit_unrelated = [
+            row
+            for row in unrelated_rows
+            if isinstance(row, dict) and row.get("source_type") == "handoff_record" and row.get("handoff_id") == explicit.get("handoff_id")
+        ]
+        self.assertTrue(explicit_unrelated, msg=unrelated_rows)
+        self.assertFalse(explicit_unrelated[0].get("read_authorizes_active_buddy"))
+
+    def test_handoff_create_validates_owned_sources_and_does_not_mutate_track_lifecycle(self) -> None:
+        track_id = "track-design-create-handoff"
+        self._seed_track(
+            track_id=track_id,
+            title="Design Create Handoff",
+            current_buddy="pm",
+            next_buddy="dev",
+            summary="design create handoff",
+        )
+        self._seed_task(task_id="task-design-create-handoff", buddy="design", title="Design Source", track_id=track_id)
+        self._seed_artifact(
+            artifact_id="art-design-create-handoff-r1",
+            task_id="task-design-create-handoff",
+            buddy="design",
+            kind="design-handoff",
+            title="Design Source Artifact",
+            source_run_id="run-design-create-handoff-r1",
+            content={"body": "design source body"},
+        )
+        before_track = copy.deepcopy(env_store.get_track(track_id))
+        assert before_track is not None
+
+        instance_json = self._instance_json(instance_id="inst-design-create-handoff", buddy="design", current_track_id=track_id)
+        created = self._dispatch(
+            tool="handoff",
+            action="create",
+            args={
+                "track_id": track_id,
+                "source_task_id": "task-design-create-handoff",
+                "source_run_id": "run-design-create-handoff-r1",
+                "target_buddy": "dev",
+                "artifact_ids": ["art-design-create-handoff-r1"],
+                "historical_artifact_ids": [],
+                "reason": "Dev should implement from design handoff.",
+                "context": "Use design handoff artifact only.",
+            },
+            instance_json=instance_json,
+            instance_id="inst-design-create-handoff",
+            buddy="design",
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+        handoff = created.get("handoff")
+        self.assertIsInstance(handoff, dict, msg=created)
+        assert isinstance(handoff, dict)
+        handoff_id = handoff.get("id")
+        self.assertIsInstance(handoff_id, str, msg=created)
+        assert isinstance(handoff_id, str)
+        persisted = env_store.get_handoff(handoff_id)
+        self.assertIsNotNone(persisted)
+
+        after_track = env_store.get_track(track_id)
+        self.assertIsNotNone(after_track)
+        assert after_track is not None
+        for key in ("status", "current_buddy", "next_buddy", "title", "summary"):
+            self.assertEqual(after_track.get(key), before_track.get(key))
+
+    def test_handoff_create_rejects_hidden_lifecycle_fields_without_mutation(self) -> None:
+        track_id = "track-design-create-handoff-hidden"
+        self._seed_track(
+            track_id=track_id,
+            title="Design Create Handoff Hidden",
+            current_buddy="pm",
+            next_buddy="dev",
+            summary="design create hidden lifecycle",
+        )
+        self._seed_task(task_id="task-design-create-hidden", buddy="design", title="Design Source", track_id=track_id)
+        self._seed_artifact(
+            artifact_id="art-design-create-hidden-r1",
+            task_id="task-design-create-hidden",
+            buddy="design",
+            kind="design-handoff",
+            title="Design Hidden Source Artifact",
+            source_run_id="run-design-create-hidden-r1",
+            content={"body": "design hidden source body"},
+        )
+        before_track = copy.deepcopy(env_store.get_track(track_id))
+        before_handoff_ids = {row["id"] for row in env_store.list_handoffs()}
+
+        instance_json = self._instance_json(instance_id="inst-design-create-hidden", buddy="design", current_track_id=track_id)
+        rejected = self._dispatch(
+            tool="handoff",
+            action="create",
+            args={
+                "track_id": track_id,
+                "source_task_id": "task-design-create-hidden",
+                "source_run_id": "run-design-create-hidden-r1",
+                "target_buddy": "dev",
+                "artifact_ids": ["art-design-create-hidden-r1"],
+                "historical_artifact_ids": [],
+                "reason": "should reject hidden lifecycle field",
+                "context": "hidden lifecycle mutation attempt",
+                "track_status": "done",
+            },
+            instance_json=instance_json,
+            instance_id="inst-design-create-hidden",
+            buddy="design",
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual(rejected.get("permission_boundary"), "handoff.lifecycle_boundary")
+        self.assertEqual(env_store.get_track(track_id), before_track)
+        self.assertEqual({row["id"] for row in env_store.list_handoffs()}, before_handoff_ids)
+
+    def test_handoff_create_rejects_unlinked_source_task_without_mutation(self) -> None:
+        track_id = "track-design-create-handoff-unlinked"
+        task_id = "task-design-create-unlinked"
+        artifact_id = "art-design-create-unlinked-r1"
+        self._seed_track(
+            track_id=track_id,
+            title="Design Create Handoff Unlinked",
+            current_buddy="pm",
+            next_buddy="dev",
+            summary="design create unlinked rejection",
+        )
+        self._seed_task(task_id=task_id, buddy="design", title="Design Source Unlinked", track_id=None)
+        self._seed_artifact(
+            artifact_id=artifact_id,
+            task_id=task_id,
+            buddy="design",
+            kind="design-handoff",
+            title="Design Unlinked Source Artifact",
+            source_run_id="run-design-create-unlinked-r1",
+            content={"body": "design unlinked source body"},
+        )
+        before_track = copy.deepcopy(env_store.get_track(track_id))
+        before_task = copy.deepcopy(env_store.get_task(task_id))
+        before_handoff_ids = {row["id"] for row in env_store.list_handoffs()}
+
+        instance_json = self._instance_json(instance_id="inst-design-create-unlinked", buddy="design", current_track_id=track_id)
+        rejected = self._dispatch(
+            tool="handoff",
+            action="create",
+            args={
+                "track_id": track_id,
+                "source_task_id": task_id,
+                "source_run_id": "run-design-create-unlinked-r1",
+                "target_buddy": "dev",
+                "artifact_ids": [artifact_id],
+                "historical_artifact_ids": [],
+                "reason": "must reject unlinked source task",
+                "context": "handoff.create should not repair source task linkage",
+            },
+            instance_json=instance_json,
+            instance_id="inst-design-create-unlinked",
+            buddy="design",
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual(rejected.get("permission_boundary"), "track.task_linkage")
+        self.assertEqual(env_store.get_track(track_id), before_track)
+        self.assertEqual(env_store.get_task(task_id), before_task)
+        self.assertEqual({row["id"] for row in env_store.list_handoffs()}, before_handoff_ids)
+
+    def test_handoff_validate_rejects_foreign_source_artifact_non_current_without_historical_flag_and_hidden_lifecycle_fields(self) -> None:
+        track_id = "track-design-validate-handoff"
+        self._seed_track(
+            track_id=track_id,
+            title="Design Validate Handoff",
+            current_buddy="pm",
+            next_buddy="dev",
+            summary="design validate handoff",
+        )
+        self._seed_task(task_id="task-design-validate-handoff", buddy="design", title="Design Source", track_id=track_id)
+        self._seed_task(task_id="task-pm-validate-handoff", buddy="pm", title="PM Source", track_id=track_id)
+        self._seed_artifact(
+            artifact_id="art-design-validate-old-r1",
+            task_id="task-design-validate-handoff",
+            buddy="design",
+            kind="design-handoff",
+            title="Design Old",
+            source_run_id="run-design-validate-r1",
+            content={"body": "design old body"},
+        )
+        self._seed_artifact(
+            artifact_id="art-design-validate-new-r2",
+            task_id="task-design-validate-handoff",
+            buddy="design",
+            kind="design-handoff",
+            title="Design New",
+            source_run_id="run-design-validate-r2",
+            content={"body": "design new body"},
+        )
+        self._seed_artifact(
+            artifact_id="art-pm-validate-r1",
+            task_id="task-pm-validate-handoff",
+            buddy="pm",
+            kind="prd",
+            title="PM Foreign",
+            source_run_id="run-pm-validate-r1",
+            content={"body": "pm foreign body"},
+        )
+        instance_json = self._instance_json(instance_id="inst-design-validate-handoff", buddy="design", current_track_id=track_id)
+        before_track = copy.deepcopy(env_store.get_track(track_id))
+
+        foreign = self._dispatch(
+            tool="handoff",
+            action="validate",
+            args={
+                "track_id": track_id,
+                "source_task_id": "task-design-validate-handoff",
+                "source_run_id": "run-design-validate-r2",
+                "target_buddy": "dev",
+                "artifact_ids": ["art-pm-validate-r1"],
+                "reason": "should fail foreign",
+                "context": "foreign artifact",
+            },
+            instance_json=instance_json,
+            instance_id="inst-design-validate-handoff",
+            buddy="design",
+        )
+        self.assertFalse(foreign.get("ok"), msg=foreign)
+        self.assertEqual(foreign.get("permission_boundary"), "handoff.source_artifact_scope")
+
+        historical_missing = self._dispatch(
+            tool="handoff",
+            action="validate",
+            args={
+                "track_id": track_id,
+                "source_task_id": "task-design-validate-handoff",
+                "source_run_id": "run-design-validate-r2",
+                "target_buddy": "dev",
+                "artifact_ids": ["art-design-validate-old-r1"],
+                "reason": "should fail missing historical marker",
+                "context": "historical artifact without marker",
+            },
+            instance_json=instance_json,
+            instance_id="inst-design-validate-handoff",
+            buddy="design",
+        )
+        self.assertFalse(historical_missing.get("ok"), msg=historical_missing)
+        self.assertEqual(historical_missing.get("permission_boundary"), "handoff.historical_marker")
+
+        hidden_lifecycle = self._dispatch(
+            tool="handoff",
+            action="validate",
+            args={
+                "track_id": track_id,
+                "source_task_id": "task-design-validate-handoff",
+                "source_run_id": "run-design-validate-r2",
+                "target_buddy": "dev",
+                "artifact_ids": ["art-design-validate-new-r2"],
+                "reason": "should fail lifecycle field",
+                "context": "hidden lifecycle mutation",
+                "track_status": "done",
+            },
+            instance_json=instance_json,
+            instance_id="inst-design-validate-handoff",
+            buddy="design",
+        )
+        self.assertFalse(hidden_lifecycle.get("ok"), msg=hidden_lifecycle)
+        self.assertEqual(hidden_lifecycle.get("permission_boundary"), "handoff.lifecycle_boundary")
+        self.assertEqual(env_store.get_track(track_id), before_track)
+
+    def test_context_feedback_points_to_direct_artifact_tools_not_context_read_actions(self) -> None:
+        track_id, _ = self._seed_pm_track_with_market_handoff()
+        instance_json = self._instance_json(instance_id="inst-market-direct-tools", buddy="market")
+        summary = self._dispatch(
+            tool="context",
+            action="summarize",
+            args={},
+            instance_json=instance_json,
+            instance_id="inst-market-direct-tools",
+            buddy="market",
+        )
+        self.assertTrue(summary.get("ok"), msg=summary)
+        context_get = self._dispatch(
+            tool="context",
+            action="get",
+            args={},
+            instance_json=instance_json,
+            instance_id="inst-market-direct-tools",
+            buddy="market",
+        )
+        self.assertTrue(context_get.get("ok"), msg=context_get)
+        serialized = json.dumps({"summary": summary, "get": context_get}, ensure_ascii=True, sort_keys=True)
+        self.assertNotIn("context.get_track_artifacts", serialized)
+        self.assertNotIn("context.inspect_track_outputs", serialized)
+        self.assertNotIn("context.explain_track_access", serialized)
+        self.assertNotIn("context.validate_sources_available", serialized)
+        self.assertIn("track.get", serialized)
+        self.assertIn("artifact.get", serialized)
+        self.assertIn(track_id, serialized)
+
+    def test_handoff_cli_exposes_list_validate_and_create(self) -> None:
+        env = os.environ.copy()
+        env.pop("BUDDYSWITCH_RUNTIME_BROKER_SOCKET", None)
+        env.pop("BUDDYSWITCH_INSTANCE_ID", None)
+        env.pop("BUDDYSWITCH_ACTIVE_BUDDY", None)
+
+        for args, token in (
+            (["handoff", "list", "--help"], "--track-id"),
+            (["handoff", "validate", "--help"], "--payload"),
+            (["handoff", "create", "--help"], "--payload"),
+        ):
+            with self.subTest(args=args):
+                completed = subprocess.run(
+                    ["python3", str(ENV_CLIENT), *args],
+                    cwd=ROOT,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+                self.assertIn(token, completed.stdout)
 
 
 if __name__ == "__main__":

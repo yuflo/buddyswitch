@@ -1,6 +1,6 @@
 ---
 name: task-tool
-description: Use when you need to create, inspect, update, archive, or bind the current task for the active buddy through runtime-owned env tools.
+description: Use when you need to create/update/archive active-buddy tasks, inspect visible task ids for orientation, or bind current task through runtime-owned env tools.
 ---
 
 # task-tool
@@ -8,6 +8,8 @@ description: Use when you need to create, inspect, update, archive, or bind the 
 ## Purpose
 - Manage task lifecycle through the broker-routed env tool path.
 - Keep task mutations scoped to the launcher-locked active buddy and instance.
+- Use `task.get --task-id` as orientation for task metadata and artifact summaries.
+- Use `artifact.get --artifact-id` for full artifact bodies.
 
 ## Command Surface
 - `python3 scripts/env/client.py task create --payload <json-file>`
@@ -27,6 +29,8 @@ description: Use when you need to create, inspect, update, archive, or bind the 
 - `create`: `{"title":"...", "summary":"..."}`
 - `update`: `{"task_id":"...", "title":"...", "summary":"...", "status":"active|blocked|done|archived"}`
 
+`task.get` returns artifact summary rows, not foreign full artifact content.
+
 ## Guardrails
 - Active buddy and instance identity come from runtime context, not payload fields.
 - Cross-buddy named task operations are rejected by the env tool/service boundary.
@@ -36,6 +40,10 @@ description: Use when you need to create, inspect, update, archive, or bind the 
 ## Decision Source
 - Runtime/tool feedback is authoritative for permission boundaries and next actions.
 - Use `prepare.runtime_context.env_tools.task` plus structured rejection payload fields (`permission_boundary`, `allowed_next_actions`, `command_hint`) to choose the next step.
+
+## Direct Id Rule
+- If you see a `task_id`, use `task get --task-id <task-id>`.
+- If task summary includes artifact ids you need to read fully, use `artifact get --artifact-id <artifact-id>`.
 
 ## Shared Runtime Rules
 - Contribute to one buddy-run commit.

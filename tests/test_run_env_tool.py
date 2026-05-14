@@ -32,11 +32,6 @@ def _pm_commit() -> dict[str, object]:
     return {
         "execution_summary": "PM wrote the AI schedule tool landing page PRD and created the delivery track.",
         "working_notes": ["PM completed planning and queued next research step."],
-        "handoff": {
-            "next_buddy": "market",
-            "reason": "Market should validate competitor landing page positioning before design.",
-            "context": "Use the PRD artifact and track summary as source context.",
-        },
         "contributors": {
             "skills": ["write-prd", "track-tool"],
             "agents": [],
@@ -88,8 +83,14 @@ class RunManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return instance_json
 
-    def _prepare(self, request_text: str = PM_REQUEST, *, buddy: str = "pm") -> dict[str, object]:
-        with patch.object(turn_runtime, "_load_product_mode_session", return_value=self._session(buddy=buddy)):
+    def _prepare(
+        self,
+        request_text: str = PM_REQUEST,
+        *,
+        buddy: str = "pm",
+        payload: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        with patch.object(turn_runtime, "_load_product_mode_session", return_value=self._session(buddy=buddy, payload=payload)):
             context = turn_runtime.prepare_turn_context(request_text, manifest_path=MANIFEST)
         self.assertTrue(context["ok"], msg=context)
         return context
@@ -200,10 +201,10 @@ class RunManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         next_state = receipt.get("next_state")
         self.assertIsInstance(next_state, dict, msg=response)
         assert isinstance(next_state, dict)
-        self.assertEqual(next_state.get("mode"), "handoff")
+        self.assertEqual(next_state.get("mode"), "taskless_audit")
         self.assertIsNone(next_state.get("task_id"))
         self.assertIsNone(next_state.get("track_id"))
-        self.assertEqual(next_state.get("next_buddy"), "market")
+        self.assertIsNone(next_state.get("next_buddy"))
 
         instance_payload = self._load_instance(instance_json)
         self.assertEqual(instance_payload, instance_before)
@@ -307,6 +308,367 @@ class RunManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         self.assertEqual(raised.exception.code, "E_RUNTIME_PERSIST_CONFLICT")
         self.assertEqual(json.loads(run_path.read_text(encoding="utf-8")), first_audit)
+
+    def test_run_validate_result_rejects_invalid_handoff_ids_and_retired_mutation_fields(self) -> None:
+        env_store.create_track(
+            "track-dev-run-validate",
+            "Run Validate Track",
+            status="active",
+            current_buddy="pm",
+            next_buddy="dev",
+            summary="run validate",
+        )
+        env_store.create_task(
+            "task-dev-run-validate",
+            "Dev Run Validate",
+            buddy="dev",
+            track_id="track-dev-run-validate",
+            status="active",
+            summary="",
+            initial_run_id=None,
+        )
+        env_store.create_task(
+            "task-pm-run-validate",
+            "PM Run Validate",
+            buddy="pm",
+            track_id="track-dev-run-validate",
+            status="active",
+            summary="",
+            initial_run_id=None,
+        )
+        env_store.create_artifact(
+            artifact_id="art-dev-run-validate-old-r1",
+            title="Dev Run Validate Old",
+            buddy="dev",
+            kind="implementation-report",
+            task_id="task-dev-run-validate",
+            source_run_id="run-dev-run-validate-r1",
+            summary="old",
+            content={"body": "old"},
+        )
+        env_store.create_artifact(
+            artifact_id="art-dev-run-validate-new-r2",
+            title="Dev Run Validate New",
+            buddy="dev",
+            kind="implementation-report",
+            task_id="task-dev-run-validate",
+            source_run_id="run-dev-run-validate-r2",
+            summary="new",
+            content={"body": "new"},
+        )
+        env_store.create_artifact(
+            artifact_id="art-pm-run-validate-r1",
+            title="PM Run Validate",
+            buddy="pm",
+            kind="prd",
+            task_id="task-pm-run-validate",
+            source_run_id="run-pm-run-validate-r1",
+            summary="pm",
+            content={"body": "pm"},
+        )
+        context = self._prepare(
+            request_text="validate run payload",
+            buddy="dev",
+            payload={
+                "current_task_id": "task-dev-run-validate",
+                "current_track_id": "track-dev-run-validate",
+            },
+        )
+        instance_json = self._instance_json(
+            instance_id=INSTANCE_ID,
+            buddy="dev",
+            current_task_id="task-dev-run-validate",
+            current_track_id="track-dev-run-validate",
+        )
+        run_id = str(context["run_envelope"]["run_id"])
+
+        def _result() -> dict[str, object]:
+            return {
+                "execution_summary": "validate result",
+                "task_id": "task-dev-run-validate",
+                "track_id": "track-dev-run-validate",
+                "artifact_ids": ["art-dev-run-validate-new-r2"],
+                "handoff": {
+                    "track_id": "track-dev-run-validate",
+                    "source_task_id": "task-dev-run-validate",
+                    "source_run_id": run_id,
+                    "target_buddy": "test",
+                    "artifact_ids": ["art-dev-run-validate-new-r2"],
+                    "historical_artifact_ids": [],
+                    "reason": "Test should verify implementation.",
+                    "context": "Use implementation artifact.",
+                },
+                "contributors": {"skills": ["implement-task"], "agents": []},
+            }
+
+        cases = [
+            ("persist.task_id", {"task_id": "task-dev-run-missing"}),
+            ("persist.track_id", {"track_id": "track-dev-run-missing"}),
+            ("persist.artifact_ids", {"artifact_ids": ["art-dev-run-missing-r1"]}),
+            ("manifest.buddies", {"handoff": {**_result()["handoff"], "target_buddy": "unknown"}}),
+            ("handoff.source_artifact_scope", {"handoff": {**_result()["handoff"], "artifact_ids": ["art-pm-run-validate-r1"]}}),
+            (
+                "handoff.historical_marker",
+                {"handoff": {**_result()["handoff"], "artifact_ids": ["art-dev-run-validate-old-r1"], "historical_artifact_ids": []}},
+            ),
+            ("persist.state_effects", {"state_effects": {"track": {"status": "done"}}}),
+            ("persist.artifacts", {"artifacts": [{"id": "legacy-inline"}]}),
+        ]
+        for expected_boundary, patch in cases:
+            with self.subTest(boundary=expected_boundary):
+                candidate = _result()
+                candidate.update(patch)
+                response = self._dispatch(
+                    action="validate_result",
+                    args={"context": context, "result": candidate},
+                    instance_json=instance_json,
+                    instance_id=INSTANCE_ID,
+                    buddy="dev",
+                )
+                self.assertFalse(response.get("ok"), msg=response)
+                self.assertEqual(response.get("permission_boundary"), expected_boundary)
+
+    def test_run_validate_result_infers_handoff_artifact_ids_from_top_level_association(self) -> None:
+        env_store.create_track(
+            "track-dev-run-validate-infer",
+            "Run Validate Infer",
+            status="active",
+            current_buddy="pm",
+            next_buddy="dev",
+            summary="run validate infer",
+        )
+        env_store.create_task(
+            "task-dev-run-validate-infer",
+            "Dev Run Validate Infer",
+            buddy="dev",
+            track_id="track-dev-run-validate-infer",
+            status="active",
+            summary="",
+            initial_run_id=None,
+        )
+        env_store.create_artifact(
+            artifact_id="art-dev-run-validate-infer-r1",
+            title="Dev Run Validate Infer",
+            buddy="dev",
+            kind="implementation-report",
+            task_id="task-dev-run-validate-infer",
+            source_run_id="run-dev-run-validate-infer-r1",
+            summary="infer",
+            content={"body": "infer"},
+        )
+        context = self._prepare(
+            request_text="validate inferred handoff payload",
+            buddy="dev",
+            payload={
+                "current_task_id": "task-dev-run-validate-infer",
+                "current_track_id": "track-dev-run-validate-infer",
+            },
+        )
+        instance_json = self._instance_json(
+            instance_id=INSTANCE_ID,
+            buddy="dev",
+            current_task_id="task-dev-run-validate-infer",
+            current_track_id="track-dev-run-validate-infer",
+        )
+        response = self._dispatch(
+            action="validate_result",
+            args={
+                "context": context,
+                "result": {
+                    "execution_summary": "validate inferred handoff payload",
+                    "task_id": "task-dev-run-validate-infer",
+                    "track_id": "track-dev-run-validate-infer",
+                    "artifact_ids": ["art-dev-run-validate-infer-r1"],
+                    "handoff": {
+                        "next_buddy": "test",
+                        "reason": "Test should validate implementation output.",
+                        "context": "Use the inferred artifact association.",
+                    },
+                },
+            },
+            instance_json=instance_json,
+            instance_id=INSTANCE_ID,
+            buddy="dev",
+        )
+        self.assertTrue(response.get("ok"), msg=response)
+        validated_handoff = response.get("validated_handoff")
+        self.assertIsInstance(validated_handoff, dict, msg=response)
+        assert isinstance(validated_handoff, dict)
+        self.assertEqual(validated_handoff.get("track_id"), "track-dev-run-validate-infer")
+        self.assertEqual(validated_handoff.get("source_task_id"), "task-dev-run-validate-infer")
+        self.assertEqual(validated_handoff.get("artifact_ids"), ["art-dev-run-validate-infer-r1"])
+        self.assertEqual(validated_handoff.get("next_buddy"), "test")
+
+    def test_run_validate_result_legacy_handoff_unknown_target_returns_manifest_boundary(self) -> None:
+        context = self._prepare(
+            request_text="legacy unknown handoff target",
+            buddy="pm",
+            payload={},
+        )
+        instance_json = self._instance_json(
+            instance_id=INSTANCE_ID,
+            buddy="pm",
+            current_task_id=None,
+            current_track_id=None,
+        )
+        response = self._dispatch(
+            action="validate_result",
+            args={
+                "context": context,
+                "result": {
+                    "execution_summary": "legacy unknown handoff target",
+                    "handoff": {
+                        "next_buddy": "sales",
+                        "reason": "Need sales review.",
+                        "context": "legacy handoff shape without source ids.",
+                    },
+                },
+            },
+            instance_json=instance_json,
+            instance_id=INSTANCE_ID,
+            buddy="pm",
+        )
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("permission_boundary"), "manifest.buddies")
+
+    def test_run_validate_result_rejects_retired_mutation_fields_with_existing_tool_hints(self) -> None:
+        context = self._prepare(
+            request_text="validate retired fields hints",
+            buddy="dev",
+            payload={},
+        )
+        instance_json = self._instance_json(
+            instance_id=INSTANCE_ID,
+            buddy="dev",
+            current_task_id=None,
+            current_track_id=None,
+        )
+
+        state_effects = self._dispatch(
+            action="validate_result",
+            args={
+                "context": context,
+                "result": {
+                    "execution_summary": "invalid lifecycle mutation",
+                    "state_effects": {"track": {"status": "done"}},
+                },
+            },
+            instance_json=instance_json,
+            instance_id=INSTANCE_ID,
+            buddy="dev",
+        )
+        self.assertFalse(state_effects.get("ok"), msg=state_effects)
+        self.assertEqual(state_effects.get("permission_boundary"), "persist.state_effects")
+        lifecycle_hints = state_effects.get("allowed_next_actions")
+        self.assertIsInstance(lifecycle_hints, list, msg=state_effects)
+        assert isinstance(lifecycle_hints, list)
+        lifecycle_text = "\n".join(str(item) for item in lifecycle_hints)
+        self.assertIn("python3 scripts/env/client.py task update --payload <json-file>", lifecycle_text)
+        self.assertIn("python3 scripts/env/client.py track update --payload <json-file>", lifecycle_text)
+        self.assertIn("python3 scripts/env/client.py track advance --payload <json-file>", lifecycle_text)
+        self.assertIn("python3 scripts/env/client.py track join --track-id <track-id>", lifecycle_text)
+        self.assertNotIn("artifact.list_revisions", lifecycle_text)
+
+        embedded_artifacts = self._dispatch(
+            action="validate_result",
+            args={
+                "context": context,
+                "result": {
+                    "execution_summary": "invalid embedded artifacts",
+                    "artifacts": [{"id": "legacy-inline"}],
+                },
+            },
+            instance_json=instance_json,
+            instance_id=INSTANCE_ID,
+            buddy="dev",
+        )
+        self.assertFalse(embedded_artifacts.get("ok"), msg=embedded_artifacts)
+        self.assertEqual(embedded_artifacts.get("permission_boundary"), "persist.artifacts")
+        artifact_hints = embedded_artifacts.get("allowed_next_actions")
+        self.assertIsInstance(artifact_hints, list, msg=embedded_artifacts)
+        assert isinstance(artifact_hints, list)
+        artifact_text = "\n".join(str(item) for item in artifact_hints)
+        self.assertIn("python3 scripts/env/client.py artifact create-revision --payload <json-file>", artifact_text)
+        self.assertNotIn("artifact.list_revisions", artifact_text)
+
+        serialized = json.dumps({"state_effects": state_effects, "embedded_artifacts": embedded_artifacts}, sort_keys=True)
+        self.assertNotIn("buddyswitch/objects", serialized)
+        self.assertNotIn("buddyswitch/content/runs", serialized)
+        self.assertNotIn("runs/raw", serialized)
+
+    def test_run_commit_does_not_repair_missing_join_or_handoff_relation(self) -> None:
+        env_store.create_track(
+            "track-dev-run-commit-main",
+            "Run Commit Main",
+            status="active",
+            current_buddy="pm",
+            next_buddy="dev",
+            summary="run commit main",
+        )
+        env_store.create_task(
+            "task-dev-run-untracked",
+            "Dev Untracked",
+            buddy="dev",
+            track_id=None,
+            status="active",
+            summary="",
+            initial_run_id=None,
+        )
+        env_store.create_artifact(
+            artifact_id="art-dev-run-untracked-r1",
+            title="Dev Untracked Artifact",
+            buddy="dev",
+            kind="implementation-report",
+            task_id="task-dev-run-untracked",
+            source_run_id="run-dev-run-untracked-r1",
+            summary="untracked",
+            content={"body": "untracked body"},
+        )
+        track_before = copy.deepcopy(env_store.get_track("track-dev-run-commit-main"))
+        task_before = copy.deepcopy(env_store.get_task("task-dev-run-untracked"))
+        assert isinstance(track_before, dict)
+        assert isinstance(task_before, dict)
+
+        context = self._prepare(
+            request_text="commit without join should fail",
+            buddy="dev",
+            payload={"current_task_id": "task-dev-run-untracked"},
+        )
+        instance_json = self._instance_json(
+            instance_id=INSTANCE_ID,
+            buddy="dev",
+            current_task_id="task-dev-run-untracked",
+            current_track_id=None,
+        )
+        run_id = str(context["run_envelope"]["turn_identity"]["run_id"])
+        result = {
+            "execution_summary": "attempt commit without join",
+            "task_id": "task-dev-run-untracked",
+            "track_id": "track-dev-run-commit-main",
+            "artifact_ids": ["art-dev-run-untracked-r1"],
+            "handoff": {
+                "track_id": "track-dev-run-commit-main",
+                "source_task_id": "task-dev-run-untracked",
+                "source_run_id": run_id,
+                "target_buddy": "test",
+                "artifact_ids": ["art-dev-run-untracked-r1"],
+                "historical_artifact_ids": [],
+                "reason": "test should continue",
+                "context": "uses untracked task artifact",
+            },
+        }
+        response = self._dispatch(
+            action="commit",
+            args={"context": context, "result": result},
+            instance_json=instance_json,
+            instance_id=INSTANCE_ID,
+            buddy="dev",
+        )
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("permission_boundary"), "track.task_linkage")
+        self.assertEqual(env_store.get_task("task-dev-run-untracked"), task_before)
+        self.assertEqual(env_store.get_track("track-dev-run-commit-main"), track_before)
+        self.assertFalse(self._runtime_path(f"buddyswitch/content/runs/{run_id}.json").exists())
 
 
 if __name__ == "__main__":

@@ -58,6 +58,7 @@ class RuntimeWorkspaceSandbox:
             patch.object(env_store, "TRACKS_DIR", objects_root / "tracks"),
             patch.object(env_store, "TASKS_DIR", objects_root / "tasks"),
             patch.object(env_store, "ARTIFACT_OBJECTS_DIR", objects_root / "artifacts"),
+            patch.object(env_store, "HANDOFF_OBJECTS_DIR", objects_root / "handoffs"),
             patch.object(env_store, "CONTENT_ROOT", content_root),
             patch.object(env_store, "RUN_CONTENT_DIR", content_root / "runs"),
             patch.object(turn_runtime, "ROOT", self.root),

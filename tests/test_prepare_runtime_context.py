@@ -183,6 +183,21 @@ class PrepareRuntimeContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("W_STALE_TRACK_BINDING", warning_codes)
         self.assertIsNone(env_store.get_track("track-missing"))
 
+    def test_prepare_projects_direct_id_tool_surface_for_track_artifact_task_handoff(self) -> None:
+        payload = self._prepare(buddy="dev", request_text=REQUESTS_BY_BUDDY["dev"])
+        env_tools = payload["runtime_context"]["env_tools"]
+
+        self.assertIn("track", env_tools)
+        self.assertIn("artifact", env_tools)
+        self.assertIn("task", env_tools)
+        self.assertIn("handoff", env_tools)
+
+        self.assertIn("join", env_tools["track"]["operations"])
+        self.assertEqual(env_tools["artifact"]["payload_fields"]["list"], ["track_id"])
+        self.assertIn("list", env_tools["handoff"]["operations"])
+        self.assertIn("validate", env_tools["handoff"]["operations"])
+        self.assertIn("create", env_tools["handoff"]["operations"])
+
 
 if __name__ == "__main__":
     unittest.main()

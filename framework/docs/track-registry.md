@@ -7,6 +7,7 @@ This document defines active track behavior in BuddySwitch.
 - Tracks: `buddyswitch/objects/tracks/*.json`
 - Tasks: `buddyswitch/objects/tasks/*.json`
 - Artifacts: `buddyswitch/objects/artifacts/*.json`
+- Handoffs: `buddyswitch/objects/handoffs/*.json`
 - Runtime tool service: `scripts/env/services/tracks.py`
 - Broker tool dispatch: `scripts/env/tools/dispatch.py`
 - Skill-facing command: `python3 scripts/env/client.py track <operation>`
@@ -72,11 +73,15 @@ Artifacts participate in track flow through `artifact.task_id -> task.track_id`.
 - `pm` controls track lifecycle operations (`create`, `update`, `advance`, `archive`) through broker-routed `env.tool` track commands.
 - Non-PM buddies do not mutate track lifecycle fields.
 - Buddies with `track.read` may inspect track summaries.
-- Active buddies may attach or detach their own tasks to an existing track through the track tool.
-- Track inspection should come from prepared task/track context, workspace projection, or `python3 scripts/env/client.py track get`.
+- `track.join` is the normal membership path for active buddies. It creates or reuses one active-buddy task on the track and updates instance binding.
+- `track.join` does not mutate lifecycle fields (`status`, `current_buddy`, `next_buddy`).
+- `track.attach_task` and `track.detach_task` remain explicit maintenance actions.
+- Track inspection should come from direct-id tools: `track.list`, `track.get`, `artifact.get`.
+- `artifact.get` allows full read of current track artifacts when active buddy has relation (`pm_lifecycle_owner`, `participant`, `current_buddy`, `next_buddy`, or latest `handoff_recipient`).
+- Foreign historical artifacts remain blocked outside owner scope.
 - Retired top-level `track_operation` payloads are not accepted by runtime persist.
 
 ## Auto-Register Rule
 
-Track membership changes only through explicit `track.attach_task` and `track.detach_task`.
+Track membership changes through `track.join`, `track.attach_task`, and `track.detach_task`.
 Artifact creation updates task `artifact_ids` and per-kind `artifact_slots` revision state through artifact-tool operations.

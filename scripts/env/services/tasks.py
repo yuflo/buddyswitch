@@ -10,6 +10,7 @@ from typing import Any, TypedDict
 import env_store
 from env_manifest import buddy_permissions
 from env.services import bindings as binding_service
+from env.services import track_relations
 
 _TASK_PUBLIC_FIELDS = (
     "id",
@@ -128,8 +129,89 @@ def _lookup_error(*, action: str, active_buddy: str, task_id: str) -> dict[str, 
     )
 
 
-def _task_summary(task: dict[str, Any]) -> dict[str, Any]:
-    return {field: task.get(field) for field in _TASK_PUBLIC_FIELDS}
+def _relation_error(
+    *,
+    action: str,
+    active_buddy: str,
+    task_id: str,
+    relation: str,
+    track_id: str | None,
+) -> dict[str, Any]:
+    payload = _error_payload(
+        action=action,
+        active_buddy=active_buddy,
+        code="E_TASK_TRACK_RELATION",
+        message=f"active buddy '{active_buddy}' cannot read task '{task_id}' without a readable track relation",
+        permission_boundary="task.track_relation",
+        task_id=task_id,
+        allowed_next_actions=[
+            "Use track.list and track.get to inspect related tracks first.",
+            "Use track.join to establish active-buddy task linkage on the track.",
+        ],
+    )
+    payload.update(
+        {
+            "relation": relation,
+            "track_id": track_id,
+            "missing_preconditions": [
+                "task must be owned by active buddy or linked to a track readable by active buddy",
+            ],
+            "next_actions": [
+                {"tool": "track", "action": "list"},
+                {"tool": "track", "action": "join", "args": {"track_id": track_id}},
+            ],
+            "command_hint": track_relations.command_hint("track", "list"),
+            "no_content_leak": True,
+        }
+    )
+    return payload
+
+
+def _task_summary(task: dict[str, Any], *, active_buddy: str | None = None) -> dict[str, Any]:
+    summary = {field: task.get(field) for field in _TASK_PUBLIC_FIELDS}
+    viewer = active_buddy if isinstance(active_buddy, str) and active_buddy else str(task.get("buddy") or "")
+    artifact_slots = task.get("artifact_slots")
+    current_artifact_ids: list[str] = []
+    current_artifacts: list[dict[str, Any]] = []
+    if isinstance(artifact_slots, dict):
+        for slot in artifact_slots.values():
+            if not isinstance(slot, dict):
+                continue
+            artifact_id = slot.get("current_artifact_id")
+            if not isinstance(artifact_id, str) or not artifact_id:
+                continue
+            current_artifact_ids.append(artifact_id)
+            artifact = env_store.get_artifact(artifact_id)
+            if isinstance(artifact, dict):
+                current_artifacts.append(
+                    track_relations.artifact_summary_row(
+                        artifact,
+                        viewer,
+                        task=task,
+                    )
+                )
+    summary["owner_buddy"] = task.get("buddy")
+    summary["current_artifact_ids"] = current_artifact_ids
+    summary["current_artifacts"] = current_artifacts
+    summary["is_current_work"] = bool(task.get("status") == "active")
+    return summary
+
+
+def _task_read_decision(task: dict[str, Any], active_buddy: str) -> dict[str, Any]:
+    if task.get("buddy") == active_buddy:
+        return {"allowed": True, "relation": "owner", "track_id": task.get("track_id")}
+    track_id = task.get("track_id")
+    if not isinstance(track_id, str) or not track_id:
+        return {"allowed": False, "relation": "none", "track_id": None}
+    track = env_store.get_track(track_id)
+    if not isinstance(track, dict):
+        return {"allowed": False, "relation": "none", "track_id": track_id}
+    if track.get("status") == "archived":
+        return {"allowed": False, "relation": "archived", "track_id": track_id}
+    relation = track_relations.track_relation_for_buddy(track, active_buddy).get("relation")
+    if relation == "none":
+        return {"allowed": False, "relation": "none", "track_id": track_id}
+    return {"allowed": True, "relation": relation, "track_id": track_id}
 
 
 def _current_binding(context: TaskServiceContext) -> dict[str, Any]:
@@ -296,17 +378,37 @@ def list_tasks_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCon
         if fields_error is not None:
             return fields_error
 
-    tasks = [_task_summary(task) for task in env_store.list_tasks() if task.get("buddy") == context["active_buddy"]]
+    task_rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for task in env_store.list_tasks():
+        task_id = task.get("id")
+        if not isinstance(task_id, str) or not task_id:
+            continue
+        decision = _task_read_decision(task, context["active_buddy"])
+        if not bool(decision.get("allowed")):
+            continue
+        if task_id in seen:
+            continue
+        seen.add(task_id)
+        row = _task_summary(task, active_buddy=context["active_buddy"])
+        row["relation"] = decision.get("relation")
+        task_rows.append(row)
+    task_rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("id") or "")), reverse=True)
     return {
         "ok": True,
         "tool": "task",
         "action": action,
         "active_buddy": context["active_buddy"],
-        "tasks": tasks,
+        "tasks": task_rows,
         "current_binding": _current_binding(context),
+        "next_actions": [
+            {"tool": "task", "action": "get", "args": {"task_id": "<task-id>"}},
+            {"tool": "artifact", "action": "get", "args": {"artifact_id": "<artifact-id>"}},
+        ],
+        "command_hint": track_relations.command_hint("task", "get", {"task_id": "<task-id>"}),
         "allowed_next_actions": [
             "Use task.get with a returned task_id to inspect one task.",
-            "Use task.create to add a new task for the active buddy.",
+            "Use artifact.get with task artifact ids for full content reads.",
         ],
     }
 
@@ -324,21 +426,41 @@ def get_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceConte
     )
     if fields_error is not None:
         return fields_error
-    task, error = _owned_task(context=context, action=action, args=args)
-    if error is not None:
-        return error
-    assert task is not None
+    task_id, parse_error = _normalize_task_id(args.get("task_id"))
+    if parse_error is not None:
+        return _payload_error(action=action, active_buddy=context["active_buddy"], message=parse_error["message"])
+    if task_id is None:
+        return _payload_error(action=action, active_buddy=context["active_buddy"], message="task_id is required")
+    task = env_store.get_task(task_id)
+    if task is None:
+        return _lookup_error(action=action, active_buddy=context["active_buddy"], task_id=task_id)
+    decision = _task_read_decision(task, context["active_buddy"])
+    if not bool(decision.get("allowed")):
+        return _relation_error(
+            action=action,
+            active_buddy=context["active_buddy"],
+            task_id=task_id,
+            relation=str(decision.get("relation") or "none"),
+            track_id=decision.get("track_id") if isinstance(decision.get("track_id"), str) else None,
+        )
+    summary = _task_summary(task, active_buddy=context["active_buddy"])
+    summary["relation"] = decision.get("relation")
     return {
         "ok": True,
         "tool": "task",
         "action": action,
         "active_buddy": context["active_buddy"],
         "task_id": task["id"],
-        "task": _task_summary(task),
+        "task": summary,
+        "relation": decision.get("relation"),
         "current_binding": _current_binding(context),
+        "next_actions": [
+            {"tool": "artifact", "action": "get", "args": {"artifact_id": "<artifact-id>"}},
+        ],
+        "command_hint": track_relations.command_hint("artifact", "get", {"artifact_id": "<artifact-id>"}),
         "allowed_next_actions": [
-            "Use task.update to change title, summary, or status.",
-            "Use task.set_current to bind this task to the active instance.",
+            "Use artifact.get with returned artifact ids for full body reads.",
+            "Use task.set_current only when selecting active-buddy owned work.",
         ],
     }
 

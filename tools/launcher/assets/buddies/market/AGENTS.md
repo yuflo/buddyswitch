@@ -13,6 +13,10 @@ AGENTS.md is context projection only and not the permission source.
 - Allowed scratch root is `runs/raw/market/`.
 - Raw state is broker-only: do not edit `buddyswitch/objects/**` or `buddyswitch/content/runs/**` directly.
 - Env tool operations use `python3 scripts/env/client.py ...` through broker method `env.tool`.
+- If you see a `track_id`, use `python3 scripts/env/client.py track get --track-id <track-id>`.
+- If you see a `task_id`, use `python3 scripts/env/client.py task get --task-id <task-id>`.
+- If you see an `artifact_id`, use `python3 scripts/env/client.py artifact get --artifact-id <artifact-id>`.
+- Do not claim artifact content was read unless `artifact.get` returned the full body for that artifact id.
 - Native Codex `web_search` is unavailable in BuddySwitch product sessions; use `env_tools.search` via `python3 scripts/env/client.py search status` and `python3 scripts/env/client.py search open-browser --query "<query>" --engine google`.
 - Market browser-native discovery starts with `python3 scripts/env/client.py search open-browser --query "<query>" --engine google`, then continues with page traversal in `chrome-devtools-cockpit`.
 - Use `python3 scripts/turn_runtime.py persist --context <context> --result <result>` after execution.

@@ -15,6 +15,7 @@ from typing import Any
 MUTATES_NONE = "none"
 MUTATES_INSTANCE_BINDING = "instance_binding"
 MUTATES_RUNTIME_OBJECTS = "runtime_objects"
+MUTATES_RUNTIME_OBJECTS_AND_INSTANCE_BINDING = "runtime_objects+instance_binding"
 MUTATES_RUN_COMMIT = "run_commit"
 MUTATES_BROKER_TOKEN = "broker_token"
 MUTATES_BROWSER_SESSION = "browser_session"
@@ -44,7 +45,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 "required_permission": "task.read",
                 "authority": "manifest.permission",
                 "preconditions": ["active buddy owns task.read permission"],
-                "returns": ["tasks", "current_binding"],
+                "returns": ["tasks", "current_binding", "relation"],
             },
             {
                 "name": "get",
@@ -54,7 +55,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 "required_permission": "task.read",
                 "authority": "manifest.permission + task.buddy_scope",
                 "preconditions": ["task_id references an active-buddy task"],
-                "returns": ["task_id", "task", "current_binding"],
+                "returns": ["task_id", "task", "current_binding", "relation"],
             },
             {
                 "name": "get_current",
@@ -123,6 +124,16 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 "authority": "manifest.permission + track.lookup",
                 "preconditions": ["track_id references an existing track"],
                 "returns": ["track_id", "track", "track_context_summary", "current_binding"],
+            },
+            {
+                "name": "join",
+                "payload_fields": ["track_id", "task_id"],
+                "kind": "bind",
+                "mutates": MUTATES_RUNTIME_OBJECTS_AND_INSTANCE_BINDING,
+                "required_permission": "track.read",
+                "authority": "task.buddy_scope + track.lookup + instance.binding",
+                "preconditions": ["track_id references an existing track", "active buddy owns task.create/task.update"],
+                "returns": ["track_id", "task_id", "task", "current_binding", "relation"],
             },
             {
                 "name": "get_current",
@@ -204,13 +215,13 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "actions": [
             {
                 "name": "list",
-                "payload_fields": [],
+                "payload_fields": ["track_id"],
                 "kind": "read",
                 "mutates": MUTATES_NONE,
                 "required_permission": "artifact.read",
-                "authority": "manifest.permission + instance.binding",
-                "preconditions": ["none"],
-                "returns": ["task_id", "artifacts", "current_binding"],
+                "authority": "manifest.permission + track.lookup",
+                "preconditions": ["track_id references an existing track"],
+                "returns": ["track_id", "relation", "artifacts", "current_binding"],
             },
             {
                 "name": "get",
@@ -218,8 +229,8 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 "kind": "read",
                 "mutates": MUTATES_NONE,
                 "required_permission": "artifact.read",
-                "authority": "artifact.buddy_scope",
-                "preconditions": ["artifact_id references an active-buddy artifact"],
+                "authority": "artifact.owner_or_track_relation",
+                "preconditions": ["artifact_id references an existing readable artifact"],
                 "returns": ["artifact_id", "artifact", "current_binding"],
             },
             {
@@ -361,17 +372,57 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "tool": "handoff",
         "cli_resource": "handoff",
         "command": "python3 scripts/env/client.py handoff <operation>",
-        "scope": "handoff target and transition validation",
+        "scope": "explicit handoff records and payload validation",
         "actions": [
             {
+                "name": "list",
+                "payload_fields": ["track_id"],
+                "kind": "read",
+                "mutates": MUTATES_NONE,
+                "required_permission": "none",
+                "authority": "manifest.buddies + track.lookup",
+                "preconditions": ["none"],
+                "returns": ["handoffs", "current_binding"],
+            },
+            {
                 "name": "validate",
-                "payload_fields": ["next_buddy", "reason", "context", "track_id"],
+                "payload_fields": [
+                    "track_id",
+                    "source_task_id",
+                    "source_run_id",
+                    "target_buddy",
+                    "next_buddy",
+                    "artifact_ids",
+                    "historical_artifact_ids",
+                    "reason",
+                    "context",
+                ],
                 "kind": "validate",
                 "mutates": MUTATES_NONE,
                 "required_permission": "none",
                 "authority": "manifest.buddies + track.transition alignment",
-                "preconditions": ["next_buddy references a manifest buddy"],
+                "preconditions": ["target_buddy references a manifest buddy"],
                 "returns": ["handoff", "track_alignment", "discoverability"],
+            },
+            {
+                "name": "create",
+                "payload_fields": [
+                    "track_id",
+                    "source_task_id",
+                    "source_run_id",
+                    "target_buddy",
+                    "next_buddy",
+                    "artifact_ids",
+                    "historical_artifact_ids",
+                    "reason",
+                    "context",
+                ],
+                "kind": "write",
+                "mutates": MUTATES_RUNTIME_OBJECTS,
+                "required_permission": "none",
+                "authority": "source ownership + handoff lifecycle boundary",
+                "preconditions": ["payload satisfies handoff.validate"],
+                "returns": ["handoff", "current_binding"],
             },
         ],
     },
@@ -419,7 +470,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 "required_permission": "none",
                 "authority": "prepare.context_revision + runtime validation",
                 "preconditions": ["context revision is active"],
-                "returns": ["durable_signals"],
+                "returns": ["durable_signals", "validated_handoff", "retired_field_rejections"],
             },
         ],
     },

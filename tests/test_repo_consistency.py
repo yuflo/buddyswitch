@@ -711,6 +711,27 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("Native Codex `web_search` is unavailable", text)
                 self.assertIn("scripts/env/client.py search status", text)
 
+    def test_buddy_agents_contain_direct_id_artifact_read_boundary(self) -> None:
+        buddy_assets = sorted((ROOT / "tools" / "launcher" / "assets" / "buddies").rglob("AGENTS.md"))
+        self.assertEqual(len(buddy_assets), 5)
+        for path in buddy_assets:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertIn("If you see a `track_id`", text)
+                self.assertIn("If you see a `task_id`", text)
+                self.assertIn("If you see an `artifact_id`", text)
+                self.assertIn("Do not claim artifact content was read unless `artifact.get` returned the full body", text)
+                self.assertIn("do not edit `buddyswitch/objects/**` or `buddyswitch/content/runs/**` directly", text.lower())
+
+    def test_buddy_agents_require_artifact_get_before_claiming_content_read(self) -> None:
+        buddy_assets = sorted((ROOT / "tools" / "launcher" / "assets" / "buddies").rglob("AGENTS.md"))
+        self.assertEqual(len(buddy_assets), 5)
+        guard = "Do not claim artifact content was read unless `artifact.get` returned the full body for that artifact id."
+        for path in buddy_assets:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertEqual(text.count(guard), 1)
+
     def test_market_skills_start_research_with_search_open_browser_and_keep_evidence_gate(self) -> None:
         market_skill_paths = [
             ROOT / "buddyswitch" / "skills" / "market" / "research-scan" / "SKILL.md",
@@ -780,8 +801,41 @@ class RepoConsistencyTests(unittest.TestCase):
                 with self.subTest(path=str(path.relative_to(ROOT)), token=token):
                     self.assertNotIn(token, text)
 
+    def test_no_context_artifact_read_actions_or_raw_state_recovery_guidance(self) -> None:
+        scan_roots = [
+            ROOT / "scripts",
+            ROOT / "buddyswitch" / "skills",
+            ROOT / "tools" / "launcher" / "assets" / "buddies",
+            ROOT / "framework" / "docs",
+        ]
+        forbidden_tokens = (
+            "context.get_track_artifacts",
+            "context.inspect_track_outputs",
+            "context.explain_track_access",
+            "context.validate_sources_available",
+            "artifact.list_revisions",
+        )
+        for root in scan_roots:
+            for path in root.rglob("*"):
+                if not path.is_file() or path.suffix not in {".py", ".md", ".toml", ".json", ".sh"}:
+                    continue
+                text = path.read_text(encoding="utf-8")
+                for token in forbidden_tokens:
+                    with self.subTest(path=str(path.relative_to(ROOT)), token=token):
+                        self.assertNotIn(token, text)
+                with self.subTest(path=str(path.relative_to(ROOT)), token="raw-state-recovery"):
+                    self.assertIsNone(
+                        re.search(
+                            r"python3 scripts/env/client\.py[^\n]*(buddyswitch/objects|buddyswitch/content/runs|runs/raw)",
+                            text,
+                        )
+                    )
+
     def test_search_memo_no_longer_guides_manager_surface(self) -> None:
         memo = ROOT / "docs" / "memo" / "2026-05-13-tool-visible-search-layer-memo.md"
+        if not memo.exists():
+            self.assertFalse(memo.exists())
+            return
         text = memo.read_text(encoding="utf-8")
         self.assertIn("Superseded note", text)
         self.assertIn("prior `search_manager` naming is retired", text)

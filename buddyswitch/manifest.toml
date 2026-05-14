@@ -60,6 +60,14 @@ path = "buddyswitch/skills/test/smoke-test"
 id = "task-tool"
 path = "buddyswitch/skills/shared/task-tool"
 
+[[skills]]
+id = "handoff-tool"
+path = "buddyswitch/skills/shared/handoff-tool"
+
+[[skills]]
+id = "run-tool"
+path = "buddyswitch/skills/shared/run-tool"
+
 [[buddies]]
 id = "market"
 label = "Market"
@@ -74,6 +82,8 @@ skills = [
   "track-tool",
   "artifact-tool",
   "task-tool",
+  "handoff-tool",
+  "run-tool",
 ]
 artifact_kinds = [
   "market-scan",
@@ -89,7 +99,7 @@ permissions = ["track.read", "task.read", "task.create", "task.update", "task.ar
 id = "pm"
 label = "PM"
 scope = "Own product iteration and track progression."
-skills = ["write-prd", "track-tool", "artifact-tool", "task-tool"]
+skills = ["write-prd", "track-tool", "artifact-tool", "task-tool", "handoff-tool", "run-tool"]
 artifact_kinds = ["prd", "pm-decision", "track-note"]
 permissions = [
   "track.read",
@@ -111,7 +121,7 @@ permissions = [
 id = "design"
 label = "Design"
 scope = "Shape UI/UX prototype direction and design handoff outcomes."
-skills = ["shape-prototype", "track-tool", "artifact-tool", "task-tool"]
+skills = ["shape-prototype", "track-tool", "artifact-tool", "task-tool", "handoff-tool", "run-tool"]
 artifact_kinds = ["design-handoff", "prototype-brief"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
@@ -119,7 +129,7 @@ permissions = ["track.read", "task.read", "task.create", "task.update", "task.ar
 id = "dev"
 label = "Dev"
 scope = "Implement approved scope in project code."
-skills = ["implement-task", "skill-creator-importer", "track-tool", "artifact-tool", "task-tool"]
+skills = ["implement-task", "skill-creator-importer", "track-tool", "artifact-tool", "task-tool", "handoff-tool", "run-tool"]
 artifact_kinds = ["implementation-report", "skill-import-report"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]
 
@@ -127,6 +137,6 @@ permissions = ["track.read", "task.read", "task.create", "task.update", "task.ar
 id = "test"
 label = "Test"
 scope = "Validate behavior and report pass/fail/blocked outcomes."
-skills = ["smoke-test", "track-tool", "artifact-tool", "task-tool"]
+skills = ["smoke-test", "track-tool", "artifact-tool", "task-tool", "handoff-tool", "run-tool"]
 artifact_kinds = ["smoke-test", "test-report"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update"]

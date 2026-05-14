@@ -172,11 +172,11 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "buddyswitch/objects/tasks/<task_id>.json",
         },
         "task_context.artifacts": {
-            "description": "Full prior artifact content for the current task when available.",
+            "description": "Projection of recent current-task artifacts for context continuity; direct full-body reads use artifact.get.",
             "content": "full",
             "scope": "active_instance_task_artifacts",
             "nullable": True,
-            "decision_use": ["read_prior_outputs", "artifact_continuation"],
+            "decision_use": ["artifact_continuation", "source_orientation"],
             "source_of_truth": "buddyswitch/objects/artifacts/<artifact_id>.json",
             "summary_projection": "runtime_context.current_context_summary.artifacts",
             "max_items": 5,
@@ -201,7 +201,7 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "sorted_by": "timestamp desc, run_id desc",
         },
         "current_context_summary": {
-            "description": "Compact scan-friendly summary; use full task_context artifacts when content detail is needed.",
+            "description": "Compact scan-friendly summary; use track.get and artifact.get for direct source intake.",
             "content": "summary",
             "scope": "active_instance_projection",
             "nullable": False,
@@ -599,6 +599,33 @@ def scan_track_recent_handoffs(track_id: str, *, limit: int = 5) -> list[dict[st
     return rows[:limit]
 
 
+def scan_track_handoff_records(track_id: str, *, limit: int = 5) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    list_handoffs = getattr(env_store, "list_handoffs", None)
+    if not callable(list_handoffs):
+        return rows
+    for row in list_handoffs():
+        if not isinstance(row, dict):
+            continue
+        if row.get("track_id") != track_id:
+            continue
+        rows.append(
+            {
+                "handoff_id": row.get("id"),
+                "track_id": row.get("track_id"),
+                "source_buddy": row.get("source_buddy"),
+                "target_buddy": row.get("target_buddy"),
+                "source_task_id": row.get("source_task_id"),
+                "source_run_id": row.get("source_run_id"),
+                "artifact_ids": row.get("artifact_ids", []),
+                "status": row.get("status"),
+                "timestamp": row.get("updated_at") or row.get("created_at"),
+            }
+        )
+    rows.sort(key=lambda row: (str(row.get("timestamp") or ""), str(row.get("handoff_id") or "")), reverse=True)
+    return rows[:limit]
+
+
 def scan_task_recent_runs(task_id: str, *, limit: int = 3) -> list[dict[str, Any]]:
     run_root = env_store.RUN_CONTENT_DIR
     if not run_root.exists():
@@ -901,7 +928,9 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
         **response_sections,
         "allowed_next_actions": [
             "Use context.summarize for compact scan-friendly context.",
-            "Use task, track, or artifact tools for permitted state operations.",
+            "Use track.get to inspect artifact ids and relation context.",
+            "Use artifact.get --artifact-id <artifact-id> for full-body reads.",
+            "Use track.join --track-id <track-id> when relation is missing.",
         ],
         "allowed_next_action_options": [
             tool_responses.next_action_option(
@@ -952,15 +981,16 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "decision_surface": decision_surface,
         "candidate_tracks": candidate_tracks,
         "allowed_next_actions": [
-            "Use context.get when full task artifacts or track rows are needed.",
-            "Use context.list_sources to inspect available section names.",
+            "Use track.get --track-id <track-id> to inspect source artifact ids.",
+            "Use artifact.get --artifact-id <artifact-id> for direct full-body reads.",
+            "Use track.join --track-id <track-id> when artifact.get reports missing relation.",
         ],
         "allowed_next_action_options": [
             tool_responses.next_action_option(
-                tool="context",
+                tool="track",
                 action="get",
-                option_id="inspect_full_context_sections",
-                reason="Inspect full context sections, including full task artifacts.",
+                option_id="inspect_track_for_source_ids",
+                reason="Inspect one track summary and current artifact ids for direct intake.",
             ),
             tool_responses.next_action_option(
                 tool="track",

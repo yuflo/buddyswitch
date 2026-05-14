@@ -260,12 +260,27 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         task_id: str,
         track_id: str,
         artifact_ids: list[str],
+        source_run_id: str | None = None,
         tool_evidence: dict[str, object] | None = None,
     ) -> dict[str, object]:
         result = _clone(base)
         result["task_id"] = task_id
         result["track_id"] = track_id
         result["artifact_ids"] = artifact_ids
+        handoff = result.get("handoff")
+        if isinstance(handoff, dict):
+            if "track_id" not in handoff:
+                handoff["track_id"] = track_id
+            if "source_task_id" not in handoff:
+                handoff["source_task_id"] = task_id
+            if "source_run_id" not in handoff and isinstance(source_run_id, str) and source_run_id.strip():
+                handoff["source_run_id"] = source_run_id.strip()
+            if "artifact_ids" not in handoff:
+                handoff["artifact_ids"] = list(artifact_ids)
+            if "historical_artifact_ids" not in handoff:
+                handoff["historical_artifact_ids"] = []
+            if "target_buddy" not in handoff and isinstance(handoff.get("next_buddy"), str):
+                handoff["target_buddy"] = str(handoff["next_buddy"])
         if tool_evidence is not None:
             result["tool_evidence"] = tool_evidence
         return result
@@ -382,6 +397,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 task_id=task_ids["pm"],
                 track_id=track_id,
                 artifact_ids=pm_artifact_ids,
+                source_run_id=str(pm_context["run_envelope"]["run_id"]),
             ),
         )
 
@@ -443,6 +459,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 task_id=task_ids["market"],
                 track_id=track_id,
                 artifact_ids=market_artifact_ids,
+                source_run_id=str(market_context["run_envelope"]["run_id"]),
                 tool_evidence=evidence["tool_evidence"],
             ),
         )
@@ -481,6 +498,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 task_id=task_ids["design"],
                 track_id=track_id,
                 artifact_ids=design_artifact_ids,
+                source_run_id=str(design_context["run_envelope"]["run_id"]),
             ),
         )
 
@@ -525,6 +543,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 task_id=task_ids["dev"],
                 track_id=track_id,
                 artifact_ids=dev_artifact_ids,
+                source_run_id=str(dev_context["run_envelope"]["run_id"]),
             ),
         )
 
@@ -569,6 +588,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 task_id=task_ids["test"],
                 track_id=track_id,
                 artifact_ids=test_artifact_ids,
+                source_run_id=str(test_context["run_envelope"]["run_id"]),
             ),
         )
 
@@ -647,6 +667,256 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ("test", "run", "commit"),
         }
         self.assertTrue(required_calls.issubset(set(self.env_tool_calls)))
+
+    def test_pm_design_dev_test_direct_artifact_id_source_intake_without_context_read_action(self) -> None:
+        track_id = "track-direct-artifact-intake"
+
+        pm_instance_id = "inst-pm-direct-intake"
+        pm_instance = self._instance_json(buddy="pm", instance_id=pm_instance_id)
+        self._env_tool(
+            buddy="pm",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+            tool="track",
+            action="create",
+            args={
+                "track_id": track_id,
+                "title": "Direct Artifact Intake",
+                "summary": "Direct id intake without context artifact read action.",
+                "current_buddy": "pm",
+                "next_buddy": "market",
+            },
+        )
+        self._create_tracked_task(
+            buddy="pm",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+            task_id="task-pm-direct-intake",
+            track_id=track_id,
+            title="PM PRD",
+        )
+        pm_context = self._prepare(
+            buddy="pm",
+            text="Write PM PRD for direct-id intake.",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+        )
+        pm_artifact_ids = self._create_artifacts(
+            buddy="pm",
+            instance_json=pm_instance,
+            instance_id=pm_instance_id,
+            context=pm_context,
+            task_id="task-pm-direct-intake",
+            artifact_specs=PM_ARTIFACTS,
+        )
+        self.assertTrue(pm_artifact_ids)
+        pm_artifact_id = pm_artifact_ids[0]
+
+        design_instance_id = "inst-design-direct-intake"
+        design_instance = self._instance_json(buddy="design", instance_id=design_instance_id)
+        self._create_tracked_task(
+            buddy="design",
+            instance_json=design_instance,
+            instance_id=design_instance_id,
+            task_id="task-design-direct-intake",
+            track_id=track_id,
+            title="Design Handoff",
+        )
+        design_context = self._prepare(
+            buddy="design",
+            text="Shape design handoff.",
+            instance_json=design_instance,
+            instance_id=design_instance_id,
+        )
+        design_read_pm = self._env_tool(
+            buddy="design",
+            instance_json=design_instance,
+            instance_id=design_instance_id,
+            tool="artifact",
+            action="get",
+            args={"artifact_id": pm_artifact_id},
+        )
+        self.assertTrue(design_read_pm.get("ok"), msg=design_read_pm)
+        design_artifact_ids = self._create_artifacts(
+            buddy="design",
+            instance_json=design_instance,
+            instance_id=design_instance_id,
+            context=design_context,
+            task_id="task-design-direct-intake",
+            artifact_specs=DESIGN_ARTIFACTS,
+        )
+        self.assertTrue(design_artifact_ids)
+        design_artifact_id = design_artifact_ids[0]
+        self._env_tool(
+            buddy="design",
+            instance_json=design_instance,
+            instance_id=design_instance_id,
+            tool="handoff",
+            action="create",
+            args={
+                "track_id": track_id,
+                "source_task_id": "task-design-direct-intake",
+                "source_run_id": str(design_context["run_envelope"]["run_id"]),
+                "target_buddy": "test",
+                "artifact_ids": [design_artifact_id],
+                "historical_artifact_ids": [],
+                "reason": "Test can verify design quality while dev is not yet linked.",
+                "context": "Use design handoff artifact.",
+            },
+        )
+
+        dev_instance_id = "inst-dev-direct-intake"
+        dev_instance = self._instance_json(buddy="dev", instance_id=dev_instance_id)
+        before_join_track_get = self._env_tool(
+            buddy="dev",
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            tool="track",
+            action="get",
+            args={"track_id": track_id},
+        )
+        current_rows = before_join_track_get.get("current_artifacts")
+        self.assertIsInstance(current_rows, list, msg=before_join_track_get)
+        assert isinstance(current_rows, list)
+        visible_ids = {row.get("artifact_id") for row in current_rows if isinstance(row, dict)}
+        self.assertIn(pm_artifact_id, visible_ids)
+        self.assertIn(design_artifact_id, visible_ids)
+
+        blocked_pm_envelope = self._dispatch(
+            buddy="dev",
+            method="env.tool",
+            params={"tool": "artifact", "action": "get", "args": {"artifact_id": pm_artifact_id}},
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+        )
+        self.assertFalse(blocked_pm_envelope.get("ok"), msg=blocked_pm_envelope)
+        self.assertEqual(blocked_pm_envelope.get("tool"), "artifact")
+        self.assertEqual(blocked_pm_envelope.get("action"), "artifact.get")
+        self.assertTrue(blocked_pm_envelope.get("no_content_leak"), msg=blocked_pm_envelope)
+
+        joined = self._env_tool(
+            buddy="dev",
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            tool="track",
+            action="join",
+            args={"track_id": track_id},
+        )
+        self.assertTrue(joined.get("ok"), msg=joined)
+        dev_task_id = joined.get("task_id")
+        self.assertIsInstance(dev_task_id, str, msg=joined)
+        assert isinstance(dev_task_id, str)
+
+        read_pm_after_join = self._env_tool(
+            buddy="dev",
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            tool="artifact",
+            action="get",
+            args={"artifact_id": pm_artifact_id},
+        )
+        self.assertTrue(read_pm_after_join.get("ok"), msg=read_pm_after_join)
+        read_design_after_join = self._env_tool(
+            buddy="dev",
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            tool="artifact",
+            action="get",
+            args={"artifact_id": design_artifact_id},
+        )
+        self.assertTrue(read_design_after_join.get("ok"), msg=read_design_after_join)
+
+        dev_context = self._prepare(
+            buddy="dev",
+            text="Implement from PM and design sources.",
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+        )
+        dev_artifact_ids = self._create_artifacts(
+            buddy="dev",
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            context=dev_context,
+            task_id=dev_task_id,
+            artifact_specs=DEV_ARTIFACTS,
+        )
+        self.assertTrue(dev_artifact_ids)
+        dev_artifact_id = dev_artifact_ids[0]
+        self._env_tool(
+            buddy="dev",
+            instance_json=dev_instance,
+            instance_id=dev_instance_id,
+            tool="handoff",
+            action="create",
+            args={
+                "track_id": track_id,
+                "source_task_id": dev_task_id,
+                "source_run_id": str(dev_context["run_envelope"]["run_id"]),
+                "target_buddy": "test",
+                "artifact_ids": [dev_artifact_id],
+                "historical_artifact_ids": [],
+                "reason": "Test should verify implementation.",
+                "context": "Use implementation artifact plus upstream sources.",
+            },
+        )
+
+        test_instance_id = "inst-test-direct-intake"
+        test_instance = self._instance_json(buddy="test", instance_id=test_instance_id)
+        test_track = self._env_tool(
+            buddy="test",
+            instance_json=test_instance,
+            instance_id=test_instance_id,
+            tool="track",
+            action="get",
+            args={"track_id": track_id},
+        )
+        test_rows = test_track.get("current_artifacts")
+        self.assertIsInstance(test_rows, list, msg=test_track)
+        assert isinstance(test_rows, list)
+        test_visible_ids = {row.get("artifact_id") for row in test_rows if isinstance(row, dict)}
+        self.assertIn(pm_artifact_id, test_visible_ids)
+        self.assertIn(design_artifact_id, test_visible_ids)
+        self.assertIn(dev_artifact_id, test_visible_ids)
+
+        read_dev = self._env_tool(
+            buddy="test",
+            instance_json=test_instance,
+            instance_id=test_instance_id,
+            tool="artifact",
+            action="get",
+            args={"artifact_id": dev_artifact_id},
+        )
+        self.assertTrue(read_dev.get("ok"), msg=read_dev)
+        read_pm = self._env_tool(
+            buddy="test",
+            instance_json=test_instance,
+            instance_id=test_instance_id,
+            tool="artifact",
+            action="get",
+            args={"artifact_id": pm_artifact_id},
+        )
+        self.assertTrue(read_pm.get("ok"), msg=read_pm)
+        read_design = self._env_tool(
+            buddy="test",
+            instance_json=test_instance,
+            instance_id=test_instance_id,
+            tool="artifact",
+            action="get",
+            args={"artifact_id": design_artifact_id},
+        )
+        self.assertTrue(read_design.get("ok"), msg=read_design)
+
+        forbidden_context_actions = {
+            "get_track_artifacts",
+            "inspect_track_outputs",
+            "explain_track_access",
+            "validate_sources_available",
+        }
+        for buddy, tool, action in self.env_tool_calls:
+            with self.subTest(call=(buddy, tool, action)):
+                if tool != "context":
+                    continue
+                self.assertNotIn(action, forbidden_context_actions)
 
 
 if __name__ == "__main__":

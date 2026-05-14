@@ -182,10 +182,30 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             tool_name = spec["tool"]
             expected[tool_name] = {action["name"] for action in spec["actions"]}
 
+        self.assertIn("join", expected.get("track", set()))
+        self.assertIn("list", expected.get("handoff", set()))
+        self.assertIn("create", expected.get("handoff", set()))
+        self.assertIn("validate", expected.get("handoff", set()))
+        self.assertEqual(
+            contracts.get_action_spec("artifact", "list").get("payload_fields"),  # type: ignore[union-attr]
+            ["track_id"],
+        )
+
         dispatch_actions = dispatch.dispatch_handler_actions()
         self.assertEqual(dispatch_actions, expected)
         self.assertEqual({tool: set(actions) for tool, actions in router._TOOL_ACTIONS.items()}, expected)
         self.assertFalse(hasattr(router, "_TOOL_DISPATCHERS"))
+
+        forbidden_context_actions = {
+            "get_track_artifacts",
+            "inspect_track_outputs",
+            "explain_track_access",
+            "validate_sources_available",
+        }
+        self.assertTrue(forbidden_context_actions.isdisjoint(expected.get("context", set())))
+        for actions in expected.values():
+            for action in actions:
+                self.assertFalse(action.startswith("explain_"), msg=f"unexpected explain action: {action}")
 
     def test_router_residue_guards_require_dispatch_only_surface(self) -> None:
         importlib.import_module("env.tools.dispatch")

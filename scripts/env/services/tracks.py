@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import env_store
+from env.services import bindings as binding_service
 from env.services import context as context_service
+from env.services import track_relations
 from env_manifest import buddy_permissions, get_buddy
 from env.tools import responses as tool_responses
 
@@ -38,10 +40,12 @@ _CREATE_PERMISSION = "track.create"
 _UPDATE_PERMISSION = "track.update"
 _ADVANCE_PERMISSION = "track.advance"
 _ARCHIVE_PERMISSION = "track.archive"
+_TASK_CREATE_PERMISSION = "task.create"
 _TASK_UPDATE_PERMISSION = "task.update"
 _IDENTITY_FIELDS = {"active_buddy", "buddy", "instance_id"}
 _TRACK_ID_FIELDS = {"track_id"}
 _LINK_FIELDS = {"track_id", "task_id"} | _IDENTITY_FIELDS
+_JOIN_FIELDS = {"track_id", "task_id"} | _IDENTITY_FIELDS
 _CREATE_FIELDS = {"track_id", "title", "status", "current_buddy", "next_buddy", "summary"} | _IDENTITY_FIELDS
 _UPDATE_FIELDS = {"track_id", "title", "status", "current_buddy", "next_buddy", "summary"} | _IDENTITY_FIELDS
 _ADVANCE_FIELDS = {"track_id", "status", "current_buddy", "next_buddy", "summary"} | _IDENTITY_FIELDS
@@ -286,25 +290,11 @@ def _task_summary(task: dict[str, Any]) -> dict[str, Any]:
     return {field: task.get(field) for field in _TASK_PUBLIC_FIELDS}
 
 
-def _artifact_decision_summary(artifact: dict[str, Any]) -> dict[str, Any]:
-    source_buddy = artifact.get("buddy")
-    source_run = artifact.get("source_run_id")
-    is_current = bool(artifact.get("is_current"))
-    return {
-        "id": artifact.get("id"),
-        "kind": artifact.get("kind"),
-        "title": artifact.get("title"),
-        "summary": artifact.get("summary", ""),
-        "source_buddy": source_buddy,
-        "source_run": source_run,
-        "revision": artifact.get("revision"),
-        "is_current": is_current,
-        "currentness": "current" if is_current else "superseded",
-        "updated_at": artifact.get("updated_at"),
-    }
+def _artifact_decision_summary(artifact: dict[str, Any], *, active_buddy: str) -> dict[str, Any]:
+    return track_relations.artifact_summary_row(artifact, active_buddy)
 
 
-def _task_current_artifact_rows(task: dict[str, Any]) -> list[dict[str, Any]]:
+def _task_current_artifact_rows(task: dict[str, Any], *, active_buddy: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     artifact_slots = task.get("artifact_slots")
     if not isinstance(artifact_slots, dict):
@@ -319,12 +309,12 @@ def _task_current_artifact_rows(task: dict[str, Any]) -> list[dict[str, Any]]:
         artifact = env_store.get_artifact(artifact_id)
         if not isinstance(artifact, dict):
             continue
-        rows.append(_artifact_decision_summary(artifact))
-    rows.sort(key=lambda item: (str(item.get("kind") or ""), str(item.get("id") or "")))
+        rows.append(_artifact_decision_summary(artifact, active_buddy=active_buddy))
+    rows.sort(key=lambda item: (str(item.get("kind") or ""), str(item.get("artifact_id") or "")))
     return rows
 
 
-def _track_context_summary(track: dict[str, Any]) -> dict[str, Any]:
+def _track_context_summary(track: dict[str, Any], *, active_buddy: str) -> dict[str, Any]:
     tasks: list[dict[str, Any]] = []
     for task_id in sorted(track.get("task_ids", [])):
         if not isinstance(task_id, str) or not task_id:
@@ -338,7 +328,7 @@ def _track_context_summary(track: dict[str, Any]) -> dict[str, Any]:
                 "buddy": task.get("buddy"),
                 "status": task.get("status"),
                 "summary": task.get("summary", ""),
-                "current_artifacts": _task_current_artifact_rows(task),
+                "current_artifacts": _task_current_artifact_rows(task, active_buddy=active_buddy),
             }
         )
 
@@ -358,11 +348,70 @@ def _track_context_summary(track: dict[str, Any]) -> dict[str, Any]:
                 "timestamp": row.get("timestamp"),
             }
         )
+    track_id = str(track.get("id") or "")
     return {
-        "track_id": track.get("id"),
+        "track_id": track_id,
         "tasks": tasks,
+        "current_artifacts": track_relations.current_artifact_rows_for_track(track_id, active_buddy),
         "recent_handoffs": compact_handoffs,
     }
+
+
+def _latest_handoff_summary_row(track_id: str) -> dict[str, Any] | None:
+    rows: list[tuple[str, str, dict[str, Any]]] = []
+
+    for row in env_store.list_handoffs():
+        if row.get("track_id") != track_id:
+            continue
+        if row.get("status") != "active":
+            continue
+        target_buddy = row.get("target_buddy")
+        if not isinstance(target_buddy, str) or not target_buddy.strip():
+            continue
+        timestamp = str(row.get("updated_at") or row.get("created_at") or "")
+        rows.append(
+            (
+                timestamp,
+                f"handoff:{row.get('id')}",
+                {
+                    "source_type": "handoff_record",
+                    "source_buddy": row.get("source_buddy"),
+                    "target_buddy": target_buddy.strip(),
+                    "source_task_id": row.get("source_task_id"),
+                    "source_run_id": row.get("source_run_id"),
+                    "reason": row.get("reason"),
+                    "timestamp": timestamp,
+                },
+            )
+        )
+
+    for handoff in context_service.scan_track_recent_handoffs(track_id, limit=20):
+        if not isinstance(handoff, dict):
+            continue
+        target_buddy = handoff.get("next_buddy")
+        if not isinstance(target_buddy, str) or not target_buddy.strip():
+            continue
+        timestamp = str(handoff.get("timestamp") or "")
+        rows.append(
+            (
+                timestamp,
+                f"run:{handoff.get('run_id')}",
+                {
+                    "source_type": "run_audit",
+                    "source_buddy": handoff.get("buddy_id"),
+                    "target_buddy": target_buddy.strip(),
+                    "source_task_id": handoff.get("task_id"),
+                    "source_run_id": handoff.get("run_id"),
+                    "reason": handoff.get("reason"),
+                    "timestamp": timestamp,
+                },
+            )
+        )
+
+    if not rows:
+        return None
+    rows.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return rows[0][2]
 
 
 def _track_discovery(
@@ -386,13 +435,13 @@ def _track_discovery(
             break
 
     recent_to_active = False
-    if isinstance(track_id, str) and track_id:
-        recent_handoffs = context_service.scan_track_recent_handoffs(track_id, limit=1)
-        if recent_handoffs:
-            first = recent_handoffs[0]
-            if isinstance(first, dict) and first.get("next_buddy") == active_buddy:
-                recent_to_active = True
-                reasons.append("recent_handoff.next_buddy == active_buddy")
+    latest_handoff = _latest_handoff_summary_row(track_id) if isinstance(track_id, str) and track_id else None
+    if isinstance(latest_handoff, dict) and latest_handoff.get("target_buddy") == active_buddy:
+        recent_to_active = True
+        if latest_handoff.get("source_type") == "run_audit":
+            reasons.append("recent_handoff.next_buddy == active_buddy")
+        else:
+            reasons.append("recent_handoff.target_buddy == active_buddy")
 
     if is_next_buddy:
         reasons.append("track.next_buddy == active_buddy")
@@ -413,10 +462,12 @@ def _track_discovery(
     priority: int | None = None
     if recent_to_active and is_next_buddy:
         priority = 0
-    elif is_next_buddy:
+    elif recent_to_active:
         priority = 1
-    elif participates:
+    elif is_next_buddy:
         priority = 2
+    elif participates:
+        priority = 3
 
     return {
         "active_buddy_role": active_role,
@@ -583,6 +634,16 @@ def list_tracks_for_active_buddy(*, args: dict[str, Any], context: TrackServiceC
         row = _track_summary(track)
         discovery, priority = _track_discovery(track=track, active_buddy=context["active_buddy"])
         row["discovery"] = discovery
+        relation = track_relations.track_relation_for_buddy(track, context["active_buddy"])
+        row["active_buddy_relation"] = relation.get("relation")
+        latest_handoff = _latest_handoff_summary_row(str(track.get("id") or ""))
+        if isinstance(latest_handoff, dict):
+            row["latest_handoff_summary"] = latest_handoff
+        row["command_hint"] = track_relations.command_hint(
+            "track",
+            "get",
+            {"track_id": str(track.get("id") or "<track-id>")},
+        )
         tracks.append(row)
         if priority is not None:
             track_id = str(track.get("id") or "")
@@ -609,9 +670,14 @@ def list_tracks_for_active_buddy(*, args: dict[str, Any], context: TrackServiceC
         tracks=tracks,
         allowed_next_actions=[
             "Use track.get with a returned track_id to inspect one track.",
-            "Ask PM to create or advance lifecycle state when needed.",
+            "Use track.join when active-buddy relation is missing for source intake.",
         ],
     )
+    payload["next_actions"] = [
+        {"tool": "track", "action": "get", "args": {"track_id": "<track-id>"}},
+        {"tool": "track", "action": "join", "args": {"track_id": "<track-id>"}},
+    ]
+    payload["command_hint"] = track_relations.command_hint("track", "get", {"track_id": "<track-id>"})
     payload["discovery_summary"] = {
         "active_buddy": context["active_buddy"],
         "candidate_track_ids": candidate_ids,
@@ -641,11 +707,25 @@ def get_track_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCon
         context=context,
         track=track,
         allowed_next_actions=[
-            "Use track.attach_task to link active-buddy task work to this track.",
-            "Ask PM to update or advance track lifecycle state.",
+            "Use artifact.get with artifact ids from track_context_summary.current_artifacts.",
+            "Use track.join when relation or active task linkage is missing.",
         ],
     )
-    payload["track_context_summary"] = _track_context_summary(track)
+    relation = track_relations.track_relation_for_buddy(track, context["active_buddy"])
+    summary = _track_context_summary(track, active_buddy=context["active_buddy"])
+    payload["relation"] = relation.get("relation")
+    payload["current_artifacts"] = summary.get("current_artifacts", [])
+    payload["recent_handoffs"] = summary.get("recent_handoffs", [])
+    payload["track_context_summary"] = summary
+    payload["next_actions"] = [
+        {"tool": "artifact", "action": "get", "args": {"artifact_id": "<artifact-id>"}},
+        {"tool": "track", "action": "join", "args": {"track_id": track.get("id")}},
+    ]
+    payload["command_hint"] = track_relations.command_hint(
+        "artifact",
+        "get",
+        {"artifact_id": "<artifact-id>"},
+    )
     return payload
 
 
@@ -704,6 +784,179 @@ def get_current_track(*, args: dict[str, Any], context: TrackServiceContext) -> 
             "Continue work using the current track binding.",
         ],
     )
+
+
+def _active_buddy_tasks_for_track(track_id: str, active_buddy: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    track = env_store.get_track(track_id)
+    if not isinstance(track, dict):
+        return rows
+    for task_id in track.get("task_ids", []):
+        if not isinstance(task_id, str) or not task_id:
+            continue
+        task = env_store.get_task(task_id)
+        if not isinstance(task, dict):
+            continue
+        if task.get("buddy") != active_buddy:
+            continue
+        if task.get("status") == "archived":
+            continue
+        rows.append(task)
+    rows.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
+    return rows
+
+
+def _next_join_task_id(active_buddy: str, track_id: str) -> str:
+    track = env_store.get_track(track_id)
+    seed = env_store.slugify(str(track.get("title") or track_id)) if isinstance(track, dict) else track_id
+    while True:
+        candidate = f"task-{active_buddy}-join-{seed}-{uuid.uuid4().hex[:8]}"
+        if env_store.get_task(candidate) is None:
+            return candidate
+
+
+def join_track_for_active_buddy(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
+    action = "track.join"
+    fields_error = _ensure_allowed_fields(
+        action=action,
+        active_buddy=context["active_buddy"],
+        args=args,
+        allowed_fields=_JOIN_FIELDS,
+    )
+    if fields_error is not None:
+        return fields_error
+    for permission in (_READ_PERMISSION, _TASK_CREATE_PERMISSION, _TASK_UPDATE_PERMISSION):
+        permission_error = _require_permission(context, permission, action)
+        if permission_error is not None:
+            return permission_error
+
+    track, error = _get_track(context=context, action=action, args=args)
+    if error is not None:
+        return error
+    assert track is not None
+    track_id = str(track.get("id"))
+    if track.get("status") == "archived":
+        return _error_payload(
+            action=action,
+            active_buddy=context["active_buddy"],
+            code="E_TRACK_LIFECYCLE_STATUS",
+            message=f"track '{track_id}' is archived",
+            permission_boundary="track.lifecycle_status",
+            track_id=track_id,
+            allowed_next_actions=[
+                "Choose a non-archived track.",
+                "Ask PM to create a new active track for continued work.",
+            ],
+        )
+
+    selected_task: dict[str, Any] | None = None
+    created_task = False
+    requested_task_id = args.get("task_id")
+    if requested_task_id is not None:
+        task, task_error = _get_owned_task(context=context, action=action, args={"task_id": requested_task_id})
+        if task_error is not None:
+            return task_error
+        assert task is not None
+        if task.get("status") == "archived":
+            return _error_payload(
+                action=action,
+                active_buddy=context["active_buddy"],
+                code="E_TASK_STATUS",
+                message=f"task '{task['id']}' is archived and cannot be selected by track.join",
+                permission_boundary="task.status",
+                track_id=track_id,
+                task_id=str(task["id"]),
+                allowed_next_actions=[
+                    "Select a non-archived active-buddy task.",
+                    "Use track.join without --task-id to create a fresh task when no active candidate exists.",
+                ],
+            )
+        existing_track = task.get("track_id")
+        if isinstance(existing_track, str) and existing_track and existing_track != track_id:
+            return _linkage_error(
+                action=action,
+                active_buddy=context["active_buddy"],
+                track_id=track_id,
+                task_id=str(task["id"]),
+                message=f"task '{task['id']}' is already bound to track '{existing_track}'",
+            )
+        if existing_track != track_id:
+            task = env_store.register_task_to_track(track_id, str(task["id"]))
+        selected_task = task
+    else:
+        active_tasks = _active_buddy_tasks_for_track(track_id, context["active_buddy"])
+        if len(active_tasks) == 0:
+            new_task_id = _next_join_task_id(context["active_buddy"], track_id)
+            selected_task = env_store.create_task(
+                new_task_id,
+                f"Join {track.get('title')}",
+                buddy=context["active_buddy"],
+                track_id=track_id,
+                status="active",
+                summary=f"Joined track {track_id} for {context['active_buddy']} work.",
+                initial_run_id=None,
+            )
+            created_task = True
+        elif len(active_tasks) == 1:
+            selected_task = active_tasks[0]
+        else:
+            candidates = [str(task.get("id")) for task in active_tasks if isinstance(task.get("id"), str)]
+            return _error_payload(
+                action=action,
+                active_buddy=context["active_buddy"],
+                code="E_TRACK_JOIN_AMBIGUITY",
+                message="multiple active-buddy tasks are already attached to this track; choose one explicitly",
+                permission_boundary="track.join_ambiguity",
+                track_id=track_id,
+                allowed_next_actions=[
+                    "Retry track.join with --task-id <task-id> using one returned candidate.",
+                    "Archive or detach stale tasks before retrying automatic join selection.",
+                ],
+            ) | {
+                "candidate_task_ids": candidates,
+                "next_actions": [
+                    {"tool": "track", "action": "join", "args": {"track_id": track_id, "task_id": "<task-id>"}},
+                ],
+                "command_hint": track_relations.command_hint(
+                    "track",
+                    "join",
+                    {"track_id": track_id, "task_id": "<task-id>"},
+                ),
+                "relation": "participant",
+            }
+
+    assert isinstance(selected_task, dict)
+    binding = binding_service.write_instance_binding(
+        context=context,
+        task_id=str(selected_task["id"]),
+        track_id=track_id,
+    )
+    track_after = env_store.get_track(track_id) or track
+    relation = track_relations.track_relation_for_buddy(track_after, context["active_buddy"])
+    readable_artifacts = track_relations.current_artifact_rows_for_track(track_id, context["active_buddy"])
+    return {
+        "ok": True,
+        "tool": "track",
+        "action": action,
+        "active_buddy": context["active_buddy"],
+        "track_id": track_id,
+        "task_id": selected_task["id"],
+        "task": _task_summary(selected_task),
+        "created_task": created_task,
+        "current_task_selected": True,
+        "relation": relation.get("relation"),
+        "readable_artifact_count": len([row for row in readable_artifacts if row.get("readable_by_current_buddy")]),
+        "current_binding": binding,
+        "next_actions": [
+            {"tool": "artifact", "action": "get", "args": {"artifact_id": "<artifact-id>"}},
+            {"tool": "track", "action": "get", "args": {"track_id": track_id}},
+        ],
+        "command_hint": track_relations.command_hint("artifact", "get", {"artifact_id": "<artifact-id>"}),
+        "allowed_next_actions": [
+            "Use track.get to inspect current artifact ids after join.",
+            "Use artifact.get with returned artifact ids for full body reads.",
+        ],
+    }
 
 
 def create_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:

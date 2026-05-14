@@ -103,6 +103,10 @@ def _parse_args() -> argparse.Namespace:
     get_track = track_sub.add_parser("get", help="Get track by id")
     get_track.add_argument("--track-id", required=True)
 
+    join_track = track_sub.add_parser("join", help="Create or reuse active-buddy task and bind it to a track")
+    join_track.add_argument("--track-id", required=True)
+    join_track.add_argument("--task-id")
+
     track_sub.add_parser("get-current", help="Get active instance current track binding")
 
     update_track = track_sub.add_parser("update", help="Update PM-owned track metadata")
@@ -125,7 +129,8 @@ def _parse_args() -> argparse.Namespace:
     artifact = sub.add_parser("artifact", help="Artifact env tool operations")
     artifact_sub = artifact.add_subparsers(dest="operation", required=True)
 
-    artifact_sub.add_parser("list", help="List artifacts for the active current task")
+    artifact_list = artifact_sub.add_parser("list", help="List track artifact summaries")
+    artifact_list.add_argument("--track-id", required=True)
 
     get_artifact = artifact_sub.add_parser("get", help="Get active-buddy artifact by id")
     get_artifact.add_argument("--artifact-id", required=True)
@@ -167,8 +172,14 @@ def _parse_args() -> argparse.Namespace:
     handoff = sub.add_parser("handoff", help="Handoff validation env operations")
     handoff_sub = handoff.add_subparsers(dest="operation", required=True)
 
+    list_handoff = handoff_sub.add_parser("list", help="List handoff records and run-audit handoffs")
+    list_handoff.add_argument("--track-id")
+
     validate_handoff = handoff_sub.add_parser("validate", help="Validate a handoff payload")
     validate_handoff.add_argument("--payload", required=True, type=Path)
+
+    create_handoff = handoff_sub.add_parser("create", help="Create an explicit handoff record")
+    create_handoff.add_argument("--payload", required=True, type=Path)
 
     evidence = sub.add_parser("evidence", help="Browser evidence env operations")
     evidence_sub = evidence.add_subparsers(dest="operation", required=True)
@@ -252,6 +263,15 @@ def _track_args_from_cli(args: argparse.Namespace) -> dict[str, Any]:
         if not isinstance(track_id, str) or not track_id.strip():
             raise ValueError("track id is required")
         return {"track_id": track_id.strip()}
+    if operation == "join":
+        track_id = getattr(args, "track_id", None)
+        if not isinstance(track_id, str) or not track_id.strip():
+            raise ValueError("track id is required")
+        payload: dict[str, Any] = {"track_id": track_id.strip()}
+        task_id = getattr(args, "task_id", None)
+        if isinstance(task_id, str) and task_id.strip():
+            payload["task_id"] = task_id.strip()
+        return payload
     if operation in {"attach-task", "detach-task"}:
         track_id = getattr(args, "track_id", None)
         task_id = getattr(args, "task_id", None)
@@ -285,7 +305,10 @@ def _artifact_args_from_cli(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError("kind must be a non-empty string when provided")
         return {"kind": kind.strip()}
     if operation == "list":
-        return {}
+        track_id = getattr(args, "track_id", None)
+        if not isinstance(track_id, str) or not track_id.strip():
+            raise ValueError("track id is required")
+        return {"track_id": track_id.strip()}
     raise ValueError(f"unsupported artifact operation: {operation}")
 
 
@@ -322,11 +345,18 @@ def _binding_args_from_cli(args: argparse.Namespace) -> dict[str, Any]:
 
 def _handoff_args_from_cli(args: argparse.Namespace) -> dict[str, Any]:
     operation = args.operation
-    if operation == "validate":
+    if operation in {"validate", "create"}:
         payload_path = getattr(args, "payload", None)
         if not isinstance(payload_path, Path):
             raise ValueError("payload file is required")
         return _load_json_object(payload_path)
+    if operation == "list":
+        track_id = getattr(args, "track_id", None)
+        if track_id is None:
+            return {}
+        if not isinstance(track_id, str) or not track_id.strip():
+            raise ValueError("track id must be a non-empty string when provided")
+        return {"track_id": track_id.strip()}
     raise ValueError(f"unsupported handoff operation: {operation}")
 
 
