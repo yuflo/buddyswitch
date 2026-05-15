@@ -491,6 +491,10 @@ def semantic_contract_errors() -> list[str]:
     return semantics.semantic_coverage_errors(TOOL_REGISTRY)
 
 
+def compact_tool_affordances() -> dict[str, dict[str, str]]:
+    return semantics.compact_tool_affordances()
+
+
 def env_tools_description() -> dict[str, dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
     for spec in TOOL_REGISTRY:

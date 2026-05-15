@@ -1386,6 +1386,9 @@ exec "$real_git" "$@"
                 self.assertIn("task-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
                 self.assertIn("track-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
                 self.assertIn("artifact-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
+                buddy_permissions = set(row for row in buddy.get("permissions", []) if isinstance(row, str))
+                if {"buddybox.read", "buddybox.write", "buddybox.delete"} & buddy_permissions:
+                    self.assertIn("buddybox-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
                 for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
                     self.assertNotIn(removed, installed_skill_ids, msg=f"buddy={buddy_id}")
 

@@ -187,6 +187,7 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
             "Use buddybox.desc to review private local workspace semantics.",
             "Use buddybox.list with an active buddy local prefix.",
         ],
+        allowed_next_action_options=_rejection_options(action),
     )
 
 
@@ -215,6 +216,7 @@ def _reject_scope(
             "Use buddybox.desc to confirm the private local boundary.",
             "Retry with a path under the active buddy local root.",
         ],
+        allowed_next_action_options=_rejection_options(action),
     )
 
 
@@ -233,6 +235,153 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str
     if unknown:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")
     return None
+
+
+def _normalize_action_name(action: str) -> str:
+    if action.startswith("buddybox."):
+        return action.split(".", 1)[1]
+    return action
+
+
+def _operation_semantic_ref(action: str) -> str:
+    return f"context.get.operation_semantics['buddybox.{action}']"
+
+
+def _tool_catalog_ref(tool: str) -> str:
+    return f"context.get.tool_catalog['{tool}']"
+
+
+def _next_option(
+    *,
+    tool: str,
+    action: str,
+    option_id: str,
+    reason: str,
+    preconditions: list[str] | None = None,
+) -> dict[str, Any]:
+    source_refs = [_tool_catalog_ref(tool), f"context.get.operation_semantics['{tool}.{action}']"]
+    return tool_responses.next_action_option(
+        tool=tool,
+        action=action,
+        option_id=option_id,
+        reason=reason,
+        preconditions=preconditions,
+        source_refs=source_refs,
+    )
+
+
+def _buddybox_retry_option(action: str) -> dict[str, Any]:
+    action_name = _normalize_action_name(action)
+    return _next_option(
+        tool="buddybox",
+        action=action_name,
+        option_id="retry_active_buddy_private_path",
+        reason="Retry the same buddybox action with a path under the active buddy private local root.",
+        preconditions=[f"path stays under <active_buddy>/... for buddybox.{action_name}"],
+    )
+
+
+def _rejection_options(action: str) -> list[dict[str, Any]]:
+    return [
+        _next_option(
+            tool="buddybox",
+            action="desc",
+            option_id="review_buddybox_private_boundary",
+            reason="Review the active buddy private-local boundary before retrying.",
+        ),
+        _buddybox_retry_option(action),
+    ]
+
+
+def _desc_options() -> list[dict[str, Any]]:
+    return [
+        _next_option(
+            tool="buddybox",
+            action="list",
+            option_id="inspect_private_buddybox_summaries",
+            reason="Inspect private local file summary rows in the active buddy workspace.",
+        ),
+        _next_option(
+            tool="buddybox",
+            action="write",
+            option_id="write_private_buddybox_file",
+            reason="Create or replace one active buddy private local file.",
+        ),
+    ]
+
+
+def _list_options() -> list[dict[str, Any]]:
+    return [
+        _next_option(
+            tool="buddybox",
+            action="read",
+            option_id="read_private_buddybox_file",
+            reason="Read one private local file chosen from list summaries.",
+        ),
+        _next_option(
+            tool="buddybox",
+            action="write",
+            option_id="write_private_buddybox_file",
+            reason="Create or replace one active buddy private local file.",
+        ),
+    ]
+
+
+def _read_options() -> list[dict[str, Any]]:
+    return [
+        _next_option(
+            tool="buddybox",
+            action="write",
+            option_id="replace_private_buddybox_file",
+            reason="Replace the current private local file with an updated version.",
+        ),
+        _next_option(
+            tool="artifact",
+            action="create_revision",
+            option_id="promote_readable_content_when_needed",
+            reason="Use artifact.create_revision when the host decides content should become product-readable.",
+        ),
+    ]
+
+
+def _write_options() -> list[dict[str, Any]]:
+    return [
+        _next_option(
+            tool="buddybox",
+            action="read",
+            option_id="confirm_private_buddybox_file",
+            reason="Confirm the private local file that was just written.",
+        ),
+        _next_option(
+            tool="buddybox",
+            action="list",
+            option_id="inspect_private_buddybox_summaries",
+            reason="Inspect private local summaries after the write.",
+        ),
+        _next_option(
+            tool="artifact",
+            action="create_revision",
+            option_id="promote_readable_content_when_needed",
+            reason="Use artifact.create_revision when the host decides content should become product-readable.",
+        ),
+    ]
+
+
+def _delete_options() -> list[dict[str, Any]]:
+    return [
+        _next_option(
+            tool="buddybox",
+            action="list",
+            option_id="inspect_private_buddybox_summaries",
+            reason="Inspect remaining private local summaries after delete.",
+        ),
+        _next_option(
+            tool="buddybox",
+            action="write",
+            option_id="write_private_buddybox_file",
+            reason="Create a replacement private local file if needed.",
+        ),
+    ]
 
 
 def describe_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxServiceContext) -> dict[str, Any]:
@@ -258,6 +407,7 @@ def describe_buddybox_for_active_buddy(*, args: dict[str, Any], context: Buddybo
         durability="none",
         read_scope="active-buddy private local workspace description",
         allowed_next_actions=allowed_next_actions,
+        allowed_next_action_options=_desc_options(),
         extra=desc_payload,
     )
 
@@ -312,6 +462,7 @@ def list_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
             "Use buddybox.read for one active buddy private local file.",
             "Use buddybox.write to create or replace one active buddy private local file.",
         ],
+        allowed_next_action_options=_list_options(),
         extra={"files": files},
     )
 
@@ -383,6 +534,7 @@ def read_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
             "Use buddybox.write to replace this private local file.",
             "When cross-buddy readability is needed, create an artifact with readable content.",
         ],
+        allowed_next_action_options=_read_options(),
         extra=payload,
     )
 
@@ -461,6 +613,7 @@ def write_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSe
             "Use buddybox.read to confirm this private local file.",
             "Keep iterating locally, or create an artifact when host decides readable promotion is needed.",
         ],
+        allowed_next_action_options=_write_options(),
         extra=payload,
     )
 
@@ -503,5 +656,6 @@ def delete_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxS
             "Use buddybox.list to inspect remaining private local summaries.",
             "Use buddybox.write to create a replacement private local file if needed.",
         ],
+        allowed_next_action_options=_delete_options(),
         extra={"path": normalized, "deleted": deleted, "private_to_buddy": active_buddy},
     )

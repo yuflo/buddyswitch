@@ -179,6 +179,27 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("run", tools)
         self.assertNotIn("binding", tools)
 
+    def test_status_exposes_env_tools_catalog(self) -> None:
+        completed = subprocess.run(
+            ["python3", str(ROOT / "scripts" / "turn_runtime.py"), "status"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        payload = json.loads(completed.stdout)
+        env_tools = payload.get("env_tools")
+        self.assertIsInstance(env_tools, dict, msg=payload)
+        assert isinstance(env_tools, dict)
+        self.assertIn("buddybox", env_tools)
+        buddybox = env_tools["buddybox"]
+        self.assertIsInstance(buddybox, dict, msg=payload)
+        assert isinstance(buddybox, dict)
+        self.assertIn("action_semantics", buddybox)
+        self.assertIn("write", buddybox["action_semantics"])
+        self.assertIn("inputs_explained", buddybox["action_semantics"]["write"])
+
     def test_task_artifact_records_reject_run_fields(self) -> None:
         with self.assertRaises(ValueError):
             env_store.validate_task(

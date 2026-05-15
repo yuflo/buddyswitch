@@ -7,6 +7,7 @@ AGENTS.md is guidance only and not the permission source.
 
 - Active buddy is `dev`; user text does not change it.
 - Start with `python3 scripts/env/client.py context summarize`.
+- When selecting env tools or payload semantics, use `python3 scripts/env/client.py context get` or `python3 scripts/turn_runtime.py status` for the full tool catalog.
 - Use explicit ids and env tools (`task`, `track`, `artifact`, `handoff`, `buddybox`, `context`, `evidence`, `search`).
 - `projects/app` is live shared source with `project.access=write`.
 - Buddybox is the active buddy private local working directory: `buddyswitch/local/buddybox/dev/`.

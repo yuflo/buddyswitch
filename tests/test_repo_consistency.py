@@ -208,10 +208,31 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("run", env_tools)
         self.assertNotIn("binding", env_tools)
         self.assertEqual(tool_contracts.semantic_contract_errors(), [])
+        compact_affordances = tool_contracts.compact_tool_affordances()
+        self.assertEqual(set(compact_affordances), {"buddybox", "artifact"})
+        runtime_env_tools = turn_runtime._build_env_tools_desc()
+        self.assertIn("buddybox", runtime_env_tools)
+        self.assertIn("artifact", runtime_env_tools)
         for tool, row in env_tools.items():
             with self.subTest(tool=tool):
                 self.assertEqual(row.get("broker_method"), "env.tool")
                 self.assertIn("python3 scripts/env/client.py", str(row.get("command", "")))
+        affordances = tool_contracts.compact_tool_affordances()
+        self.assertEqual(set(affordances), {"buddybox", "artifact"})
+        self.assertIn("action_semantics", env_tools["buddybox"])
+
+    def test_active_runtime_feedback_points_to_current_tool_discovery_surfaces(self) -> None:
+        retired_hits = self._scan(r"prepare\.runtime_context\.env_tools")
+        self.assertEqual(retired_hits, [], msg="\n".join(retired_hits))
+
+        router_text = (ROOT / "scripts" / "env" / "tools" / "router.py").read_text(encoding="utf-8")
+        for token in (
+            "context.get.tool_catalog",
+            "context.summarize.tool_affordances",
+            "scripts/turn_runtime.py status",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, router_text)
 
     def test_active_docs_teach_runless_flow(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -235,6 +256,7 @@ class RepoConsistencyTests(unittest.TestCase):
             ROOT / "buddyswitch" / "skills" / "shared" / "track-tool" / "SKILL.md",
             ROOT / "buddyswitch" / "skills" / "shared" / "artifact-tool" / "SKILL.md",
             ROOT / "buddyswitch" / "skills" / "shared" / "handoff-tool" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "shared" / "buddybox-tool" / "SKILL.md",
         ]
         for path in shared:
             text = path.read_text(encoding="utf-8")
@@ -244,6 +266,48 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("turn_runtime.py persist", lowered)
                 self.assertNotIn("prepare.runtime_context", lowered)
                 self.assertIn("env.tool", lowered)
+
+    def test_role_contracts_keep_buddybox_guidance_short_and_role_specific(self) -> None:
+        expectations = {
+            "pm": (
+                "pm-owned private local drafts",
+                "lightweight prototypes",
+                "artifact when content must become product-readable",
+            ),
+            "design": (
+                "private local prototypes",
+                "exports",
+                "artifact for design handoffs or prototype briefs",
+            ),
+            "dev": (
+                "private logs",
+                "generated files",
+                "binary outputs",
+                "artifact for implementation reports",
+            ),
+            "test": (
+                "private logs",
+                "raw evidence files",
+                "artifact for pass/fail reports",
+            ),
+            "market": (
+                "private research exports",
+                "logs",
+                "artifact for market deliverables",
+            ),
+        }
+        for buddy, tokens in expectations.items():
+            text = (ROOT / "framework" / "contracts" / f"{buddy}.md").read_text(encoding="utf-8").lower()
+            with self.subTest(buddy=buddy):
+                for token in tokens:
+                    self.assertIn(token, text)
+                for forbidden in (
+                    "payload_fields",
+                    "action_semantics",
+                    "prepare.runtime_context",
+                    "always create artifact",
+                ):
+                    self.assertNotIn(forbidden, text)
 
     def test_buddy_agents_contain_direct_id_artifact_read_boundary(self) -> None:
         buddy_assets = sorted((ROOT / "tools" / "launcher" / "assets" / "buddies").rglob("AGENTS.md"))
@@ -312,6 +376,42 @@ class RepoConsistencyTests(unittest.TestCase):
         pattern = "|".join((legacy_prepare, legacy_persist_key, prepare_subparser, persist_subparser))
         completed = subprocess.run(
             ["rg", "-n", pattern, "scripts", "tests", "framework"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_no_hardcoded_intent_to_buddybox_phrase_routing(self) -> None:
+        pattern = "|".join(
+            (
+                "prototype means",
+                "quickly build means",
+                "simple page prototype means",
+                "route prototype to buddybox",
+                "hardcoded trigger",
+                "always create artifact",
+            )
+        )
+        completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                pattern,
+                "README.md",
+                "AGENTS.md",
+                "scripts",
+                "framework",
+                "buddyswitch",
+                "tools",
+                "-g",
+                "!docs/memo/**",
+                "-g",
+                "!docs/spec/**",
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,

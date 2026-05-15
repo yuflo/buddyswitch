@@ -163,6 +163,21 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertIsInstance(response.get("retry_guidance"), str, msg=response)
                 self.assertEqual(self._tasks_snapshot(), before_tasks)
                 self.assertEqual(self._load_instance(instance_json), before_instance)
+                recovery_text = json.dumps(
+                    {
+                        "retry_guidance": response.get("retry_guidance"),
+                        "allowed_next_actions": response.get("allowed_next_actions"),
+                    },
+                    ensure_ascii=True,
+                ).lower()
+                self.assertNotIn("prepare.runtime_context", recovery_text)
+                if case in {"unknown_tool", "unknown_task_action", "non_object_args"}:
+                    self.assertTrue(
+                        "context.get.tool_catalog" in recovery_text
+                        or "scripts/turn_runtime.py status" in recovery_text
+                        or "context.summarize.tool_affordances" in recovery_text,
+                        msg=response,
+                    )
 
     def test_router_supported_tools_and_actions_match_registry(self) -> None:
         contracts = importlib.import_module("env.tools.contracts")

@@ -98,6 +98,22 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
+    def _assert_option(self, payload: dict[str, object], option_id: str, *, tool: str, action: str) -> dict[str, object]:
+        options = payload.get("allowed_next_action_options")
+        self.assertIsInstance(options, list, msg=payload)
+        assert isinstance(options, list)
+        matches = [row for row in options if isinstance(row, dict) and row.get("id") == option_id]
+        self.assertEqual(len(matches), 1, msg=payload)
+        option = matches[0]
+        self.assertEqual(option.get("tool"), tool, msg=option)
+        self.assertEqual(option.get("action"), action, msg=option)
+        self.assertIn("mutates", option, msg=option)
+        self.assertIsInstance(option.get("reason"), str, msg=option)
+        self.assertTrue(str(option.get("reason", "")).strip(), msg=option)
+        self.assertIsInstance(option.get("source_refs"), list, msg=option)
+        self.assertIsInstance(option.get("preconditions"), list, msg=option)
+        return option
+
     def test_buddybox_desc_returns_private_local_workspace_summary(self) -> None:
         instance_id = "inst-pm-box-desc"
         instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
@@ -138,6 +154,8 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("host decides", next_actions_text)
         self.assertNotIn("only next action", next_actions_text)
         self.assertNotIn("always create artifact", next_actions_text)
+        self._assert_option(desc, "inspect_private_buddybox_summaries", tool="buddybox", action="list")
+        self._assert_option(desc, "write_private_buddybox_file", tool="buddybox", action="write")
 
     def test_buddybox_text_and_binary_lifecycle_uses_local_root(self) -> None:
         instance_id = "inst-pm-box"
@@ -156,6 +174,16 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(text_write.get("path"), "pm/prototypes/hero.html")
         self.assertTrue(self._runtime_path("buddyswitch/local/buddybox/pm/prototypes/hero.html").exists())
         self.assertFalse(self._runtime_path(f"{_OLD_BUDDYBOX_ROOT}/pm/prototypes/hero.html").exists())
+        self._assert_option(text_write, "confirm_private_buddybox_file", tool="buddybox", action="read")
+        self._assert_option(text_write, "inspect_private_buddybox_summaries", tool="buddybox", action="list")
+        promotion = self._assert_option(
+            text_write,
+            "promote_readable_content_when_needed",
+            tool="artifact",
+            action="create_revision",
+        )
+        self.assertIn("when", str(promotion.get("reason", "")).lower())
+        self.assertNotIn("must", str(promotion.get("reason", "")).lower())
 
         text_read = self._dispatch(
             instance_json=instance_json,
@@ -167,6 +195,8 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(text_read.get("ok"), msg=text_read)
         self.assertEqual(text_read.get("encoding"), "utf-8")
         self.assertEqual(text_read.get("content"), "<html>hero</html>")
+        self._assert_option(text_read, "replace_private_buddybox_file", tool="buddybox", action="write")
+        self._assert_option(text_read, "promote_readable_content_when_needed", tool="artifact", action="create_revision")
 
         raw_bytes = b"\x00\x01\xff\x10"
         binary_write = self._dispatch(
@@ -217,6 +247,8 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.assertNotIn("content", row)
             self.assertNotIn("content_base64", row)
             self.assertNotIn("source_ref", row)
+        self._assert_option(listed, "read_private_buddybox_file", tool="buddybox", action="read")
+        self._assert_option(listed, "write_private_buddybox_file", tool="buddybox", action="write")
 
         deleted = self._dispatch(
             instance_json=instance_json,
@@ -256,6 +288,10 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertIn("permission_boundary", rejected)
                 self.assertIn("retryable", rejected)
                 self.assertIn("allowed_next_actions", rejected)
+                self.assertIs(rejected.get("state_changed"), False, msg=rejected)
+                self._assert_option(rejected, "review_buddybox_private_boundary", tool="buddybox", action="desc")
+                self._assert_option(rejected, "retry_active_buddy_private_path", tool="buddybox", action=action)
+                self.assertEqual(dev_file.read_text(encoding="utf-8"), "private\n")
 
     def test_buddybox_rejects_symlink_escape_from_active_root(self) -> None:
         dev_file = self._runtime_path("buddyswitch/local/buddybox/dev/reports/secret.txt")

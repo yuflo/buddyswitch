@@ -64,6 +64,10 @@ path = "buddyswitch/skills/shared/task-tool"
 id = "handoff-tool"
 path = "buddyswitch/skills/shared/handoff-tool"
 
+[[skills]]
+id = "buddybox-tool"
+path = "buddyswitch/skills/shared/buddybox-tool"
+
 [[buddies]]
 id = "market"
 label = "Market"
@@ -79,6 +83,7 @@ skills = [
   "artifact-tool",
   "task-tool",
   "handoff-tool",
+  "buddybox-tool",
 ]
 artifact_kinds = [
   "market-scan",
@@ -94,7 +99,7 @@ permissions = ["track.read", "task.read", "task.create", "task.update", "task.ar
 id = "pm"
 label = "PM"
 scope = "Own product iteration and track progression."
-skills = ["write-prd", "track-tool", "artifact-tool", "task-tool", "handoff-tool"]
+skills = ["write-prd", "track-tool", "artifact-tool", "task-tool", "handoff-tool", "buddybox-tool"]
 artifact_kinds = ["prd", "pm-decision", "track-note"]
 permissions = [
   "track.read",
@@ -124,7 +129,7 @@ permissions = [
 id = "design"
 label = "Design"
 scope = "Shape UI/UX prototype direction and design handoff outcomes."
-skills = ["shape-prototype", "track-tool", "artifact-tool", "task-tool", "handoff-tool"]
+skills = ["shape-prototype", "track-tool", "artifact-tool", "task-tool", "handoff-tool", "buddybox-tool"]
 artifact_kinds = ["design-handoff", "prototype-brief"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "handoff.read", "handoff.create", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "search.use"]
 
@@ -132,7 +137,7 @@ permissions = ["track.read", "task.read", "task.create", "task.update", "task.ar
 id = "dev"
 label = "Dev"
 scope = "Implement approved scope in project code."
-skills = ["implement-task", "skill-creator-importer", "track-tool", "artifact-tool", "task-tool", "handoff-tool"]
+skills = ["implement-task", "skill-creator-importer", "track-tool", "artifact-tool", "task-tool", "handoff-tool", "buddybox-tool"]
 artifact_kinds = ["implementation-report", "skill-import-report"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "handoff.read", "handoff.create", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "search.use"]
 
@@ -140,6 +145,6 @@ permissions = ["track.read", "task.read", "task.create", "task.update", "task.ar
 id = "test"
 label = "Test"
 scope = "Validate behavior and report pass/fail/blocked outcomes."
-skills = ["smoke-test", "track-tool", "artifact-tool", "task-tool", "handoff-tool"]
+skills = ["smoke-test", "track-tool", "artifact-tool", "task-tool", "handoff-tool", "buddybox-tool"]
 artifact_kinds = ["smoke-test", "test-report"]
 permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "handoff.read", "handoff.create", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "search.use"]

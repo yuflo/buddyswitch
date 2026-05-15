@@ -70,11 +70,19 @@ class RuntimeAgentsValidationTests(unittest.TestCase):
                 template = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy_id / "AGENTS.md"
                 text = template.read_text(encoding="utf-8")
                 self.assertIn("python3 scripts/env/client.py context summarize", text)
+                self.assertTrue(
+                    "python3 scripts/env/client.py context get" in text
+                    or "python3 scripts/turn_runtime.py status" in text,
+                    msg=text,
+                )
+                self.assertTrue("tool catalog" in text.lower() or "payload semantics" in text.lower(), msg=text)
                 self.assertIn("structured tool feedback", text.lower())
                 self.assertIn(f"buddyswitch/local/buddybox/{buddy_id}", text)
                 self.assertIn("private local", text.lower())
                 self.assertNotIn("scripts/turn_runtime.py prepare", text)
                 self.assertNotIn("scripts/turn_runtime.py persist", text)
+                for forbidden in ("payload_fields", "action_semantics", "prototype means", "always create artifact"):
+                    self.assertNotIn(forbidden, text)
 
 
 if __name__ == "__main__":

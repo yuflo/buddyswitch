@@ -73,6 +73,77 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertFalse(response["ok"])
         self.assertEqual(response["permission_boundary"], "track.lifecycle_authority")
 
+    def test_pm_page_prototype_decision_surface_prefers_private_buddybox_without_phrase_rule(self) -> None:
+        pm_agents = (ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("project.access=read-only", pm_agents)
+
+        summary = self._dispatch(buddy="pm", tool="context", action="summarize", args={})
+        self.assertTrue(summary["ok"], msg=summary)
+        affordances = summary.get("tool_affordances")
+        self.assertIsInstance(affordances, dict, msg=summary)
+        assert isinstance(affordances, dict)
+        buddybox = affordances.get("buddybox")
+        artifact = affordances.get("artifact")
+        self.assertIsInstance(buddybox, dict, msg=summary)
+        self.assertIsInstance(artifact, dict, msg=summary)
+        assert isinstance(buddybox, dict)
+        assert isinstance(artifact, dict)
+        self.assertIn("lightweight prototypes", str(buddybox.get("use_for", "")).lower())
+        self.assertIn("private local files", str(buddybox.get("use_for", "")).lower())
+        self.assertIn("product objects", str(buddybox.get("not_for", "")).lower())
+        self.assertIn("cross-buddy readable deliverables", str(buddybox.get("not_for", "")).lower())
+        self.assertIn("artifact.create_revision", str(buddybox.get("promote_with", "")).lower())
+        self.assertIn("product-readable deliverables", str(artifact.get("use_for", "")).lower())
+
+        context_get = self._dispatch(buddy="pm", tool="context", action="get", args={})
+        self.assertTrue(context_get["ok"], msg=context_get)
+        buddybox_catalog = context_get["tool_catalog"]["buddybox"]
+        write_semantics = buddybox_catalog["action_semantics"]["write"]
+        inputs = write_semantics["inputs_explained"]
+        self.assertIn("content", inputs)
+        self.assertIn("content_base64", inputs)
+        semantic_payload = json.dumps(
+            {"summary": affordances, "buddybox_write": write_semantics},
+            ensure_ascii=True,
+        ).lower()
+        self.assertNotIn("prototype means", semantic_payload)
+        self.assertNotIn("quickly build means", semantic_payload)
+
+        written = self._dispatch(
+            buddy="pm",
+            tool="buddybox",
+            action="write",
+            args={
+                "path": "pm/prototypes/simple-page.html",
+                "content": "<!doctype html><html><body><h1>Prototype</h1></body></html>",
+                "content_type": "text/html",
+            },
+        )
+        self.assertTrue(written["ok"], msg=written)
+        self.assertTrue(self._runtime_path("buddyswitch/local/buddybox/pm/prototypes/simple-page.html").exists())
+        self.assertIn("no artifact/handoff/task/track/context/evidence state changed", str(written.get("effect_summary", "")).lower())
+
+        options = written.get("allowed_next_action_options")
+        self.assertIsInstance(options, list, msg=written)
+        assert isinstance(options, list)
+        option_pairs = {
+            (row.get("tool"), row.get("action"))
+            for row in options
+            if isinstance(row, dict)
+        }
+        self.assertIn(("buddybox", "read"), option_pairs)
+        self.assertIn(("buddybox", "list"), option_pairs)
+        self.assertIn(("artifact", "create_revision"), option_pairs)
+        promotion = next(
+            row
+            for row in options
+            if isinstance(row, dict) and row.get("tool") == "artifact" and row.get("action") == "create_revision"
+        )
+        self.assertIn("when", str(promotion.get("reason", "")).lower())
+        self.assertNotIn("must", str(promotion.get("reason", "")).lower())
+
 
 if __name__ == "__main__":
     unittest.main()

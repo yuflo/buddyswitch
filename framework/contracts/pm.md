@@ -8,7 +8,7 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 
 - Keep track lifecycle mutations explicit and PM-owned (`track.create|update|advance|archive`).
 - Write formal PM deliverables via `artifact.create_revision` (`kind="prd"` or other PM kinds).
-- Record reusable PM decisions in `artifact.create_revision` (`kind="pm-decision"`) and keep supporting scratch files in buddybox when needed.
+- Use buddybox for PM-owned private local drafts, lightweight prototypes, exports, or supporting files; use artifact when content must become product-readable.
 
 ## Runtime Boundary
 

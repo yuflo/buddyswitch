@@ -107,11 +107,15 @@ def dispatch_env_tool_request(
             why_blocked="payload.tool is not in the runtime supported env tool set.",
             impact="No env action ran and runtime state was unchanged.",
             retryable=True,
-            retry_guidance="Pick a tool id from prepare.runtime_context.env_tools and retry.",
+            retry_guidance=(
+                "Inspect context.get.tool_catalog, context.summarize.tool_affordances, or "
+                "python3 scripts/turn_runtime.py status, then retry with a supported tool."
+            ),
             tool=tool,
             allowed_next_actions=[
                 f"Use one supported tool: {_supported_tools_text()}.",
-                "Check prepare.runtime_context.env_tools for active tool ids and payload hints.",
+                "Use context.get for tool_catalog and operation_semantics.",
+                "Run python3 scripts/turn_runtime.py status for the full env tool catalog.",
             ],
         )
 
@@ -147,12 +151,16 @@ def dispatch_env_tool_request(
             why_blocked="payload.action is not registered under the selected tool.",
             impact="No env action ran and runtime state was unchanged.",
             retryable=True,
-            retry_guidance="Choose an action from prepare.runtime_context.env_tools and retry.",
+            retry_guidance=(
+                "Inspect context.get.operation_semantics and python3 scripts/turn_runtime.py status, "
+                "then retry with a supported action."
+            ),
             tool=tool,
             action=semantic_action,
             allowed_next_actions=[
                 f"Use one supported action: {_supported_actions_text(tool)}.",
-                f"Check prepare.runtime_context.env_tools.{_TOOL_HINTS[tool]} for action and payload field hints.",
+                f"Use context.get.tool_catalog['{_TOOL_HINTS[tool]}'] for action and payload field hints.",
+                "Run python3 scripts/turn_runtime.py status for the full env tool catalog.",
             ],
         )
 
@@ -172,7 +180,7 @@ def dispatch_env_tool_request(
             action=semantic_action,
             allowed_next_actions=[
                 "Set payload.args to an object and retry.",
-                f"Use prepare.runtime_context.env_tools.{_TOOL_HINTS[tool]}.payload_fields to shape args.",
+                f"Use context.get.tool_catalog['{_TOOL_HINTS[tool]}'].payload_fields to shape args.",
             ],
         )
 

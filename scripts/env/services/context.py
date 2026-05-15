@@ -216,6 +216,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "current_context_summary": sections["current_context_summary"],
         "candidate_tracks": sections["candidate_tracks"],
         "buddybox_desc": sections["buddybox_desc"],
+        "tool_affordances": tool_contracts.compact_tool_affordances(),
         "decision_surface": sections["decision_surface"],
     }
 

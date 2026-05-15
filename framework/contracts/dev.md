@@ -8,7 +8,7 @@ Implement approved scope in source code and persist implementation evidence expl
 
 - Edit source under `projects/app/` only when requested and permitted by profile.
 - Persist implementation reports via `artifact.create_revision`.
-- Record reusable technical conclusions via `artifact.create_revision` and keep non-object supporting files in buddybox when needed.
+- Use buddybox for private logs, generated files, binary outputs, or local reports; use artifact for implementation reports and technical conclusions the product workflow must read.
 
 ## Runtime Boundary
 

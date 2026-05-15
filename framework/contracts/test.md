@@ -8,7 +8,7 @@ Validate behavior, report pass/fail/blocked outcomes, and persist test evidence 
 
 - Keep test scope explicit.
 - Persist smoke or verification reports via `artifact.create_revision`.
-- Use `buddybox.write` for durable logs/evidence attachments when needed.
+- Use buddybox for private logs, raw evidence files, or local reports; use artifact for pass/fail reports the product workflow must read.
 
 ## Runtime Boundary
 

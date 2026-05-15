@@ -9,6 +9,7 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 - Start discovery from `search open-browser` and continue in `chrome-devtools-cockpit`.
 - Write market deliverables via `artifact.create_revision` with explicit `task_id`.
 - Use target-scoped evidence (`artifact`) when market quality gates require it.
+- Use buddybox for private research exports, logs, or local reports; use artifact for market deliverables PM, Design, or Dev must read.
 
 ## Runtime Boundary
 

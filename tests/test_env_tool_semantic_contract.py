@@ -246,6 +246,76 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertEqual(desc_semantic["side_effects"]["writes"], [])
         self.assertTrue(desc_semantic["risk_hints"]["read_only"])
 
+    def test_buddybox_semantics_cover_file_output_affordances_and_output_meanings(self) -> None:
+        desc = contracts.env_tools_description()
+        buddybox = desc["buddybox"]
+        capability_text = json.dumps(
+            {
+                "plain_description": buddybox["plain_description"],
+                "use_when": buddybox["use_when"],
+                "do_not_use_when": buddybox["do_not_use_when"],
+                "capability_boundary": buddybox["capability_boundary"],
+            },
+            ensure_ascii=True,
+        ).lower()
+        for token in (
+            "active buddy",
+            "private",
+            "local workspace",
+            "drafts",
+            "lightweight prototypes",
+            "exports",
+            "reports",
+            "logs",
+            "generated files",
+            "binary outputs",
+            "not collaborative",
+            "not visible to other buddies",
+            "not product object",
+            "artifact",
+            "product-readable",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, capability_text)
+
+        actions = buddybox["action_semantics"]
+        expected_success_tokens = {
+            "desc": ("semantic description", "compact local summary only"),
+            "list": ("summaries only", "no file content"),
+            "read": ("one active buddy private local file", "content", "content_base64"),
+            "write": (
+                "created or overwrote one active buddy private local file",
+                "did not create artifact/handoff/task/track/context/evidence",
+            ),
+            "delete": ("absent", "no product/collaboration object changed"),
+        }
+        for action, tokens in expected_success_tokens.items():
+            success_text = str(actions[action]["success_means"]).lower()
+            with self.subTest(action=action):
+                for token in tokens:
+                    self.assertIn(token, success_text)
+
+    def test_buddybox_action_semantics_explain_input_formats_and_output_fields(self) -> None:
+        actions = contracts.env_tools_description()["buddybox"]["action_semantics"]
+
+        for action in ("list", "read", "write", "delete"):
+            fields = actions[action]["inputs_explained"]
+            self.assertIn("path", fields, msg=action)
+            self.assertIn("active buddy", str(fields["path"]).lower(), msg=action)
+            self.assertIn("prefix", str(fields["path"]).lower(), msg=action)
+
+        write_fields = actions["write"]["inputs_explained"]
+        self.assertIn("utf-8 text", str(write_fields["content"]).lower())
+        self.assertIn("binary", str(write_fields["content_base64"]).lower())
+        self.assertIn("non-utf-8", str(write_fields["content_base64"]).lower())
+        self.assertIn("mime hint", str(write_fields["content_type"]).lower())
+        self.assertIn("not a product contract", str(write_fields["content_type"]).lower())
+
+        read_fields = actions["read"]["inputs_explained"]
+        encoding_text = str(read_fields["encoding"]).lower()
+        for token in ("auto", "utf-8", "base64"):
+            self.assertIn(token, encoding_text)
+
     def test_buddybox_semantics_reject_old_ambiguous_wording(self) -> None:
         desc = contracts.env_tools_description()
         packed = json.dumps(desc["buddybox"], ensure_ascii=True).lower()
@@ -258,8 +328,11 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         actions = desc["buddybox"]["action_semantics"]
         packed = json.dumps(actions, ensure_ascii=True).lower()
         for forbidden in (
+            "prototype means",
+            "hardcoded trigger",
             "only next action",
             "always create artifact",
+            "must create artifact",
             "must create artifact after buddybox.write",
             "artifact-required-for-cross-buddy-readable-content",
         ):

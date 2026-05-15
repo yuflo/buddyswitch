@@ -124,6 +124,46 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("buddybox_desc", summary)
         self.assertNotIn(_RETIRED_BUDDYBOX_FILE_ROWS_FIELD, summary)
 
+    def test_context_summarize_exposes_compact_tool_affordances(self) -> None:
+        instance_json = self._instance_json()
+        summary = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
+        self.assertTrue(summary.get("ok"), msg=summary)
+
+        affordances = summary.get("tool_affordances")
+        self.assertIsInstance(affordances, dict, msg=summary)
+        assert isinstance(affordances, dict)
+        self.assertEqual(set(affordances), {"buddybox", "artifact"})
+
+        buddybox = affordances.get("buddybox")
+        self.assertIsInstance(buddybox, dict, msg=affordances)
+        assert isinstance(buddybox, dict)
+        buddybox_use_for = str(buddybox.get("use_for", "")).lower()
+        for token in (
+            "private local",
+            "drafts",
+            "lightweight prototypes",
+            "exports",
+            "reports",
+            "logs",
+            "generated files",
+            "binary outputs",
+        ):
+            self.assertIn(token, buddybox_use_for)
+        self.assertIn("cross-buddy readable", str(buddybox.get("not_for", "")).lower())
+        self.assertIn("product objects", str(buddybox.get("not_for", "")).lower())
+        self.assertIn("artifact.create_revision", str(buddybox.get("promote_with", "")).lower())
+
+        artifact = affordances.get("artifact")
+        self.assertIsInstance(artifact, dict, msg=affordances)
+        assert isinstance(artifact, dict)
+        self.assertIn("product-readable deliverables", str(artifact.get("use_for", "")).lower())
+
+        self.assertEqual(set(buddybox), {"use_for", "not_for", "promote_with", "inspect_with"})
+        self.assertEqual(set(artifact), {"use_for", "not_for", "inspect_with"})
+        for row in (buddybox, artifact):
+            for value in row.values():
+                self.assertIsInstance(value, str)
+
     def test_context_uses_buddybox_desc_not_file_projection(self) -> None:
         self._seed_context_state()
         instance_json = self._instance_json()
@@ -137,6 +177,46 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(desc.get("active_buddy"), "dev")
         self.assertEqual(desc.get("logical_root"), "buddyswitch/local/buddybox/dev")
         self.assertIn("private", str(desc.get("message", "")).lower())
+
+    def test_context_summarize_tool_affordances_stay_compact(self) -> None:
+        self._seed_context_state()
+        instance_json = self._instance_json()
+
+        summary = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
+
+        self.assertTrue(summary.get("ok"), msg=summary)
+        self.assertIn("buddybox_desc", summary)
+        self.assertNotIn("tool_catalog", summary)
+        self.assertNotIn("operation_semantics", summary)
+        affordances = summary.get("tool_affordances")
+        self.assertIsInstance(affordances, dict, msg=summary)
+        assert isinstance(affordances, dict)
+        for tool_name, row in affordances.items():
+            with self.subTest(tool=tool_name):
+                self.assertIsInstance(row, dict, msg=summary)
+                assert isinstance(row, dict)
+                for forbidden in ("payload_fields", "action_semantics", "content", "content_base64", "files"):
+                    self.assertNotIn(forbidden, row)
+
+    def test_context_get_exposes_full_tool_catalog_for_inspection(self) -> None:
+        instance_json = self._instance_json()
+
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="get", args={})
+
+        self.assertTrue(payload.get("ok"), msg=payload)
+        tool_catalog = payload.get("tool_catalog")
+        operation_semantics = payload.get("operation_semantics")
+        self.assertIsInstance(tool_catalog, dict, msg=payload)
+        self.assertIsInstance(operation_semantics, dict, msg=payload)
+        assert isinstance(tool_catalog, dict)
+        assert isinstance(operation_semantics, dict)
+        self.assertIn("buddybox", tool_catalog)
+        buddybox = tool_catalog["buddybox"]
+        self.assertIsInstance(buddybox, dict, msg=payload)
+        assert isinstance(buddybox, dict)
+        self.assertIn("action_semantics", buddybox)
+        self.assertIn("payload_fields", buddybox)
+        self.assertIn("buddybox.write", operation_semantics)
 
     def test_context_list_sources_excludes_memory_and_includes_buddybox(self) -> None:
         instance_json = self._instance_json()

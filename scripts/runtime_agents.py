@@ -169,6 +169,23 @@ def validate_runtime_agents_template(
             message="missing non-dev source read-only wording",
         )
 
+    _require_contains_any(
+        text=text,
+        needles=[
+            "python3 scripts/env/client.py context get",
+            "python3 scripts/turn_runtime.py status",
+        ],
+        message="missing full tool catalog discovery command reference",
+    )
+    for forbidden in (
+        "payload_fields",
+        "action_semantics",
+        "prototype" + " means",
+        "always create " + "artifact",
+    ):
+        if forbidden in lowered:
+            raise RuntimeAgentsError(f"template contains forbidden verbose or trigger wording: {forbidden}")
+
     _require_contains(
         text=lowered,
         needle="env tools",

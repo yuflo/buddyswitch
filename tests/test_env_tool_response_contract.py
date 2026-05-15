@@ -140,6 +140,22 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertTrue(written_file.get("ok"), msg=written_file)
         self.assertTrue(written_file.get("state_changed"), msg=written_file)
         self.assertEqual(written_file.get("durability"), "durable")
+        options = written_file.get("allowed_next_action_options")
+        self.assertIsInstance(options, list, msg=written_file)
+        assert isinstance(options, list)
+        option_pairs = {
+            (row.get("tool"), row.get("action"))
+            for row in options
+            if isinstance(row, dict)
+        }
+        self.assertIn(("buddybox", "read"), option_pairs)
+        self.assertIn(("artifact", "create_revision"), option_pairs)
+        for row in options:
+            if not isinstance(row, dict):
+                continue
+            self.assertIn("mutates", row, msg=row)
+            self.assertIn("reason", row, msg=row)
+            self.assertIn("source_refs", row, msg=row)
 
         created_artifact = self._dispatch(
             instance_json=instance_json,

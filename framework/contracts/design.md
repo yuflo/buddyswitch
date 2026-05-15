@@ -8,7 +8,7 @@ Shape product interaction and UX direction into durable design outputs.
 
 - Keep scope aligned to explicit `task_id` / `track_id` context.
 - Persist deliverables via `artifact.create_revision` using design artifact kinds.
-- Use `buddybox.write` for durable file outputs (prototypes, exports) when needed.
+- Use buddybox for private local prototypes or exports; use artifact for design handoffs or prototype briefs another buddy must read.
 
 ## Runtime Boundary
 
