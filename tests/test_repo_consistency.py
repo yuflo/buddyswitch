@@ -265,6 +265,7 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("buddy-run commit", lowered)
                 self.assertNotIn("turn_runtime.py persist", lowered)
                 self.assertNotIn("prepare.runtime_context", lowered)
+                self.assertNotIn("run-tool", lowered)
                 self.assertIn("env.tool", lowered)
 
     def test_role_contracts_keep_buddybox_guidance_short_and_role_specific(self) -> None:
@@ -321,9 +322,24 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("If you see a `task_id`", text)
                 self.assertIn("If you see an `artifact_id`", text)
                 self.assertIn(guard, text)
+                self.assertTrue(
+                    "python3 scripts/env/client.py context get" in text
+                    or "python3 scripts/turn_runtime.py status" in text,
+                    msg=text,
+                )
                 self.assertIn("do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly", text.lower())
                 self.assertNotIn("scripts/turn_runtime.py prepare", text)
                 self.assertNotIn("scripts/turn_runtime.py persist", text)
+                for forbidden in (
+                    "content_base64",
+                    "payload_fields",
+                    "action_semantics",
+                    "prototype means",
+                    "quickly build means",
+                    "route prototype to buddybox",
+                    "always create artifact",
+                ):
+                    self.assertNotIn(forbidden, text.lower())
 
     def test_search_tool_visible_surface_is_projected(self) -> None:
         buddy_assets = sorted((ROOT / "tools" / "launcher" / "assets" / "buddies").rglob("AGENTS.md"))

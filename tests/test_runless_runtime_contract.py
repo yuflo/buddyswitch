@@ -199,6 +199,10 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("action_semantics", buddybox)
         self.assertIn("write", buddybox["action_semantics"])
         self.assertIn("inputs_explained", buddybox["action_semantics"]["write"])
+        operations = buddybox.get("operations")
+        self.assertIsInstance(operations, list, msg=buddybox)
+        assert isinstance(operations, list)
+        self.assertNotIn("search", operations)
 
     def test_task_artifact_records_reject_run_fields(self) -> None:
         with self.assertRaises(ValueError):

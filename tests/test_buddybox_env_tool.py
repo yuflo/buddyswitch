@@ -424,15 +424,15 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_id = "inst-pm-box-invalid"
         instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
         invalid_writes = [
-            {"path": "", "content": "x"},
-            {"path": "/tmp/x", "content": "x"},
-            {"path": "../x", "content": "x"},
-            {"path": "pm/../x", "content": "x"},
-            {"path": "pm/notes.md"},
-            {"path": "pm/notes.md", "content": "x", "content_base64": "eA=="},
+            ({"path": "", "content": "x"}, {"E_BUDDYBOX_SCOPE", "E_BUDDYBOX_PAYLOAD"}),
+            ({"path": "/tmp/x", "content": "x"}, {"E_BUDDYBOX_SCOPE"}),
+            ({"path": "../x", "content": "x"}, {"E_BUDDYBOX_SCOPE"}),
+            ({"path": "pm/../x", "content": "x"}, {"E_BUDDYBOX_SCOPE"}),
+            ({"path": "pm/notes.md"}, {"E_BUDDYBOX_PAYLOAD"}),
+            ({"path": "pm/notes.md", "content": "x", "content_base64": "eA=="}, {"E_BUDDYBOX_PAYLOAD"}),
         ]
-        for payload in invalid_writes:
-            with self.subTest(payload=payload):
+        for payload, expected_codes in invalid_writes:
+            with self.subTest(payload=payload, expected_codes=sorted(expected_codes)):
                 rejected = self._dispatch(
                     instance_json=instance_json,
                     instance_id=instance_id,
@@ -441,6 +441,11 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     args=payload,
                 )
                 self.assertFalse(rejected.get("ok"), msg=rejected)
+                self.assertIn((rejected.get("error") or {}).get("code"), expected_codes, msg=rejected)
+                self.assertIs(rejected.get("state_changed"), False, msg=rejected)
+                attempted_path = payload.get("path")
+                if isinstance(attempted_path, str) and attempted_path.startswith("pm/") and ".." not in attempted_path:
+                    self.assertFalse(self._runtime_path(f"buddyswitch/local/buddybox/{attempted_path}").exists())
 
         invalid_read = self._dispatch(
             instance_json=instance_json,

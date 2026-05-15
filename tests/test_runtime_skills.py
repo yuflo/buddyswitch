@@ -32,9 +32,42 @@ class RuntimeSkillsTests(unittest.TestCase):
             with self.subTest(buddy=buddy.get("id")):
                 self.assertTrue(required.issubset(skills))
 
-    def test_buddybox_tool_skill_teaches_private_local_file_workflow(self) -> None:
+    def test_buddybox_tool_skill_exists_with_required_frontmatter_and_sections(self) -> None:
         skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "buddybox-tool" / "SKILL.md"
         self.assertTrue(skill_path.exists())
+        text = skill_path.read_text(encoding="utf-8")
+        lowered = text.lower()
+        self.assertIn("name: buddybox-tool", lowered)
+        for token in (
+            "active buddy",
+            "private local workspace",
+            "drafts",
+            "prototypes",
+            "exports",
+            "logs",
+            "reports",
+            "binary outputs",
+            "buddyswitch env tools",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, lowered)
+        for token in (
+            "what buddybox is",
+            "when to use",
+            "when not to use",
+            "commands",
+            "path",
+            "payload",
+            "response",
+            "promotion",
+            "runtime closing",
+            "common flows",
+        ):
+            with self.subTest(section=token):
+                self.assertIn(token, lowered)
+
+    def test_buddybox_tool_teaches_env_tool_not_direct_filesystem(self) -> None:
+        skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "buddybox-tool" / "SKILL.md"
         text = skill_path.read_text(encoding="utf-8")
         lowered = text.lower()
         for token in (
@@ -57,11 +90,40 @@ class RuntimeSkillsTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, lowered)
         for forbidden in (
+            'cat > buddyswitch/local/buddybox',
+            'tee buddyswitch/local/buddybox',
+            'open("buddyswitch/local/buddybox',
+            'path("buddyswitch/local/buddybox',
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, lowered)
+        for forbidden in (
             "prepare",
             "persist",
-            "directly edit",
+            "run-tool",
             "always create artifact",
             "prototype means",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, lowered)
+
+    def test_buddybox_tool_search_flow_is_conditional_and_does_not_shell_search(self) -> None:
+        skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "buddybox-tool" / "SKILL.md"
+        text = skill_path.read_text(encoding="utf-8")
+        lowered = text.lower()
+        self.assertIn("search", lowered)
+        self.assertTrue(
+            "when available" in lowered
+            or "if the runtime exposes" in lowered
+            or "if tool catalog exposes" in lowered,
+            msg=lowered,
+        )
+        self.assertTrue("context.get" in lowered or "scripts/turn_runtime.py status" in lowered, msg=lowered)
+        self.assertTrue("do not shell-search" in lowered or "do not use shell search" in lowered, msg=lowered)
+        for forbidden in (
+            "rg buddyswitch/local/buddybox",
+            "grep -r buddyswitch/local/buddybox",
+            "find buddyswitch/local/buddybox",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, lowered)

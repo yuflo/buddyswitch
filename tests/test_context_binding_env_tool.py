@@ -216,6 +216,13 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(buddybox, dict)
         self.assertIn("action_semantics", buddybox)
         self.assertIn("payload_fields", buddybox)
+        payload_fields = buddybox["payload_fields"]
+        self.assertIsInstance(payload_fields, dict, msg=payload)
+        assert isinstance(payload_fields, dict)
+        write_fields = payload_fields.get("write")
+        self.assertIsInstance(write_fields, list, msg=payload)
+        assert isinstance(write_fields, list)
+        self.assertTrue({"path", "content", "content_base64", "content_type"}.issubset(set(write_fields)), msg=write_fields)
         self.assertIn("buddybox.write", operation_semantics)
 
     def test_context_list_sources_excludes_memory_and_includes_buddybox(self) -> None:

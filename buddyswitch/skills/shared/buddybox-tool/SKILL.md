@@ -1,36 +1,85 @@
 ---
 name: buddybox-tool
-description: Use when you need to describe, list, read, write, or delete active-buddy private local files through runtime env tools.
+description: Use when the active buddy needs private local workspace files such as drafts, prototypes, exports, logs, reports, or binary outputs, and needs to operate buddybox through BuddySwitch env tools.
 ---
 
 # buddybox-tool
 
-## Purpose
+## What Buddybox Is
 
-- Manage active buddy private local files through broker-routed env tools (`env.tool`).
-- Use for private drafts, lightweight prototypes, exports, reports, logs, generated files, and binary outputs.
-- Use `artifact.create_revision` when readable content must become product-readable or cross-buddy-readable.
+- Buddybox is the active buddy private local workspace and is operated through `env.tool`.
+- Other buddies cannot list/read/write/delete these files.
+- Buddybox paths are not cross-buddy payload authority.
+- Product-readable or cross-buddy-readable content must be carried by artifact or another explicit product object.
 
-## Runtime Contract
+## Use It When
 
-- CLI: `python3 scripts/env/client.py buddybox <operation>`
-- Broker method: `env.tool`
-- Operations: `desc`, `list`, `read`, `write`, `delete`
-- Path convention: every path stays under `<active_buddy>/...`, such as `pm/prototypes/landing.html`.
+- When to use buddybox: private drafts, lightweight prototypes, exports, logs, reports, generated files, or binary outputs are needed.
+- You need local iterative file work before deciding whether anything should be promoted.
 
-## Payload Hints
+## Do Not Use It When
 
-- `write` accepts exactly one of `content` or `content_base64`.
+- When not to use buddybox: you are producing product deliverables that other buddies must read.
+- You are editing shared source or transport payloads for handoff.
+- You are mutating `buddyswitch/objects/**` or directly editing `buddyswitch/local/buddybox/**`.
+
+## Commands
+
+```bash
+python3 scripts/env/client.py buddybox desc
+python3 scripts/env/client.py buddybox list --path pm/prototypes --recursive
+python3 scripts/env/client.py buddybox read --path pm/prototypes/landing.html
+python3 scripts/env/client.py buddybox write --payload /tmp/buddybox-write.json
+python3 scripts/env/client.py buddybox delete --path pm/tmp/obsolete.txt
+```
+
+## Path Rules
+
+- Use relative paths under `<active_buddy>/...` (example: `pm/prototypes/landing.html`).
+- Do not use absolute paths, traversal (`../`), foreign buddy prefixes, or root-level direct edits.
+
+## Payload Rules
+
+- Text write payload:
+
+```json
+{"path":"pm/prototypes/landing.html","content":"<!doctype html>","content_type":"text/html"}
+```
+
+- Binary write payload:
+
+```json
+{"path":"pm/assets/snapshot.png","content_base64":"<base64>","content_type":"image/png"}
+```
+
 - `content` is UTF-8 text.
-- `content_base64` is for binary or non-UTF-8 payloads.
-- `content_type` is a MIME hint for the file, not a product contract.
-- `read --encoding` accepts `auto`, `utf-8`, or `base64`.
+- `content_base64` is for binary or non-UTF-8 bytes.
+- `content` and `content_base64` are mutually exclusive.
+- `content_type` is a MIME hint.
+- `read --encoding` supports `auto`, `utf-8`, or `base64`.
 
 ## Response Checks
 
-- Confirm response JSON has `ok=true` before relying on file operation output.
-- `desc` and `list` return semantic/summary payloads, not file bodies.
-- `write` reports whether the file was created or overwritten.
-- `delete` reports whether the file was deleted or already absent.
-- Follow `allowed_next_actions` and `allowed_next_action_options`.
-- Do not bypass env tools by touching `buddyswitch/local/buddybox/**` paths.
+- Inspect `ok`, `state_changed`, `durability`, and `read_scope`.
+- Inspect `allowed_next_actions` and `allowed_next_action_options` before selecting follow-ups.
+- Use created/updated/deleted path fields to verify target effects.
+- Trust structured rejection feedback for boundary-safe retries.
+
+## Promotion Rule
+
+- Use `artifact.create_revision` only when content must become product-readable or cross-buddy-readable.
+
+## Runtime Closing
+
+- Summarize which private buddybox files were written, updated, or deleted.
+- Summarize artifact or handoff status.
+- If blocked, include the tool rejection reason and the next action.
+
+## Common Flows
+
+- Write/update: `write` then `read` for one exact file and inspect `allowed_next_actions`.
+- List/read: `list` for summaries, then `read` for one exact file path.
+- Search-or-inspect: `buddybox.read` is exact-file read and `buddybox.list` returns summaries only. For keyword or regex search, inspect `context.get.tool_catalog['buddybox']` or `python3 scripts/turn_runtime.py status`; use `buddybox.search` only when available. In the current runless catalog, use `list` then exact `read`. Do not shell-search buddybox roots as the normal buddy workflow.
+- Delete cleanup: `delete` stale private files and verify `state_changed`.
+- Promotion: call `artifact.create_revision` only when readability must move beyond active-buddy-private scope.
+- Rejection recovery: read `allowed_next_action_options`, correct path/payload shape, and retry through `python3 scripts/env/client.py buddybox <operation>`.

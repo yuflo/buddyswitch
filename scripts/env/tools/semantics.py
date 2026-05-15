@@ -427,7 +427,7 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
                 "path": "Required active buddy prefix path under <active_buddy>/... for one private local file read.",
                 "encoding": "Output preference: auto, utf-8, or base64.",
             },
-            "plain_description": "Read one active-buddy private local file without mutating product/collaboration objects.",
+            "plain_description": "Read one exact active-buddy private local file path without mutating product/collaboration objects.",
             "use_when": [
                 "You need one private local file body for local iteration.",
                 "You need to inspect output from a prior buddybox.write before deciding next action.",
@@ -436,7 +436,10 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
                 "You need to browse many files; use buddybox.list.",
                 "You need product-readable delivery; use artifact.create_revision when host decides content must become product-readable.",
             ],
-            "success_means": "read returned one active buddy private local file and either content or content_base64 with encoding explaining interpretation.",
+            "success_means": (
+                "read returned one active buddy private local file at one exact path and either content "
+                "or content_base64 with encoding explaining interpretation."
+            ),
             "common_failures": [
                 "unsupported payload fields",
                 "missing file",

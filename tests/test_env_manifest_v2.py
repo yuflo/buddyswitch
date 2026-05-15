@@ -57,6 +57,32 @@ class EnvManifestV2Tests(unittest.TestCase):
             assert isinstance(row, dict)
             self.assertEqual(set(row.keys()), {"id", "path"})
 
+    def test_buddybox_capable_buddies_include_buddybox_tool(self) -> None:
+        buddybox_capable: set[str] = set()
+        for buddy in self.manifest.get("buddies", []):
+            assert isinstance(buddy, dict)
+            buddy_id = buddy.get("id")
+            permissions = {row for row in buddy.get("permissions", []) if isinstance(row, str)}
+            if {"buddybox.read", "buddybox.write", "buddybox.delete"} & permissions:
+                self.assertIsInstance(buddy_id, str)
+                assert isinstance(buddy_id, str)
+                buddybox_capable.add(buddy_id)
+                skills = {row for row in buddy.get("skills", []) if isinstance(row, str)}
+                self.assertIn("buddybox-tool", skills, msg=buddy_id)
+        self.assertEqual(buddybox_capable, {"market", "pm", "design", "dev", "test"})
+
+    def test_buddybox_tool_skill_row_points_to_shared_package(self) -> None:
+        rows = [
+            row
+            for row in self.manifest.get("skills", [])
+            if isinstance(row, dict) and row.get("id") == "buddybox-tool"
+        ]
+        self.assertEqual(len(rows), 1, msg=rows)
+        row = rows[0]
+        self.assertEqual(set(row.keys()), {"id", "path"})
+        self.assertEqual(row.get("path"), "buddyswitch/skills/shared/buddybox-tool")
+        self.assertTrue((ROOT / str(row["path"]) / "SKILL.md").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

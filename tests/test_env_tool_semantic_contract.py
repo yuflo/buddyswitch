@@ -353,6 +353,32 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertGreaterEqual(local_affordance_actions, 2)
         self.assertGreaterEqual(conditional_readable_actions, 1)
 
+    def test_buddybox_current_operations_do_not_conflate_read_list_and_search(self) -> None:
+        self.assertEqual(contracts.supported_actions("buddybox"), {"desc", "list", "read", "write", "delete"})
+        buddybox = contracts.env_tools_description()["buddybox"]["action_semantics"]
+        self.assertNotIn("search", buddybox)
+
+        read_text = json.dumps(
+            {
+                "plain_description": buddybox["read"]["plain_description"],
+                "use_when": buddybox["read"]["use_when"],
+                "success_means": buddybox["read"]["success_means"],
+            },
+            ensure_ascii=True,
+        ).lower()
+        self.assertIn("one", read_text)
+        self.assertTrue("exact" in read_text or "path" in read_text, msg=read_text)
+
+        list_text = json.dumps(
+            {
+                "plain_description": buddybox["list"]["plain_description"],
+                "success_means": buddybox["list"]["success_means"],
+            },
+            ensure_ascii=True,
+        ).lower()
+        self.assertIn("summary", list_text)
+        self.assertIn("no file content", list_text)
+
 
 if __name__ == "__main__":
     unittest.main()
