@@ -143,12 +143,12 @@ def select_artifacts_for_run(
     demand: str,
     required_kinds: list[str],
     track_artifact_index: dict[str, Any] | None,
-    current_task_id: str | None = None,
+    task_id_scope: str | None = None,
     max_default_items: int | None = None,
 ) -> dict[str, Any]:
     del current_buddy
     del demand
-    del current_task_id
+    del task_id_scope
 
     config = _selection_config()
     selection_mode = str(config["selection_mode"])
@@ -224,7 +224,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--demand", required=True, help="Turn request text")
     parser.add_argument("--index-file", type=Path, required=True, help="Path to track_artifact_index JSON")
     parser.add_argument("--required-kind", action="append", dest="required_kinds", default=[], help="Required input kind")
-    parser.add_argument("--current-task-id", help="Current task id when continuing an existing task")
+    parser.add_argument("--current-task-id", dest="task_id_scope", help="Task scope id when continuing an existing task")
     parser.add_argument("--max-default-items", type=int)
     return parser
 
@@ -237,7 +237,7 @@ def main() -> int:
         demand=args.demand,
         required_kinds=args.required_kinds,
         track_artifact_index=_load_json(args.index_file),
-        current_task_id=args.current_task_id,
+        task_id_scope=args.task_id_scope,
         max_default_items=args.max_default_items,
     )
     print(json.dumps(payload, ensure_ascii=True, indent=2))

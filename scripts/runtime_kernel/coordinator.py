@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -61,8 +60,6 @@ def _error(
 
 
 def lock_mode_for_request(method: str, params: dict[str, Any]) -> LockMode:
-    if method in {"prepare", "persist"}:
-        return LockMode.WRITE
     if method in {"ping", "status"}:
         return LockMode.NONE
     if method != "env.tool":

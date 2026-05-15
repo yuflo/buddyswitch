@@ -33,9 +33,9 @@ description: Use when the task is sharpening external positioning, value framing
 - Optional constraints such as tone, target audience, or channel context.
 
 ## Outputs
-- A contribution to the current compact buddy-run commit.
-- Durable positioning content is written before persist through `artifact-tool` `artifact.create_revision`.
-- The final run commit references already-written artifacts with optional `artifact_ids` metadata.
+- Durable outputs are written explicitly through env tools.
+- Durable positioning content is written through `artifact-tool` `artifact.create_revision`.
+- Reference written artifacts by explicit ids when relevant.
 
 ## Market Research Cockpit Runtime
 
@@ -58,17 +58,17 @@ description: Use when the task is sharpening external positioning, value framing
 
 - See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
 - This native skill contributes content to the current buddy run.
-- Do not call persist from the skill perspective.
-- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
+- Do not rely on deprecated prepare/persist flows.
+- The locked buddy session returns after explicit durable writes are complete.
 
 ## BuddySwitch Commit Output
 
-Contribute to one buddy-run commit. Do not call persist from inside the skill.
+Write durable outputs explicitly via env tools. Do not rely on deprecated prepare/persist flows.
 
 Required top-level field:
 - `execution_summary`
 
-Use `artifact-tool` before persist when this skill produces a durable artifact:
+Use `artifact-tool` when this skill produces a durable artifact:
 - `kind`: `positioning-brief`
 - `title`: concise artifact title
 - `summary`: short downstream selection summary

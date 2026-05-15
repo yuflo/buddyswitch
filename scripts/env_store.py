@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BuddySwitch env object store for tracks, tasks, and artifacts."""
+"""BuddySwitch runless env object store for durable collaboration objects."""
 
 from __future__ import annotations
 
@@ -25,13 +25,22 @@ TRACKS_DIR = OBJECTS_ROOT / "tracks"
 TASKS_DIR = OBJECTS_ROOT / "tasks"
 ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
 HANDOFF_OBJECTS_DIR = OBJECTS_ROOT / "handoffs"
+MEMORY_OBJECTS_DIR = OBJECTS_ROOT / "memories"
 CONTENT_ROOT = STATE_ROOT / "buddyswitch" / "content"
-RUN_CONTENT_DIR = CONTENT_ROOT / "runs"
+BUDDYBOX_CONTENT_DIR = CONTENT_ROOT / "buddybox"
+
 RUNTIME_WORKSPACE_AGENTS_HEADER = "# BuddySwitch Runtime Workspace"
+
 VALID_TRACK_STATUS = ("active", "blocked", "done", "archived")
 VALID_TASK_STATUS = ("active", "blocked", "done", "archived")
 VALID_HANDOFF_STATUS = ("active", "superseded", "archived")
+VALID_MEMORY_STATUS = ("active", "archived")
+VALID_MEMORY_KINDS = ("decision", "fact", "preference", "constraint", "lesson", "context-summary")
+
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+_LEGACY_TASK_RUN_IDS = "run" + "_ids"
+_LEGACY_TASK_LATEST_RUN = "latest" + "_run_id"
+_LEGACY_SOURCE_RUN = "source" + "_run_id"
 
 
 def now_iso() -> str:
@@ -76,7 +85,8 @@ def ensure_runtime_dirs() -> None:
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
     HANDOFF_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
-    RUN_CONTENT_DIR.mkdir(parents=True, exist_ok=True)
+    MEMORY_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    BUDDYBOX_CONTENT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def require_id(value: str, label: str) -> str:
@@ -88,10 +98,6 @@ def require_id(value: str, label: str) -> str:
 def slugify(text: str) -> str:
     cleaned = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return cleaned or "artifact"
-
-
-def run_content_path(run_id: str) -> str:
-    return f"buddyswitch/content/runs/{require_id(run_id, 'run id')}.json"
 
 
 def track_file(track_id: str) -> Path:
@@ -108,6 +114,10 @@ def artifact_file(artifact_id: str) -> Path:
 
 def handoff_file(handoff_id: str) -> Path:
     return HANDOFF_OBJECTS_DIR / f"{require_id(handoff_id, 'handoff id')}.json"
+
+
+def memory_file(memory_id: str) -> Path:
+    return MEMORY_OBJECTS_DIR / f"{require_id(memory_id, 'memory id')}.json"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -127,6 +137,60 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         handle.write(serialized)
         temp_name = handle.name
     os.replace(temp_name, path)
+
+
+def _validate_buddybox_ref_path(path: Any) -> str:
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("source_refs.buddybox path must be a non-empty string")
+    normalized = path.replace("\\", "/").strip()
+    if normalized.startswith("/") or normalized.startswith("../") or "/../" in normalized:
+        raise ValueError("source_refs.buddybox path must be relative and stay inside buddybox")
+    parts = [part for part in normalized.split("/") if part not in {"", "."}]
+    if not parts:
+        raise ValueError("source_refs.buddybox path must be non-empty")
+    return "/".join(parts)
+
+
+def _normalize_source_refs(raw_refs: Any) -> list[dict[str, Any]] | None:
+    if raw_refs is None:
+        return None
+    if not isinstance(raw_refs, list):
+        raise ValueError("source_refs must be a list when provided")
+
+    normalized: list[dict[str, Any]] = []
+    for raw in raw_refs:
+        if not isinstance(raw, dict):
+            raise ValueError("each source_ref must be an object")
+        ref_type = raw.get("type")
+        if not isinstance(ref_type, str) or not ref_type.strip():
+            raise ValueError("source_ref.type must be a non-empty string")
+        ref_type = ref_type.strip()
+        row: dict[str, Any] = {"type": ref_type}
+
+        if ref_type in {"artifact", "memory", "track", "task", "handoff"}:
+            row["id"] = require_id(raw.get("id"), f"source_ref.{ref_type}.id")
+        elif ref_type == "buddybox":
+            row["path"] = _validate_buddybox_ref_path(raw.get("path"))
+        elif ref_type == "external":
+            label = raw.get("label")
+            if not isinstance(label, str) or not label.strip():
+                raise ValueError("source_ref.external.label must be a non-empty string")
+            row["label"] = label.strip()
+            url = raw.get("url")
+            if url is not None:
+                if not isinstance(url, str) or not url.strip():
+                    raise ValueError("source_ref.external.url must be a non-empty string when provided")
+                row["url"] = url.strip()
+        elif ref_type == "note":
+            label = raw.get("label")
+            if not isinstance(label, str) or not label.strip():
+                raise ValueError("source_ref.note.label must be a non-empty string")
+            row["label"] = label.strip()
+        else:
+            raise ValueError(f"unsupported source_ref type: {ref_type}")
+
+        normalized.append(row)
+    return normalized
 
 
 def validate_track(track: dict[str, Any]) -> dict[str, Any]:
@@ -152,6 +216,8 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("track.next_buddy must be a non-empty string or null")
     if not isinstance(task_ids, list) or any(not isinstance(item, str) or not item for item in task_ids):
         raise ValueError("track.task_ids must be a list of non-empty strings")
+    for task_id in task_ids:
+        require_id(task_id, "track.task_ids[]")
     if summary is not None and not isinstance(summary, str):
         raise ValueError("track.summary must be a string or null")
     if not isinstance(updated_at, str) or not updated_at:
@@ -170,6 +236,9 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_task(task: dict[str, Any]) -> dict[str, Any]:
+    if _LEGACY_TASK_RUN_IDS in task or _LEGACY_TASK_LATEST_RUN in task:
+        raise ValueError("legacy task run lineage fields are retired; use artifact_ids and artifact_slots")
+
     task_id = require_id(task.get("id", ""), "task.id")
     buddy = task.get("buddy")
     title = task.get("title")
@@ -177,8 +246,6 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
     track_id = task.get("track_id")
     artifact_ids = task.get("artifact_ids")
     artifact_slots = task.get("artifact_slots", {})
-    run_ids = task.get("run_ids")
-    latest_run_id = task.get("latest_run_id")
     summary = task.get("summary")
     created_at = task.get("created_at")
     updated_at = task.get("updated_at")
@@ -193,8 +260,11 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
         require_id(track_id, "task.track_id")
     if not isinstance(artifact_ids, list) or any(not isinstance(item, str) or not item for item in artifact_ids):
         raise ValueError("task.artifact_ids must be a list of non-empty strings")
+    for artifact_id in artifact_ids:
+        require_id(artifact_id, "task.artifact_ids[]")
     if not isinstance(artifact_slots, dict):
         raise ValueError("task.artifact_slots must be an object")
+
     normalized_slots: dict[str, dict[str, Any]] = {}
     for slot, row in artifact_slots.items():
         if not isinstance(slot, str) or not slot.strip():
@@ -210,17 +280,7 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
             "current_artifact_id": current_artifact_id,
             "revision_count": revision_count,
         }
-    if not isinstance(run_ids, list) or any(not isinstance(item, str) or not item for item in run_ids):
-        raise ValueError("task.run_ids must be a list of non-empty strings")
-    normalized_run_ids = list(dict.fromkeys(run_ids))
-    if latest_run_id is None:
-        if normalized_run_ids:
-            raise ValueError("task.latest_run_id must be included in task.run_ids")
-    else:
-        if not isinstance(latest_run_id, str) or not latest_run_id:
-            raise ValueError("task.latest_run_id must be a non-empty string or null")
-        if latest_run_id not in normalized_run_ids:
-            raise ValueError("task.latest_run_id must be included in task.run_ids")
+
     if summary is not None and not isinstance(summary, str):
         raise ValueError("task.summary must be a string or null")
     if not isinstance(created_at, str) or not created_at:
@@ -236,8 +296,6 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
         "track_id": track_id,
         "artifact_ids": list(dict.fromkeys(artifact_ids)),
         "artifact_slots": normalized_slots,
-        "run_ids": normalized_run_ids,
-        "latest_run_id": latest_run_id,
         "summary": summary or "",
         "created_at": created_at,
         "updated_at": updated_at,
@@ -247,6 +305,8 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
 def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     if "track_id" in artifact:
         raise ValueError("artifact.track_id is retired; use artifact.task_id")
+    if _LEGACY_SOURCE_RUN in artifact:
+        raise ValueError("legacy artifact run lineage field is retired; use created_by and source_refs")
 
     artifact_id = require_id(artifact.get("id", ""), "artifact.id")
     title = artifact.get("title")
@@ -257,7 +317,8 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     supersedes_sentinel = object()
     supersedes_artifact_id = artifact.get("supersedes_artifact_id", supersedes_sentinel)
     is_current = artifact.get("is_current")
-    source_run_id = artifact.get("source_run_id")
+    created_by = artifact.get("created_by")
+    source_refs = _normalize_source_refs(artifact.get("source_refs"))
     summary = artifact.get("summary")
     content = artifact.get("content", {})
     created_at = artifact.get("created_at")
@@ -279,7 +340,8 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         require_id(supersedes_artifact_id, "artifact.supersedes_artifact_id")
     if not isinstance(is_current, bool):
         raise ValueError("artifact.is_current must be a boolean")
-    require_id(source_run_id, "artifact.source_run_id")
+    if not isinstance(created_by, str) or not created_by.strip():
+        raise ValueError("artifact.created_by must be a non-empty string")
     if summary is not None and not isinstance(summary, str):
         raise ValueError("artifact.summary must be a string or null")
     if not isinstance(content, dict):
@@ -298,7 +360,8 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         "revision": revision,
         "supersedes_artifact_id": supersedes_artifact_id,
         "is_current": is_current,
-        "source_run_id": source_run_id,
+        "created_by": created_by.strip(),
+        "source_refs": source_refs,
         "summary": summary or "",
         "content": content,
         "created_at": created_at,
@@ -307,14 +370,20 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_handoff_record(record: dict[str, Any]) -> dict[str, Any]:
+    if _LEGACY_SOURCE_RUN in record:
+        raise ValueError("legacy handoff run lineage field is retired; use product object refs")
+    if "historical_artifact_ids" in record:
+        raise ValueError("handoff.historical_artifact_ids is retired; use source_refs")
+
     handoff_id = require_id(record.get("id", ""), "handoff.id")
     track_id = require_id(record.get("track_id", ""), "handoff.track_id")
     source_buddy = record.get("source_buddy")
     target_buddy = record.get("target_buddy")
-    source_task_id = require_id(record.get("source_task_id", ""), "handoff.source_task_id")
-    source_run_id = require_id(record.get("source_run_id", ""), "handoff.source_run_id")
+    source_task_id = record.get("source_task_id")
     artifact_ids = record.get("artifact_ids", [])
-    historical_artifact_ids = record.get("historical_artifact_ids", [])
+    memory_ids = record.get("memory_ids", [])
+    buddybox_paths = record.get("buddybox_paths", [])
+    source_refs = _normalize_source_refs(record.get("source_refs"))
     reason = record.get("reason")
     context = record.get("context")
     status = record.get("status")
@@ -325,18 +394,25 @@ def validate_handoff_record(record: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("handoff.source_buddy must be a non-empty string")
     if not isinstance(target_buddy, str) or not target_buddy.strip():
         raise ValueError("handoff.target_buddy must be a non-empty string")
+    if source_task_id is not None:
+        require_id(source_task_id, "handoff.source_task_id")
     if status not in VALID_HANDOFF_STATUS:
         raise ValueError(f"handoff.status must be one of {', '.join(VALID_HANDOFF_STATUS)}")
+
     if not isinstance(artifact_ids, list) or any(not isinstance(item, str) or not item.strip() for item in artifact_ids):
         raise ValueError("handoff.artifact_ids must be a list of non-empty strings")
-    if not isinstance(historical_artifact_ids, list) or any(
-        not isinstance(item, str) or not item.strip() for item in historical_artifact_ids
-    ):
-        raise ValueError("handoff.historical_artifact_ids must be a list of non-empty strings")
     for artifact_id in artifact_ids:
         require_id(artifact_id, "handoff.artifact_ids[]")
-    for artifact_id in historical_artifact_ids:
-        require_id(artifact_id, "handoff.historical_artifact_ids[]")
+
+    if not isinstance(memory_ids, list) or any(not isinstance(item, str) or not item.strip() for item in memory_ids):
+        raise ValueError("handoff.memory_ids must be a list of non-empty strings")
+    for memory_id in memory_ids:
+        require_id(memory_id, "handoff.memory_ids[]")
+
+    if not isinstance(buddybox_paths, list) or any(not isinstance(item, str) or not item.strip() for item in buddybox_paths):
+        raise ValueError("handoff.buddybox_paths must be a list of non-empty strings")
+    normalized_buddybox_paths = [_validate_buddybox_ref_path(path) for path in buddybox_paths]
+
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("handoff.reason must be a non-empty string")
     if not isinstance(context, str) or not context.strip():
@@ -352,11 +428,55 @@ def validate_handoff_record(record: dict[str, Any]) -> dict[str, Any]:
         "source_buddy": source_buddy.strip(),
         "target_buddy": target_buddy.strip(),
         "source_task_id": source_task_id,
-        "source_run_id": source_run_id,
         "artifact_ids": list(dict.fromkeys(artifact_ids)),
-        "historical_artifact_ids": list(dict.fromkeys(historical_artifact_ids)),
+        "memory_ids": list(dict.fromkeys(memory_ids)),
+        "buddybox_paths": list(dict.fromkeys(normalized_buddybox_paths)),
+        "source_refs": source_refs,
         "reason": reason.strip(),
         "context": context.strip(),
+        "status": status,
+        "created_at": created_at,
+        "updated_at": updated_at,
+    }
+
+
+def validate_memory(memory: dict[str, Any]) -> dict[str, Any]:
+    memory_id = require_id(memory.get("id", ""), "memory.id")
+    buddy = memory.get("buddy")
+    kind = memory.get("kind")
+    title = memory.get("title")
+    summary = memory.get("summary")
+    content = memory.get("content")
+    source_refs = _normalize_source_refs(memory.get("source_refs"))
+    status = memory.get("status")
+    created_at = memory.get("created_at")
+    updated_at = memory.get("updated_at")
+
+    if not isinstance(buddy, str) or not buddy.strip():
+        raise ValueError("memory.buddy must be a non-empty string")
+    if kind not in VALID_MEMORY_KINDS:
+        raise ValueError(f"memory.kind must be one of {', '.join(VALID_MEMORY_KINDS)}")
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("memory.title must be a non-empty string")
+    if not isinstance(summary, str) or not summary.strip():
+        raise ValueError("memory.summary must be a non-empty string")
+    if not isinstance(content, dict):
+        raise ValueError("memory.content must be an object")
+    if status not in VALID_MEMORY_STATUS:
+        raise ValueError(f"memory.status must be one of {', '.join(VALID_MEMORY_STATUS)}")
+    if not isinstance(created_at, str) or not created_at:
+        raise ValueError("memory.created_at must be a non-empty string")
+    if not isinstance(updated_at, str) or not updated_at:
+        raise ValueError("memory.updated_at must be a non-empty string")
+
+    return {
+        "id": memory_id,
+        "buddy": buddy.strip(),
+        "kind": kind,
+        "title": title.strip(),
+        "summary": summary.strip(),
+        "content": content,
+        "source_refs": source_refs,
         "status": status,
         "created_at": created_at,
         "updated_at": updated_at,
@@ -414,6 +534,14 @@ def list_handoffs() -> list[dict[str, Any]]:
     return rows
 
 
+def list_memories() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for path in MEMORY_OBJECTS_DIR.glob("*.json"):
+        rows.append(validate_memory(_read_json(path)))
+    rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
+    return rows
+
+
 def _task_artifacts_from_map(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     rows = [artifact_map[item] for item in task.get("artifact_ids", []) if item in artifact_map]
     rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
@@ -451,7 +579,8 @@ def build_track_artifact_index(track_id: str | None) -> dict[str, Any] | None:
                     "revision": artifact.get("revision"),
                     "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
                     "summary": artifact.get("summary", ""),
-                    "source_run_id": artifact.get("source_run_id"),
+                    "created_by": artifact.get("created_by"),
+                    "source_refs": artifact.get("source_refs"),
                     "source_buddy": artifact.get("buddy"),
                     "updated_at": artifact_updated_at,
                     "is_current": bool(artifact.get("is_current")),
@@ -506,6 +635,13 @@ def get_handoff(handoff_id: str) -> dict[str, Any] | None:
     return validate_handoff_record(_read_json(path))
 
 
+def get_memory(memory_id: str) -> dict[str, Any] | None:
+    path = memory_file(memory_id)
+    if not path.exists():
+        return None
+    return validate_memory(_read_json(path))
+
+
 def save_track(track: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_track(track)
     ensure_runtime_dirs()
@@ -531,6 +667,13 @@ def save_handoff(record: dict[str, Any]) -> dict[str, Any]:
     ensure_runtime_dirs()
     normalized = validate_handoff_record(record)
     _write_json(handoff_file(normalized["id"]), normalized)
+    return normalized
+
+
+def save_memory(memory: dict[str, Any]) -> dict[str, Any]:
+    ensure_runtime_dirs()
+    normalized = validate_memory(memory)
+    _write_json(memory_file(normalized["id"]), normalized)
     return normalized
 
 
@@ -607,17 +750,12 @@ def create_task(
 ) -> dict[str, Any]:
     require_id(task_id, "task id")
     if initial_run_id is not None:
-        require_id(initial_run_id, "task.initial_run_id")
+        raise ValueError("task.initial_run_id is retired in runless runtime")
     if get_task(task_id):
         raise ValueError(f"task already exists: {task_id}")
     if track_id is not None and get_track(track_id) is None:
         raise ValueError(f"track not found: {track_id}")
     timestamp = now_iso()
-    run_ids: list[str] = []
-    latest_run_id: str | None = None
-    if isinstance(initial_run_id, str):
-        run_ids = [initial_run_id]
-        latest_run_id = initial_run_id
     task = {
         "id": task_id,
         "buddy": buddy,
@@ -626,8 +764,6 @@ def create_task(
         "track_id": track_id,
         "artifact_ids": [],
         "artifact_slots": {},
-        "run_ids": run_ids,
-        "latest_run_id": latest_run_id,
         "summary": summary,
         "created_at": timestamp,
         "updated_at": timestamp,
@@ -649,8 +785,7 @@ def update_task(task_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         "track_id",
         "summary",
         "artifact_ids",
-        "run_ids",
-        "latest_run_id",
+        "artifact_slots",
     }
     for key, value in patch.items():
         if key not in allowed:
@@ -678,19 +813,6 @@ def register_task_to_track(track_id: str, task_id: str) -> dict[str, Any]:
         task = update_task(task_id, {"track_id": track_id})
     _register_task_id(track_id, task_id)
     return task
-
-
-def add_run_to_task(task_id: str, run_id: str, *, summary: str | None = None) -> dict[str, Any]:
-    task = get_task(task_id)
-    if task is None:
-        raise ValueError(f"task not found: {task_id}")
-    if run_id not in task["run_ids"]:
-        task["run_ids"].append(run_id)
-    task["latest_run_id"] = run_id
-    if summary is not None:
-        task["summary"] = summary
-    task["updated_at"] = now_iso()
-    return save_task(task)
 
 
 def add_artifact_to_task(task_id: str, artifact_id: str, *, summary: str | None = None) -> dict[str, Any]:
@@ -790,10 +912,15 @@ def create_artifact(
     buddy: str,
     kind: str,
     task_id: str,
-    source_run_id: str,
     summary: str = "",
     content: dict[str, Any] | None = None,
+    created_by: str,
+    source_refs: list[dict[str, Any]] | None = None,
+    legacy_source_run: str | None = None,
 ) -> dict[str, Any]:
+    if legacy_source_run is not None:
+        raise ValueError("legacy artifact run lineage field is retired; use source_refs")
+
     task = get_task(task_id)
     if task is None:
         raise ValueError(f"task not found: {task_id}")
@@ -812,6 +939,7 @@ def create_artifact(
         previous["is_current"] = False
         previous["updated_at"] = now_iso()
         save_artifact(previous)
+
     timestamp = now_iso()
     artifact = {
         "id": resolved_id,
@@ -822,7 +950,8 @@ def create_artifact(
         "revision": revision,
         "supersedes_artifact_id": previous["id"] if previous else None,
         "is_current": True,
-        "source_run_id": require_id(source_run_id, "artifact.source_run_id"),
+        "created_by": created_by,
+        "source_refs": source_refs,
         "summary": summary,
         "content": content or {},
         "created_at": timestamp,
@@ -831,41 +960,6 @@ def create_artifact(
     artifact = save_artifact(artifact)
     add_artifact_to_task(task_id, resolved_id, summary=summary or None)
     return artifact
-
-
-def create_handoff(
-    *,
-    handoff_id: str,
-    track_id: str,
-    source_buddy: str,
-    target_buddy: str,
-    source_task_id: str,
-    source_run_id: str,
-    artifact_ids: list[str],
-    historical_artifact_ids: list[str],
-    reason: str,
-    context: str,
-    status: str = "active",
-) -> dict[str, Any]:
-    require_id(handoff_id, "handoff id")
-    if get_handoff(handoff_id) is not None:
-        raise ValueError(f"handoff already exists: {handoff_id}")
-    payload = {
-        "id": handoff_id,
-        "track_id": require_id(track_id, "handoff.track_id"),
-        "source_buddy": source_buddy,
-        "target_buddy": target_buddy,
-        "source_task_id": require_id(source_task_id, "handoff.source_task_id"),
-        "source_run_id": require_id(source_run_id, "handoff.source_run_id"),
-        "artifact_ids": artifact_ids,
-        "historical_artifact_ids": historical_artifact_ids,
-        "reason": reason,
-        "context": context,
-        "status": status,
-        "created_at": now_iso(),
-        "updated_at": now_iso(),
-    }
-    return save_handoff(payload)
 
 
 def update_artifact(
@@ -878,14 +972,18 @@ def update_artifact(
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
     old_task_id = artifact.get("task_id")
+    if _LEGACY_SOURCE_RUN in patch:
+        raise ValueError("legacy artifact run lineage field is retired; use source_refs")
+
     allowed = {
         "title",
         "task_id",
         "buddy",
         "kind",
-        "source_run_id",
         "summary",
         "content",
+        "created_by",
+        "source_refs",
     }
     for key, value in patch.items():
         if key not in allowed:
@@ -908,16 +1006,96 @@ def update_artifact(
     if artifact.get("buddy") != task["buddy"]:
         raise ValueError("artifact.buddy must match artifact.task_id owner")
     require_id(artifact.get("kind"), "artifact.kind")
-    require_id(artifact.get("source_run_id"), "artifact.source_run_id")
 
     artifact["updated_at"] = now_iso()
     artifact = save_artifact(artifact)
 
-    if auto_register:
-        if old_task_id and old_task_id != new_task_id:
-            remove_artifact_from_task(old_task_id, artifact_id)
-            add_artifact_to_task(new_task_id, artifact_id, summary=artifact.get("summary") or None)
+    if auto_register and old_task_id and old_task_id != new_task_id:
+        remove_artifact_from_task(old_task_id, artifact_id)
+        add_artifact_to_task(new_task_id, artifact_id, summary=artifact.get("summary") or None)
     return artifact
+
+
+def create_handoff(
+    *,
+    handoff_id: str,
+    track_id: str,
+    source_buddy: str,
+    target_buddy: str,
+    source_task_id: str | None,
+    artifact_ids: list[str],
+    memory_ids: list[str],
+    buddybox_paths: list[str],
+    source_refs: list[dict[str, Any]] | None,
+    reason: str,
+    context: str,
+    status: str = "active",
+) -> dict[str, Any]:
+    require_id(handoff_id, "handoff id")
+    if get_handoff(handoff_id) is not None:
+        raise ValueError(f"handoff already exists: {handoff_id}")
+    payload = {
+        "id": handoff_id,
+        "track_id": require_id(track_id, "handoff.track_id"),
+        "source_buddy": source_buddy,
+        "target_buddy": target_buddy,
+        "source_task_id": source_task_id,
+        "artifact_ids": artifact_ids,
+        "memory_ids": memory_ids,
+        "buddybox_paths": buddybox_paths,
+        "source_refs": source_refs,
+        "reason": reason,
+        "context": context,
+        "status": status,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    return save_handoff(payload)
+
+
+def create_memory(
+    *,
+    memory_id: str,
+    buddy: str,
+    kind: str,
+    title: str,
+    summary: str,
+    content: dict[str, Any],
+    source_refs: list[dict[str, Any]] | None,
+    status: str = "active",
+) -> dict[str, Any]:
+    require_id(memory_id, "memory id")
+    if get_memory(memory_id) is not None:
+        raise ValueError(f"memory already exists: {memory_id}")
+    timestamp = now_iso()
+    payload = {
+        "id": memory_id,
+        "buddy": buddy,
+        "kind": kind,
+        "title": title,
+        "summary": summary,
+        "content": content,
+        "source_refs": source_refs,
+        "status": status,
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+    return save_memory(payload)
+
+
+def update_memory(memory_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    memory = get_memory(memory_id)
+    if memory is None:
+        raise ValueError(f"memory not found: {memory_id}")
+
+    allowed = {"kind", "title", "summary", "content", "source_refs", "status"}
+    for key, value in patch.items():
+        if key not in allowed:
+            raise ValueError(f"unsupported memory field: {key}")
+        memory[key] = value
+
+    memory["updated_at"] = now_iso()
+    return save_memory(memory)
 
 
 def delete_artifact(artifact_id: str) -> dict[str, Any]:
@@ -954,10 +1132,3 @@ def delete_all_artifacts(*, dry_run: bool = False) -> list[dict[str, Any]]:
     for artifact in targets:
         delete_artifact(artifact["id"])
     return targets
-
-
-def save_run_content(run_id: str, payload: dict[str, Any]) -> str:
-    ensure_runtime_dirs()
-    path = STATE_ROOT / run_content_path(run_id)
-    _write_json(path, payload)
-    return rel(path)

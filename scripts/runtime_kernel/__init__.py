@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
-"""Runtime kernel entrypoints for turn prepare/persist."""
+"""Runtime kernel entrypoints for runless broker operations."""
 
-from .persist import persist_buddy_run_request
-from .resolve import prepare_turn_context_request
+from .broker import dispatch_runtime_request
 
-__all__ = [
-    "prepare_turn_context_request",
-    "persist_buddy_run_request",
-]
+__all__ = ["dispatch_runtime_request"]

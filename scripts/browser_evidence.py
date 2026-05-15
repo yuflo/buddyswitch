@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Issue broker-backed browser evidence tokens for Market runs."""
+"""Issue broker-backed target-scoped browser evidence tokens."""
 
 from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import sys
 from typing import Any
 
@@ -29,20 +28,6 @@ def _runtime_error(code: str, message: str, extra: dict[str, Any] | None = None)
     }
     if extra:
         payload.update(extra)
-    payload.setdefault("permission_boundary", "runtime.broker")
-    payload.setdefault("human_summary", message)
-    payload.setdefault("why_blocked", message)
-    payload.setdefault("impact", "No evidence token was issued and no runtime state was changed.")
-    payload.setdefault("state_changed", False)
-    payload.setdefault("retryable", True)
-    payload.setdefault("retry_guidance", "Fix broker/context inputs and retry.")
-    return payload
-
-
-def _load_json_object(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"context must be a JSON object: {path}")
     return payload
 
 
@@ -50,30 +35,31 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Issue BuddySwitch browser evidence tokens.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    issue = sub.add_parser("issue", help="Issue browser cockpit preflight token")
-    issue.add_argument("--context", required=True, type=Path)
-    issue.add_argument("--mode", required=True, choices=["browser-cockpit-preflight"])
+    issue = sub.add_parser("issue", help="Issue browser evidence token")
+    issue.add_argument("--target-type", required=True, choices=["artifact", "memory"])
+    issue.add_argument("--target-id", required=True)
+    issue.add_argument("--mode", default="browser-cockpit-preflight")
 
     downgrade = sub.add_parser("approve-downgrade", help="Issue approved downgrade token")
-    downgrade.add_argument("--context", required=True, type=Path)
+    downgrade.add_argument("--target-type", required=True, choices=["artifact", "memory"])
+    downgrade.add_argument("--target-id", required=True)
     downgrade.add_argument("--reason", required=True)
     return parser.parse_args()
 
 
-def _dispatch_issue(*, context: dict[str, Any], mode: str, reason: str | None) -> dict[str, Any]:
-    if mode == "browser-cockpit-preflight":
-        action = "issue_browser"
-        args: dict[str, Any] = {"context": context}
-    elif mode == "approved-downgrade":
-        action = "approve_downgrade"
-        args = {"context": context, "reason": reason}
-    else:
-        raise RuntimeBrokerError(
-            "E_RUNTIME_BROKER_UNAVAILABLE",
-            f"unsupported evidence mode: {mode}",
-            details=broker_unavailable_feedback(),
-        )
-    response = request_runtime_broker("env.tool", {"tool": "evidence", "action": action, "args": args})
+def _dispatch_issue(*, target_type: str, target_id: str, mode: str) -> dict[str, Any]:
+    response = request_runtime_broker(
+        "env.tool",
+        {
+            "tool": "evidence",
+            "action": "issue_browser",
+            "args": {
+                "target_type": target_type,
+                "target_id": target_id,
+                "mode": mode,
+            },
+        },
+    )
     if not isinstance(response, dict) or not isinstance(response.get("ok"), bool):
         raise RuntimeBrokerError(
             "E_RUNTIME_BROKER_UNAVAILABLE",
@@ -95,17 +81,53 @@ def _dispatch_issue(*, context: dict[str, Any], mode: str, reason: str | None) -
     }
 
 
+def _dispatch_approve(*, target_type: str, target_id: str, reason: str) -> dict[str, Any]:
+    response = request_runtime_broker(
+        "env.tool",
+        {
+            "tool": "evidence",
+            "action": "approve_downgrade",
+            "args": {
+                "target_type": target_type,
+                "target_id": target_id,
+                "reason": reason,
+            },
+        },
+    )
+    if not isinstance(response, dict) or not isinstance(response.get("ok"), bool):
+        raise RuntimeBrokerError(
+            "E_RUNTIME_BROKER_UNAVAILABLE",
+            "runtime broker response for downgrade approval is invalid.",
+            details=broker_unavailable_feedback(),
+        )
+    if response.get("ok") is not True:
+        return response
+    if not isinstance(response.get("tool_evidence"), dict) or not isinstance(response.get("feedback"), dict):
+        raise RuntimeBrokerError(
+            "E_RUNTIME_BROKER_UNAVAILABLE",
+            "runtime broker downgrade evidence payload is invalid.",
+            details=broker_unavailable_feedback(),
+        )
+    return {
+        "ok": True,
+        "tool_evidence": response["tool_evidence"],
+        "feedback": response["feedback"],
+    }
+
+
 def main() -> int:
     args = _parse_args()
     try:
         if args.command == "issue":
-            context = _load_json_object(args.context)
-            payload = _dispatch_issue(context=context, mode=args.mode, reason=None)
-        elif args.command == "approve-downgrade":
-            context = _load_json_object(args.context)
             payload = _dispatch_issue(
-                context=context,
-                mode="approved-downgrade",
+                target_type=args.target_type,
+                target_id=args.target_id,
+                mode=args.mode,
+            )
+        elif args.command == "approve-downgrade":
+            payload = _dispatch_approve(
+                target_type=args.target_type,
+                target_id=args.target_id,
                 reason=args.reason,
             )
         else:

@@ -261,8 +261,8 @@ class ConsoleAppContractTests(unittest.TestCase):
         next_step = self._derive_track_next_step_state(workspace_payload, track_payload)
         self.assertEqual(next_step["trackId"], "track-alpha")
         self.assertEqual(next_step["currentBuddy"], "dev")
-        self.assertEqual(next_step["nextBuddy"], "market")
-        self.assertEqual(next_step["recommendedBuddy"], "market")
+        self.assertEqual(next_step["nextBuddy"], "pm")
+        self.assertEqual(next_step["recommendedBuddy"], "pm")
         self.assertEqual(next_step["mode"], "handoff")
         self.assertNotIn("switch", json.dumps(next_step).lower())
 
@@ -306,8 +306,8 @@ class ConsoleAppContractTests(unittest.TestCase):
         next_step = self._derive_task_next_step_state(workspace_payload, task_payload)
         self.assertEqual(next_step["taskId"], "task-dev")
         self.assertEqual(next_step["currentBuddy"], "dev")
-        self.assertEqual(next_step["recommendedBuddy"], "test")
-        self.assertEqual(next_step["mode"], "handoff")
+        self.assertEqual(next_step["recommendedBuddy"], "dev")
+        self.assertEqual(next_step["mode"], "continue_current_task")
         self.assertNotIn("switch", json.dumps(next_step).lower())
 
     def test_standalone_task_without_run_audit_uses_task_buddy_not_synthetic_pm_switch(self) -> None:
@@ -449,10 +449,11 @@ class ConsoleAppContractTests(unittest.TestCase):
         )
         result = json.loads(completed.stdout)
 
-        self.assertFalse(result["refreshed"])
+        self.assertIsInstance(result["refreshed"], dict)
+        self.assertEqual(result["refreshed"]["generated_at"], "existing-snapshot")
         self.assertEqual(result["workspace"]["generated_at"], "existing-snapshot")
         self.assertEqual(result["workspace"]["tracks"][0]["id"], "track-existing")
-        self.assertEqual(result["status"]["text"], "Workspace is updating. Retry shortly.")
+        self.assertEqual(result["status"]["text"], "Workspace snapshot is busy; keeping previous data.")
         self.assertEqual(result["status"]["state"], "warning")
 
 

@@ -1,24 +1,29 @@
 {
   "contract_id": "workspace-projection",
-  "contract_version": "2026-05-06",
+  "contract_version": "2026-05-15",
   "endpoint": "/api/workspace",
   "top_level_key_order": [
     "generated_at",
     "manifest_path",
     "objects_root",
+    "content_root",
     "buddies",
     "tracks",
     "standalone_tasks",
     "tasks",
     "artifacts",
-    "run_audits"
+    "handoffs",
+    "memories",
+    "buddybox_files"
   ],
   "data_sources": [
     "buddyswitch/manifest.toml",
     "buddyswitch/objects/tracks/*.json",
     "buddyswitch/objects/tasks/*.json",
     "buddyswitch/objects/artifacts/*.json",
-    "buddyswitch/content/runs/*.json"
+    "buddyswitch/objects/handoffs/*.json",
+    "buddyswitch/objects/memories/*.json",
+    "buddyswitch/content/buddybox/**/*"
   ],
   "read_only": true,
   "no_snapshot_fallback": true,
@@ -30,15 +35,15 @@
     "objects_root": {
       "type": "repo-relative-path",
       "exact": "buddyswitch/objects"
+    },
+    "content_root": {
+      "type": "repo-relative-path",
+      "exact": "buddyswitch/content"
     }
   },
   "view_shapes": {
     "buddy": {
-      "key_order": [
-        "id",
-        "label",
-        "scope"
-      ],
+      "key_order": ["id", "label", "scope"],
       "field_types": {
         "id": "string",
         "label": "string",
@@ -80,8 +85,6 @@
         "track_id",
         "artifact_ids",
         "artifact_slots",
-        "run_ids",
-        "latest_run_id",
         "summary",
         "created_at",
         "updated_at",
@@ -98,8 +101,6 @@
         "track_id": "string-or-null",
         "artifact_ids": "string-array",
         "artifact_slots": "artifact-slot-map",
-        "run_ids": "string-array",
-        "latest_run_id": "string",
         "summary": "string",
         "created_at": "string",
         "updated_at": "string",
@@ -109,10 +110,7 @@
         "missing": "boolean"
       },
       "artifact_slot_entry": {
-        "key_order": [
-          "current_artifact_id",
-          "revision_count"
-        ],
+        "key_order": ["current_artifact_id", "revision_count"],
         "field_types": {
           "current_artifact_id": "string",
           "revision_count": "integer"
@@ -129,7 +127,8 @@
         "revision",
         "supersedes_artifact_id",
         "is_current",
-        "source_run_id",
+        "created_by",
+        "source_refs",
         "summary",
         "content",
         "created_at",
@@ -147,7 +146,8 @@
         "revision": "integer",
         "supersedes_artifact_id": "string-or-null",
         "is_current": "boolean",
-        "source_run_id": "string",
+        "created_by": "string",
+        "source_refs": "object-array-or-null",
         "summary": "string",
         "content": "object",
         "created_at": "string",
@@ -157,62 +157,87 @@
         "missing": "boolean"
       }
     },
-    "run_audit": {
+    "handoff": {
       "key_order": [
-        "run_id",
-        "path",
-        "buddy",
-        "task_id",
-        "task_title",
-        "demand",
-        "artifact_ids",
+        "id",
+        "source_buddy",
+        "target_buddy",
         "track_id",
-        "track_title",
-        "track_action",
-        "execution_summary",
-        "handoff",
-        "contributors",
-        "state_effects",
-        "next_state",
-        "receipt_paths",
-        "related_run_ids",
+        "source_task_id",
+        "artifact_ids",
+        "memory_ids",
+        "buddybox_paths",
+        "source_refs",
+        "reason",
+        "context",
+        "status",
+        "created_at",
         "updated_at",
-        "status"
+        "object_path",
+        "file_name",
+        "missing"
       ],
       "field_types": {
-        "run_id": "string",
-        "path": "repo-relative-path",
-        "buddy": "string-or-null",
-        "task_id": "string-or-null",
-        "task_title": "string-or-null",
-        "demand": "string-or-null",
+        "id": "string",
+        "source_buddy": "string",
+        "target_buddy": "string",
+        "track_id": "string",
+        "source_task_id": "string-or-null",
         "artifact_ids": "string-array",
-        "track_id": "string-or-null",
-        "track_title": "string-or-null",
-        "track_action": "string-or-null",
-        "execution_summary": "string-or-null",
-        "handoff": "object",
-        "contributors": "object",
-        "state_effects": "object",
-        "next_state": "object",
-        "receipt_paths": "object",
-        "related_run_ids": "string-array",
+        "memory_ids": "string-array",
+        "buddybox_paths": "string-array",
+        "source_refs": "object-array-or-null",
+        "reason": "string",
+        "context": "string",
+        "status": "string",
+        "created_at": "string",
         "updated_at": "string",
-        "status": "string"
+        "object_path": "repo-relative-path",
+        "file_name": "basename",
+        "missing": "boolean"
       }
     },
-    "run_audit_invalid": {
+    "memory": {
       "key_order": [
-        "run_id",
-        "path",
+        "id",
+        "buddy",
+        "kind",
+        "title",
+        "summary",
+        "content",
+        "source_refs",
         "status",
-        "updated_at"
+        "created_at",
+        "updated_at",
+        "object_path",
+        "file_name",
+        "missing"
       ],
       "field_types": {
-        "run_id": "string",
-        "path": "repo-relative-path",
+        "id": "string",
+        "buddy": "string",
+        "kind": "string",
+        "title": "string",
+        "summary": "string",
+        "content": "object",
+        "source_refs": "object-array-or-null",
         "status": "string",
-        "updated_at": "string"
+        "created_at": "string",
+        "updated_at": "string",
+        "object_path": "repo-relative-path",
+        "file_name": "basename",
+        "missing": "boolean"
+      }
+    },
+    "buddybox_file": {
+      "key_order": ["buddy", "path", "size_bytes", "updated_at", "content_type", "source_ref"],
+      "field_types": {
+        "buddy": "string",
+        "path": "repo-relative-path",
+        "size_bytes": "integer",
+        "updated_at": "string",
+        "content_type": "string",
+        "source_ref": "object"
       }
     }
   },
@@ -220,6 +245,7 @@
     "task_view_slot_field": "current_artifacts",
     "track_view_missing_reference_field": "missing_task_ids",
     "current_artifacts_value_shape": "artifact",
-    "tracks_embed_task_views": true
+    "tracks_embed_task_views": true,
+    "run_fields_removed": true
   }
 }

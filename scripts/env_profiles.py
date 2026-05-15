@@ -219,12 +219,12 @@ def validate_env_profile(
     if project_path != "projects/app":
         raise EnvProfileError(f"project.path must be 'projects/app', got {project_path!r}")
 
-    scratch = _require_dict(profile.get("scratch"), "scratch")
-    scratch_root = _require_string(scratch.get("root"), "scratch.root")
-    expected_scratch_root = f"runs/raw/{buddy_id}"
-    if scratch_root != expected_scratch_root:
+    buddybox = _require_dict(profile.get("buddybox"), "buddybox")
+    buddybox_root = _require_string(buddybox.get("root"), "buddybox.root")
+    expected_buddybox_root = f"buddyswitch/content/buddybox/{buddy_id}"
+    if buddybox_root != expected_buddybox_root:
         raise EnvProfileError(
-            f"scratch.root mismatch for '{buddy_id}': expected {expected_scratch_root!r}, got {scratch_root!r}"
+            f"buddybox.root mismatch for '{buddy_id}': expected {expected_buddybox_root!r}, got {buddybox_root!r}"
         )
 
     fs_capability = _require_dict(profile.get("filesystem_capability"), "filesystem_capability")

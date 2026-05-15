@@ -90,8 +90,6 @@ for instance_json in sorted((shared_root / "instances").glob("*/instance.json"))
             payload.get("instance_id", instance_json.parent.name),
             buddy or "",
             payload.get("status", ""),
-            payload.get("current_task_id") or "",
-            payload.get("current_track_id") or "",
             str(payload.get("browser_port") or ""),
             payload.get("updated_at", ""),
             payload.get("workspace_dir", ""),
@@ -103,7 +101,7 @@ if not rows:
     print("Start one with: ./buddyswitch-codex instance start --buddy <buddy>")
     raise SystemExit(0)
 
-print("instance_id\tbuddy\tstatus\tcurrent_task_id\tcurrent_track_id\tbrowser_port\tupdated_at\tworkspace_dir")
+print("instance_id\tbuddy\tstatus\tbrowser_port\tupdated_at\tworkspace_dir")
 for row in rows:
     print("\t".join(str(item) for item in row))
 PY

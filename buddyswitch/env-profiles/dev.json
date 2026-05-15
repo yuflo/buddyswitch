@@ -6,17 +6,27 @@
     "access": "write",
     "path": "projects/app"
   },
-  "scratch": {
-    "root": "runs/raw/dev"
+  "buddybox": {
+    "root": "buddyswitch/content/buddybox/dev"
   },
   "filesystem_capability": {
-    "host_writable": ["home", "codex-home", "xdg-config", "scratch", "temp", "project-workspace"],
+    "host_writable": [
+      "home",
+      "codex-home",
+      "xdg-config",
+      "scratch",
+      "temp",
+      "project-workspace"
+    ],
     "project_workspace": "write",
     "raw_state": "broker-only"
   },
   "state_capability": {
     "artifact_kinds": "from-manifest",
-    "task_effects": ["status", "summary"],
+    "task_effects": [
+      "status",
+      "summary"
+    ],
     "track_effects": [],
     "handoff_targets": "manifest-buddies"
   },

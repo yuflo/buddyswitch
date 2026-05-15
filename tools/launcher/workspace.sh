@@ -351,8 +351,9 @@ buddyswitch_workspace_runtime_output_paths() {
 buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
-buddyswitch/content/runs
-runs/raw
+buddyswitch/objects/handoffs
+buddyswitch/objects/memories
+buddyswitch/content/buddybox
 EOF
 }
 
@@ -361,14 +362,14 @@ buddyswitch_workspace_projected_state_paths() {
 buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
-buddyswitch/content/runs
+buddyswitch/objects/handoffs
+buddyswitch/objects/memories
+buddyswitch/content/buddybox
 EOF
 }
 
 buddyswitch_workspace_local_runtime_paths() {
-  cat <<'EOF'
-runs/raw
-EOF
+  true
 }
 
 buddyswitch_workspace_is_instance_mode() {
@@ -663,11 +664,12 @@ buddyswitch_workspace_install_local_excludes() {
       printf '%s\n' "${pattern}" >> "${exclude_path}"
     fi
   done <<'EOF'
-buddyswitch/content/runs/**
 buddyswitch/objects/tracks/**
 buddyswitch/objects/tasks/**
 buddyswitch/objects/artifacts/**
-runs/raw/**
+buddyswitch/objects/handoffs/**
+buddyswitch/objects/memories/**
+buddyswitch/content/buddybox/**
 .agents/skills/**
 EOF
 }
@@ -687,11 +689,12 @@ buddyswitch_workspace_ensure_state_skeleton() {
   while IFS= read -r relative_dir; do
     mkdir -p "${workspace_dir}/${relative_dir}"
   done <<'EOF'
-runs/raw
 buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
-buddyswitch/content/runs
+buddyswitch/objects/handoffs
+buddyswitch/objects/memories
+buddyswitch/content/buddybox
 EOF
 }
 

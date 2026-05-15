@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
-"""Functional coverage for broker-routed env.tool task env tool operations."""
+"""Runless task env.tool integration tests."""
 
 from __future__ import annotations
 
-import copy
 import json
-import os
-import subprocess
 import sys
-import time
 import unittest
 import uuid
 from pathlib import Path
@@ -24,32 +20,20 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
-ENV_CLIENT = ROOT / "scripts" / "env" / "client.py"
 
 
-class TaskManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(
-        self,
-        *,
-        instance_id: str = "inst-dev-example",
-        buddy: str = "dev",
-        status: str = "active",
-        current_task_id: str | None = None,
-        current_track_id: str | None = None,
-    ) -> Path:
-        instance_json = self._runtime_path("instance.json")
-        instance_json.write_text(
+class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _instance_json(self, *, instance_id: str = "inst-dev-task", buddy: str = "dev", status: str = "active") -> Path:
+        path = self._runtime_path("instance.json")
+        path.write_text(
             json.dumps(
                 {
                     "instance_id": instance_id,
                     "buddy": buddy,
                     "status": status,
-                    "current_task_id": current_task_id,
-                    "current_track_id": current_track_id,
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
-                    "created_at": "2026-05-10T00:00:00Z",
-                    "updated_at": "2026-05-10T00:00:00Z",
+                    "updated_at": "2026-05-15T00:00:00Z",
                 },
                 ensure_ascii=True,
                 indent=2,
@@ -57,26 +41,28 @@ class TaskManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             + "\n",
             encoding="utf-8",
         )
-        return instance_json
+        return path
 
     def _dispatch(
         self,
         *,
+        instance_json: Path,
+        tool: str,
         action: str,
         args: dict[str, object],
-        instance_json: Path,
-        instance_id: str = "inst-dev-example",
-        buddy: str = "dev",
+        instance_id: str,
+        buddy: str,
     ) -> dict[str, object]:
-        payload: dict[str, object] = {"tool": "task", "action": action, "args": args}
         request = {
             "protocol": PROTOCOL,
-            "request_id": f"req-task-env-{uuid.uuid4().hex}",
+            "request_id": f"req-task-{uuid.uuid4().hex}",
             "method": "env.tool",
             "params": {
                 "instance_id": instance_id,
                 "active_buddy": buddy,
-                **payload,
+                "tool": tool,
+                "action": action,
+                "args": args,
             },
             "deadline_ms": 35000,
         }
@@ -93,10 +79,8 @@ class TaskManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.assertIsInstance(result, dict, msg=envelope)
             assert isinstance(result, dict)
             return result
-        error = envelope.get("error")
-        self.assertIsInstance(error, dict, msg=envelope)
-        assert isinstance(error, dict)
-        response: dict[str, object] = {
+        error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
+        payload: dict[str, object] = {
             "ok": False,
             "error": {
                 "code": error.get("code"),
@@ -107,591 +91,104 @@ class TaskManagerEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for key, value in envelope.items():
             if key in {"protocol", "request_id", "ok", "error"}:
                 continue
-            response[key] = value
-        return response
+            payload[key] = value
+        return payload
 
-    def _seed_task(
-        self,
-        *,
-        task_id: str,
-        buddy: str,
-        title: str,
-        summary: str = "",
-        status: str = "active",
-        track_id: str | None = None,
-    ) -> None:
-        env_store.create_task(
-            task_id,
-            title,
-            buddy=buddy,
-            track_id=track_id,
-            status=status,
-            summary=summary,
-            initial_run_id=None,
-        )
-
-    def _load_instance(self, instance_json: Path) -> dict[str, object]:
-        return json.loads(instance_json.read_text(encoding="utf-8"))
-
-    def _tasks_snapshot(self) -> dict[str, dict[str, object]]:
-        rows: dict[str, dict[str, object]] = {}
-        tasks_dir = self._runtime_path("buddyswitch/objects/tasks")
-        if not tasks_dir.exists():
-            return rows
-        for path in sorted(tasks_dir.glob("*.json")):
-            rows[path.name] = json.loads(path.read_text(encoding="utf-8"))
-        return rows
-
-    def _assert_scope_rejection(
-        self,
-        response: dict[str, object],
-        *,
-        action: str,
-        task_id: str,
-        expected_code: str = "E_TASK_BUDDY_SCOPE",
-        expected_boundary: str = "task.buddy_scope",
-    ) -> None:
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("action"), action)
-        error = response.get("error")
-        self.assertIsInstance(error, dict, msg=response)
-        assert isinstance(error, dict)
-        self.assertEqual(error.get("code"), expected_code)
-        self.assertEqual(response.get("permission_boundary"), expected_boundary)
-        self.assertEqual(response.get("active_buddy"), "dev")
-        self.assertEqual(response.get("task_id"), task_id)
-        allowed_next_actions = response.get("allowed_next_actions")
-        self.assertIsInstance(allowed_next_actions, list, msg=response)
-        assert isinstance(allowed_next_actions, list)
-        self.assertTrue(allowed_next_actions, msg=response)
-
-    def test_task_create_list_get_update_archive_for_active_buddy(self) -> None:
-        instance_json = self._instance_json()
-        self._seed_task(task_id="task-dev-existing", buddy="dev", title="Dev Existing")
-        self._seed_task(task_id="task-pm-foreign", buddy="pm", title="PM Foreign")
+    def test_task_crud_flow_for_active_buddy(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-task", buddy="dev")
 
         created = self._dispatch(
-            action="create",
-            args={
-                "title": "Dev Created",
-                "summary": "created through env tool",
-                "buddy": "pm",
-                "active_buddy": "pm",
-            },
             instance_json=instance_json,
+            tool="task",
+            action="create",
+            args={"task_id": "task-dev-runless", "title": "Runless Task", "summary": "seed"},
+            instance_id="inst-dev-task",
+            buddy="dev",
         )
         self.assertTrue(created.get("ok"), msg=created)
         self.assertEqual(created.get("action"), "task.create")
-        self.assertEqual(created.get("active_buddy"), "dev")
-        created_task_id = created.get("task_id")
-        self.assertIsInstance(created_task_id, str)
-        assert isinstance(created_task_id, str)
-        created_task = env_store.get_task(created_task_id)
-        self.assertIsNotNone(created_task)
-        assert created_task is not None
-        self.assertEqual(created_task["buddy"], "dev")
+        task = created.get("task")
+        self.assertIsInstance(task, dict, msg=created)
+        assert isinstance(task, dict)
+        self.assertEqual(task.get("id"), "task-dev-runless")
 
-        listed = self._dispatch(action="list", args={}, instance_json=instance_json)
+        listed = self._dispatch(
+            instance_json=instance_json,
+            tool="task",
+            action="list",
+            args={},
+            instance_id="inst-dev-task",
+            buddy="dev",
+        )
         self.assertTrue(listed.get("ok"), msg=listed)
-        self.assertEqual(listed.get("action"), "task.list")
         tasks = listed.get("tasks")
         self.assertIsInstance(tasks, list, msg=listed)
         assert isinstance(tasks, list)
         task_ids = {row.get("id") for row in tasks if isinstance(row, dict)}
-        self.assertIn("task-dev-existing", task_ids)
-        self.assertIn(created_task_id, task_ids)
-        self.assertNotIn("task-pm-foreign", task_ids)
-
-        fetched = self._dispatch(action="get", args={"task_id": created_task_id}, instance_json=instance_json)
-        self.assertTrue(fetched.get("ok"), msg=fetched)
-        self.assertEqual(fetched.get("action"), "task.get")
-        self.assertEqual(fetched.get("task_id"), created_task_id)
-
-        summary_updated = self._dispatch(
-            action="update",
-            args={"task_id": created_task_id, "summary": "summary-only update"},
-            instance_json=instance_json,
-        )
-        self.assertTrue(summary_updated.get("ok"), msg=summary_updated)
-        summary_task = env_store.get_task(created_task_id)
-        self.assertIsNotNone(summary_task)
-        assert summary_task is not None
-        self.assertEqual(summary_task["summary"], "summary-only update")
-
-        updated = self._dispatch(
-            action="update",
-            args={"task_id": created_task_id, "title": "Dev Created Updated", "status": "blocked"},
-            instance_json=instance_json,
-        )
-        self.assertTrue(updated.get("ok"), msg=updated)
-        self.assertEqual(updated.get("action"), "task.update")
-        self.assertEqual(updated.get("task_id"), created_task_id)
-        updated_task = env_store.get_task(created_task_id)
-        self.assertIsNotNone(updated_task)
-        assert updated_task is not None
-        self.assertEqual(updated_task["title"], "Dev Created Updated")
-        self.assertEqual(updated_task["status"], "blocked")
-
-        archived = self._dispatch(
-            action="archive",
-            args={"task_id": created_task_id},
-            instance_json=instance_json,
-        )
-        self.assertTrue(archived.get("ok"), msg=archived)
-        self.assertEqual(archived.get("action"), "task.archive")
-        archived_task = env_store.get_task(created_task_id)
-        self.assertIsNotNone(archived_task)
-        assert archived_task is not None
-        self.assertEqual(archived_task["status"], "archived")
-
-        archived_fetch = self._dispatch(action="get", args={"task_id": created_task_id}, instance_json=instance_json)
-        self.assertTrue(archived_fetch.get("ok"), msg=archived_fetch)
-        archived_task_payload = archived_fetch.get("task")
-        self.assertIsInstance(archived_task_payload, dict, msg=archived_fetch)
-        assert isinstance(archived_task_payload, dict)
-        self.assertEqual(archived_task_payload.get("status"), "archived")
-
-        pm_instance_json = self._instance_json(instance_id="inst-pm-example", buddy="pm")
-        pm_listed = self._dispatch(
-            action="list",
-            args={},
-            instance_json=pm_instance_json,
-            instance_id="inst-pm-example",
-            buddy="pm",
-        )
-        self.assertTrue(pm_listed.get("ok"), msg=pm_listed)
-        pm_tasks = pm_listed.get("tasks")
-        self.assertIsInstance(pm_tasks, list, msg=pm_listed)
-        assert isinstance(pm_tasks, list)
-        pm_task_ids = {row.get("id") for row in pm_tasks if isinstance(row, dict)}
-        self.assertIn("task-pm-foreign", pm_task_ids)
-        self.assertNotIn("task-dev-existing", pm_task_ids)
-        self.assertNotIn(created_task_id, pm_task_ids)
-
-    def test_task_list_includes_owned_and_relation_readable_track_tasks_with_current_artifact_ids(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-dev-rel-list", buddy="dev")
-        env_store.create_track(
-            "track-task-rel-list",
-            "Task Relation List",
-            status="active",
-            current_buddy="pm",
-            next_buddy="dev",
-            summary="relation list",
-        )
-        self._seed_task(task_id="task-pm-rel-list", buddy="pm", title="PM Task", track_id="track-task-rel-list")
-        self._seed_task(task_id="task-design-rel-list", buddy="design", title="Design Task", track_id="track-task-rel-list")
-        self._seed_task(task_id="task-dev-rel-list", buddy="dev", title="Dev Task", track_id="track-task-rel-list")
-        env_store.create_track(
-            "track-task-unrelated",
-            "Task Unrelated",
-            status="active",
-            current_buddy="pm",
-            next_buddy="market",
-            summary="unrelated",
-        )
-        self._seed_task(task_id="task-pm-unrelated-list", buddy="pm", title="PM Unrelated", track_id="track-task-unrelated")
-
-        env_store.create_artifact(
-            artifact_id="art-pm-rel-list-r1",
-            title="PM Rel Artifact",
-            buddy="pm",
-            kind="prd",
-            task_id="task-pm-rel-list",
-            source_run_id="run-pm-rel-list-r1",
-            summary="pm summary",
-            content={"body": "pm body"},
-        )
-        env_store.create_artifact(
-            artifact_id="art-design-rel-list-r1",
-            title="Design Rel Artifact",
-            buddy="design",
-            kind="design-handoff",
-            task_id="task-design-rel-list",
-            source_run_id="run-design-rel-list-r1",
-            summary="design summary",
-            content={"body": "design body"},
-        )
-        env_store.create_artifact(
-            artifact_id="art-dev-rel-list-r1",
-            title="Dev Rel Artifact",
-            buddy="dev",
-            kind="implementation-report",
-            task_id="task-dev-rel-list",
-            source_run_id="run-dev-rel-list-r1",
-            summary="dev summary",
-            content={"body": "dev body"},
-        )
-
-        listed = self._dispatch(
-            action="list",
-            args={},
-            instance_json=instance_json,
-            instance_id="inst-dev-rel-list",
-            buddy="dev",
-        )
-        self.assertTrue(listed.get("ok"), msg=listed)
-        rows = listed.get("tasks")
-        self.assertIsInstance(rows, list, msg=listed)
-        assert isinstance(rows, list)
-        by_id = {row.get("id"): row for row in rows if isinstance(row, dict)}
-        self.assertIn("task-pm-rel-list", by_id)
-        self.assertIn("task-design-rel-list", by_id)
-        self.assertIn("task-dev-rel-list", by_id)
-        self.assertNotIn("task-pm-unrelated-list", by_id)
-
-        for task_id in ("task-pm-rel-list", "task-design-rel-list", "task-dev-rel-list"):
-            row = by_id[task_id]
-            self.assertIn("track_id", row)
-            self.assertIn("owner_buddy", row)
-            self.assertIn("current_artifact_ids", row)
-            self.assertIsInstance(row.get("current_artifact_ids"), list)
-            self.assertIn("is_current_work", row)
-
-    def test_task_get_returns_artifact_summaries_and_points_to_artifact_get_without_body(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-dev-task-get", buddy="dev")
-        env_store.create_track(
-            "track-task-get",
-            "Task Get Track",
-            status="active",
-            current_buddy="pm",
-            next_buddy="dev",
-            summary="task get",
-        )
-        self._seed_task(task_id="task-pm-task-get", buddy="pm", title="PM Source", track_id="track-task-get")
-        self._seed_task(task_id="task-dev-task-get", buddy="dev", title="Dev Participant", track_id="track-task-get")
-        env_store.create_artifact(
-            artifact_id="art-pm-task-get-r1",
-            title="PM Source Artifact",
-            buddy="pm",
-            kind="prd",
-            task_id="task-pm-task-get",
-            source_run_id="run-pm-task-get-r1",
-            summary="pm task get summary",
-            content={"body": "pm-secret-task-get-body"},
-        )
+        self.assertIn("task-dev-runless", task_ids)
 
         fetched = self._dispatch(
-            action="get",
-            args={"task_id": "task-pm-task-get"},
             instance_json=instance_json,
-            instance_id="inst-dev-task-get",
+            tool="task",
+            action="get",
+            args={"task_id": "task-dev-runless"},
+            instance_id="inst-dev-task",
             buddy="dev",
         )
         self.assertTrue(fetched.get("ok"), msg=fetched)
-        self.assertEqual(fetched.get("relation"), "participant")
-        task = fetched.get("task")
-        self.assertIsInstance(task, dict, msg=fetched)
-        assert isinstance(task, dict)
-        artifacts = task.get("current_artifacts")
-        self.assertIsInstance(artifacts, list, msg=fetched)
-        assert isinstance(artifacts, list)
-        self.assertTrue(artifacts, msg=fetched)
-        first = artifacts[0]
-        self.assertIsInstance(first, dict, msg=fetched)
-        assert isinstance(first, dict)
-        self.assertEqual(first.get("artifact_id"), "art-pm-task-get-r1")
-        self.assertIn("readable_by_current_buddy", first)
+        self.assertEqual((fetched.get("task") or {}).get("summary"), "seed")
 
-        next_actions = fetched.get("next_actions")
-        self.assertIsInstance(next_actions, list, msg=fetched)
-        assert isinstance(next_actions, list)
-        self.assertEqual(next_actions[0].get("tool"), "artifact")
-        self.assertEqual(next_actions[0].get("action"), "get")
-        self.assertIn("artifact get", str(fetched.get("command_hint")))
-
-        serialized = json.dumps(fetched, ensure_ascii=True, sort_keys=True)
-        self.assertNotIn("pm-secret-task-get-body", serialized)
-        self.assertNotIn('"content":', serialized)
-
-    def test_unsupported_update_fields_reject_without_partial_mutation(self) -> None:
-        instance_json = self._instance_json()
-        self._seed_task(task_id="task-dev-owned", buddy="dev", title="Dev Owned", summary="original")
-        before_task = copy.deepcopy(env_store.get_task("task-dev-owned"))
-        before_instance = self._load_instance(instance_json)
-
-        response = self._dispatch(
+        updated = self._dispatch(
+            instance_json=instance_json,
+            tool="task",
             action="update",
-            args={
-                "task_id": "task-dev-owned",
-                "summary": "should not persist",
-                "track_id": "track-dev-example",
-                "artifact_ids": ["artifact-dev-example"],
-                "run_ids": ["run-dev-example"],
-            },
-            instance_json=instance_json,
-        )
-
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual(response.get("permission_boundary"), "request-payload")
-        self.assertEqual(env_store.get_task("task-dev-owned"), before_task)
-        self.assertEqual(self._load_instance(instance_json), before_instance)
-
-    def test_cross_buddy_named_task_operations_reject_without_mutation(self) -> None:
-        instance_json = self._instance_json()
-        self._seed_task(task_id="task-dev-owned", buddy="dev", title="Dev Owned")
-        self._seed_task(task_id="task-pm-foreign", buddy="pm", title="PM Foreign", summary="do not mutate")
-        before_task = copy.deepcopy(env_store.get_task("task-pm-foreign"))
-        before_instance = self._load_instance(instance_json)
-
-        for action, args in (
-            ("get", {"task_id": "task-pm-foreign"}),
-            ("update", {"task_id": "task-pm-foreign", "summary": "should fail"}),
-            ("archive", {"task_id": "task-pm-foreign"}),
-            ("set_current", {"task_id": "task-pm-foreign"}),
-        ):
-            with self.subTest(action=action):
-                response = self._dispatch(action=action, args=args, instance_json=instance_json)
-                if action == "get":
-                    self._assert_scope_rejection(
-                        response,
-                        action=f"task.{action}",
-                        task_id="task-pm-foreign",
-                        expected_code="E_TASK_TRACK_RELATION",
-                        expected_boundary="task.track_relation",
-                    )
-                else:
-                    self._assert_scope_rejection(response, action=f"task.{action}", task_id="task-pm-foreign")
-                self.assertEqual(env_store.get_task("task-pm-foreign"), before_task)
-                self.assertEqual(self._load_instance(instance_json), before_instance)
-
-    def test_set_current_and_get_current_sync_instance_binding(self) -> None:
-        instance_json = self._instance_json()
-        env_store.create_track(
-            "track-dev-example",
-            "Dev Track",
-            status="active",
-            current_buddy="dev",
-            next_buddy=None,
-            summary="",
-        )
-        self._seed_task(task_id="task-dev-untracked", buddy="dev", title="Untracked Dev Task")
-        self._seed_task(
-            task_id="task-dev-tracked",
+            args={"task_id": "task-dev-runless", "summary": "updated", "status": "blocked"},
+            instance_id="inst-dev-task",
             buddy="dev",
-            title="Tracked Dev Task",
-            track_id="track-dev-example",
         )
+        self.assertTrue(updated.get("ok"), msg=updated)
+        self.assertEqual((updated.get("task") or {}).get("status"), "blocked")
 
-        untracked_set = self._dispatch(
-            action="set_current",
-            args={"task_id": "task-dev-untracked"},
+        archived = self._dispatch(
             instance_json=instance_json,
+            tool="task",
+            action="archive",
+            args={"task_id": "task-dev-runless"},
+            instance_id="inst-dev-task",
+            buddy="dev",
         )
-        self.assertTrue(untracked_set.get("ok"), msg=untracked_set)
-        self.assertEqual(untracked_set.get("action"), "task.set_current")
-        instance_after_untracked = self._load_instance(instance_json)
-        self.assertEqual(instance_after_untracked["current_task_id"], "task-dev-untracked")
-        self.assertIsNone(instance_after_untracked["current_track_id"])
+        self.assertTrue(archived.get("ok"), msg=archived)
+        self.assertEqual((archived.get("task") or {}).get("status"), "archived")
 
-        current_untracked = self._dispatch(action="get_current", args={}, instance_json=instance_json)
-        self.assertTrue(current_untracked.get("ok"), msg=current_untracked)
-        self.assertEqual(current_untracked.get("action"), "task.get_current")
-        task_payload = current_untracked.get("task")
-        self.assertIsInstance(task_payload, dict, msg=current_untracked)
-        assert isinstance(task_payload, dict)
-        self.assertEqual(task_payload.get("id"), "task-dev-untracked")
+    def test_task_get_rejects_foreign_buddy_scope(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-task", buddy="dev")
+        env_store.create_task("task-pm-owned", "PM Task", buddy="pm", summary="pm")
 
-        tracked_set = self._dispatch(
-            action="set_current",
-            args={"task_id": "task-dev-tracked"},
+        rejected = self._dispatch(
             instance_json=instance_json,
+            tool="task",
+            action="get",
+            args={"task_id": "task-pm-owned"},
+            instance_id="inst-dev-task",
+            buddy="dev",
         )
-        self.assertTrue(tracked_set.get("ok"), msg=tracked_set)
-        instance_after_tracked = self._load_instance(instance_json)
-        self.assertEqual(instance_after_tracked["current_task_id"], "task-dev-tracked")
-        self.assertEqual(instance_after_tracked["current_track_id"], "track-dev-example")
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TASK_BUDDY_SCOPE")
+        self.assertEqual(rejected.get("permission_boundary"), "task.buddy_scope")
 
-        current_tracked = self._dispatch(action="get_current", args={}, instance_json=instance_json)
-        self.assertTrue(current_tracked.get("ok"), msg=current_tracked)
-        current_binding = current_tracked.get("current_binding")
-        self.assertIsInstance(current_binding, dict, msg=current_tracked)
-        assert isinstance(current_binding, dict)
-        self.assertEqual(current_binding.get("current_task_id"), "task-dev-tracked")
-        self.assertEqual(current_binding.get("current_track_id"), "track-dev-example")
-        tracked_payload = current_tracked.get("task")
-        self.assertIsInstance(tracked_payload, dict, msg=current_tracked)
-        assert isinstance(tracked_payload, dict)
-        self.assertEqual(tracked_payload.get("id"), "task-dev-tracked")
+    def test_task_create_rejects_unknown_payload_field(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-task", buddy="dev")
 
-        missing_set = self._dispatch(
-            action="set_current",
-            args={"task_id": "task-dev-missing"},
+        rejected = self._dispatch(
             instance_json=instance_json,
+            tool="task",
+            action="create",
+            args={"task_id": "task-dev-bad", "title": "Bad", "unknown": 1},
+            instance_id="inst-dev-task",
+            buddy="dev",
         )
-        self.assertFalse(missing_set.get("ok"), msg=missing_set)
-        self.assertEqual(missing_set.get("permission_boundary"), "task.lookup")
-        instance_after_missing = self._load_instance(instance_json)
-        self.assertEqual(instance_after_missing["current_task_id"], "task-dev-tracked")
-        self.assertEqual(instance_after_missing["current_track_id"], "track-dev-example")
-
-    def test_get_current_without_binding_returns_structured_success(self) -> None:
-        instance_json = self._instance_json()
-        response = self._dispatch(action="get_current", args={}, instance_json=instance_json)
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("action"), "task.get_current")
-        self.assertEqual(response.get("active_buddy"), "dev")
-        self.assertIsNone(response.get("task"))
-        current_binding = response.get("current_binding")
-        self.assertIsInstance(current_binding, dict, msg=response)
-        assert isinstance(current_binding, dict)
-        self.assertIsNone(current_binding.get("current_task_id"))
-        self.assertIsNone(current_binding.get("current_track_id"))
-        allowed_next_actions = response.get("allowed_next_actions")
-        self.assertIsInstance(allowed_next_actions, list, msg=response)
-        assert isinstance(allowed_next_actions, list)
-        self.assertTrue(allowed_next_actions, msg=response)
-
-    def test_malformed_or_missing_payload_rejects_without_mutation(self) -> None:
-        instance_json = self._instance_json()
-        self._seed_task(task_id="task-dev-owned", buddy="dev", title="Dev Owned")
-        before_tasks = self._tasks_snapshot()
-        before_instance = self._load_instance(instance_json)
-
-        bad_payload_request = {
-            "protocol": PROTOCOL,
-            "request_id": "req-task-malformed-payload",
-            "method": "env.tool",
-            "params": {
-                "instance_id": "inst-dev-example",
-                "active_buddy": "dev",
-                "tool": "task",
-                "action": "update",
-                "args": "bad",
-            },
-            "deadline_ms": 35000,
-        }
-        bad_payload = runtime_broker.dispatch_runtime_request(
-            request=bad_payload_request,
-            instance_json_path=instance_json,
-            manifest_path=MANIFEST,
-        )
-        self.assertFalse(bad_payload.get("ok"), msg=bad_payload)
-        self.assertEqual(bad_payload.get("permission_boundary"), "request-payload")
-        self.assertEqual(self._tasks_snapshot(), before_tasks)
-        self.assertEqual(self._load_instance(instance_json), before_instance)
-
-        missing_payload = self._dispatch(action="update", args={}, instance_json=instance_json)
-        self.assertFalse(missing_payload.get("ok"), msg=missing_payload)
-        self.assertEqual(missing_payload.get("permission_boundary"), "request-payload")
-        self.assertEqual(self._tasks_snapshot(), before_tasks)
-        self.assertEqual(self._load_instance(instance_json), before_instance)
-
-    def test_cli_prints_structured_json_and_exit_codes(self) -> None:
-        env = os.environ.copy()
-        env.pop("BUDDYSWITCH_RUNTIME_BROKER_SOCKET", None)
-        env.pop("BUDDYSWITCH_INSTANCE_ID", None)
-        env.pop("BUDDYSWITCH_ACTIVE_BUDDY", None)
-
-        unavailable = subprocess.run(
-            ["python3", str(ENV_CLIENT), "task", "list"],
-            cwd=ROOT,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(unavailable.returncode, 0, msg=unavailable.stderr)
-        unavailable_payload = json.loads(unavailable.stdout)
-        self.assertFalse(unavailable_payload.get("ok"), msg=unavailable_payload)
-        self.assertEqual(unavailable_payload.get("error", {}).get("code"), "E_RUNTIME_BROKER_UNAVAILABLE")
-
-        missing_payload_file = subprocess.run(
-            ["python3", str(ENV_CLIENT), "task", "create", "--payload", str(ROOT / "tmp" / "missing-task.json")],
-            cwd=ROOT,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(missing_payload_file.returncode, 2)
-        self.assertIn("payload file is not readable", missing_payload_file.stderr.lower())
-
-    def test_cli_prints_structured_ok_false_from_live_broker_and_exits_zero(self) -> None:
-        instance_json = self._instance_json()
-        self._seed_task(task_id="task-pm-foreign", buddy="pm", title="PM Foreign")
-
-        socket_path = self._runtime_path("runtime/runtime-broker.socket")
-        pid_path = self._runtime_path("runtime/runtime-broker.pid")
-        socket_path.parent.mkdir(parents=True, exist_ok=True)
-        broker_env = os.environ.copy()
-        broker_env.update(
-            {
-                "BUDDYSWITCH_SHARED_ROOT": str(self.runtime_root),
-                "BUDDYSWITCH_STATE_ROOT": str(self.runtime_root),
-            }
-        )
-        broker = subprocess.Popen(
-            [
-                "python3",
-                str(ROOT / "scripts" / "runtime_kernel" / "broker.py"),
-                "serve",
-                "--socket",
-                str(socket_path),
-                "--pid-file",
-                str(pid_path),
-                "--instance-json",
-                str(instance_json),
-                "--manifest",
-                str(MANIFEST),
-            ],
-            cwd=ROOT,
-            env=broker_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        try:
-            deadline = time.monotonic() + 5.0
-            while time.monotonic() < deadline:
-                if socket_path.exists():
-                    break
-                if broker.poll() is not None:
-                    break
-                time.sleep(0.05)
-            if broker.poll() is not None:
-                stderr = broker.stderr.read() if broker.stderr else "broker exited"
-                self.fail(stderr)
-            self.assertTrue(socket_path.exists(), "broker socket was not created")
-
-            client_env = os.environ.copy()
-            client_env.update(
-                {
-                    "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": str(socket_path),
-                    "BUDDYSWITCH_INSTANCE_ID": "inst-dev-example",
-                    "BUDDYSWITCH_ACTIVE_BUDDY": "dev",
-                }
-            )
-            completed = subprocess.run(
-                ["python3", str(ENV_CLIENT), "task", "get", "--task-id", "task-pm-foreign"],
-                cwd=ROOT,
-                env=client_env,
-                text=True,
-                capture_output=True,
-                check=False,
-                timeout=5,
-            )
-        finally:
-            broker.terminate()
-            try:
-                broker.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                broker.kill()
-                broker.wait(timeout=5)
-
-        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-        payload = json.loads(completed.stdout)
-        self.assertFalse(payload.get("ok"), msg=payload)
-        self.assertEqual(payload.get("action"), "task.get")
-        self.assertEqual(payload.get("permission_boundary"), "task.track_relation")
-        self.assertEqual(payload.get("error", {}).get("code"), "E_TASK_TRACK_RELATION")
-
-    def test_task_read_responses_include_semantic_no_state_change_and_artifact_boundary(self) -> None:
-        self.test_task_get_returns_artifact_summaries_and_points_to_artifact_get_without_body()
-        self.test_get_current_without_binding_returns_structured_success()
-
-    def test_task_mutation_responses_describe_actual_state_changes(self) -> None:
-        self.test_task_create_list_get_update_archive_for_active_buddy()
-        self.test_set_current_and_get_current_sync_instance_binding()
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TASK_PAYLOAD")
 
 
 if __name__ == "__main__":

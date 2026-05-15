@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
-"""Registry-backed env.tool action dispatch."""
+"""Registry-backed runless env.tool dispatch."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from env.services import artifacts as artifact_service
-from env.services import bindings as binding_service
+from env.services import buddybox as buddybox_service
 from env.services import context as context_service
 from env.services import evidence as evidence_service
 from env.services import handoffs as handoff_service
-from env.services import runs as run_service
+from env.services import memories as memory_service
 from env.services import search as search_service
 from env.services import tasks as task_service
 from env.services import tracks as track_service
@@ -23,8 +22,6 @@ HANDLERS_BY_TOOL = {
         "create": task_service.create_task_for_active_buddy,
         "list": task_service.list_tasks_for_active_buddy,
         "get": task_service.get_task_for_active_buddy,
-        "get_current": task_service.get_current_task,
-        "set_current": task_service.set_current_task,
         "update": task_service.update_task_for_active_buddy,
         "archive": task_service.archive_task_for_active_buddy,
     },
@@ -32,7 +29,6 @@ HANDLERS_BY_TOOL = {
         "list": track_service.list_tracks_for_active_buddy,
         "get": track_service.get_track_for_active_buddy,
         "join": track_service.join_track_for_active_buddy,
-        "get_current": track_service.get_current_track,
         "create": track_service.create_track_for_pm,
         "update": track_service.update_track_for_pm,
         "advance": track_service.advance_track_for_pm,
@@ -43,32 +39,32 @@ HANDLERS_BY_TOOL = {
     "artifact": {
         "list": artifact_service.list_artifacts_for_track,
         "get": artifact_service.get_artifact_for_active_buddy,
-        "get_current": artifact_service.get_current_artifacts_for_active_task,
         "validate_payload": artifact_service.validate_artifact_payload,
         "create_revision": artifact_service.create_artifact_revision,
         "update_metadata": artifact_service.update_artifact_metadata,
-    },
-    "context": {
-        "get": context_service.get_context,
-        "summarize": context_service.summarize_context,
-        "list_sources": context_service.list_sources,
-    },
-    "binding": {
-        "get": binding_service.get_binding,
-        "set_task": binding_service.set_task_binding,
-        "set_track": binding_service.set_track_binding,
-        "clear": binding_service.clear_binding,
     },
     "handoff": {
         "list": handoff_service.list_handoffs_for_active_buddy,
         "validate": handoff_service.validate_handoff,
         "create": handoff_service.create_handoff_for_active_buddy,
     },
-    "run": {
-        "commit": run_service.commit_for_active_instance,
-        "get_receipt": run_service.get_receipt_for_active_instance,
-        "get_raw": run_service.get_raw_for_active_instance,
-        "validate_result": run_service.validate_result_for_active_instance,
+    "memory": {
+        "list": memory_service.list_memories_for_active_buddy,
+        "get": memory_service.get_memory_for_active_buddy,
+        "write": memory_service.write_memory_for_active_buddy,
+        "update": memory_service.update_memory_for_active_buddy,
+        "archive": memory_service.archive_memory_for_active_buddy,
+    },
+    "buddybox": {
+        "list": buddybox_service.list_buddybox_for_active_buddy,
+        "read": buddybox_service.read_buddybox_for_active_buddy,
+        "write": buddybox_service.write_buddybox_for_active_buddy,
+        "delete": buddybox_service.delete_buddybox_for_active_buddy,
+    },
+    "context": {
+        "get": context_service.get_context,
+        "summarize": context_service.summarize_context,
+        "list_sources": context_service.list_sources,
     },
     "evidence": {
         "issue_browser": evidence_service.issue_browser_for_active_instance,
@@ -95,50 +91,43 @@ def _runtime_feedback_error(
     message: str,
     details: dict[str, Any],
 ) -> dict[str, Any]:
-    missing = object()
-
-    def _extract_bool_field(*, key: str, default: bool, invalid_default: bool) -> bool:
-        raw = extra.pop(key, missing)
-        if raw is missing:
+    def _coerce_bool(value: Any, *, default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"true", "1", "yes", "y"}:
+                return True
+            if lowered in {"false", "0", "no", "n"}:
+                return False
             return default
-        if isinstance(raw, bool):
-            return raw
-        return invalid_default
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return default
 
-    extra = dict(details)
-    permission_boundary = str(extra.pop("permission_boundary", "runtime.feedback"))
-    allowed_next_actions_raw = extra.pop("allowed_next_actions", [])
-    allowed_next_actions = (
-        list(allowed_next_actions_raw)
-        if isinstance(allowed_next_actions_raw, list)
-        else ["Retry after fixing runtime preconditions."]
-    )
-    options = extra.pop("allowed_next_action_options", None)
-    if not isinstance(options, list) and allowed_next_actions:
-        if tool == "run":
-            options = [
-                tool_responses.next_action_option(
-                    tool="context",
-                    action="summarize",
-                    option_id="summarize_context_before_run_retry",
-                    reason="Summarize active context before retrying run action.",
-                )
-            ]
-        elif tool == "evidence":
-            options = [
-                tool_responses.next_action_option(
-                    tool="evidence",
-                    action="issue_browser",
-                    option_id="issue_browser_token",
-                    reason="Issue browser evidence for the prepared run before retrying.",
-                )
-            ]
-    state_changed = _extract_bool_field(key="state_changed", default=False, invalid_default=False)
-    retryable = _extract_bool_field(key="retryable", default=True, invalid_default=False)
-    retry_guidance = str(extra.pop("retry_guidance", "Fix runtime preconditions and retry safely."))
-    human_summary = str(extra.pop("human_summary", message))
-    why_blocked = str(extra.pop("why_blocked", message))
-    impact = str(extra.pop("impact", "No runtime state changed before this rejection."))
+    permission_boundary = str(details.get("permission_boundary", "runtime.feedback"))
+    human_summary = str(details.get("human_summary", message))
+    why_blocked = str(details.get("why_blocked", message))
+    impact = str(details.get("impact", "No state changed before runtime rejection."))
+    state_changed = _coerce_bool(details.get("state_changed"), default=False)
+    retryable = _coerce_bool(details.get("retryable"), default=True)
+    retry_guidance = str(details.get("retry_guidance", "Fix runtime preconditions and retry."))
+    allowed_next_actions = details.get("allowed_next_actions")
+    if not isinstance(allowed_next_actions, list) or not allowed_next_actions:
+        allowed_next_actions = ["Inspect payload and retry once prerequisites are satisfied."]
+    options = details.get("allowed_next_action_options")
+    if not isinstance(options, list):
+        options = [
+            tool_responses.next_action_option(
+                tool="context",
+                action="summarize",
+                option_id="summarize_context_before_retry",
+                reason="Summarize current runless context before retrying the action.",
+            )
+        ]
+    extra = {key: value for key, value in details.items() if key not in {
+        "permission_boundary", "human_summary", "why_blocked", "impact", "state_changed", "retryable", "retry_guidance", "allowed_next_actions", "allowed_next_action_options"
+    }}
     return tool_responses.rejection(
         tool=tool,
         action=action,
@@ -152,15 +141,14 @@ def _runtime_feedback_error(
         state_changed=state_changed,
         retryable=retryable,
         retry_guidance=retry_guidance,
-        allowed_next_actions=allowed_next_actions,
-        allowed_next_action_options=options if isinstance(options, list) else None,
+        allowed_next_actions=list(allowed_next_actions),
+        allowed_next_action_options=options,
         extra=extra if extra else None,
     )
 
 
 def _service_context(
     *,
-    tool: str,
     active_buddy: str,
     instance_id: str,
     instance_json: Path,
@@ -168,66 +156,14 @@ def _service_context(
     manifest: dict[str, Any],
     manifest_path: Path | None,
 ) -> dict[str, Any]:
-    context: dict[str, Any] = {
+    return {
         "active_buddy": active_buddy,
         "instance_id": instance_id,
         "instance_json": instance_json,
         "instance_payload": instance_payload,
         "manifest": manifest,
+        "manifest_path": manifest_path,
     }
-    if tool in {"run", "evidence", "search"}:
-        context["manifest_path"] = manifest_path
-    return context
-
-
-def _runtime_feedback_from_exception(
-    *,
-    tool: str,
-    action: str,
-    active_buddy: str,
-    error: Exception,
-) -> dict[str, Any]:
-    if tool == "run":
-        return _runtime_feedback_error(
-            tool=tool,
-            action=action,
-            active_buddy=active_buddy,
-            code="E_RUNTIME_PERSIST",
-            message=str(error),
-            details={
-                "permission_boundary": "run.service",
-                "human_summary": "Run service rejected the request before commit.",
-                "why_blocked": str(error),
-                "impact": "No run commit or runtime object mutation occurred.",
-                "state_changed": False,
-                "retryable": True,
-                "retry_guidance": "Fix run payload or refresh context, then retry run.validate_result or run.commit.",
-                "allowed_next_actions": [
-                    "Use prepare.runtime_context.env_tools.run payload hints and retry.",
-                    "Rerun prepare if the context or reserved run is stale.",
-                ],
-            },
-        )
-    return _runtime_feedback_error(
-        tool=tool,
-        action=action,
-        active_buddy=active_buddy,
-        code="E_RUNTIME_BROKER",
-        message=str(error),
-        details={
-            "permission_boundary": "market.browser_evidence",
-            "human_summary": "Evidence service rejected the request before token issuance.",
-            "why_blocked": str(error),
-            "impact": "No evidence token was issued and no runtime objects were changed.",
-            "state_changed": False,
-            "retryable": True,
-            "retry_guidance": "Fix evidence payload or browser readiness, then retry evidence action.",
-            "allowed_next_actions": [
-                "Use prepare.runtime_context.env_tools.evidence payload hints and retry.",
-                "Rerun prepare if the context or browser cockpit readiness is stale.",
-            ],
-        },
-    )
 
 
 def dispatch_registered_env_tool(
@@ -244,7 +180,6 @@ def dispatch_registered_env_tool(
 ) -> dict[str, Any]:
     handler = HANDLERS_BY_TOOL[tool][action]
     context = _service_context(
-        tool=tool,
         active_buddy=active_buddy,
         instance_id=instance_id,
         instance_json=instance_json,
@@ -253,30 +188,26 @@ def dispatch_registered_env_tool(
         manifest_path=manifest_path,
     )
     semantic_action = f"{tool}.{action}"
-
-    if tool in {"run", "evidence"}:
-        import turn_runtime
-
-        try:
-            response = handler(args=args, context=context)
-        except turn_runtime.RuntimeFeedbackError as exc:
-            return _runtime_feedback_error(
-                tool=tool,
-                action=semantic_action,
-                active_buddy=active_buddy,
-                code=exc.code,
-                message=exc.message,
-                details=exc.details,
-            )
-        except (ValueError, OSError, json.JSONDecodeError) as exc:
-            return _runtime_feedback_from_exception(
-                tool=tool,
-                action=semantic_action,
-                active_buddy=active_buddy,
-                error=exc,
-            )
-    else:
+    try:
         response = handler(args=args, context=context)
+    except (ValueError, OSError) as exc:
+        response = _runtime_feedback_error(
+            tool=tool,
+            action=semantic_action,
+            active_buddy=active_buddy,
+            code="E_RUNTIME_BROKER",
+            message=str(exc),
+            details={
+                "permission_boundary": "runtime.feedback",
+                "human_summary": "Runtime service rejected the request before completion.",
+                "why_blocked": str(exc),
+                "impact": "No durable state was changed by this failed operation.",
+                "state_changed": False,
+                "retryable": True,
+                "retry_guidance": "Fix payload or prerequisites and retry.",
+                "allowed_next_actions": ["Use context.summarize to inspect current state before retrying."],
+            },
+        )
 
     if isinstance(response, dict):
         response.setdefault("tool", tool)

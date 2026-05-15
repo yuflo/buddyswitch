@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only workspace projection builders."""
+"""Read-only workspace projection builders for runless durable output objects."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-import json
 import math
 import os
 import time
@@ -30,10 +29,6 @@ SHARED_ROOT_ENV = "BUDDYSWITCH_SHARED_ROOT"
 
 class RuntimeSnapshotLockError(RuntimeError):
     """Raised when a configured runtime snapshot lock cannot protect a read."""
-
-
-def iso_time(path: Path) -> str:
-    return datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat(timespec="seconds")
 
 
 def rel(path: Path) -> str:
@@ -79,7 +74,9 @@ def _workspace_uses_projected_state(workspace_root: Path) -> bool:
         workspace_root / "buddyswitch" / "objects" / "tracks",
         workspace_root / "buddyswitch" / "objects" / "tasks",
         workspace_root / "buddyswitch" / "objects" / "artifacts",
-        workspace_root / "buddyswitch" / "content" / "runs",
+        workspace_root / "buddyswitch" / "objects" / "handoffs",
+        workspace_root / "buddyswitch" / "objects" / "memories",
+        workspace_root / "buddyswitch" / "content" / "buddybox",
     )
     return any(path.is_symlink() for path in projected_paths)
 
@@ -149,6 +146,14 @@ def artifact_object_path(artifact_id: str) -> str:
 
 def task_object_path(task_id: str) -> str:
     return f"buddyswitch/objects/tasks/{task_id}.json"
+
+
+def handoff_object_path(handoff_id: str) -> str:
+    return f"buddyswitch/objects/handoffs/{handoff_id}.json"
+
+
+def memory_object_path(memory_id: str) -> str:
+    return f"buddyswitch/objects/memories/{memory_id}.json"
 
 
 def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
@@ -226,113 +231,61 @@ def build_track_views(
     return rows
 
 
-def scan_run_audits() -> list[dict[str, Any]]:
-    run_root = env_store.ROOT / "buddyswitch" / "content" / "runs"
-    if not run_root.exists():
-        return []
-
-    manifest = load_manifest(DEFAULT_MANIFEST)
-    valid_buddy_ids = {
-        buddy_id
-        for buddy in manifest.get("buddies", [])
-        if isinstance(buddy, dict)
-        for buddy_id in [buddy.get("id")]
-        if isinstance(buddy_id, str) and buddy_id
+def build_handoff_view(handoff: dict[str, Any]) -> dict[str, Any]:
+    object_path = handoff_object_path(handoff["id"])
+    return {
+        "id": handoff["id"],
+        "source_buddy": handoff["source_buddy"],
+        "target_buddy": handoff["target_buddy"],
+        "track_id": handoff["track_id"],
+        "source_task_id": handoff.get("source_task_id"),
+        "artifact_ids": handoff.get("artifact_ids", []),
+        "memory_ids": handoff.get("memory_ids", []),
+        "buddybox_paths": handoff.get("buddybox_paths", []),
+        "source_refs": handoff.get("source_refs"),
+        "reason": handoff.get("reason", ""),
+        "context": handoff.get("context", ""),
+        "status": handoff.get("status", ""),
+        "created_at": handoff.get("created_at", ""),
+        "updated_at": handoff.get("updated_at", ""),
+        "object_path": object_path,
+        "file_name": Path(object_path).name,
+        "missing": False,
     }
 
-    rows = []
-    for path in sorted(run_root.glob("*.json")):
-        if path.name == ".gitkeep":
+
+def build_memory_view(memory: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **memory,
+        "object_path": memory_object_path(memory["id"]),
+        "file_name": Path(memory_object_path(memory["id"])).name,
+        "missing": False,
+    }
+
+
+def scan_buddybox_files() -> list[dict[str, Any]]:
+    root = env_store.BUDDYBOX_CONTENT_DIR
+    if not root.exists():
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
             continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            rows.append(
-                {
-                    "run_id": path.stem,
-                    "path": rel(path),
-                    "status": "invalid",
-                    "updated_at": iso_time(path),
-                }
-            )
-            continue
-
-        if not isinstance(payload, dict):
-            rows.append(
-                {
-                    "run_id": path.stem,
-                    "path": rel(path),
-                    "status": "invalid",
-                    "updated_at": iso_time(path),
-                }
-            )
-            continue
-
-        def _clean(value: Any) -> str | None:
-            if not isinstance(value, str):
-                return None
-            text = value.strip()
-            return text or None
-
-        def _known_buddy(value: Any) -> str | None:
-            buddy = _clean(value)
-            if buddy is None or buddy not in valid_buddy_ids:
-                return None
-            return buddy
-
-        buddy = _known_buddy(payload.get("buddy_id")) or _known_buddy(payload.get("active_buddy"))
-        task_id = (
-            _clean(payload.get("task_id"))
-            or _clean(payload.get("current_task_id"))
-            or _clean(payload.get("resolved_task_id"))
-        )
-        track_id = (
-            _clean(payload.get("track_id"))
-            or _clean(payload.get("current_track_id"))
-            or _clean(payload.get("effective_track_id"))
-        )
-        demand = _clean(payload.get("request_text"))
-        next_state = payload.get("next_state")
-        if not isinstance(next_state, dict):
-            mode = "archive" if payload.get("track_action") == "archive" else "continue_current_task"
-            next_state = {
-                "task_id": task_id,
-                "track_id": track_id,
-                "current_buddy": buddy,
-                "next_buddy": None,
-                "mode": mode,
-            }
-        receipt_paths = payload.get("receipt_paths")
-        if not isinstance(receipt_paths, dict):
-            # Legacy runs used "paths" before receipt_paths was introduced.
-            receipt_paths = payload.get("paths") if isinstance(payload.get("paths"), dict) else {}
-
+        rel_path = path.relative_to(root).as_posix()
+        buddy = rel_path.split("/", 1)[0] if "/" in rel_path else rel_path
+        stat = path.stat()
         rows.append(
             {
-                "run_id": payload.get("run_id", path.stem),
-                "path": rel(path),
                 "buddy": buddy,
-                "task_id": task_id,
-                "task_title": payload.get("task_title"),
-                "demand": demand,
-                "artifact_ids": payload.get("artifact_ids") or [],
-                "track_id": track_id,
-                "track_title": payload.get("track_title"),
-                "track_action": payload.get("track_action"),
-                "execution_summary": payload.get("execution_summary"),
-                "handoff": payload.get("handoff") if isinstance(payload.get("handoff"), dict) else {},
-                "contributors": payload.get("contributors") if isinstance(payload.get("contributors"), dict) else {},
-                "state_effects": payload.get("state_effects") if isinstance(payload.get("state_effects"), dict) else {},
-                "next_state": next_state,
-                "receipt_paths": receipt_paths,
-                "related_run_ids": payload.get("related_run_ids")
-                if isinstance(payload.get("related_run_ids"), list)
-                else [],
-                "updated_at": payload.get("timestamp") or iso_time(path),
-                "status": "ok",
+                "path": rel_path,
+                "size_bytes": stat.st_size,
+                "updated_at": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds"),
+                "content_type": "application/octet-stream",
+                "source_ref": {"type": "buddybox", "path": rel_path},
             }
         )
-    rows.sort(key=lambda item: (item.get("updated_at", ""), item.get("run_id", "")), reverse=True)
+    rows.sort(key=lambda row: (str(row.get("updated_at", "")), str(row.get("path", ""))), reverse=True)
     return rows
 
 
@@ -340,8 +293,10 @@ def build_workspace_projection() -> dict[str, Any]:
     manifest = load_manifest(DEFAULT_MANIFEST)
     artifacts = [build_artifact_view(artifact) for artifact in env_store.list_artifacts()]
     artifact_map = {artifact["id"]: artifact for artifact in artifacts}
+
     tasks = [build_task_view(task, artifact_map) for task in env_store.list_tasks()]
     task_map = {task["id"]: task for task in tasks}
+
     tracks = build_track_views(env_store.list_tracks(), task_map, artifact_map)
     tracked_task_ids = {
         task_id
@@ -356,10 +311,15 @@ def build_workspace_projection() -> dict[str, Any]:
     ]
     standalone_tasks.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
 
+    handoffs = [build_handoff_view(handoff) for handoff in env_store.list_handoffs()]
+    memories = [build_memory_view(memory) for memory in env_store.list_memories()]
+    buddybox_files = scan_buddybox_files()
+
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "manifest_path": rel(DEFAULT_MANIFEST),
         "objects_root": "buddyswitch/objects",
+        "content_root": "buddyswitch/content",
         "buddies": [
             {"id": buddy["id"], "label": buddy["label"], "scope": buddy["scope"]}
             for buddy in manifest.get("buddies", [])
@@ -368,7 +328,9 @@ def build_workspace_projection() -> dict[str, Any]:
         "standalone_tasks": standalone_tasks,
         "tasks": tasks,
         "artifacts": artifacts,
-        "run_audits": scan_run_audits(),
+        "handoffs": handoffs,
+        "memories": memories,
+        "buddybox_files": buddybox_files,
     }
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Handoff service for broker-routed env.tool operations."""
+"""Runless handoff services."""
 
 from __future__ import annotations
 
@@ -8,23 +8,8 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import env_store
-from env.services import context as context_service
-from env.services import track_relations
+from env.services import source_refs as source_ref_service
 from env.tools import responses as tool_responses
-
-_IDENTITY_FIELDS = {"active_buddy", "buddy", "instance_id"}
-_VALIDATE_FIELDS = {
-    "track_id",
-    "source_task_id",
-    "source_run_id",
-    "target_buddy",
-    "next_buddy",
-    "artifact_ids",
-    "historical_artifact_ids",
-    "reason",
-    "context",
-} | _IDENTITY_FIELDS
-_FORBIDDEN_MUTATION_FIELDS = {"status", "current_buddy", "next_buddy_override", "track_status", "state_effects"}
 
 
 class HandoffServiceContext(TypedDict):
@@ -35,65 +20,27 @@ class HandoffServiceContext(TypedDict):
     manifest: dict[str, Any]
 
 
-def _known_buddy_ids(manifest: dict[str, Any]) -> set[str]:
-    return {
-        buddy.get("id")
-        for buddy in manifest.get("buddies", [])
-        if isinstance(buddy, dict) and isinstance(buddy.get("id"), str)
-    }
+_LIST_FIELDS = {"track_id", "target_buddy", "status", "limit"}
+_VALIDATE_FIELDS = {
+    "track_id",
+    "source_task_id",
+    "target_buddy",
+    "artifact_ids",
+    "memory_ids",
+    "buddybox_paths",
+    "source_refs",
+    "reason",
+    "context",
+    "status",
+    "read_claim",
+}
+_CREATE_FIELDS = set(_VALIDATE_FIELDS) | {"handoff_id"}
+_LEGACY_SOURCE_RUN = "source" + "_run_id"
 
 
-def _current_binding(context: HandoffServiceContext) -> dict[str, Any]:
-    payload = context["instance_payload"]
-    return {
-        "instance_id": context["instance_id"],
-        "current_task_id": payload.get("current_task_id"),
-        "current_track_id": payload.get("current_track_id"),
-    }
-
-
-def _error_payload(
-    *,
-    action: str,
-    active_buddy: str,
-    code: str,
-    message: str,
-    permission_boundary: str,
-    allowed_next_actions: list[str],
-    human_summary: str | None = None,
-    why_blocked: str | None = None,
-    impact: str = "No handoff, track, task, or run state was changed.",
-    retryable: bool = True,
-    retry_guidance: str | None = None,
-    allowed_next_action_options: list[dict[str, Any]] | None = None,
-    track_id: str | None = None,
-    extra: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    payload = tool_responses.rejection(
+def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+    return tool_responses.rejection(
         tool="handoff",
-        action=action,
-        active_buddy=active_buddy,
-        code=code,
-        message=message,
-        permission_boundary=permission_boundary,
-        human_summary=human_summary or message,
-        why_blocked=why_blocked or message,
-        impact=impact,
-        state_changed=False,
-        retryable=retryable,
-        retry_guidance=retry_guidance or "Fix handoff payload/context preconditions and retry.",
-        allowed_next_actions=allowed_next_actions,
-        allowed_next_action_options=allowed_next_action_options,
-    )
-    if isinstance(track_id, str) and track_id.strip():
-        payload["track_id"] = track_id.strip()
-    if isinstance(extra, dict):
-        payload.update(extra)
-    return payload
-
-
-def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
-    payload = _error_payload(
         action=action,
         active_buddy=active_buddy,
         code="E_HANDOFF_PAYLOAD",
@@ -101,540 +48,379 @@ def _payload_error(*, action: str, active_buddy: str, message: str) -> dict[str,
         permission_boundary="request-payload",
         human_summary="Handoff payload is invalid.",
         why_blocked=message,
+        impact="No handoff or product object state changed.",
+        state_changed=False,
         retryable=True,
-        retry_guidance="Provide required handoff fields and retry.",
+        retry_guidance="Fix handoff payload fields and retry.",
         allowed_next_actions=[
-            "Provide track_id, source_task_id, target_buddy, artifact_ids, reason, and context.",
-            "Use handoff.list and track.get to inspect current handoff state before retrying.",
-        ],
-        allowed_next_action_options=[
-            tool_responses.next_action_option(
-                tool="track",
-                action="get",
-                option_id="inspect_track_before_handoff",
-                reason="Inspect one track before validating or creating a handoff.",
-            ),
-            tool_responses.next_action_option(
-                tool="handoff",
-                action="list",
-                option_id="inspect_recent_handoffs",
-                reason="Inspect recent handoffs before creating a new one.",
-            ),
+            "Use context.summarize to inspect candidate ids.",
+            "Use handoff.validate before handoff.create.",
         ],
     )
-    payload.update(
-        {
-            "next_actions": [
-                {"tool": "track", "action": "list"},
-                {"tool": "handoff", "action": "list"},
-            ],
-            "command_hint": track_relations.command_hint("track", "list"),
-            "relation": "none",
-            "missing_preconditions": ["handoff payload must include required fields"],
-            "no_content_leak": True,
-        }
-    )
-    return payload
 
 
-def _ensure_allowed_fields(
-    *,
-    action: str,
-    active_buddy: str,
-    args: dict[str, Any],
-    allowed_fields: set[str],
-) -> dict[str, Any] | None:
-    unknown = sorted(key for key in args.keys() if key not in allowed_fields)
-    if not unknown:
-        return None
-    return _payload_error(
+def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str, code: str = "E_HANDOFF_SCOPE") -> dict[str, Any]:
+    return tool_responses.rejection(
+        tool="handoff",
         action=action,
         active_buddy=active_buddy,
-        message=f"unsupported payload fields: {', '.join(unknown)}",
+        code=code,
+        message=message,
+        permission_boundary=boundary,
+        human_summary="Handoff scope check failed.",
+        why_blocked=message,
+        impact="No handoff or product object state changed.",
+        state_changed=False,
+        retryable=False,
+        retry_guidance="Use owned source objects and valid target buddy ids.",
+        allowed_next_actions=[
+            "Use task.list/artifact.list/memory.list to inspect owned source ids.",
+            "Use handoff.validate with corrected refs.",
+        ],
     )
 
 
-def _normalize_target_buddy(args: dict[str, Any]) -> tuple[str | None, str | None]:
-    target = args.get("target_buddy")
-    next_buddy = args.get("next_buddy")
-    if isinstance(target, str) and target.strip():
-        return target.strip(), next_buddy.strip() if isinstance(next_buddy, str) and next_buddy.strip() else target.strip()
-    if isinstance(next_buddy, str) and next_buddy.strip():
-        return next_buddy.strip(), next_buddy.strip()
-    return None, None
+def _manifest_buddies(manifest: dict[str, Any]) -> set[str]:
+    buddies: set[str] = set()
+    for row in manifest.get("buddies", []):
+        if isinstance(row, dict):
+            buddy_id = row.get("id")
+            if isinstance(buddy_id, str) and buddy_id:
+                buddies.add(buddy_id)
+    return buddies
 
 
-def _normalize_id(value: Any, label: str) -> tuple[str | None, str | None]:
-    if not isinstance(value, str) or not value.strip():
-        return None, None
-    try:
-        return env_store.require_id(value.strip(), label), None
-    except ValueError as exc:
-        return None, str(exc)
+def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
+    allowed = _LIST_FIELDS if action == "handoff.list" else _VALIDATE_FIELDS if action == "handoff.validate" else _CREATE_FIELDS
+    unknown = sorted(key for key in args if key not in allowed)
+    if unknown:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")
+    if _LEGACY_SOURCE_RUN in args:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="legacy handoff run lineage field is retired; use product object refs",
+        )
+    return None
 
 
-def _normalize_string_list(value: Any, label: str) -> tuple[list[str] | None, str | None]:
+def _normalize_ids(value: Any, *, label: str) -> tuple[list[str] | None, str | None]:
     if value is None:
         return [], None
     if not isinstance(value, list):
         return None, f"{label} must be a list"
     rows: list[str] = []
-    for item in value:
-        if not isinstance(item, str) or not item.strip():
+    for raw in value:
+        if not isinstance(raw, str) or not raw.strip():
             return None, f"{label} must contain non-empty strings"
         try:
-            rows.append(env_store.require_id(item.strip(), label))
+            rows.append(env_store.require_id(raw.strip(), f"{label}[]"))
         except ValueError as exc:
             return None, str(exc)
     return list(dict.fromkeys(rows)), None
 
 
-def _track_id_from_payload_or_binding(args: dict[str, Any], context: HandoffServiceContext) -> tuple[str | None, str | None]:
-    raw_track_id = args.get("track_id")
-    if raw_track_id is None:
-        raw_track_id = context["instance_payload"].get("current_track_id")
-    return _normalize_id(raw_track_id, "track id")
+def _normalize_paths(value: Any, *, label: str) -> tuple[list[str] | None, str | None]:
+    if value is None:
+        return [], None
+    if not isinstance(value, list):
+        return None, f"{label} must be a list"
+    rows: list[str] = []
+    for raw in value:
+        try:
+            rows.append(source_ref_service.validate_buddybox_ref_path(raw))
+        except ValueError as exc:
+            return None, str(exc)
+    return list(dict.fromkeys(rows)), None
 
 
-def _validate_handoff_payload(
-    *,
-    args: dict[str, Any],
-    context: HandoffServiceContext,
-    action: str,
-    mutate: bool,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    forbidden = sorted(key for key in args.keys() if key in _FORBIDDEN_MUTATION_FIELDS)
-    if forbidden:
-        return None, _error_payload(
-            action=action,
-            active_buddy=context["active_buddy"],
-            code="E_HANDOFF_LIFECYCLE_BOUNDARY",
-            message=f"forbidden handoff mutation fields: {', '.join(forbidden)}",
-            permission_boundary="handoff.lifecycle_boundary",
-            allowed_next_actions=[
-                "Remove lifecycle mutation fields from handoff payload.",
-                "Use explicit track/task env tools for lifecycle or state changes.",
-            ],
-        )
+def _validate_payload(*, args: dict[str, Any], context: HandoffServiceContext, action: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    active_buddy = context["active_buddy"]
+    track_id = args.get("track_id")
+    if not isinstance(track_id, str) or not track_id.strip():
+        return None, _reject_payload(action=action, active_buddy=active_buddy, message="track_id is required")
+    track_id = track_id.strip()
 
-    track_id, track_error = _track_id_from_payload_or_binding(args, context)
-    if track_error is not None:
-        return None, _payload_error(action=action, active_buddy=context["active_buddy"], message=track_error)
-    if track_id is None:
-        return None, _payload_error(action=action, active_buddy=context["active_buddy"], message="track_id is required")
     track = env_store.get_track(track_id)
     if track is None:
-        return None, _error_payload(
+        return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"track not found: {track_id}")
+
+    target_buddy = args.get("target_buddy")
+    if not isinstance(target_buddy, str) or not target_buddy.strip():
+        return None, _reject_payload(action=action, active_buddy=active_buddy, message="target_buddy is required")
+    target_buddy = target_buddy.strip()
+    buddies = _manifest_buddies(context["manifest"])
+    if target_buddy not in buddies:
+        return None, _reject_scope(
             action=action,
-            active_buddy=context["active_buddy"],
-            code="E_TRACK_NOT_FOUND",
-            message=f"track not found: {track_id}",
-            permission_boundary="track.lookup",
-            track_id=track_id,
-            allowed_next_actions=[
-                "Use track.list to inspect valid track ids.",
-                "Retry handoff with an existing track id.",
-            ],
+            active_buddy=active_buddy,
+            boundary="handoff.target_buddy",
+            code="E_HANDOFF_TARGET_BUDDY",
+            message=f"target_buddy '{target_buddy}' is not in manifest buddies",
         )
 
-    source_task_id, task_error = _normalize_id(args.get("source_task_id"), "task id")
-    if task_error is not None:
-        return None, _payload_error(action=action, active_buddy=context["active_buddy"], message=task_error)
-    if source_task_id is None:
-        return None, _payload_error(action=action, active_buddy=context["active_buddy"], message="source_task_id is required")
-    source_task = env_store.get_task(source_task_id)
-    if source_task is None:
-        return None, _error_payload(
-            action=action,
-            active_buddy=context["active_buddy"],
-            code="E_TASK_NOT_FOUND",
-            message=f"source task not found: {source_task_id}",
-            permission_boundary="task.lookup",
-            track_id=track_id,
-            allowed_next_actions=[
-                "Use task.list to inspect active-buddy tasks.",
-                "Retry with a valid source_task_id owned by the active buddy.",
-            ],
-        )
-    if source_task.get("buddy") != context["active_buddy"]:
-        return None, _error_payload(
-            action=action,
-            active_buddy=context["active_buddy"],
-            code="E_TASK_BUDDY_SCOPE",
-            message=f"source task belongs to '{source_task.get('buddy')}', not active buddy '{context['active_buddy']}'",
-            permission_boundary="task.buddy_scope",
-            track_id=track_id,
-            allowed_next_actions=[
-                "Use a source task owned by the active buddy.",
-                "Use handoff.list to inspect handoffs from other buddies.",
-            ],
-        )
+    source_task_id = args.get("source_task_id")
+    if source_task_id is not None:
+        if not isinstance(source_task_id, str) or not source_task_id.strip():
+            return None, _reject_payload(action=action, active_buddy=active_buddy, message="source_task_id must be a non-empty string")
+        source_task_id = source_task_id.strip()
+        task = env_store.get_task(source_task_id)
+        if task is None:
+            return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"source_task_id not found: {source_task_id}")
+        if task.get("buddy") != active_buddy:
+            return None, _reject_scope(
+                action=action,
+                active_buddy=active_buddy,
+                boundary="task.buddy_scope",
+                message=f"source_task_id '{source_task_id}' is owned by buddy '{task.get('buddy')}'",
+            )
 
-    source_task_track_id = source_task.get("track_id")
-    if isinstance(source_task_track_id, str) and source_task_track_id and source_task_track_id != track_id:
-        return None, _error_payload(
-            action=action,
-            active_buddy=context["active_buddy"],
-            code="E_TRACK_TASK_LINKAGE",
-            message=f"source task '{source_task_id}' is bound to another track '{source_task_track_id}'",
-            permission_boundary="track.task_linkage",
-            track_id=track_id,
-            allowed_next_actions=[
-                "Use a source task already linked to the requested track.",
-                "Use track.join to create a task on the target track first.",
-            ],
-        )
-    if source_task_track_id is None:
-        return None, _error_payload(
-            action=action,
-            active_buddy=context["active_buddy"],
-            code="E_TRACK_TASK_LINKAGE",
-            message=f"source task '{source_task_id}' is not linked to track '{track_id}'",
-            permission_boundary="track.task_linkage",
-            track_id=track_id,
-            allowed_next_actions=[
-                "Link source task to the track before validate/create/commit handoff payload.",
-                "Use track.join to create or select active-buddy tracked work first.",
-            ],
-        )
-
-    source_run_id, run_error = _normalize_id(args.get("source_run_id"), "run id")
-    if run_error is not None:
-        return None, _payload_error(action=action, active_buddy=context["active_buddy"], message=run_error)
-    if source_run_id is None:
-        return None, _payload_error(action=action, active_buddy=context["active_buddy"], message="source_run_id is required")
-
-    target_buddy, next_buddy = _normalize_target_buddy(args)
-    if not isinstance(target_buddy, str):
-        return None, _payload_error(action=action, active_buddy=context["active_buddy"], message="target_buddy is required")
-    if target_buddy not in _known_buddy_ids(context["manifest"]):
-        return None, _error_payload(
-            action=action,
-            active_buddy=context["active_buddy"],
-            code="E_HANDOFF_TARGET",
-            message=f"target_buddy must reference a manifest buddy id; got '{target_buddy}'",
-            permission_boundary="manifest.buddies",
-            track_id=track_id,
-            allowed_next_actions=[
-                "Use one of the manifest buddy ids as target_buddy.",
-                "Retry handoff after selecting a valid buddy target.",
-            ],
-            extra={"handoff_targets": sorted(_known_buddy_ids(context["manifest"]))},
-        )
-
-    reason = args.get("reason")
-    handoff_context = args.get("context")
-    if not isinstance(reason, str) or not reason.strip():
-        return None, _payload_error(action=action, active_buddy=context["active_buddy"], message="reason must be a non-empty string")
-    if not isinstance(handoff_context, str) or not handoff_context.strip():
-        return None, _payload_error(action=action, active_buddy=context["active_buddy"], message="context must be a non-empty string")
-
-    artifact_ids, artifact_error = _normalize_string_list(args.get("artifact_ids"), "artifact_ids")
-    if artifact_error is not None:
-        return None, _payload_error(action=action, active_buddy=context["active_buddy"], message=artifact_error)
-    if artifact_ids is None or not artifact_ids:
-        return None, _payload_error(action=action, active_buddy=context["active_buddy"], message="artifact_ids is required")
-
-    historical_artifact_ids, historical_error = _normalize_string_list(
-        args.get("historical_artifact_ids"),
-        "historical_artifact_ids",
-    )
-    if historical_error is not None:
-        return None, _payload_error(action=action, active_buddy=context["active_buddy"], message=historical_error)
-    assert isinstance(historical_artifact_ids, list)
-
+    artifact_ids, artifact_err = _normalize_ids(args.get("artifact_ids"), label="artifact_ids")
+    if artifact_err:
+        return None, _reject_payload(action=action, active_buddy=active_buddy, message=artifact_err)
+    assert artifact_ids is not None
     for artifact_id in artifact_ids:
         artifact = env_store.get_artifact(artifact_id)
         if artifact is None:
-            return None, _error_payload(
+            return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {artifact_id}")
+        if artifact.get("buddy") != active_buddy:
+            return None, _reject_scope(
                 action=action,
-                active_buddy=context["active_buddy"],
-                code="E_ARTIFACT_NOT_FOUND",
-                message=f"artifact not found: {artifact_id}",
-                permission_boundary="artifact.lookup",
-                track_id=track_id,
-                allowed_next_actions=[
-                    "Use artifact.list --track-id <track-id> to inspect valid ids.",
-                    "Retry with existing source artifact ids only.",
-                ],
-            )
-        if artifact.get("task_id") != source_task_id:
-            return None, _error_payload(
-                action=action,
-                active_buddy=context["active_buddy"],
-                code="E_HANDOFF_SOURCE_ARTIFACT_SCOPE",
-                message=f"artifact '{artifact_id}' is not owned by source task '{source_task_id}'",
-                permission_boundary="handoff.source_artifact_scope",
-                track_id=track_id,
-                allowed_next_actions=[
-                    "Use artifacts owned by the source task only.",
-                    "Use artifact.create_revision on the source task before handoff.",
-                ],
-            )
-        if artifact.get("buddy") != context["active_buddy"]:
-            return None, _error_payload(
-                action=action,
-                active_buddy=context["active_buddy"],
-                code="E_ARTIFACT_BUDDY_SCOPE",
-                message=f"artifact '{artifact_id}' is not owned by active buddy '{context['active_buddy']}'",
-                permission_boundary="artifact.buddy_scope",
-                track_id=track_id,
-                allowed_next_actions=[
-                    "Use source artifacts owned by the active buddy only.",
-                    "Use handoff.list to inspect foreign handoff records instead of reusing foreign artifacts.",
-                ],
-            )
-        if not bool(artifact.get("is_current")) and artifact_id not in set(historical_artifact_ids):
-            return None, _error_payload(
-                action=action,
-                active_buddy=context["active_buddy"],
-                code="E_HANDOFF_HISTORICAL_MARKER",
-                message=f"artifact '{artifact_id}' is historical and must be listed in historical_artifact_ids",
-                permission_boundary="handoff.historical_marker",
-                track_id=track_id,
-                allowed_next_actions=[
-                    "Add historical artifact ids explicitly when handing off superseded artifacts.",
-                    "Prefer current artifacts for normal handoff payloads.",
-                ],
+                active_buddy=active_buddy,
+                boundary="artifact.buddy_scope",
+                message=f"artifact '{artifact_id}' is owned by buddy '{artifact.get('buddy')}'",
             )
 
-    return {
+    memory_ids, memory_err = _normalize_ids(args.get("memory_ids"), label="memory_ids")
+    if memory_err:
+        return None, _reject_payload(action=action, active_buddy=active_buddy, message=memory_err)
+    assert memory_ids is not None
+    for memory_id in memory_ids:
+        memory = env_store.get_memory(memory_id)
+        if memory is None:
+            return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"memory not found: {memory_id}")
+        if memory.get("buddy") != active_buddy:
+            return None, _reject_scope(
+                action=action,
+                active_buddy=active_buddy,
+                boundary="memory.buddy_scope",
+                message=f"memory '{memory_id}' is owned by buddy '{memory.get('buddy')}'",
+            )
+
+    buddybox_paths, paths_err = _normalize_paths(args.get("buddybox_paths"), label="buddybox_paths")
+    if paths_err:
+        return None, _reject_payload(action=action, active_buddy=active_buddy, message=paths_err)
+    assert buddybox_paths is not None
+
+    for path in buddybox_paths:
+        if path.split("/", 1)[0] != active_buddy:
+            return None, _reject_scope(
+                action=action,
+                active_buddy=active_buddy,
+                boundary="buddybox.owner_scope",
+                message=f"buddybox path '{path}' is outside active buddy root '{active_buddy}/'",
+            )
+
+    reason = args.get("reason")
+    context_text = args.get("context")
+    if not isinstance(reason, str) or not reason.strip():
+        return None, _reject_payload(action=action, active_buddy=active_buddy, message="reason is required")
+    if not isinstance(context_text, str) or not context_text.strip():
+        return None, _reject_payload(action=action, active_buddy=active_buddy, message="context is required")
+
+    status = args.get("status")
+    if status is None:
+        status = "active"
+    if status not in env_store.VALID_HANDOFF_STATUS:
+        return None, _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=f"status must be one of {', '.join(env_store.VALID_HANDOFF_STATUS)}",
+        )
+
+    read_claim = args.get("read_claim")
+    if read_claim is not None and not isinstance(read_claim, str):
+        return None, _reject_payload(action=action, active_buddy=active_buddy, message="read_claim must be a string")
+
+    try:
+        source_refs, scope_error = source_ref_service.normalize_source_refs(
+            args.get("source_refs"), active_buddy=active_buddy, read_claim=read_claim if isinstance(read_claim, str) else None
+        )
+    except ValueError as exc:
+        return None, _reject_scope(
+            action=action,
+            active_buddy=active_buddy,
+            boundary="source_refs.required_fields",
+            message=str(exc),
+            code="E_SOURCE_REFS",
+        )
+    if isinstance(scope_error, dict):
+        return None, _reject_scope(
+            action=action,
+            active_buddy=active_buddy,
+            boundary=str(scope_error.get("permission_boundary", "source_refs.read_scope")),
+            message=str(scope_error.get("why_blocked", "source_refs read scope denied")),
+            code="E_SOURCE_REFS_READ_SCOPE",
+        )
+
+    normalized = {
         "track_id": track_id,
         "source_task_id": source_task_id,
-        "source_run_id": source_run_id,
         "target_buddy": target_buddy,
-        "next_buddy": next_buddy,
         "artifact_ids": artifact_ids,
-        "historical_artifact_ids": historical_artifact_ids,
+        "memory_ids": memory_ids,
+        "buddybox_paths": buddybox_paths,
+        "source_refs": source_refs,
         "reason": reason.strip(),
-        "context": handoff_context.strip(),
-    }, None
+        "context": context_text.strip(),
+        "status": status,
+    }
+    return normalized, None
 
 
-def _discoverability() -> dict[str, Any]:
+def _handoff_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
-        "will_be_discoverable_by_next_buddy": True,
-        "discovery_basis": "handoff_record + run_audit",
-        "available_after": "handoff.create or run.commit",
-        "discovery_surfaces": ["track.list", "track.get", "handoff.list"],
+        "id": row.get("id"),
+        "source_buddy": row.get("source_buddy"),
+        "target_buddy": row.get("target_buddy"),
+        "track_id": row.get("track_id"),
+        "source_task_id": row.get("source_task_id"),
+        "artifact_ids": list(row.get("artifact_ids", [])),
+        "memory_ids": list(row.get("memory_ids", [])),
+        "buddybox_paths": list(row.get("buddybox_paths", [])),
+        "source_refs": row.get("source_refs"),
+        "reason": row.get("reason"),
+        "context": row.get("context"),
+        "status": row.get("status"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
     }
 
 
 def list_handoffs_for_active_buddy(*, args: dict[str, Any], context: HandoffServiceContext) -> dict[str, Any]:
     action = "handoff.list"
-    fields_error = _ensure_allowed_fields(
-        action=action,
-        active_buddy=context["active_buddy"],
-        args=args,
-        allowed_fields={"track_id"} | _IDENTITY_FIELDS,
-    )
-    if fields_error is not None:
-        return fields_error
+    active_buddy = context["active_buddy"]
+    payload_error = _require_allowed_fields(action, args, active_buddy)
+    if payload_error is not None:
+        return payload_error
 
-    track_id: str | None = None
-    if "track_id" in args:
-        track_id, parse_error = _normalize_id(args.get("track_id"), "track id")
-        if parse_error is not None:
-            return _payload_error(action=action, active_buddy=context["active_buddy"], message=parse_error)
-
-    rows: list[dict[str, Any]] = []
-    for record in env_store.list_handoffs():
-        if track_id is not None and record.get("track_id") != track_id:
+    rows = []
+    for row in env_store.list_handoffs():
+        if row.get("source_buddy") != active_buddy and row.get("target_buddy") != active_buddy and active_buddy != "pm":
             continue
-        target_buddy = record.get("target_buddy")
-        rows.append(
-            {
-                "source_type": "handoff_record",
-                "handoff_id": record.get("id"),
-                "track_id": record.get("track_id"),
-                "source_buddy": record.get("source_buddy"),
-                "target_buddy": target_buddy,
-                "source_task_id": record.get("source_task_id"),
-                "source_run_id": record.get("source_run_id"),
-                "artifact_ids": record.get("artifact_ids", []),
-                "status": record.get("status"),
-                "read_authorizes_active_buddy": target_buddy == context["active_buddy"],
-                "created_at": record.get("created_at"),
-                "updated_at": record.get("updated_at"),
-            }
-        )
+        rows.append(row)
 
-    if isinstance(track_id, str):
-        for handoff in context_service.scan_track_recent_handoffs(track_id, limit=20):
-            if not isinstance(handoff, dict):
-                continue
-            target_buddy = handoff.get("next_buddy")
-            rows.append(
-                {
-                    "source_type": "run_audit",
-                    "handoff_id": None,
-                    "track_id": track_id,
-                    "source_buddy": handoff.get("buddy_id"),
-                    "target_buddy": target_buddy,
-                    "source_task_id": handoff.get("task_id"),
-                    "source_run_id": handoff.get("run_id"),
-                    "artifact_ids": [],
-                    "status": "active",
-                    "read_authorizes_active_buddy": target_buddy == context["active_buddy"],
-                    "created_at": handoff.get("timestamp"),
-                    "updated_at": handoff.get("timestamp"),
-                }
-            )
+    track_id = args.get("track_id")
+    if isinstance(track_id, str) and track_id.strip():
+        rows = [row for row in rows if row.get("track_id") == track_id.strip()]
 
-    rows.sort(
-        key=lambda row: (
-            str(row.get("updated_at") or row.get("created_at") or ""),
-            str(row.get("handoff_id") or row.get("source_run_id") or ""),
-        ),
-        reverse=True,
-    )
+    target_buddy = args.get("target_buddy")
+    if isinstance(target_buddy, str) and target_buddy.strip():
+        rows = [row for row in rows if row.get("target_buddy") == target_buddy.strip()]
 
-    payload: dict[str, Any] = {
-        "track_id": track_id,
-        "handoffs": rows,
-        "current_binding": _current_binding(context),
-        "next_actions": [
-            {"tool": "handoff", "action": "validate"},
-            {"tool": "handoff", "action": "create"},
-        ],
-        "command_hint": track_relations.command_hint("handoff", "create"),
-    }
+    status = args.get("status")
+    if isinstance(status, str) and status.strip():
+        rows = [row for row in rows if row.get("status") == status.strip()]
+
+    limit = args.get("limit")
+    if isinstance(limit, int) and limit > 0:
+        rows = rows[:limit]
+
+    payload_rows = [_handoff_row(row) for row in rows]
     return tool_responses.success(
         tool="handoff",
         action=action,
-        active_buddy=context["active_buddy"],
-        effect_summary=f"Listed {len(rows)} handoff rows for track '{track_id}' without mutating state.",
+        active_buddy=active_buddy,
+        effect_summary=f"Listed {len(payload_rows)} readable handoff record(s).",
         state_changed=False,
         durability="none",
-        read_scope="Explicit handoff records plus recent run-audit handoff summaries.",
-        allowed_next_actions=[
-            "Use handoff.validate before creating a new explicit handoff record.",
-            "Use track.get and artifact.get to inspect referenced source artifacts.",
-        ],
-        extra=payload,
+        read_scope="explicit handoff object records",
+        allowed_next_actions=["Use handoff.validate before creating new handoff records."],
+        extra={"handoffs": payload_rows},
     )
 
 
 def validate_handoff(*, args: dict[str, Any], context: HandoffServiceContext) -> dict[str, Any]:
     action = "handoff.validate"
-    fields_error = _ensure_allowed_fields(
-        action=action,
-        active_buddy=context["active_buddy"],
-        args=args,
-        allowed_fields=_VALIDATE_FIELDS | _FORBIDDEN_MUTATION_FIELDS,
-    )
-    if fields_error is not None:
-        return fields_error
+    active_buddy = context["active_buddy"]
+    payload_error = _require_allowed_fields(action, args, active_buddy)
+    if payload_error is not None:
+        return payload_error
 
-    normalized, error = _validate_handoff_payload(args=args, context=context, action=action, mutate=False)
+    normalized, error = _validate_payload(args=args, context=context, action=action)
     if error is not None:
         return error
     assert isinstance(normalized, dict)
-    track = env_store.get_track(str(normalized["track_id"]))
-    track_next_buddy = track.get("next_buddy") if isinstance(track, dict) else None
+
     return tool_responses.success(
         tool="handoff",
         action=action,
-        active_buddy=context["active_buddy"],
-        effect_summary="Validated handoff payload and discoverability alignment without writing state.",
+        active_buddy=active_buddy,
+        effect_summary="Handoff payload validated with explicit product object refs.",
         state_changed=False,
         durability="none",
         validation_only=True,
-        follow_up_affordances=[
-            tool_responses.follow_up_affordance(
-                tool="handoff",
-                action="create",
-                reason="Create explicit handoff record from validated payload.",
-            )
-        ],
-        allowed_next_actions=[
-            "Use handoff.create with the validated payload when ready.",
-            "Use run.validate_result before run.commit when handoff payload is included in result.",
-        ],
+        read_scope="request payload validation",
+        allowed_next_actions=["Use handoff.create with the same validated payload."],
         extra={
-            "track_id": normalized["track_id"],
             "handoff": normalized,
             "track_alignment": {
                 "track_id": normalized["track_id"],
-                "requested_next_buddy": normalized["target_buddy"],
-                "track_next_buddy": track_next_buddy,
-                "target_matches_track_next_buddy": track_next_buddy in {None, normalized["target_buddy"]},
+                "target_buddy": normalized["target_buddy"],
+                "source_buddy": active_buddy,
             },
-            "discoverability": _discoverability(),
-            "current_binding": _current_binding(context),
-            "next_actions": [
-                {"tool": "handoff", "action": "create"},
-                {"tool": "run", "action": "validate_result"},
-            ],
-            "command_hint": track_relations.command_hint("handoff", "create"),
         },
     )
 
 
 def create_handoff_for_active_buddy(*, args: dict[str, Any], context: HandoffServiceContext) -> dict[str, Any]:
     action = "handoff.create"
-    fields_error = _ensure_allowed_fields(
-        action=action,
-        active_buddy=context["active_buddy"],
-        args=args,
-        allowed_fields=_VALIDATE_FIELDS | _FORBIDDEN_MUTATION_FIELDS,
-    )
-    if fields_error is not None:
-        return fields_error
+    active_buddy = context["active_buddy"]
+    payload_error = _require_allowed_fields(action, args, active_buddy)
+    if payload_error is not None:
+        return payload_error
 
-    normalized, error = _validate_handoff_payload(args=args, context=context, action=action, mutate=True)
+    normalized, error = _validate_payload(args=args, context=context, action=action)
     if error is not None:
         return error
     assert isinstance(normalized, dict)
 
-    handoff_id = f"handoff-{normalized['track_id']}-{context['active_buddy']}-to-{normalized['target_buddy']}-{uuid.uuid4().hex[:8]}"
-    record = env_store.create_handoff(
-        handoff_id=handoff_id,
-        track_id=str(normalized["track_id"]),
-        source_buddy=context["active_buddy"],
-        target_buddy=str(normalized["target_buddy"]),
-        source_task_id=str(normalized["source_task_id"]),
-        source_run_id=str(normalized["source_run_id"]),
-        artifact_ids=list(normalized["artifact_ids"]),
-        historical_artifact_ids=list(normalized["historical_artifact_ids"]),
-        reason=str(normalized["reason"]),
-        context=str(normalized["context"]),
-        status="active",
-    )
+    handoff_id = args.get("handoff_id")
+    if handoff_id is None:
+        handoff_id = f"handoff-{active_buddy}-{normalized['target_buddy']}-{uuid.uuid4().hex[:8]}"
+    if not isinstance(handoff_id, str) or not handoff_id.strip():
+        return _reject_payload(action=action, active_buddy=active_buddy, message="handoff_id must be a non-empty string")
 
+    try:
+        created = env_store.create_handoff(
+            handoff_id=handoff_id.strip(),
+            track_id=normalized["track_id"],
+            source_buddy=active_buddy,
+            target_buddy=normalized["target_buddy"],
+            source_task_id=normalized["source_task_id"],
+            artifact_ids=normalized["artifact_ids"],
+            memory_ids=normalized["memory_ids"],
+            buddybox_paths=normalized["buddybox_paths"],
+            source_refs=normalized["source_refs"],
+            reason=normalized["reason"],
+            context=normalized["context"],
+            status=normalized["status"],
+        )
+    except ValueError as exc:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
+
+    row = _handoff_row(created)
     return tool_responses.success(
         tool="handoff",
         action=action,
-        active_buddy=context["active_buddy"],
-        effect_summary=f"Created explicit handoff record '{record['id']}' without mutating track lifecycle fields.",
+        active_buddy=active_buddy,
+        effect_summary=f"Created handoff '{created['id']}' from '{active_buddy}' to '{created['target_buddy']}'.",
         state_changed=True,
-        durability="runtime_object",
-        state_changes=[{"object_type": "handoff", "object_id": record["id"], "change": "created"}],
-        created_ids=[str(record["id"])],
+        durability="durable",
+        created_ids=[created["id"]],
         allowed_next_actions=[
-            "Use run.validate_result or run.commit to include this handoff in run audit when needed.",
-            "Use handoff.list to verify recipient-facing handoff visibility.",
+            "Use handoff.list to review readable handoff timeline.",
+            "Notify target buddy to consume referenced artifacts/memories/buddybox files.",
         ],
-        extra={
-            "track_id": normalized["track_id"],
-            "handoff": record,
-            "current_binding": _current_binding(context),
-            "next_actions": [
-                {"tool": "run", "action": "validate_result"},
-                {"tool": "handoff", "action": "list", "args": {"track_id": normalized["track_id"]}},
-            ],
-            "command_hint": track_relations.command_hint(
-                "handoff",
-                "list",
-                {"track_id": normalized["track_id"]},
-            ),
-        },
+        extra={"handoff": row},
     )
-
-
-__all__ = [
-    "validate_handoff",
-    "list_handoffs_for_active_buddy",
-    "create_handoff_for_active_buddy",
-    "_validate_handoff_payload",
-]

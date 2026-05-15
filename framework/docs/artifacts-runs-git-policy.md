@@ -1,4 +1,4 @@
-# BuddySwitch Artifacts, Runs, and Git Policy
+# BuddySwitch Artifacts and Git Policy
 
 ## 1. Scope
 
@@ -26,11 +26,13 @@ Object source of truth:
 - tracks: `buddyswitch/objects/tracks/*.json`
 - tasks: `buddyswitch/objects/tasks/*.json`
 - artifacts with structured content: `buddyswitch/objects/artifacts/*.json`
-- run audit payloads: `buddyswitch/content/runs/*.json`
+- handoff objects: `buddyswitch/objects/handoffs/*.json`
+- memory objects: `buddyswitch/objects/memories/*.json`
+- buddy-owned files: `buddyswitch/content/buddybox/<buddy>/**`
 
-### `runs/raw/` (raw execution dumps)
+### `buddyswitch/content/buddybox/<buddy>/` (intentional durable files)
 
-Use `runs/raw/` for noisy intermediate output that helps a run but is not durable:
+Use `buddyswitch/content/buddybox/` for intentional durable file output that does not fit JSON object fields:
 - scratch notes
 - transient logs
 - debugging traces
@@ -52,8 +54,8 @@ Do not write temporary runtime noise into `projects/app/` source folders.
 ### Do not commit by default
 
 - generated state under `buddyswitch/objects/**`
-- generated run audit content under `buddyswitch/content/runs/**`
-- `runs/raw/**`
+- generated buddybox content under `buddyswitch/content/buddybox/<buddy>/**`
+- `buddyswitch/content/buddybox/**`
 - temporary logs and traces
 - scratch dumps
 - machine-local clutter
@@ -68,5 +70,5 @@ Ask this before writing output:
 
 Decision:
 - If 1 or 2 is yes, write to an artifact object under `buddyswitch/objects/artifacts/`.
-- If 3 is yes, write to `runs/raw/`.
-- If the run should become BuddySwitch state, persist it through a task object and write a run audit under `buddyswitch/content/runs/`.
+- If 3 is yes, write to `buddyswitch/content/buddybox/`.
+- If content should become BuddySwitch state, write artifact/memory/handoff objects or intentional buddybox files explicitly.

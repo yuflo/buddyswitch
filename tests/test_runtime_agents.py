@@ -33,8 +33,7 @@ class RuntimeAgentsValidationTests(unittest.TestCase):
                     [
                         "# BuddySwitch Runtime Workspace",
                         "Active buddy is `pm`.",
-                        "Use python3 scripts/turn_runtime.py prepare \"<request>\" before each run.",
-                        "Use python3 scripts/turn_runtime.py persist --context <context> --result <result> after execution.",
+                        "Start with python3 scripts/env/client.py context summarize.",
                         "project.access=readonly",
                     ]
                 )
@@ -65,20 +64,15 @@ class RuntimeAgentsValidationTests(unittest.TestCase):
         for buddy_id in ("market", "pm", "design", "dev", "test"):
             self.assertIn(f"{buddy_id}: ok", output)
 
-    def test_runtime_agents_point_to_prepare_runtime_context(self) -> None:
+    def test_runtime_agents_point_to_runless_context_discovery(self) -> None:
         for buddy_id in ("market", "pm", "design", "dev", "test"):
             with self.subTest(buddy=buddy_id):
                 template = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy_id / "AGENTS.md"
                 text = template.read_text(encoding="utf-8")
-                self.assertIn("prepare.runtime_context", text)
+                self.assertIn("python3 scripts/env/client.py context summarize", text)
                 self.assertIn("structured tool feedback", text.lower())
-                self.assertIn('python3 scripts/turn_runtime.py prepare "<request>"', text)
-                self.assertIn(
-                    "python3 scripts/turn_runtime.py persist --context <context> --result <result>",
-                    text,
-                )
-                self.assertNotIn("scripts/turn_runtime.py prepare", text.replace("python3 scripts/turn_runtime.py prepare", ""))
-                self.assertNotIn("scripts/turn_runtime.py persist", text.replace("python3 scripts/turn_runtime.py persist", ""))
+                self.assertNotIn("scripts/turn_runtime.py prepare", text)
+                self.assertNotIn("scripts/turn_runtime.py persist", text)
 
 
 if __name__ == "__main__":

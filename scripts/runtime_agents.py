@@ -65,25 +65,15 @@ def validate_runtime_agents_template(
         needle=f"`{buddy_id}`",
         message=f"missing active buddy id `{buddy_id}` in template body",
     )
+    if "scripts/turn_runtime.py prepare" in text or "scripts/turn_runtime.py persist" in text:
+        raise RuntimeAgentsError("template still references retired prepare/persist runtime lifecycle")
     _require_contains(
         text=text,
-        needle='python3 scripts/turn_runtime.py prepare "<request>"',
-        message="missing canonical prepare command reference",
+        needle="python3 scripts/env/client.py context summarize",
+        message="missing runless context discovery command reference",
     )
-    _require_contains(
-        text=text,
-        needle="python3 scripts/turn_runtime.py persist --context <context> --result <result>",
-        message="missing canonical persist command reference",
-    )
-    prepare_tail = "scripts/turn_runtime.py" + " prepare"
-    persist_tail = "scripts/turn_runtime.py" + " persist"
-    if prepare_tail in text.replace("python3 " + prepare_tail, ""):
-        raise RuntimeAgentsError("template contains bare prepare command reference")
-    if persist_tail in text.replace("python3 " + persist_tail, ""):
-        raise RuntimeAgentsError("template contains bare persist command reference")
-
     project_access = profile["project"]["access"]
-    scratch_root = profile["scratch"]["root"]
+    buddybox_root = profile["buddybox"]["root"]
 
     _require_contains(
         text=lowered,
@@ -92,14 +82,13 @@ def validate_runtime_agents_template(
     )
     _require_contains(
         text=text,
-        needle=scratch_root,
-        message=f"missing buddy scratch root wording: {scratch_root}",
+        needle=buddybox_root,
+        message=f"missing buddy buddybox root wording: {buddybox_root}",
     )
     _require_contains_any(
         text=lowered,
         needles=[
-            "raw state is broker-only",
-            "raw state remains broker-only",
+            "do not edit `buddyswitch/objects/**`",
             "broker-only state",
         ],
         message="missing broker-only raw state wording",
@@ -110,13 +99,9 @@ def validate_runtime_agents_template(
             "agents.md describes context projection only",
             "agents.md is context projection only",
             "agents.md is not the permission source",
+            "agents.md is guidance only and not the permission source",
         ],
         message="missing AGENTS context projection wording",
-    )
-    _require_contains(
-        text=text,
-        needle="prepare.runtime_context",
-        message="missing prepare.runtime_context reference",
     )
     _require_contains_any(
         text=lowered,
@@ -138,12 +123,7 @@ def validate_runtime_agents_template(
     )
     _require_contains_any(
         text=lowered,
-        needles=["receipt", "## receipt"],
-        message="missing receipt section",
-    )
-    _require_contains_any(
-        text=lowered,
-        needles=["summary", "## summary"],
+        needles=["summary", "## summary", "## output rule", "final output must"],
         message="missing summary section",
     )
 
@@ -155,6 +135,7 @@ def validate_runtime_agents_template(
                 "dev can write `projects/app`",
                 "can write projects/app",
                 "project source is writable",
+                "project.access=write",
             ],
             message="missing dev source-write authority wording",
         )
@@ -165,24 +146,22 @@ def validate_runtime_agents_template(
                 "project source is read-only",
                 "source is read-only",
                 "cannot edit source",
+                "project.access=read-only",
             ],
             message="missing non-dev source read-only wording",
         )
-        _require_contains_any(
-            text=lowered,
-            needles=[
-                "hand off to dev",
-                "handoff to dev",
-                "hand source fixes to dev",
-            ],
-            message="missing non-dev dev-handoff wording",
-        )
+
+    _require_contains(
+        text=lowered,
+        needle="env tools",
+        message="missing env tool surface wording",
+    )
 
     if buddy_id == "market":
-        _require_contains(
-            text=text,
-            needle="prepare.runtime_context.tool_requirements",
-            message="missing market tool requirements pointer",
+        _require_contains_any(
+            text=lowered,
+            needles=["evidence", "target-scoped"],
+            message="missing market evidence boundary wording",
         )
 
     return {"ok": True, "buddy_id": buddy_id, "template_path": str(template_path)}

@@ -1,28 +1,24 @@
 ---
 name: handoff-tool
-description: Use when you need to inspect recent handoffs, validate a handoff payload, or create an explicit handoff record through runtime-owned env tools.
+description: Use when you need explicit cross-buddy handoff validation or creation with product-object references.
 ---
 
 # handoff-tool
 
 ## Purpose
-- Keep handoffs explicit and auditable.
-- Validate source ownership, ids, and lifecycle boundaries before handoff creation.
-- Use list/validate/create instead of hidden lifecycle mutation.
+- Create explicit collaboration handoff records between buddies.
+- Keep handoff provenance object-based (`artifact_ids`, `memory_ids`, `buddybox_paths`, `source_refs`).
 
-## Command Surface
-- `python3 scripts/env/client.py handoff list [--track-id <track-id>]`
-- `python3 scripts/env/client.py handoff validate --payload <json-file>`
-- `python3 scripts/env/client.py handoff create --payload <json-file>`
+## Runtime Contract
+- CLI: `python3 scripts/env/client.py handoff <operation>`
+- Broker method: `env.tool`
+- Operations: `list`, `validate`, `create`
 
-## Payload Hints
-- Required fields: `track_id`, `source_task_id`, `source_run_id`, `target_buddy`, `artifact_ids`, `reason`, `context`.
-- Optional fields: `historical_artifact_ids`, `next_buddy`.
-- Forbidden fields: lifecycle mutation fields such as `track_status`, `current_buddy`, `state_effects`.
+## Notes
+- Handoff payloads must be explicit; no run-scoped source fields.
+- Handoff records transfer context; they do not mutate track lifecycle implicitly.
 
 ## Verification
-- Contribute to one buddy-run commit.
-- Do not call persist from inside the skill.
-- Run `handoff validate` first, then `handoff create`.
-- Confirm JSON response is `ok=true` before relying on handoff visibility.
-- Do not edit raw state files directly.
+- Confirm response JSON has `ok=true` and a durable handoff id.
+- For failures, follow structured rejection fields (`permission_boundary`, `why_blocked`, `retry_guidance`).
+- Do not edit runtime state files directly.

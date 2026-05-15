@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runtime broker v2 client for product-mode turn tools."""
+"""Runtime broker v2 client for product-mode env.tool and health methods."""
 
 from __future__ import annotations
 
@@ -80,44 +80,11 @@ def runtime_broker_socket_from_env() -> Path:
     return Path(raw.strip())
 
 
-def _require_env(name: str) -> str:
-    raw = os.environ.get(name)
-    if not isinstance(raw, str) or not raw.strip():
-        raise RuntimeBrokerError(
-            "E_RUNTIME_BROKER_UNAVAILABLE",
-            f"{name} is required in product mode.",
-            details=broker_unavailable_feedback(),
-        )
-    return raw.strip()
-
-
 def canonical_result_hash(result: dict[str, Any]) -> str:
     if not isinstance(result, dict):
         raise ValueError("result must be an object to compute canonical_result_hash")
     body = json.dumps(result, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(body).hexdigest()
-
-
-def _extract_run_id(context: dict[str, Any]) -> str:
-    if not isinstance(context, dict):
-        raise ValueError("context must be an object")
-    run_envelope = context.get("run_envelope")
-    if isinstance(run_envelope, dict):
-        turn_identity = run_envelope.get("turn_identity")
-        if isinstance(turn_identity, dict):
-            run_id = turn_identity.get("run_id")
-            if isinstance(run_id, str) and run_id.strip():
-                return run_id.strip()
-        run_id = run_envelope.get("run_id")
-        if isinstance(run_id, str) and run_id.strip():
-            return run_id.strip()
-    raise ValueError("context.run_envelope.turn_identity.run_id is required for persist idempotency")
-
-
-def make_persist_idempotency_key(context: dict[str, Any], result: dict[str, Any]) -> str:
-    run_id = _extract_run_id(context)
-    result_hash = canonical_result_hash(result)
-    return f"persist:{run_id}:{result_hash}"
 
 
 def _response_timeout_seconds(request_deadline_ms: int, response_margin_ms: int) -> float:
@@ -161,6 +128,7 @@ def _retry_decision(
     params: dict[str, Any],
     idempotency_key: str | None,
 ) -> BrokerRetryDecision:
+    del idempotency_key
     code = error.code
     retriable = bool(error.details.get("retriable", False))
 
@@ -176,14 +144,6 @@ def _retry_decision(
 
     if method in {"ping", "status"}:
         return BrokerRetryDecision(True, "read health request")
-
-    if method == "prepare":
-        return BrokerRetryDecision(False, "prepare does not auto-retry")
-
-    if method == "persist":
-        if isinstance(idempotency_key, str) and idempotency_key.strip():
-            return BrokerRetryDecision(True, "persist with idempotency key")
-        return BrokerRetryDecision(False, "persist missing idempotency key")
 
     if _is_read_only_env_tool(method, params):
         return BrokerRetryDecision(True, "read-only env.tool request")
@@ -217,146 +177,140 @@ def _request_once(
             },
         ) from exc
     except protocol.BrokerProtocolError as exc:
-        # EOF while reading a response is usually a disconnect/reset after request send.
-        is_disconnect = "unexpected EOF" in exc.message
-        code = "E_RUNTIME_BROKER_CLIENT_DISCONNECTED" if is_disconnect else "E_RUNTIME_BROKER_PROTOCOL"
+        code = "E_RUNTIME_BROKER_CLIENT_DISCONNECTED"
+        message = exc.message
+        retriable = True
+        if "invalid JSON" in exc.message or "header exceeds limit" in exc.message or "invalid broker header line" in exc.message:
+            code = "E_RUNTIME_BROKER_PROTOCOL"
+            retriable = False
         raise RuntimeBrokerError(
             code,
-            f"runtime broker protocol failure at {socket_path}: {exc.message}",
+            f"runtime broker response protocol error: {message}",
             details={
-                **broker_unavailable_feedback(socket_path=socket_path),
                 "request_id": request_id,
-                "retriable": is_disconnect,
+                "retriable": retriable,
+                "permission_boundary": "broker-protocol",
             },
         ) from exc
-    except OSError as exc:
-        err = getattr(exc, "errno", None)
-        is_stale_socket = err in {errno.ENOENT, errno.ECONNREFUSED, errno.ENOTSOCK}
-        code = "E_RUNTIME_BROKER_STALE_SOCKET" if is_stale_socket else "E_RUNTIME_BROKER_CLIENT_DISCONNECTED"
+    except ConnectionResetError as exc:
         raise RuntimeBrokerError(
-            code,
-            f"runtime broker unavailable at {socket_path}: {exc}",
+            "E_RUNTIME_BROKER_CLIENT_DISCONNECTED",
+            f"runtime broker reset connection at {socket_path}",
             details={
                 **broker_unavailable_feedback(socket_path=socket_path),
                 "request_id": request_id,
                 "retriable": True,
             },
         ) from exc
-
-    if not isinstance(response, dict):
+    except FileNotFoundError as exc:
+        raise RuntimeBrokerError(
+            "E_RUNTIME_BROKER_UNAVAILABLE",
+            f"runtime broker socket not found: {socket_path}",
+            details={
+                **broker_unavailable_feedback(socket_path=socket_path),
+                "request_id": request_id,
+                "retriable": True,
+            },
+        ) from exc
+    except OSError as exc:
+        if exc.errno in {errno.ENOENT, errno.ECONNREFUSED}:
+            raise RuntimeBrokerError(
+                "E_RUNTIME_BROKER_UNAVAILABLE",
+                f"runtime broker unavailable at {socket_path}: {exc}",
+                details={
+                    **broker_unavailable_feedback(socket_path=socket_path),
+                    "request_id": request_id,
+                    "retriable": True,
+                },
+            ) from exc
         raise RuntimeBrokerError(
             "E_RUNTIME_BROKER_PROTOCOL",
-            "runtime broker response must be a JSON object.",
-            response={"raw_response": response},
-            details={"request_id": request_id, "retriable": False},
-        )
+            f"runtime broker transport error at {socket_path}: {exc}",
+            details={
+                "request_id": request_id,
+                "retriable": False,
+                "permission_boundary": "broker-transport",
+            },
+        ) from exc
 
     if response.get("protocol") != PROTOCOL:
         raise RuntimeBrokerError(
             "E_RUNTIME_BROKER_PROTOCOL",
-            "runtime broker response protocol mismatch.",
-            response=response,
+            f"runtime broker protocol mismatch: {response.get('protocol')!r}",
+            response=response if isinstance(response, dict) else None,
             details={"request_id": request_id, "retriable": False},
         )
 
-    response_request_id = response.get("request_id")
-    if response_request_id != request_id:
+    returned_request_id = response.get("request_id")
+    if returned_request_id != request_id:
         raise RuntimeBrokerError(
             "E_RUNTIME_BROKER_PROTOCOL",
-            "runtime broker response request_id mismatch.",
+            f"runtime broker request_id mismatch: expected {request_id!r}, got {returned_request_id!r}",
             response=response,
             details={"request_id": request_id, "retriable": False},
         )
 
-    if not isinstance(response.get("ok"), bool):
+    if response.get("ok") is not True:
+        raise _normalize_broker_error(response, request_id=request_id)
+
+    result = response.get("result")
+    if not isinstance(result, dict):
         raise RuntimeBrokerError(
             "E_RUNTIME_BROKER_PROTOCOL",
-            "runtime broker response must contain boolean 'ok'.",
+            "runtime broker success response missing object result",
             response=response,
             details={"request_id": request_id, "retriable": False},
         )
-
-    if response["ok"] is True:
-        result = response.get("result")
-        if not isinstance(result, dict):
-            raise RuntimeBrokerError(
-                "E_RUNTIME_BROKER_PROTOCOL",
-                "runtime broker success response must contain object result.",
-                response=response,
-                details={"request_id": request_id, "retriable": False},
-            )
-        return result
-
-    raise _normalize_broker_error(response, request_id=request_id)
+    return result
 
 
 def request_runtime_broker(
     method: str,
     params: dict[str, Any],
     *,
-    deadline_ms: int | None = None,
     idempotency_key: str | None = None,
     result_hash: str | None = None,
-    timeouts: RuntimeBrokerTimeouts | None = None,
+    socket_path: Path | None = None,
+    timeouts: RuntimeBrokerTimeouts = RuntimeBrokerTimeouts(),
 ) -> dict[str, Any]:
+    del result_hash
     if not isinstance(method, str) or not method.strip():
-        raise RuntimeBrokerError(
-            "E_RUNTIME_BROKER_UNAVAILABLE",
-            "runtime broker method is required.",
-            details=broker_unavailable_feedback(),
-        )
+        raise ValueError("method must be a non-empty string")
     if not isinstance(params, dict):
-        raise RuntimeBrokerError(
-            "E_RUNTIME_BROKER_UNAVAILABLE",
-            "runtime broker params must be an object.",
-            details=broker_unavailable_feedback(),
-        )
+        raise ValueError("params must be an object")
 
-    socket_path = runtime_broker_socket_from_env()
-    _require_env("BUDDYSWITCH_INSTANCE_ID")
-    _require_env("BUDDYSWITCH_ACTIVE_BUDDY")
+    chosen_socket = runtime_broker_socket_from_env() if socket_path is None else socket_path
+    method_name = method.strip()
+    deadline_ms = max(1, int(timeouts.request_deadline_ms))
+    request_params = dict(params)
+    response_timeout_seconds = _response_timeout_seconds(
+        request_deadline_ms=max(1, int(timeouts.request_deadline_ms)),
+        response_margin_ms=max(0, int(timeouts.response_margin_ms)),
+    )
 
-    cfg = timeouts or RuntimeBrokerTimeouts()
-    request_deadline_ms = int(deadline_ms if isinstance(deadline_ms, int) and deadline_ms > 0 else cfg.request_deadline_ms)
-    response_timeout_seconds = _response_timeout_seconds(request_deadline_ms, cfg.response_margin_ms)
-
-    max_attempts = 2
-    attempt = 0
-    while attempt < max_attempts:
-        request_id = f"req-{uuid.uuid4()}"
+    attempts = 0
+    last_error: RuntimeBrokerError | None = None
+    while attempts < 2:
+        attempts += 1
         request = protocol.make_request(
-            request_id=request_id,
-            method=method.strip(),
-            params=params,
-            deadline_ms=request_deadline_ms,
+            request_id=f"req-{uuid.uuid4()}",
+            method=method_name,
+            params=request_params,
+            deadline_ms=deadline_ms,
             idempotency_key=idempotency_key,
         )
-        if isinstance(result_hash, str) and result_hash.strip():
-            request["result_hash"] = result_hash.strip()
-
         try:
             return _request_once(
-                socket_path=socket_path,
+                socket_path=chosen_socket,
                 request=request,
-                connect_timeout_seconds=cfg.connect_timeout_seconds,
+                connect_timeout_seconds=float(timeouts.connect_timeout_seconds),
                 response_timeout_seconds=response_timeout_seconds,
             )
         except RuntimeBrokerError as exc:
-            if attempt >= max_attempts - 1:
+            last_error = exc
+            decision = _retry_decision(error=exc, method=method_name, params=params, idempotency_key=idempotency_key)
+            if attempts >= 2 or not decision.should_retry:
                 raise
-            decision = _retry_decision(
-                error=exc,
-                method=method.strip(),
-                params=params,
-                idempotency_key=idempotency_key,
-            )
-            if not decision.should_retry:
-                raise
-            attempt += 1
-            continue
-
-    raise RuntimeBrokerError(
-        "E_RUNTIME_BROKER_UNAVAILABLE",
-        "runtime broker request exhausted retry budget.",
-        details=broker_unavailable_feedback(socket_path=socket_path),
-    )
+    if last_error is not None:
+        raise last_error
+    raise RuntimeBrokerError("E_RUNTIME_BROKER_PROTOCOL", "runtime broker request failed without response")

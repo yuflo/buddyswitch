@@ -44,13 +44,14 @@ class ResolveTimeTaskMaterializationTests(RuntimeWorkspaceTestMixin, unittest.Te
             self._task_id,
             "Resolve-Time Materialization",
             buddy="dev",
-            initial_run_id=None,
         )
 
-        self.assertEqual(task["run_ids"], [])
-        self.assertIsNone(task["latest_run_id"])
+        self.assertEqual(task["artifact_ids"], [])
+        self.assertEqual(task["artifact_slots"], {})
+        self.assertNotIn("run_ids", task)
+        self.assertNotIn("latest_run_id", task)
 
-    def test_validate_task_allows_empty_run_ids_when_latest_run_is_null(self) -> None:
+    def test_validate_task_rejects_legacy_run_fields(self) -> None:
         payload = {
             "id": "task-dev-validate-empty-runs",
             "buddy": "dev",
@@ -59,17 +60,15 @@ class ResolveTimeTaskMaterializationTests(RuntimeWorkspaceTestMixin, unittest.Te
             "track_id": None,
             "artifact_ids": [],
             "artifact_slots": {},
-            "run_ids": [],
-            "latest_run_id": None,
+            "run_ids": ["run-old"],
+            "latest_run_id": "run-old",
             "summary": "",
             "created_at": "2026-04-22T10:00:00+08:00",
             "updated_at": "2026-04-22T10:00:00+08:00",
         }
 
-        normalized = validate_task(payload)
-
-        self.assertEqual(normalized["run_ids"], [])
-        self.assertIsNone(normalized["latest_run_id"])
+        with self.assertRaises(ValueError):
+            validate_task(payload)
 
     def test_create_task_binds_task_and_track_ids_together(self) -> None:
         track = create_track("track-pm-binding-invariant", "PM Binding Invariant")
@@ -78,7 +77,6 @@ class ResolveTimeTaskMaterializationTests(RuntimeWorkspaceTestMixin, unittest.Te
             "PM Binding Invariant",
             buddy="pm",
             track_id=track["id"],
-            initial_run_id="run-seed-pm-binding-invariant",
         )
 
         stored_task = get_task(task["id"])
@@ -86,6 +84,7 @@ class ResolveTimeTaskMaterializationTests(RuntimeWorkspaceTestMixin, unittest.Te
 
         self.assertEqual(stored_task["track_id"], track["id"])
         self.assertIn(task["id"], stored_track["task_ids"])
+
 
 class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _task_path(self, task_id: str) -> Path:
@@ -125,7 +124,6 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "task-pm-v2-slot",
             "V2 Slot Task",
             buddy="pm",
-            initial_run_id="run-seed-v2-slot",
         )
 
         self.assertEqual(task["artifact_slots"], {})
@@ -139,7 +137,6 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "task-pm-v2-revision",
             "V2 Revision Task",
             buddy="pm",
-            initial_run_id="run-seed-v2-revision",
         )
 
         first = create_artifact(
@@ -148,7 +145,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=task["id"],
-            source_run_id="run-seed-v2-revision",
+            created_by="test-env-store-v2",
             summary="Initial PRD",
             content={"task_summary": "Initial PRD"},
         )
@@ -158,7 +155,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=task["id"],
-            source_run_id="run-seed-v2-revision-2",
+            created_by="test-env-store-v2",
             summary="Revised PRD",
             content={"task_summary": "Revised PRD"},
         )
@@ -190,7 +187,6 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "task-pm-v2-revision",
             "V2 Revision Task",
             buddy="pm",
-            initial_run_id="run-seed-v2-revision",
         )
 
         initial = create_artifact(
@@ -199,7 +195,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=task["id"],
-            source_run_id="run-seed-v2-revision",
+            created_by="test-env-store-v2",
             summary="Initial PRD",
             content={"task_summary": "Initial PRD"},
         )
@@ -210,7 +206,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=task["id"],
-            source_run_id="run-seed-v2-revision-2",
+            created_by="test-env-store-v2",
             summary="Revised PRD",
             content={"task_summary": "Revised PRD"},
         )
@@ -228,7 +224,6 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "task-pm-v2-revision",
             "V2 Revision Task",
             buddy="pm",
-            initial_run_id="run-seed-v2-revision",
         )
 
         first = create_artifact(
@@ -237,7 +232,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=task["id"],
-            source_run_id="run-seed-v2-revision",
+            created_by="test-env-store-v2",
             summary="Initial PRD",
             content={"task_summary": "Initial PRD"},
         )
@@ -247,7 +242,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=task["id"],
-            source_run_id="run-seed-v2-revision-2",
+            created_by="test-env-store-v2",
             summary="Revised PRD",
             content={"task_summary": "Revised PRD"},
         )
@@ -268,7 +263,6 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "task-pm-v2-revision",
             "V2 Revision Task",
             buddy="pm",
-            initial_run_id="run-seed-v2-revision",
         )
 
         first = create_artifact(
@@ -277,7 +271,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=task["id"],
-            source_run_id="run-seed-v2-revision",
+            created_by="test-env-store-v2",
             summary="Initial PRD",
             content={"task_summary": "Initial PRD"},
         )
@@ -287,7 +281,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=task["id"],
-            source_run_id="run-seed-v2-revision-2",
+            created_by="test-env-store-v2",
             summary="Revised PRD",
             content={"task_summary": "Revised PRD"},
         )
@@ -307,7 +301,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=task["id"],
-            source_run_id="run-seed-v2-revision-3",
+            created_by="test-env-store-v2",
             summary="Third PRD",
             content={"task_summary": "Third PRD"},
         )
@@ -327,13 +321,11 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "task-pm-v2-move-source",
             "V2 Move Source",
             buddy="pm",
-            initial_run_id="run-seed-v2-move-source",
         )
         dest = create_task(
             "task-pm-v2-move-dest",
             "V2 Move Dest",
             buddy="pm",
-            initial_run_id="run-seed-v2-move-dest",
         )
 
         source_old = create_artifact(
@@ -342,7 +334,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=source["id"],
-            source_run_id="run-seed-v2-move-source",
+            created_by="test-env-store-v2",
             summary="Source old",
             content={"task_summary": "Source old"},
         )
@@ -352,7 +344,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=source["id"],
-            source_run_id="run-seed-v2-move-source-2",
+            created_by="test-env-store-v2",
             summary="Source current",
             content={"task_summary": "Source current"},
         )
@@ -362,7 +354,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=dest["id"],
-            source_run_id="run-seed-v2-move-dest",
+            created_by="test-env-store-v2",
             summary="Dest current",
             content={"task_summary": "Dest current"},
         )
@@ -390,13 +382,11 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "task-pm-v2-move-source",
             "V2 Move Source",
             buddy="pm",
-            initial_run_id="run-seed-v2-move-source",
         )
         dest = create_task(
             "task-pm-v2-move-dest",
             "V2 Move Dest",
             buddy="pm",
-            initial_run_id="run-seed-v2-move-dest",
         )
 
         source_old = create_artifact(
@@ -405,7 +395,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=source["id"],
-            source_run_id="run-seed-v2-move-source",
+            created_by="test-env-store-v2",
             summary="Source old",
             content={"task_summary": "Source old"},
         )
@@ -415,7 +405,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=source["id"],
-            source_run_id="run-seed-v2-move-source-2",
+            created_by="test-env-store-v2",
             summary="Source current",
             content={"task_summary": "Source current"},
         )
@@ -425,7 +415,7 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             kind="prd",
             task_id=dest["id"],
-            source_run_id="run-seed-v2-move-dest",
+            created_by="test-env-store-v2",
             summary="Dest current",
             content={"task_summary": "Dest current"},
         )

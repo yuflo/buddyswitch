@@ -1,70 +1,40 @@
-# BuddySwitch Context Panel Interface Spec
+# BuddySwitch Interface Spec (Runless)
 
-## Purpose
+## Console Data Contract
 
-The context panel is a read-only workspace viewer for:
+The context panel reads workspace data from:
 
-- track objects
-- task objects
-- artifact objects
-- run audits
-- next-step state summaries
+- `GET /api/workspace`
 
-## Boundary
+Contract source of truth:
 
-The interface must not:
+- `framework/contracts/workspace-projection.json`
 
-- invoke buddies
-- call LLMs
-- execute shell commands
-- execute cleanup commands
-- write repository files from browser code
+Key projection sections:
 
-## Data Source
+- buddies
+- tracks
+- standalone_tasks
+- tasks
+- artifacts
+- handoffs
+- memories
+- buddybox_files
 
-Live data endpoint: `/api/workspace`.
-Canonical contract: `framework/contracts/workspace-projection.json`.
+## Runtime Tool Interface
 
-No static snapshot fallback is supported.
+Runtime operations use broker method `env.tool` with CLI entrypoint:
 
-Task and track projections are slot-aware:
+- `python3 scripts/env/client.py <resource> <operation> ...`
 
-- task view exposes current artifacts by slot
-- artifact lineage uses revision metadata
-- track summaries derive latest material from current slot artifacts
+Tool resources:
 
-## UI Surface Boundary
-
-UI surface:
-
-- `framework/console/app.js`
-
-`projects/app` is shared product source projected into runtime workspaces. It is
-not a framework context panel UI surface.
-
-These browser entrypoints must not reference runtime internals.
-Runtime internals that must not be referenced from UI surfaces include:
-
-- `env_store`
-- `runtime_store.projections`
-- `turn_runtime`
-- `workspace_data`
-
-Console UI reads runtime state only from `/api/workspace`.
-No direct runtime module imports, runtime object reads, or runtime write paths are allowed in browser code.
-
-## Refresh Flow
-
-1. Start server: `python3 scripts/serve_context_panel.py`
-2. Open `http://127.0.0.1:8765/`
-3. Panel auto-fetches on load
-4. User can click `Refresh workspace`
-
-## Cleanup Integration
-
-Panel may show cleanup commands only:
-
-- `./buddyswitch-codex data cleanup --buddy <buddy>`
-- `./buddyswitch-codex data cleanup --all-data`
-
-Commands must not include `--yes` by default.
+- `task`
+- `track`
+- `artifact`
+- `handoff`
+- `memory`
+- `buddybox`
+- `context`
+- `evidence`
+- `search`

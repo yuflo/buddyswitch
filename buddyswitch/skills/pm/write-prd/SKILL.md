@@ -22,15 +22,15 @@ description: Use when the task is drafting a PRD, defining MVP scope, or turning
 - Constraints, assumptions, requirements.
 
 ## Outputs
-- A contribution to the current compact buddy-run commit.
-- Durable PRD content is written before persist through `artifact-tool` `artifact.create_revision`.
-- The final run commit references already-written artifacts with optional `artifact_ids` metadata.
+- Durable outputs are written explicitly through env tools.
+- Durable PRD content is written through `artifact-tool` `artifact.create_revision`.
+- Reference written artifacts by explicit ids when relevant.
 
 ## Steps
 1. Define the PRD summary and key decisions.
 2. Capture risks, open questions, and one concrete suggested next step.
 3. Put PRD-specific detail under the artifact payload `content.prd` (problem, user_value, requirements, scope).
-4. If an explicit PM track lifecycle mutation is required, use `track-tool` before persist.
+4. If an explicit PM track lifecycle mutation is required, use `track-tool` before returning.
 
 ## Verification
 - Keep the result product-definition centered.
@@ -40,17 +40,17 @@ description: Use when the task is drafting a PRD, defining MVP scope, or turning
 ## Shared Runtime Rules
 - See `framework/docs/skill-runtime-shared-rules.md`.
 - This native skill contributes content to the current buddy run.
-- Do not call persist from the skill perspective.
-- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
+- Do not rely on deprecated prepare/persist flows.
+- The locked buddy session returns after explicit durable writes are complete.
 
 ## BuddySwitch Commit Output
 
-Contribute to one buddy-run commit. Do not call persist from inside the skill.
+Write durable outputs explicitly via env tools. Do not rely on deprecated prepare/persist flows.
 
 Required top-level field:
 - `execution_summary`
 
-Use `artifact-tool` before persist when this skill produces a durable artifact:
+Use `artifact-tool` when this skill produces a durable artifact:
 - `kind`: `prd`
 - `title`: concise artifact title
 - `summary`: short downstream selection summary

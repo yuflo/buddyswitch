@@ -23,9 +23,10 @@ ROOT = Path(__file__).resolve().parents[1]
 CATEGORY_ORDER = (
     "artifact_objects",
     "task_objects",
-    "run_content",
-    "run_raw",
     "track_objects",
+    "handoff_objects",
+    "memory_objects",
+    "buddybox_files",
 )
 
 
@@ -243,12 +244,14 @@ def new_plan(scope: str, *, buddy: str | None = None) -> dict[str, Any]:
         "delete_paths": [],
         "artifact_object_ids": [],
         "task_object_ids": [],
-        "run_ids": [],
+        "handoff_object_ids": [],
+        "memory_object_ids": [],
         "warnings": [],
         "counts_by_category": counts,
         "artifact_records": [],
         "task_records": [],
-        "run_records": [],
+        "handoff_records": [],
+        "memory_records": [],
         "direct_delete_paths": [],
         "external_delete_paths": {},
     }
@@ -338,23 +341,49 @@ def discover_task_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[s
     return valid, invalid
 
 
-def discover_run_content(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def discover_handoff_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     valid: list[dict[str, Any]] = []
     invalid: list[dict[str, Any]] = []
-    for path in iter_files(root, "buddyswitch/content/runs"):
+    for path in iter_files(root, "buddyswitch/objects/handoffs"):
         relative = rel(root, path)
-        run_id = path.stem
         try:
             payload = read_json(path)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
-            invalid.append({"path": relative, "run_id": run_id, "reason": f"invalid run content JSON: {exc}"})
+            invalid.append({"path": relative, "reason": f"invalid handoff object JSON: {exc}"})
             continue
 
-        buddy = payload.get("active_buddy")
-        if not isinstance(buddy, str) or not buddy.strip():
-            invalid.append({"path": relative, "run_id": run_id, "reason": "run content is missing active_buddy"})
+        handoff_id = payload.get("id")
+        source_buddy = payload.get("source_buddy")
+        if not isinstance(handoff_id, str) or not handoff_id:
+            invalid.append({"path": relative, "reason": "handoff object is missing id"})
             continue
-        valid.append({"path": relative, "run_id": run_id, "buddy": buddy.strip()})
+        if not isinstance(source_buddy, str) or not source_buddy:
+            invalid.append({"path": relative, "reason": f"handoff '{handoff_id}' is missing source_buddy"})
+            continue
+        valid.append({"id": handoff_id, "source_buddy": source_buddy, "object_path": relative})
+    return valid, invalid
+
+
+def discover_memory_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    valid: list[dict[str, Any]] = []
+    invalid: list[dict[str, Any]] = []
+    for path in iter_files(root, "buddyswitch/objects/memories"):
+        relative = rel(root, path)
+        try:
+            payload = read_json(path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            invalid.append({"path": relative, "reason": f"invalid memory object JSON: {exc}"})
+            continue
+
+        memory_id = payload.get("id")
+        memory_buddy = payload.get("buddy")
+        if not isinstance(memory_id, str) or not memory_id:
+            invalid.append({"path": relative, "reason": "memory object is missing id"})
+            continue
+        if not isinstance(memory_buddy, str) or not memory_buddy:
+            invalid.append({"path": relative, "reason": f"memory '{memory_id}' is missing buddy"})
+            continue
+        valid.append({"id": memory_id, "buddy": memory_buddy, "object_path": relative})
     return valid, invalid
 
 
@@ -533,15 +562,24 @@ def add_indexed_task(plan: dict[str, Any], record: dict[str, Any]) -> None:
     add_path(plan, object_path, "task_objects")
 
 
-def add_run_content(plan: dict[str, Any], record: dict[str, Any]) -> None:
+def add_indexed_handoff(plan: dict[str, Any], record: dict[str, Any]) -> None:
     root = Path(plan["repo_root"])
-    if record["run_id"] not in plan["run_ids"]:
-        plan["run_ids"].append(record["run_id"])
-        plan["run_records"].append(record)
-    resolved = repo_path(root, record["path"])
-    if resolved is not None:
-        add_path(plan, resolved, "run_content")
-        plan["direct_delete_paths"].append(record["path"])
+    if record["id"] not in plan["handoff_object_ids"]:
+        plan["handoff_object_ids"].append(record["id"])
+        plan["handoff_records"].append(record)
+
+    object_path = root / record["object_path"]
+    add_path(plan, object_path, "handoff_objects")
+
+
+def add_indexed_memory(plan: dict[str, Any], record: dict[str, Any]) -> None:
+    root = Path(plan["repo_root"])
+    if record["id"] not in plan["memory_object_ids"]:
+        plan["memory_object_ids"].append(record["id"])
+        plan["memory_records"].append(record)
+
+    object_path = root / record["object_path"]
+    add_path(plan, object_path, "memory_objects")
 
 
 def delete_relative_path(root: Path, relative_path: str) -> None:
@@ -719,11 +757,12 @@ def detach_artifact_from_task(
 
 def ensure_required_skeleton(root: Path, *, warnings: list[str] | None = None) -> None:
     for relative_dir in (
-        "runs/raw",
         "buddyswitch/objects/tracks",
         "buddyswitch/objects/tasks",
         "buddyswitch/objects/artifacts",
-        "buddyswitch/content/runs",
+        "buddyswitch/objects/handoffs",
+        "buddyswitch/objects/memories",
+        "buddyswitch/content/buddybox",
     ):
         directory, blocked_reason = resolve_guarded_relative_dir(root, relative_dir, allow_missing=True)
         if directory is None:
@@ -774,24 +813,23 @@ def build_cleanup_plan(
 
     artifact_objects, invalid_artifact_objects = discover_artifact_objects(repo_root)
     task_objects, invalid_task_objects = discover_task_objects(repo_root)
-    run_content, invalid_run_content = discover_run_content(repo_root)
+    handoff_objects, invalid_handoff_objects = discover_handoff_objects(repo_root)
+    memory_objects, invalid_memory_objects = discover_memory_objects(repo_root)
 
     if scope == "buddy":
-        add_dir_files(plan, f"runs/raw/{buddy}", "run_raw")
+        add_dir_files(plan, f"buddyswitch/content/buddybox/{buddy}", "buddybox_files")
         for record in artifact_objects:
             if record["producer_buddy"] == buddy:
                 add_indexed_artifact(plan, record)
         for record in task_objects:
             if record["buddy"] == buddy:
                 add_indexed_task(plan, record)
-        for record in run_content:
+        for record in handoff_objects:
+            if record["source_buddy"] == buddy:
+                add_indexed_handoff(plan, record)
+        for record in memory_objects:
             if record["buddy"] == buddy:
-                add_run_content(plan, record)
-        for item in invalid_run_content:
-            add_warning(
-                plan,
-                f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
-            )
+                add_indexed_memory(plan, record)
         for item in invalid_artifact_objects:
             add_warning(
                 plan,
@@ -802,13 +840,24 @@ def build_cleanup_plan(
                 plan,
                 f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
             )
+        for item in invalid_handoff_objects:
+            add_warning(
+                plan,
+                f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
+            )
+        for item in invalid_memory_objects:
+            add_warning(
+                plan,
+                f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
+            )
 
     elif scope == "all-data":
-        add_dir_files(plan, "runs/raw", "run_raw")
         add_dir_files(plan, "buddyswitch/objects/tracks", "track_objects")
         add_dir_files(plan, "buddyswitch/objects/tasks", "task_objects")
         add_dir_files(plan, "buddyswitch/objects/artifacts", "artifact_objects")
-        add_dir_files(plan, "buddyswitch/content/runs", "run_content")
+        add_dir_files(plan, "buddyswitch/objects/handoffs", "handoff_objects")
+        add_dir_files(plan, "buddyswitch/objects/memories", "memory_objects")
+        add_dir_files(plan, "buddyswitch/content/buddybox", "buddybox_files")
         for record in artifact_objects:
             if record["id"] not in plan["artifact_object_ids"]:
                 plan["artifact_object_ids"].append(record["id"])
@@ -817,19 +866,22 @@ def build_cleanup_plan(
             if record["id"] not in plan["task_object_ids"]:
                 plan["task_object_ids"].append(record["id"])
                 plan["task_records"].append(record)
-        for record in run_content:
-            if record["run_id"] not in plan["run_ids"]:
-                plan["run_ids"].append(record["run_id"])
-                plan["run_records"].append(record)
-        for item in invalid_run_content:
-            if item["run_id"] not in plan["run_ids"]:
-                plan["run_ids"].append(item["run_id"])
+        for record in handoff_objects:
+            if record["id"] not in plan["handoff_object_ids"]:
+                plan["handoff_object_ids"].append(record["id"])
+                plan["handoff_records"].append(record)
+        for record in memory_objects:
+            if record["id"] not in plan["memory_object_ids"]:
+                plan["memory_object_ids"].append(record["id"])
+                plan["memory_records"].append(record)
         for item in invalid_artifact_objects:
             add_warning(plan, f"All-data cleanup will delete malformed artifact object: {item['path']} ({item['reason']}).")
         for item in invalid_task_objects:
             add_warning(plan, f"All-data cleanup will delete malformed task object: {item['path']} ({item['reason']}).")
-        for item in invalid_run_content:
-            add_warning(plan, f"All-data cleanup will delete malformed run content: {item['path']} ({item['reason']}).")
+        for item in invalid_handoff_objects:
+            add_warning(plan, f"All-data cleanup will delete malformed handoff object: {item['path']} ({item['reason']}).")
+        for item in invalid_memory_objects:
+            add_warning(plan, f"All-data cleanup will delete malformed memory object: {item['path']} ({item['reason']}).")
     else:
         raise ValueError(f"Unsupported cleanup scope: {scope}")
 
@@ -840,8 +892,8 @@ def build_cleanup_plan(
                     plan,
                     shared_root=shared_root,
                     workspace_dir=workspace,
-                    relative_dir=f"runs/raw/{buddy}",
-                    category="run_raw",
+                    relative_dir=f"buddyswitch/content/buddybox/{buddy}",
+                    category="buddybox_files",
                 )
         elif scope == "all-data":
             for workspace in discover_instance_workspaces(plan, shared_root=shared_root, buddy_filter=None):
@@ -849,14 +901,15 @@ def build_cleanup_plan(
                     plan,
                     shared_root=shared_root,
                     workspace_dir=workspace,
-                    relative_dir="runs/raw",
-                    category="run_raw",
+                    relative_dir="buddyswitch/content/buddybox",
+                    category="buddybox_files",
                 )
 
     plan["delete_paths"].sort()
     plan["artifact_object_ids"].sort()
     plan["task_object_ids"].sort()
-    plan["run_ids"].sort()
+    plan["handoff_object_ids"].sort()
+    plan["memory_object_ids"].sort()
     plan["direct_delete_paths"] = sorted(set(plan["direct_delete_paths"]))
     plan["external_delete_paths"] = {
         key: plan["external_delete_paths"][key] for key in sorted(plan["external_delete_paths"])
@@ -916,7 +969,8 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "deleted_count": len(deleted_paths),
         "artifact_object_ids": plan["artifact_object_ids"],
         "task_object_ids": plan["task_object_ids"],
-        "run_ids": plan["run_ids"],
+        "handoff_object_ids": plan["handoff_object_ids"],
+        "memory_object_ids": plan["memory_object_ids"],
         "warnings": plan["warnings"],
     }
 

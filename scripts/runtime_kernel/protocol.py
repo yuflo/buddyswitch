@@ -36,8 +36,8 @@ def make_request(
         "params": params,
         "deadline_ms": deadline_ms,
     }
-    if idempotency_key is not None:
-        request["idempotency_key"] = idempotency_key
+    if isinstance(idempotency_key, str) and idempotency_key.strip():
+        request["idempotency_key"] = idempotency_key.strip()
     return request
 
 
@@ -141,15 +141,6 @@ def validate_request(request: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(deadline_ms, int) or deadline_ms <= 0:
         _raise_protocol("deadline_ms must be a positive integer", request_id=request_id)
 
-    if method.strip() == "persist":
-        idempotency_key = request.get("idempotency_key")
-        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
-            raise BrokerProtocolError(
-                "E_RUNTIME_IDEMPOTENCY_REQUIRED",
-                "idempotency_key is required for persist requests",
-                request_id=request_id,
-            )
-
     return request
 
 
@@ -188,17 +179,17 @@ def error_response(
     if retriable is None:
         retriable = False
 
-    error: dict[str, Any] = {
+    error_payload: dict[str, Any] = {
         "code": code,
         "message": message,
         "retriable": retriable,
     }
     for key, value in extra.items():
         if value is not None:
-            error[key] = value
+            error_payload[key] = value
     return {
         "protocol": PROTOCOL,
         "request_id": request_id,
         "ok": False,
-        "error": error,
+        "error": error_payload,
     }

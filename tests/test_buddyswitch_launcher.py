@@ -302,7 +302,7 @@ prepare_probe = None
 prepare_text = os.environ.get("BUDDYSWITCH_TEST_PREPARE_TEXT")
 if prepare_text:
     prepare_result = subprocess.run(
-        ["python3", "scripts/turn_runtime.py", "prepare", prepare_text],
+        ["python3", "scripts/turn_runtime.py", "status"],
         cwd=os.getcwd(),
         text=True,
         capture_output=True,
@@ -1095,11 +1095,10 @@ exec "$real_git" "$@"
             for token in (
                 "## Runtime Boundary",
                 "project.access=read-only",
-                "Raw state remains broker-only",
-                "python3 scripts/turn_runtime.py prepare",
-                "python3 scripts/turn_runtime.py persist",
-                "## Receipt",
-                "## Summary",
+                "AGENTS.md is guidance only and not the permission source.",
+                "python3 scripts/env/client.py context summarize",
+                "Do not edit `buddyswitch/objects/**`",
+                "## Output Rule",
             ):
                 self.assertIn(token, runtime_prompt)
             runtime_skills = workspace_dir / ".agents" / "skills"
@@ -1283,12 +1282,11 @@ exec "$real_git" "$@"
             for token in (
                 "## Runtime Boundary",
                 "project.access=read-only",
-                "hand off to Dev",
+                "next handoff target",
                 "env_tools.search",
                 "Native Codex `web_search` is unavailable",
                 "scripts/env/client.py search status",
-                "## Receipt",
-                "## Summary",
+                "## Output Rule",
             ):
                 self.assertIn(token, prompt_text)
             runtime_skills = workspace_dir / ".agents" / "skills"
@@ -1552,13 +1550,11 @@ exec "$real_git" "$@"
             self.assertTrue((workspace_dir / "AGENTS.md").read_text(encoding="utf-8").startswith("# BuddySwitch Runtime Workspace\n"))
             copied_agents = (workspace_dir / "AGENTS.md").read_text(encoding="utf-8").lower()
             for token in (
-                "context projection only",
+                "guidance only and not the permission source",
                 "project.access=read-only",
-                "env_tools.track",
-                "python3 scripts/turn_runtime.py prepare",
-                "python3 scripts/turn_runtime.py persist",
-                "## receipt",
-                "## summary",
+                "env tools (`task`, `track`",
+                "python3 scripts/env/client.py context summarize",
+                "## output rule",
             ):
                 self.assertIn(token, copied_agents)
             self.assertNotIn("state_effects.track", copied_agents)
@@ -1603,9 +1599,9 @@ exec "$real_git" "$@"
                 "scripts/env/services/tracks.py",
                 "scripts/env/services/artifacts.py",
                 "scripts/env/services/context.py",
-                "scripts/env/services/bindings.py",
                 "scripts/env/services/handoffs.py",
-                "scripts/env/services/runs.py",
+                "scripts/env/services/memories.py",
+                "scripts/env/services/buddybox.py",
                 "scripts/env/services/evidence.py",
             ):
                 with self.subTest(runtime_surface=relative):
@@ -1659,12 +1655,11 @@ exec "$real_git" "$@"
             self.assertEqual(instance_snapshot["status"], "active")
             self.assertEqual(instance_snapshot["instance_id"], payload["instance_id"])
             self.assertEqual(instance_snapshot["buddy"], "pm")
-            self.assertIsNone(instance_snapshot["current_task_id"])
-            self.assertIsNone(instance_snapshot["current_track_id"])
+            self.assertNotIn("current_task_id", instance_snapshot)
+            self.assertNotIn("current_track_id", instance_snapshot)
             self.assertEqual(instance_snapshot["workspace_dir"], str(workspace_dir))
             browser_port = instance_snapshot["browser_port"]
             self.assertIsInstance(browser_port, int)
-            self.assertTrue(instance_snapshot["created_at"])
             self.assertTrue(instance_snapshot["updated_at"])
 
             stored_instance = json.loads(instance_json_path.read_text(encoding="utf-8"))
@@ -1672,10 +1667,9 @@ exec "$real_git" "$@"
             self.assertEqual(stored_instance["instance_id"], payload["instance_id"])
             self.assertEqual(stored_instance["buddy"], "pm")
             self.assertEqual(stored_instance["workspace_dir"], str(workspace_dir))
-            self.assertIsNone(stored_instance["current_task_id"])
-            self.assertIsNone(stored_instance["current_track_id"])
+            self.assertNotIn("current_task_id", stored_instance)
+            self.assertNotIn("current_track_id", stored_instance)
             self.assertEqual(stored_instance["browser_port"], browser_port)
-            self.assertTrue(stored_instance["created_at"])
             self.assertTrue(stored_instance["updated_at"])
             self.assertFalse((shared_root / "workspace").exists(), "buddy-locked start must not use legacy shared workspace")
 
@@ -1695,7 +1689,9 @@ exec "$real_git" "$@"
                 "buddyswitch/objects/tasks": shared_root / "state" / "buddyswitch" / "objects" / "tasks",
                 "buddyswitch/objects/tracks": shared_root / "state" / "buddyswitch" / "objects" / "tracks",
                 "buddyswitch/objects/artifacts": shared_root / "state" / "buddyswitch" / "objects" / "artifacts",
-                "buddyswitch/content/runs": shared_root / "state" / "buddyswitch" / "content" / "runs",
+                "buddyswitch/objects/handoffs": shared_root / "state" / "buddyswitch" / "objects" / "handoffs",
+                "buddyswitch/objects/memories": shared_root / "state" / "buddyswitch" / "objects" / "memories",
+                "buddyswitch/content/buddybox": shared_root / "state" / "buddyswitch" / "content" / "buddybox",
             }
             for relative_path, state_path in projection_pairs.items():
                 projected_path = workspace_dir / relative_path
@@ -1706,10 +1702,8 @@ exec "$real_git" "$@"
                 live_probe.write_text('{"ok":true}\n', encoding="utf-8")
                 self.assertEqual((projected_path / live_probe.name).read_text(encoding="utf-8"), '{"ok":true}\n')
 
-            for relative_path in ("runs/raw",):
-                local_path = workspace_dir / relative_path
-                self.assertTrue(local_path.is_dir(), f"missing instance-local runtime dir: {local_path}")
-                self.assertFalse(local_path.is_symlink(), f"instance-local runtime dir must not be projected: {local_path}")
+            for retired_relative_path in ("runs/raw", "buddyswitch/content/runs"):
+                self.assertFalse((workspace_dir / retired_relative_path).exists())
 
     def test_instance_start_first_prepare_runs_through_workspace_broker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -1774,24 +1768,15 @@ exec "$real_git" "$@"
             prepare_payload = prepare_probe["json"]
             self.assertIsInstance(prepare_payload, dict, msg=prepare_probe)
             self.assertTrue(prepare_payload.get("ok"), msg=prepare_payload)
-            self.assertNotIn("protocol", prepare_payload)
-            self.assertNotIn("request_id", prepare_payload)
-            run_envelope = prepare_payload.get("run_envelope")
-            self.assertIsInstance(run_envelope, dict, msg=prepare_payload)
-            run_id = run_envelope.get("run_id")
-            self.assertIsInstance(run_id, str, msg=prepare_payload)
-            reserved_path = workspace_dir / "buddyswitch" / "content" / "runs" / "reserved" / f"{run_id}.json"
-            self.assertTrue(reserved_path.exists(), "prepare must reserve a run visible through the runtime workspace")
-            reservation = json.loads(reserved_path.read_text(encoding="utf-8"))
-            self.assertEqual(reservation["run_id"], run_id)
-            self.assertEqual(reservation["status"], "reserved")
-            self.assertEqual(reservation["instance_id"], payload["instance_id"])
-            context_save_path = prepare_payload.get("context_save_path")
-            self.assertIsInstance(context_save_path, str, msg=prepare_payload)
-            context_path = workspace_dir / context_save_path
-            self.assertTrue(context_path.exists(), "prepare must write the raw context path advertised in payload")
-            context_payload = json.loads(context_path.read_text(encoding="utf-8"))
-            self.assertEqual(context_payload["run_envelope"]["run_id"], run_id)
+            self.assertEqual(prepare_payload.get("runtime_mode"), "runless")
+            self.assertIn("env_tools", prepare_payload)
+            reserved_dir = workspace_dir / "buddyswitch" / "content" / "runs" / "reserved"
+            reserved = sorted(reserved_dir.glob("*.json")) if reserved_dir.exists() else []
+            self.assertEqual(reserved, [])
+            raw_dir = workspace_dir / "runs" / "raw"
+            if raw_dir.exists():
+                prepare_context_files = sorted(raw_dir.rglob("prepare-context-*.json"))
+                self.assertEqual(prepare_context_files, [])
 
             status_probe = payload["broker_status_probe"]
             self.assertIsInstance(status_probe, dict)
@@ -3548,9 +3533,9 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            for instance_id, buddy, task_id in (
-                ("inst-pm-a", "pm", "task-pm-a"),
-                ("inst-dev-b", "dev", "task-dev-b"),
+            for instance_id, buddy in (
+                ("inst-pm-a", "pm"),
+                ("inst-dev-b", "dev"),
             ):
                 instance_root = shared_root / "instances" / instance_id
                 instance_root.mkdir(parents=True, exist_ok=True)
@@ -3560,8 +3545,6 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
                             "instance_id": instance_id,
                             "buddy": buddy,
                             "status": "inactive",
-                            "current_task_id": task_id,
-                            "current_track_id": None,
                             "workspace_dir": str(instance_root / "workspace"),
                             "browser_port": None,
                             "created_at": "2026-04-26T00:00:00Z",
@@ -3590,7 +3573,6 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             self.assertIn("inst-pm-a", completed.stdout)
             self.assertIn("pm", completed.stdout)
-            self.assertIn("task-pm-a", completed.stdout)
             self.assertNotIn("inst-dev-b", completed.stdout)
 
     def test_instance_open_reuses_existing_instance_environment(self) -> None:
@@ -3745,19 +3727,15 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             prepare_payload = prepare_probe["json"]
             self.assertIsInstance(prepare_payload, dict, msg=prepare_probe)
             self.assertTrue(prepare_payload.get("ok"), msg=prepare_payload)
-            self.assertNotIn("protocol", prepare_payload)
-            run_id = prepare_payload["run_envelope"]["run_id"]
-            self.assertTrue(
-                (
-                    instance_root
-                    / "workspace"
-                    / "buddyswitch"
-                    / "content"
-                    / "runs"
-                    / "reserved"
-                    / f"{run_id}.json"
-                ).exists()
-            )
+            self.assertEqual(prepare_payload.get("runtime_mode"), "runless")
+            self.assertIn("env_tools", prepare_payload)
+            reserved_dir = instance_root / "workspace" / "buddyswitch" / "content" / "runs" / "reserved"
+            reserved = sorted(reserved_dir.glob("*.json")) if reserved_dir.exists() else []
+            self.assertEqual(reserved, [])
+            raw_dir = instance_root / "workspace" / "runs" / "raw"
+            if raw_dir.exists():
+                prepare_context_files = sorted(raw_dir.rglob("prepare-context-*.json"))
+                self.assertEqual(prepare_context_files, [])
 
             status_probe = payload["broker_status_probe"]
             self.assertIsInstance(status_probe, dict)

@@ -1,51 +1,41 @@
 # BuddySwitch Workspace
 
-BuddySwitch is a control layer for launcher-managed buddy instances.
-The host Codex session executes work; BuddySwitch prepares turn context, validates outputs, and persists canonical state.
+BuddySwitch is a launcher-managed control layer for buddy-locked Codex instances.
+
+The runtime model is runless:
+- runtime broker methods are `env.tool`, `ping`, `status`;
+- turns are disposable by default;
+- durable state is written explicitly via product tools.
 
 ## Quick Start
 
-Development mode (edit BuddySwitch source):
+Development mode:
 
 ```bash
 codex
 ```
 
-Product mode (run a locked buddy instance):
+Product mode:
 
 ```bash
 ./buddyswitch-codex instance start --buddy pm
 ```
 
-Then submit an ordinary request, for example:
+## Product Runtime Loop (Runless)
 
-```text
-Draft the MVP PRD for onboarding rewrite
-```
+1. Call context discovery (`context.get` or `context.summarize`).
+2. Pick explicit target ids (`track_id`, `task_id`, `artifact_id`, `memory_id`, buddybox path).
+3. Write durable outputs with env tools:
+   - `task.*`, `track.*`, `artifact.*`, `handoff.*`, `memory.*`, `buddybox.*`
+4. Summarize what was written.
 
-## Product Runtime Loop
+No `prepare/persist` lifecycle is required.
 
-1. `prepare-turn-context`
-2. Codex CLI discovers native runtime skills from `.agents/skills` and runs needed skills inside the locked buddy session
-3. Integrate outputs into one buddy run commit payload
-4. `persist-buddy-run` with `--context` and `--result`
-
-Runtime env tool operations use `python3 scripts/env/client.py ...` through broker method `env.tool`.
-
-Runtime CLI:
+Runtime env tool operations use:
 
 ```bash
-python3 scripts/turn_runtime.py prepare "Draft onboarding PRD"
+python3 scripts/env/client.py <resource> <operation> ...
 ```
-
-```bash
-python3 scripts/turn_runtime.py persist \
-  --context /tmp/prepare-context.json \
-  --result /tmp/result.json
-```
-
-Successful `persist` does not reserve a follow-up run.
-If another turn is needed, derive next `request_text` from `receipt.next_state`, then run `prepare` again.
 
 ## Workspace Layout
 
@@ -53,7 +43,7 @@ Launcher product mode:
 
 - `${BUDDYSWITCH_SHARED_ROOT}` shared launcher root
 - `${BUDDYSWITCH_SHARED_ROOT}/state` canonical BuddySwitch state
-- `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace` runtime worktree per locked buddy
+- `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace` runtime workspace per buddy
 - `${BUDDYSWITCH_SHARED_ROOT}/project/workspace` shared product source
 - `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace/.agents/skills` instance-only runtime skills
 
@@ -62,8 +52,9 @@ Canonical state paths:
 - `buddyswitch/objects/tracks/*.json`
 - `buddyswitch/objects/tasks/*.json`
 - `buddyswitch/objects/artifacts/*.json`
-- `buddyswitch/content/runs/*.json`
-- `runs/raw/` instance-local scratch
+- `buddyswitch/objects/handoffs/*.json`
+- `buddyswitch/objects/memories/*.json`
+- `buddyswitch/content/buddybox/<buddy>/**`
 
 ## Context Panel
 
@@ -87,6 +78,6 @@ Open `http://127.0.0.1:8765/` and click `Refresh workspace`.
 
 - `framework/docs/architecture-overview.md`
 - `framework/docs/turn-runtime-spec.md`
-- `framework/docs/skill-architecture-best-practices.md`
+- `framework/docs/skill-runtime-shared-rules.md`
 - `framework/docs/track-registry.md`
 - `framework/docs/interface-spec.md`

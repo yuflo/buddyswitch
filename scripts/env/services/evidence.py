@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
-"""Browser evidence issuance service for broker-routed env.tool operations."""
+"""Target-scoped evidence services for runless runtime."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-import json
+import uuid
 from pathlib import Path
 from typing import Any, TypedDict
-from urllib.error import URLError
-from urllib.request import Request, urlopen
-import uuid
 
-import env_profiles
 from env.tools import responses as tool_responses
+import env_store
 
 
 class EvidenceServiceContext(TypedDict):
@@ -24,379 +20,208 @@ class EvidenceServiceContext(TypedDict):
     manifest_path: Path | None
 
 
-def _runtime() -> Any:
-    import turn_runtime
-
-    return turn_runtime
+_ISSUE_FIELDS = {"target_type", "target_id", "mode"}
+_APPROVE_FIELDS = {"target_type", "target_id", "reason"}
 
 
-def _allowed(*actions: str) -> list[str]:
-    return list(actions)
-
-
-def _payload_error(*, action: str, context: EvidenceServiceContext, message: str) -> dict[str, Any]:
+def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
     return tool_responses.rejection(
         tool="evidence",
         action=action,
-        active_buddy=context["active_buddy"],
+        active_buddy=active_buddy,
         code="E_EVIDENCE_PAYLOAD",
         message=message,
         permission_boundary="request-payload",
         human_summary="Evidence payload is invalid.",
         why_blocked=message,
-        impact="No broker evidence token was issued and no runtime object state changed.",
+        impact="No evidence token state changed.",
         state_changed=False,
         retryable=True,
-        retry_guidance="Fix evidence payload fields and retry.",
+        retry_guidance="Fix evidence payload and retry.",
         allowed_next_actions=[
-            'Send env.tool payload as {"tool":"evidence","action":"<action>","args":{...}}.',
-            "Use prepare.runtime_context.env_tools.evidence.payload_fields to shape args.",
-        ],
-        allowed_next_action_options=[
-            tool_responses.next_action_option(
-                tool="evidence",
-                action="issue_browser",
-                option_id="issue_browser_token",
-                reason="Issue browser evidence token for the prepared run.",
-            ),
-            tool_responses.next_action_option(
-                tool="evidence",
-                action="approve_downgrade",
-                option_id="issue_approved_downgrade",
-                reason="Issue approved downgrade token only when fallback is explicitly approved.",
-            ),
+            "Use context.summarize to inspect target ids.",
+            "Retry with explicit target_type and target_id.",
         ],
     )
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _context_matches_active_instance(*, prepared_context: dict[str, Any], context: EvidenceServiceContext) -> None:
-    rt = _runtime()
-    instance_payload = context["instance_payload"]
-    active_buddy = context["active_buddy"]
-    instance_id = context["instance_id"]
-
-    if prepared_context.get("ok") is not True:
-        rt._raise_runtime_feedback(
-            "E_RUNTIME_BROKER",
-            "context must be successful before issuing browser evidence",
-            permission_boundary="prepare.context_revision",
-            allowed_next_actions=rt._rerun_prepare_actions(),
-        )
-    if prepared_context.get("instance_id") != instance_id:
-        rt._raise_runtime_feedback(
-            "E_RUNTIME_BROKER",
-            "context instance_id mismatch for evidence issuance",
-            permission_boundary="active-instance",
-            allowed_next_actions=rt._rerun_prepare_actions(),
-        )
-    if prepared_context.get("active_buddy") != active_buddy:
-        rt._raise_runtime_feedback(
-            "E_RUNTIME_BROKER",
-            "context active_buddy mismatch for evidence issuance",
-            permission_boundary="active-buddy",
-            allowed_next_actions=rt._rerun_prepare_actions(),
-        )
-
-    validated = rt._validate_prepared_run_context(prepared_context)
-    task_id = validated.get("task_id")
-    context_track_id = validated.get("track_id")
-
-    bound_task = instance_payload.get("current_task_id")
-    if isinstance(bound_task, str) and bound_task.strip() and bound_task != task_id:
-        rt._raise_runtime_feedback(
-            "E_RUNTIME_BROKER",
-            "context task_id does not match active instance binding",
-            permission_boundary="active-instance",
-            allowed_next_actions=rt._rerun_prepare_actions(),
-        )
-    bound_track = instance_payload.get("current_track_id")
-    if isinstance(bound_track, str) and bound_track.strip():
-        if not isinstance(context_track_id, str) or context_track_id != bound_track:
-            rt._raise_runtime_feedback(
-                "E_RUNTIME_BROKER",
-                "context track_id does not match active instance binding",
-                permission_boundary="active-instance",
-                allowed_next_actions=rt._rerun_prepare_actions(),
-            )
-
-    rt._validate_prepared_run_context(prepared_context)
-
-
-def _require_market_evidence_profile(*, context: EvidenceServiceContext) -> None:
-    rt = _runtime()
-    manifest_path = context["manifest_path"] or rt.DEFAULT_MANIFEST
-    profile = env_profiles.require_env_profile(
-        context["active_buddy"],
-        manifest_path=manifest_path,
-        repo_root=rt.REPO_ROOT,
-    )
-    tool_capability = profile.get("tool_capability")
-    if not isinstance(tool_capability, dict):
-        raise ValueError("env profile tool_capability must be an object")
-    if tool_capability.get("browser_cockpit") != "required":
-        raise ValueError("active profile does not require browser cockpit evidence")
-    if tool_capability.get("market_research_evidence") != "required":
-        raise ValueError("active profile does not require market research evidence")
-
-
-def _instance_browser_url(instance_payload: dict[str, Any]) -> str:
-    port = instance_payload.get("browser_port")
-    if not isinstance(port, int):
-        raise ValueError("instance browser_port is missing")
-    if port < 1 or port > 65535:
-        raise ValueError(f"invalid instance browser_port: {port}")
-    return f"http://127.0.0.1:{port}"
-
-
-def _require_browser_endpoint(url: str) -> None:
-    probe_url = f"{url}/json/version"
-    try:
-        with urlopen(probe_url, timeout=3.0) as response:
-            if response.status < 200 or response.status >= 300:
-                raise ValueError(f"browser endpoint probe failed: HTTP {response.status}")
-    except (URLError, OSError, ValueError) as exc:
-        raise ValueError(f"browser cockpit endpoint is unreachable: {probe_url}: {exc}") from exc
-
-
-def _browser_target_is_usable_page(target: Any) -> bool:
-    if not isinstance(target, dict):
-        return False
-    if target.get("type") != "page":
-        return False
-    url = target.get("url")
-    if not isinstance(url, str):
-        return False
-    normalized = url.strip().lower()
-    if not normalized:
-        return False
-    if normalized == "about:blank":
-        return True
-    if normalized.startswith("chrome://"):
-        return False
-    if normalized.startswith("chrome-untrusted://"):
-        return False
-    if normalized.startswith("devtools://"):
-        return False
-    return True
-
-
-def _browser_has_usable_page(url: str) -> bool:
-    targets_url = f"{url}/json/list"
-    try:
-        with urlopen(targets_url, timeout=3.0) as response:
-            if response.status < 200 or response.status >= 300:
-                return False
-            payload = json.loads(response.read().decode("utf-8"))
-    except (URLError, OSError, ValueError, json.JSONDecodeError):
-        return False
-    if not isinstance(payload, list):
-        return False
-    return any(_browser_target_is_usable_page(target) for target in payload)
-
-
-def _browser_create_blank_page(url: str) -> bool:
-    create_url = f"{url}/json/new?about:blank"
-    request = Request(create_url, method="PUT")
-    try:
-        with urlopen(request, timeout=3.0) as response:
-            return 200 <= response.status < 300
-    except (URLError, OSError, ValueError):
-        return False
-
-
-def _require_browser_ready_page(url: str, *, instance_id: str) -> None:
-    rt = _runtime()
-    _require_browser_endpoint(url)
-    if _browser_has_usable_page(url):
-        return
-    _browser_create_blank_page(url)
-    if _browser_has_usable_page(url):
-        return
-    rt._raise_runtime_feedback(
-        "E_RUNTIME_BROKER",
-        "browser cockpit ready page is required before issuing browser evidence",
-        permission_boundary="browser-cockpit-ready",
-        stop_condition="browser cockpit is not ready for MCP page operations",
-        allowed_next_actions=_allowed(
-            "Restart or open the launcher-managed instance to rebuild browser cockpit readiness.",
-            "Rerun browser ensure for the active launcher-managed instance.",
-        ),
-        command_hint=f"./buddyswitch-codex env browser ensure --instance {instance_id}",
-    )
-
-
-def evidence_root(instance_json: Path) -> Path:
-    return instance_json.parent / "runtime" / "evidence-tokens"
-
-
-def _write_evidence_token(
-    *,
-    context: EvidenceServiceContext,
-    prepared_context: dict[str, Any],
-    mode: str,
-    reason: str | None,
-    browser_url: str | None,
-) -> dict[str, Any]:
-    run_envelope = prepared_context["run_envelope"]
-    run_id = str(run_envelope["run_id"]).strip()
-    context_revision = str(prepared_context["context_revision"]).strip()
-    buddy_id = str(prepared_context["active_buddy"]).strip()
-    instance_id = str(prepared_context["instance_id"]).strip()
-    raw_task_id = prepared_context.get("current_task_id")
-    task_id = raw_task_id.strip() if isinstance(raw_task_id, str) and raw_task_id.strip() else None
-    track_id = prepared_context.get("current_track_id")
-    token_prefix = "evidence" if mode == "browser-cockpit-preflight" else "downgrade"
-    token = f"{token_prefix}-{run_id}-{uuid.uuid4().hex[:8]}"
-
-    root = evidence_root(context["instance_json"]) / run_id
-    root.mkdir(parents=True, exist_ok=True)
-    token_path = root / f"{token}.json"
-    payload: dict[str, Any] = {
-        "token": token,
-        "mode": mode,
-        "instance_id": instance_id,
-        "buddy_id": buddy_id,
-        "task_id": task_id,
-        "track_id": track_id if isinstance(track_id, str) and track_id else None,
-        "context_revision": context_revision,
-        "run_id": run_id,
-        "issued_at": _now_iso(),
-    }
-    if browser_url is not None:
-        payload["browser_url"] = browser_url
-    if reason is not None:
-        payload["reason"] = reason
-    token_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-
-    token_scope = {
-        "instance_id": instance_id,
-        "buddy_id": buddy_id,
-        "task_id": task_id,
-        "track_id": track_id if isinstance(track_id, str) and track_id else None,
-        "context_revision": context_revision,
-        "run_id": run_id,
-    }
-    if mode == "browser-cockpit-preflight":
-        return {
-            "ok": True,
-            "tool_evidence": {"browser_cockpit_token": token},
-            "feedback": {
-                "mode": mode,
-                "browser_url": browser_url,
-                "persist_field": "tool_evidence.browser_cockpit_token",
-                "token_scope": token_scope,
-                "next_action": "Include tool_evidence.browser_cockpit_token in the next artifact-producing persist.",
-            },
-            "persist_payload_hint": {
-                "tool_evidence_field": "tool_evidence.browser_cockpit_token",
-                "tool_evidence": {
-                    "accepted_fields": ["browser_cockpit_token", "approved_downgrade_token"],
-                },
-            },
-        }
-    return {
-        "ok": True,
-        "tool_evidence": {"approved_downgrade_token": token},
-        "feedback": {
-            "mode": mode,
-            "reason": reason,
-            "persist_field": "tool_evidence.approved_downgrade_token",
-            "token_scope": token_scope,
-            "next_action": "Include tool_evidence.approved_downgrade_token in the next artifact-producing persist.",
-        },
-        "persist_payload_hint": {
-            "tool_evidence_field": "tool_evidence.approved_downgrade_token",
-            "tool_evidence": {
-                "accepted_fields": ["browser_cockpit_token", "approved_downgrade_token"],
-            },
-        },
-    }
-
-
-def _issue(
-    *,
-    action: str,
-    args: dict[str, Any],
-    context: EvidenceServiceContext,
-    mode: str,
-    reason: str | None,
-) -> dict[str, Any]:
-    prepared_context = args.get("context")
-    if not isinstance(prepared_context, dict):
-        return _payload_error(action=action, context=context, message="context is required")
-
-    _require_market_evidence_profile(context=context)
-    _context_matches_active_instance(prepared_context=prepared_context, context=context)
-
-    browser_url: str | None = None
-    if mode == "browser-cockpit-preflight":
-        browser_url = _instance_browser_url(context["instance_payload"])
-        _require_browser_ready_page(browser_url, instance_id=context["instance_id"])
-
-    payload = _write_evidence_token(
-        context=context,
-        prepared_context=prepared_context,
-        mode=mode,
-        reason=reason,
-        browser_url=browser_url,
-    )
-    semantic_extra = dict(payload)
-    semantic_extra.pop("ok", None)
-    evidence_token = payload.get("tool_evidence", {}) if isinstance(payload.get("tool_evidence"), dict) else {}
-    token_value = evidence_token.get("browser_cockpit_token") or evidence_token.get("approved_downgrade_token")
-    mode_label = "browser evidence" if mode == "browser-cockpit-preflight" else "approved downgrade evidence"
-    state_changes = [{"object_type": "evidence_token", "object_id": token_value, "change": "issued"}] if isinstance(token_value, str) else []
-    return tool_responses.success(
+def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str, code: str = "E_EVIDENCE_SCOPE") -> dict[str, Any]:
+    return tool_responses.rejection(
         tool="evidence",
         action=action,
-        active_buddy=context["active_buddy"],
-        effect_summary=f"Issued {mode_label} token for the prepared run.",
-        state_changed=True,
-        durability="broker_token",
-        state_changes=state_changes,
-        created_ids=[token_value] if isinstance(token_value, str) else [],
+        active_buddy=active_buddy,
+        code=code,
+        message=message,
+        permission_boundary=boundary,
+        human_summary="Evidence scope check failed.",
+        why_blocked=message,
+        impact="No evidence token state changed.",
+        state_changed=False,
+        retryable=False,
+        retry_guidance="Use readable owner-scoped artifact or memory targets.",
         allowed_next_actions=[
-            "Include the issued evidence token in the next artifact-producing persist payload.",
+            "Use artifact.list/memory.list to inspect readable targets.",
+            "Retry with a target owned by active buddy.",
         ],
-        allowed_next_action_options=[
-            tool_responses.next_action_option(
-                tool="run",
-                action="commit",
-                option_id="commit_with_issued_tool_evidence",
-                reason="Commit the prepared run with the issued tool_evidence token.",
-            ),
-        ],
-        extra=semantic_extra,
     )
+
+
+def _allow(action: str) -> set[str]:
+    return _ISSUE_FIELDS if action == "evidence.issue_browser" else _APPROVE_FIELDS
+
+
+def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
+    unknown = sorted(key for key in args if key not in _allow(action))
+    if unknown:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")
+    return None
+
+
+def _resolve_target(*, target_type: str, target_id: str, active_buddy: str, action: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if target_type == "artifact":
+        artifact = env_store.get_artifact(target_id)
+        if artifact is None:
+            return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {target_id}")
+        if artifact.get("buddy") != active_buddy:
+            return None, _reject_scope(
+                action=action,
+                active_buddy=active_buddy,
+                boundary="artifact.buddy_scope",
+                code="E_EVIDENCE_TARGET_SCOPE",
+                message=f"artifact '{target_id}' is owned by buddy '{artifact.get('buddy')}'",
+            )
+        return artifact, None
+    if target_type == "memory":
+        memory = env_store.get_memory(target_id)
+        if memory is None:
+            return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"memory not found: {target_id}")
+        if memory.get("buddy") != active_buddy:
+            return None, _reject_scope(
+                action=action,
+                active_buddy=active_buddy,
+                boundary="memory.buddy_scope",
+                code="E_EVIDENCE_TARGET_SCOPE",
+                message=f"memory '{target_id}' is owned by buddy '{memory.get('buddy')}'",
+            )
+        return memory, None
+    return None, _reject_scope(
+        action=action,
+        active_buddy=active_buddy,
+        boundary="evidence.target_type",
+        code="E_EVIDENCE_TARGET_TYPE",
+        message="target_type must be one of: artifact, memory",
+    )
+
+
+def _issue_token(*, target_type: str, target_id: str, mode: str | None, kind: str, active_buddy: str) -> dict[str, Any]:
+    return {
+        "token_id": f"evidence-{uuid.uuid4().hex[:16]}",
+        "target_type": target_type,
+        "target_id": target_id,
+        "active_buddy": active_buddy,
+        "mode": mode or "default",
+        "evidence_kind": kind,
+        "issued_at": env_store.now_iso(),
+    }
 
 
 def issue_browser_for_active_instance(*, args: dict[str, Any], context: EvidenceServiceContext) -> dict[str, Any]:
-    return _issue(
-        action="evidence.issue_browser",
-        args=args,
-        context=context,
-        mode="browser-cockpit-preflight",
-        reason=None,
+    action = "evidence.issue_browser"
+    active_buddy = context["active_buddy"]
+    payload_error = _require_allowed_fields(action, args, active_buddy)
+    if payload_error is not None:
+        return payload_error
+
+    target_type = args.get("target_type")
+    target_id = args.get("target_id")
+    if not isinstance(target_type, str) or not target_type.strip():
+        return _reject_payload(action=action, active_buddy=active_buddy, message="target_type is required")
+    if not isinstance(target_id, str) or not target_id.strip():
+        return _reject_payload(action=action, active_buddy=active_buddy, message="target_id is required")
+
+    _, scope_error = _resolve_target(
+        target_type=target_type.strip(),
+        target_id=target_id.strip(),
+        active_buddy=active_buddy,
+        action=action,
+    )
+    if scope_error is not None:
+        return scope_error
+
+    mode = args.get("mode")
+    if mode is not None and (not isinstance(mode, str) or not mode.strip()):
+        return _reject_payload(action=action, active_buddy=active_buddy, message="mode must be a non-empty string when provided")
+
+    token = _issue_token(
+        target_type=target_type.strip(),
+        target_id=target_id.strip(),
+        mode=mode.strip() if isinstance(mode, str) and mode.strip() else None,
+        kind="browser",
+        active_buddy=active_buddy,
+    )
+
+    return tool_responses.success(
+        tool="evidence",
+        action=action,
+        active_buddy=active_buddy,
+        effect_summary=f"Issued browser evidence token for {target_type.strip()} '{target_id.strip()}'.",
+        state_changed=True,
+        durability="transient token",
+        created_ids=[token["token_id"]],
+        allowed_next_actions=[
+            "Attach evidence token metadata via artifact/memory source_refs when persisting outputs.",
+            "Issue another token for a different target when needed.",
+        ],
+        extra={"tool_evidence": token},
     )
 
 
 def approve_downgrade_for_active_instance(*, args: dict[str, Any], context: EvidenceServiceContext) -> dict[str, Any]:
+    action = "evidence.approve_downgrade"
+    active_buddy = context["active_buddy"]
+    payload_error = _require_allowed_fields(action, args, active_buddy)
+    if payload_error is not None:
+        return payload_error
+
+    target_type = args.get("target_type")
+    target_id = args.get("target_id")
     reason = args.get("reason")
-    normalized_reason = reason.strip() if isinstance(reason, str) else None
-    if not isinstance(normalized_reason, str) or not normalized_reason:
-        return _payload_error(
-            action="evidence.approve_downgrade",
-            context=context,
-            message="approved downgrade requires a non-empty reason",
-        )
-    return _issue(
-        action="evidence.approve_downgrade",
-        args=args,
-        context=context,
-        mode="approved-downgrade",
-        reason=normalized_reason,
+    if not isinstance(target_type, str) or not target_type.strip():
+        return _reject_payload(action=action, active_buddy=active_buddy, message="target_type is required")
+    if not isinstance(target_id, str) or not target_id.strip():
+        return _reject_payload(action=action, active_buddy=active_buddy, message="target_id is required")
+    if not isinstance(reason, str) or not reason.strip():
+        return _reject_payload(action=action, active_buddy=active_buddy, message="reason is required")
+
+    _, scope_error = _resolve_target(
+        target_type=target_type.strip(),
+        target_id=target_id.strip(),
+        active_buddy=active_buddy,
+        action=action,
+    )
+    if scope_error is not None:
+        return scope_error
+
+    token = _issue_token(
+        target_type=target_type.strip(),
+        target_id=target_id.strip(),
+        mode="downgrade-approved",
+        kind="downgrade",
+        active_buddy=active_buddy,
+    )
+    token["reason"] = reason.strip()
+
+    return tool_responses.success(
+        tool="evidence",
+        action=action,
+        active_buddy=active_buddy,
+        effect_summary=f"Recorded downgrade approval for {target_type.strip()} '{target_id.strip()}'.",
+        state_changed=True,
+        durability="transient token",
+        created_ids=[token["token_id"]],
+        allowed_next_actions=[
+            "Persist downgrade reason in artifact/memory source_refs when writing outputs.",
+            "Use evidence.issue_browser when browser evidence can be produced later.",
+        ],
+        extra={"tool_evidence": token},
     )

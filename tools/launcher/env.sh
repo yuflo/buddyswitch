@@ -269,11 +269,8 @@ payload = {
     "instance_id": instance_id,
     "buddy": buddy,
     "status": status,
-    "current_task_id": None,
-    "current_track_id": None,
     "workspace_dir": workspace_dir,
     "browser_port": None,
-    "created_at": now,
     "updated_at": now,
 }
 temp_path = instance_json.with_suffix(".tmp")

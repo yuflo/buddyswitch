@@ -23,6 +23,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 _SAFE_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+_SAFE_PERMISSION_PART_RE = re.compile(r"^[a-z][a-z0-9-_]*$")
 ADVISORY_RUNTIME_METADATA_POLICY = "advisory"
 DEBUG_API_PERMISSION_SCOPE = "manual_debug_apis"
 BROWSER_COCKPIT_HOST_EXECUTION = {
@@ -229,10 +230,23 @@ def _validate_permission(permission: str, label: str) -> None:
     if "." not in permission:
         raise ManifestError(f"{label} permission '{permission}' must use '<object>.<action>' format")
     obj, action = permission.split(".", 1)
-    if obj not in {"track", "artifact", "task"}:
+    supported_objects = {
+        "track",
+        "task",
+        "artifact",
+        "handoff",
+        "memory",
+        "buddybox",
+        "context",
+        "evidence",
+        "search",
+    }
+    if obj not in supported_objects:
         raise ManifestError(f"{label} permission '{permission}' has unsupported object '{obj}'")
     if not action:
         raise ManifestError(f"{label} permission '{permission}' has empty action")
+    if not _SAFE_PERMISSION_PART_RE.match(action):
+        raise ManifestError(f"{label} permission '{permission}' has invalid action '{action}'")
 
 
 def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
@@ -347,8 +361,8 @@ def buddy_authority_profile(manifest: dict[str, Any], buddy_id: str) -> dict[str
         "permission_scope": DEBUG_API_PERMISSION_SCOPE,
         "runtime_note": (
             "buddy->skills controls which runtime packages are materialized under .agents/skills, "
-            "and persist commits one buddy run in the active buddy context (not a single native skill id). "
-            "object permission enforcement remains in manual/debug mutation APIs."
+            "while product writes are explicit env.tool operations over track/task/artifact/handoff/memory/buddybox "
+            "objects. object permission enforcement remains in manual/debug mutation APIs."
         ),
     }
 

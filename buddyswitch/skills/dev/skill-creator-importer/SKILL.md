@@ -19,9 +19,9 @@ description: Use when importing an external Codex-native skill package into Budd
 - The request asks to build a marketplace, sync daemon, package registry, or runtime adapter.
 
 ## Outputs
-- A contribution to the current compact buddy-run commit.
-- Durable skill import report content is written before persist through `artifact-tool` `artifact.create_revision`.
-- The final run commit references already-written artifacts with optional `artifact_ids` metadata.
+- Durable outputs are written explicitly through env tools.
+- Durable skill import report content is written through `artifact-tool` `artifact.create_revision`.
+- Reference written artifacts by explicit ids when relevant.
 
 ## Steps
 1. Confirm the target buddy and source package path.
@@ -33,18 +33,18 @@ description: Use when importing an external Codex-native skill package into Budd
 ## Shared Runtime Rules
 - See `framework/docs/skill-runtime-shared-rules.md`.
 - This native skill contributes content to the current buddy run.
-- Do not call persist from the skill perspective.
-- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.
+- Do not rely on deprecated prepare/persist flows.
+- The locked buddy session returns after explicit durable writes are complete.
 - Do not introduce transcript parsing, runtime adapter layers, or legacy markdown output paths.
 
 ## BuddySwitch Commit Output
 
-Contribute to one buddy-run commit. Do not call persist from inside the skill.
+Write durable outputs explicitly via env tools. Do not rely on deprecated prepare/persist flows.
 
 Required top-level field:
 - `execution_summary`
 
-Use `artifact-tool` before persist when this skill produces a durable artifact:
+Use `artifact-tool` when this skill produces a durable artifact:
 - `kind`: `skill-import-report`
 - `title`: concise artifact title
 - `summary`: short downstream selection summary

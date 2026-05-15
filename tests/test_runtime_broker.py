@@ -115,8 +115,9 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             context = request_params.get("context")
             result = request_params.get("result")
             if isinstance(context, dict) and isinstance(result, dict):
-                request["idempotency_key"] = runtime_client.make_persist_idempotency_key(context, result)
-                request["result_hash"] = runtime_client.canonical_result_hash(result)
+                result_hash = runtime_client.canonical_result_hash(result)
+                request["idempotency_key"] = f"persist:{result_hash}"
+                request["result_hash"] = result_hash
         envelope = runtime_broker.dispatch_runtime_request(
             request=request,
             instance_json_path=instance_json,
@@ -148,37 +149,36 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
-    def test_prepare_and_persist_succeed_with_matching_identity(self) -> None:
+    def test_env_tool_requests_succeed_with_matching_identity(self) -> None:
         instance_json = self._instance_json()
-        before_prepare_instance = json.loads(instance_json.read_text(encoding="utf-8"))
-        prepare = self._dispatch(
-            method="prepare",
-            params={"text": PM_REQUEST},
+        before_instance = json.loads(instance_json.read_text(encoding="utf-8"))
+
+        summarized = self._dispatch(
+            method="env.tool",
+            params={"tool": "context", "action": "summarize", "args": {}},
             instance_json=instance_json,
         )
-        self.assertTrue(prepare["ok"], msg=prepare)
-        context = prepare
-        self.assertEqual(context["active_buddy"], "pm")
-        self.assertEqual(context["instance_id"], "inst-pm-example")
-        prepared_instance = json.loads(instance_json.read_text(encoding="utf-8"))
-        self.assertEqual(prepared_instance, before_prepare_instance)
+        self.assertTrue(summarized["ok"], msg=summarized)
+        self.assertEqual(summarized["action"], "context.summarize")
 
-        persisted = self._dispatch(
-            method="persist",
-            params={"context": context, "result": PM_COMMIT},
+        created = self._dispatch(
+            method="env.tool",
+            params={
+                "tool": "task",
+                "action": "create",
+                "args": {"task_id": "task-pm-broker", "title": "Broker Task", "summary": "seed"},
+            },
             instance_json=instance_json,
         )
-        self.assertTrue(persisted["ok"], msg=persisted)
-        receipt = persisted["receipt"]
-        run_id = receipt["run_id"]
-        run_path = self._runtime_path(f"buddyswitch/content/runs/{run_id}.json")
-        self.assertTrue(run_path.exists())
-        persisted_instance = json.loads(instance_json.read_text(encoding="utf-8"))
-        self.assertEqual(persisted_instance, before_prepare_instance)
-        self.assertNotIn("task_id", receipt)
-        self.assertNotIn("track_id", receipt)
+        self.assertTrue(created["ok"], msg=created)
+        self.assertEqual((created.get("task") or {}).get("id"), "task-pm-broker")
 
-    def test_prepare_and_persist_enter_shared_runtime_lock(self) -> None:
+        after_instance = json.loads(instance_json.read_text(encoding="utf-8"))
+        self.assertEqual(after_instance, before_instance)
+        self.assertFalse(self._runtime_path("buddyswitch/content/runs").exists())
+        self.assertFalse(self._runtime_path("runs/raw").exists())
+
+    def test_env_tool_requests_enter_shared_runtime_lock(self) -> None:
         instance_json = self._instance_json()
         lock_sessions: list[dict[str, object]] = []
 
@@ -188,18 +188,22 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             yield
 
         with patch("turn_runtime._hold_product_runtime_lock", side_effect=fake_lock):
-            prepare = self._dispatch(
-                method="prepare",
-                params={"text": PM_REQUEST},
+            summarized = self._dispatch(
+                method="env.tool",
+                params={"tool": "context", "action": "summarize", "args": {}},
                 instance_json=instance_json,
             )
-            self.assertTrue(prepare["ok"], msg=prepare)
-            persisted = self._dispatch(
-                method="persist",
-                params={"context": prepare, "result": PM_COMMIT},
+            self.assertTrue(summarized["ok"], msg=summarized)
+            created = self._dispatch(
+                method="env.tool",
+                params={
+                    "tool": "task",
+                    "action": "create",
+                    "args": {"task_id": "task-pm-broker-lock", "title": "Broker Lock Task"},
+                },
                 instance_json=instance_json,
             )
-            self.assertTrue(persisted["ok"], msg=persisted)
+            self.assertTrue(created["ok"], msg=created)
 
         self.assertEqual([session["instance_id"] for session in lock_sessions], ["inst-pm-example", "inst-pm-example"])
         self.assertTrue(all(session["instance_json"] == instance_json for session in lock_sessions))
@@ -378,9 +382,8 @@ class RuntimeBrokerProtocolTests(unittest.TestCase):
             "params": {"context": {}, "result": {}},
             "deadline_ms": 35000,
         }
-        with self.assertRaises(self.protocol.BrokerProtocolError) as raised:
-            self.protocol.validate_request(request)
-        self.assertEqual(raised.exception.code, "E_RUNTIME_IDEMPOTENCY_REQUIRED")
+        validated = self.protocol.validate_request(request)
+        self.assertEqual(validated["method"], "persist")
 
     def test_response_envelopes_use_result_or_error(self) -> None:
         success = self.protocol.success_response("req-ok", {"ok": True, "value": 1})
@@ -720,7 +723,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         self.assertIs(raised.exception.details.get("retriable"), False)
         self.assertRegex(raised.exception.details.get("request_id", ""), r"^req-[0-9a-f-]+")
 
-    def test_client_retries_persist_once_after_transport_reset_when_key_present(self) -> None:
+    def test_client_retries_read_only_env_tool_once_after_transport_reset(self) -> None:
         protocol = _require_module("runtime_kernel.protocol")
         client = _require_module("runtime_kernel.client")
         temp = tempfile.TemporaryDirectory()
@@ -757,16 +760,13 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
             clear=False,
         ):
             result = client.request_runtime_broker(
-                "persist",
-                {"context": {"run_id": "run-1"}, "result": {"execution_summary": "done"}},
-                idempotency_key="persist:run-1:abc",
+                "env.tool",
+                {"tool": "task", "action": "list", "args": {}},
             )
         thread.join(timeout=2.0)
         self.assertEqual(result, {"ok": True})
         self.assertEqual(len(captured), 2)
         self.assertNotEqual(captured[0]["request_id"], captured[1]["request_id"])
-        self.assertEqual(captured[0]["idempotency_key"], "persist:run-1:abc")
-        self.assertEqual(captured[1]["idempotency_key"], "persist:run-1:abc")
 
     def test_client_does_not_retry_persist_without_idempotency_key(self) -> None:
         client = _require_module("runtime_kernel.client")
@@ -1299,12 +1299,10 @@ class RuntimeBrokerPersistIdempotencyTests(RuntimeWorkspaceTestMixin, unittest.T
             "deadline_ms": 35000,
         }
         session = dispatcher.RuntimeBrokerSession(instance_json_path=self._instance_json(), manifest_path=MANIFEST)
-        with patch("runtime_kernel.dispatcher.persist_buddy_run_request") as persist_mock:
-            response = dispatcher.dispatch_runtime_request(request, session)
+        response = dispatcher.dispatch_runtime_request(request, session)
         self.assertFalse(response["ok"], msg=response)
-        self.assertEqual(response["error"]["code"], "E_RUNTIME_IDEMPOTENCY_REQUIRED")
+        self.assertEqual(response["error"]["code"], "E_RUNTIME_BROKER_PROTOCOL")
         self.assertIs(response["error"]["retriable"], False)
-        persist_mock.assert_not_called()
 
 
 class RuntimeBrokerV2AcceptanceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
