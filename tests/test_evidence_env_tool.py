@@ -91,7 +91,7 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
-    def _seed_market_targets(self) -> tuple[str, str]:
+    def _seed_market_targets(self) -> str:
         env_store.create_task("task-market-evidence", "Market task", buddy="market")
         artifact = env_store.create_artifact(
             artifact_id="art-market-evidence-r1",
@@ -104,19 +104,10 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             created_by="market",
             source_refs=[{"type": "note", "label": "seed"}],
         )
-        memory = env_store.create_memory(
-            memory_id="mem-market-evidence-001",
-            buddy="market",
-            kind="decision",
-            title="Market decision",
-            summary="seed",
-            content={"body": "market memory"},
-            source_refs=[{"type": "artifact", "id": artifact["id"]}],
-        )
-        return artifact["id"], memory["id"]
+        return artifact["id"]
 
     def test_issue_browser_is_target_scoped_and_runless(self) -> None:
-        artifact_id, _ = self._seed_market_targets()
+        artifact_id = self._seed_market_targets()
         instance_json = self._instance_json(buddy="market", instance_id="inst-market-evidence")
 
         issued = self._dispatch(
@@ -138,7 +129,7 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("run_id", evidence)
 
     def test_approve_downgrade_requires_reason_and_owns_target(self) -> None:
-        _, memory_id = self._seed_market_targets()
+        artifact_id = self._seed_market_targets()
         instance_json = self._instance_json(buddy="market", instance_id="inst-market-downgrade")
 
         missing_reason = self._dispatch(
@@ -146,28 +137,40 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id="inst-market-downgrade",
             buddy="market",
             action="approve_downgrade",
-            args={"target_type": "memory", "target_id": memory_id, "reason": " "},
+            args={"target_type": "artifact", "target_id": artifact_id, "reason": " "},
         )
         self.assertFalse(missing_reason.get("ok"), msg=missing_reason)
         self.assertEqual((missing_reason.get("error") or {}).get("code"), "E_EVIDENCE_PAYLOAD")
+
+        rejected_memory = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-market-downgrade",
+            buddy="market",
+            action="approve_downgrade",
+            args={"target_type": "memory", "target_id": "mem-old", "reason": "Manual fallback approved."},
+        )
+        self.assertFalse(rejected_memory.get("ok"), msg=rejected_memory)
+        self.assertEqual((rejected_memory.get("error") or {}).get("code"), "E_EVIDENCE_TARGET_TYPE")
+        self.assertEqual(rejected_memory.get("permission_boundary"), "evidence.target_type")
+        self.assertNotIn("tool_evidence", rejected_memory)
 
         approved = self._dispatch(
             instance_json=instance_json,
             instance_id="inst-market-downgrade",
             buddy="market",
             action="approve_downgrade",
-            args={"target_type": "memory", "target_id": memory_id, "reason": "Manual fallback approved."},
+            args={"target_type": "artifact", "target_id": artifact_id, "reason": "Manual fallback approved."},
         )
         self.assertTrue(approved.get("ok"), msg=approved)
         evidence = approved.get("tool_evidence")
         self.assertIsInstance(evidence, dict, msg=approved)
         assert isinstance(evidence, dict)
-        self.assertEqual(evidence.get("target_type"), "memory")
-        self.assertEqual(evidence.get("target_id"), memory_id)
+        self.assertEqual(evidence.get("target_type"), "artifact")
+        self.assertEqual(evidence.get("target_id"), artifact_id)
         self.assertEqual(evidence.get("reason"), "Manual fallback approved.")
 
     def test_cross_buddy_target_is_rejected(self) -> None:
-        artifact_id, _ = self._seed_market_targets()
+        artifact_id = self._seed_market_targets()
         design_instance = self._instance_json(buddy="design", instance_id="inst-design-evidence")
 
         denied = self._dispatch(

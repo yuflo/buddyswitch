@@ -13,7 +13,7 @@ _CAPABILITIES: dict[str, dict[str, Any]] = {
         "plain_description": "Create and manage active-buddy tasks as durable work items.",
         "use_when": [
             "You need to create, read, update, or archive a task owned by the active buddy.",
-            "You need explicit task ids to attach artifacts, handoffs, or memories.",
+            "You need explicit task ids to attach artifacts or handoffs.",
         ],
         "do_not_use_when": [
             "You need PM-only track lifecycle changes; use track actions instead.",
@@ -42,7 +42,7 @@ _CAPABILITIES: dict[str, dict[str, Any]] = {
             "You need to revise artifact metadata or content with explicit task ownership.",
         ],
         "do_not_use_when": [
-            "You need free-form reusable knowledge; use memory actions.",
+            "You need task/track orchestration metadata; use task or handoff actions.",
             "You need durable file outputs; use buddybox actions.",
         ],
         "capability_boundary": "Writes require explicit task_id and active-buddy task ownership.",
@@ -51,34 +51,21 @@ _CAPABILITIES: dict[str, dict[str, Any]] = {
         "title": "Handoff Records",
         "plain_description": "Create explicit cross-buddy handoff objects referencing product objects.",
         "use_when": [
-            "You need to transfer work context across buddies with artifact/memory/buddybox refs.",
+            "You need to transfer work context across buddies with artifact/buddybox/source_refs.",
             "You need structured validation before writing a handoff record.",
         ],
         "do_not_use_when": [
             "You need to mutate track lifecycle state; use PM track lifecycle actions.",
-            "You need to persist generic notes; use memory or artifact instead.",
+            "You need to persist generic notes; use artifact or buddybox instead.",
         ],
         "capability_boundary": "Handoff writes enforce source ownership and target buddy validity.",
-    },
-    "memory": {
-        "title": "Reusable Memory",
-        "plain_description": "Write and manage durable reusable buddy knowledge records.",
-        "use_when": [
-            "A conclusion should influence future work but is not a formal deliverable artifact.",
-            "You need durable decisions, facts, preferences, constraints, lessons, or context summaries.",
-        ],
-        "do_not_use_when": [
-            "You need formal deliverable body content; use artifacts.",
-            "You need arbitrary file assets; use buddybox.",
-        ],
-        "capability_boundary": "Owner writes are enforced in service code; cross-buddy reads are scoped.",
     },
     "buddybox": {
         "title": "Buddybox Files",
         "plain_description": "Manage intentional durable buddy-owned files under buddybox roots.",
         "use_when": [
             "You need durable file outputs such as prototypes, exports, screenshots, or reports.",
-            "You need to reference durable files from artifacts, memories, or handoffs.",
+            "You need to reference durable files from artifacts or handoffs.",
         ],
         "do_not_use_when": [
             "You need to edit source code under projects/app; use normal project editing workflow.",
@@ -90,7 +77,7 @@ _CAPABILITIES: dict[str, dict[str, Any]] = {
         "title": "Context Discovery",
         "plain_description": "Read-only orientation payload for runless product state and tool catalog.",
         "use_when": [
-            "You need a snapshot of readable tracks/tasks/artifacts/handoffs/memories/buddybox files.",
+            "You need a snapshot of readable tracks/tasks/artifacts/handoffs/buddybox files.",
             "You need candidate ids for subsequent explicit tool writes.",
         ],
         "do_not_use_when": [
@@ -101,16 +88,16 @@ _CAPABILITIES: dict[str, dict[str, Any]] = {
     },
     "evidence": {
         "title": "Market Evidence",
-        "plain_description": "Issue target-scoped browser evidence tokens for artifact/memory quality gates.",
+        "plain_description": "Issue target-scoped browser evidence tokens for artifact quality gates.",
         "use_when": [
-            "Market workflow requires browser evidence attached to artifact or memory targets.",
+            "Market workflow requires browser evidence attached to artifact targets.",
             "You need explicit approval reason for evidence downgrade on a target.",
         ],
         "do_not_use_when": [
             "You need generic provenance refs without market gate requirements.",
             "You need run-scoped evidence tied to prepared runs; runless model has no run tokens.",
         ],
-        "capability_boundary": "Evidence is target-scoped to artifact or memory ids.",
+        "capability_boundary": "Evidence is target-scoped to artifact ids.",
     },
     "search": {
         "title": "Search Boundary",
@@ -345,7 +332,6 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             "source_task_id": "Optional source task id.",
             "target_buddy": "Required target buddy id.",
             "artifact_ids": "Optional artifact id list.",
-            "memory_ids": "Optional memory id list.",
             "buddybox_paths": "Optional buddybox path list.",
             "source_refs": "Optional source_refs list.",
             "reason": "Required handoff reason.",
@@ -359,7 +345,6 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             "source_task_id": "Optional source task id.",
             "target_buddy": "Required target buddy id.",
             "artifact_ids": "Optional artifact id list.",
-            "memory_ids": "Optional memory id list.",
             "buddybox_paths": "Optional buddybox path list.",
             "source_refs": "Optional source_refs list.",
             "reason": "Required handoff reason.",
@@ -388,58 +373,6 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             risk_hints=_risk_hints(mutates=mut, open_world=False),
             success_means=f"handoff.{action} returned structured object-based collaboration state.",
             common_failures=["target_buddy unknown", "source ownership mismatch", "invalid source_refs"],
-        )
-
-    # memory actions
-    memory_rows = {
-        "list": ("none", {"buddy": "Optional buddy filter.", "kind": "Optional kind filter.", "status": "Optional status filter.", "source_ref": "Optional source ref matcher.", "limit": "Optional positive limit."}),
-        "get": ("none", {"memory_id": "Required memory id."}),
-        "write": (
-            "runtime_objects",
-            {
-                "memory_id": "Optional explicit memory id.",
-                "kind": "Required memory kind.",
-                "title": "Required memory title.",
-                "summary": "Required summary.",
-                "content": "Required JSON object content.",
-                "source_refs": "Optional source_refs list.",
-                "read_claim": "Optional full-summary claim for internal refs.",
-            },
-        ),
-        "update": (
-            "runtime_objects",
-            {
-                "memory_id": "Required owned memory id.",
-                "kind": "Optional kind patch.",
-                "title": "Optional title patch.",
-                "summary": "Optional summary patch.",
-                "content": "Optional content patch.",
-                "source_refs": "Optional source_refs replacement.",
-                "status": "Optional status patch.",
-                "read_claim": "Optional full-summary claim for internal refs.",
-            },
-        ),
-        "archive": ("runtime_objects", {"memory_id": "Required owned memory id."}),
-    }
-    for action, (mut, fields) in memory_rows.items():
-        add(
-            "memory",
-            action,
-            title=f"Memory {action.replace('_', ' ').title()}",
-            plain_description=f"Execute memory.{action} for durable reusable knowledge objects.",
-            use_when=[f"You need memory.{action} behavior."],
-            do_not_use_when=["You need formal artifact deliverables or buddybox file writes."],
-            inputs_explained=fields,
-            side_effects=_side_effects(
-                mutates=mut,
-                writes=[] if mut == "none" else ["buddyswitch/objects/memories/*.json"],
-                does_not_write=["buddyswitch/content/buddybox", "buddyswitch/content/buddybox"],
-                durability="none" if mut == "none" else "durable",
-                idempotency="idempotent for reads" if mut == "none" else "conditionally idempotent",
-            ),
-            risk_hints=_risk_hints(mutates=mut, open_world=False),
-            success_means=f"memory.{action} completed with owner-scope enforcement and structured output.",
-            common_failures=["invalid memory kind/status", "missing fields", "cross-buddy full-read/write denial"],
         )
 
     # buddybox actions
@@ -472,7 +405,7 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
 
     # context actions
     context_rows = {
-        "get": {"track_id": "Optional track focus id.", "task_id": "Optional task focus id.", "memory_kind": "Optional memory kind filter.", "limit": "Optional section limit."},
+        "get": {"track_id": "Optional track focus id.", "task_id": "Optional task focus id.", "limit": "Optional section limit."},
         "summarize": {"track_id": "Optional track focus id.", "task_id": "Optional task focus id.", "limit": "Optional summary limit."},
         "list_sources": {},
     }
@@ -499,15 +432,15 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
 
     # evidence actions
     for action, fields in {
-        "issue_browser": {"target_type": "Required: artifact or memory.", "target_id": "Required target id.", "mode": "Optional issue mode hint."},
-        "approve_downgrade": {"target_type": "Required: artifact or memory.", "target_id": "Required target id.", "reason": "Required downgrade approval reason."},
+        "issue_browser": {"target_type": "Required: artifact.", "target_id": "Required target id.", "mode": "Optional issue mode hint."},
+        "approve_downgrade": {"target_type": "Required: artifact.", "target_id": "Required target id.", "reason": "Required downgrade approval reason."},
     }.items():
         add(
             "evidence",
             action,
             title=f"Evidence {action.replace('_', ' ').title()}",
             plain_description=f"Execute evidence.{action} as target-scoped market gate token flow.",
-            use_when=[f"You need evidence.{action} for artifact/memory quality gates."],
+            use_when=[f"You need evidence.{action} for artifact quality gates."],
             do_not_use_when=["You need run-scoped evidence tokens or context-discovery envelopes."],
             inputs_explained=fields,
             side_effects=_side_effects(

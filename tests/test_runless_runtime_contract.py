@@ -172,9 +172,9 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(self._runtime_path("buddyswitch/content/runs/reserved").exists())
         self.assertFalse(self._runtime_path("runs/raw").exists())
 
-    def test_tool_registry_exposes_memory_and_buddybox_and_excludes_run_and_binding(self) -> None:
+    def test_tool_registry_exposes_runless_tools_and_excludes_memory_run_and_binding(self) -> None:
         tools = tool_contracts.supported_tools()
-        self.assertIn("memory", tools)
+        self.assertNotIn("memory", tools)
         self.assertIn("buddybox", tools)
         self.assertNotIn("run", tools)
         self.assertNotIn("binding", tools)
@@ -282,7 +282,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             check=True,
         )
         help_text = completed.stdout
-        self.assertIn("memory", help_text)
+        self.assertNotIn("memory", help_text)
         self.assertIn("buddybox", help_text)
         self.assertNotIn("binding", help_text)
         self.assertNotIn(" run ", f" {help_text} ")

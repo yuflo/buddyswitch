@@ -77,20 +77,6 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(artifact["ok"], msg=artifact)
 
-        memory = self._dispatch(
-            buddy="pm",
-            tool="memory",
-            action="write",
-            args={
-                "memory_id": "mem-pm-e2e-decision",
-                "kind": "decision",
-                "title": "Decision",
-                "summary": "runless memory",
-                "content": {"body": "keep runless"},
-            },
-        )
-        self.assertTrue(memory["ok"], msg=memory)
-
         buddybox = self._dispatch(
             buddy="pm",
             tool="buddybox",
@@ -109,7 +95,6 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "source_task_id": "task-pm-e2e-runless",
                 "target_buddy": "dev",
                 "artifact_ids": ["art-pm-e2e-prd-r1"],
-                "memory_ids": ["mem-pm-e2e-decision"],
                 "buddybox_paths": ["pm/e2e/notes.md"],
                 "reason": "implement",
                 "context": "handoff context",
@@ -121,30 +106,38 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsNotNone(env_store.get_track("track-e2e-runless"))
         self.assertIsNotNone(env_store.get_task("task-pm-e2e-runless"))
         self.assertIsNotNone(env_store.get_artifact("art-pm-e2e-prd-r1"))
-        self.assertIsNotNone(env_store.get_memory("mem-pm-e2e-decision"))
         self.assertIsNotNone(env_store.get_handoff("handoff-pm-dev-e2e"))
         self.assertTrue(self._runtime_path("buddyswitch/content/buddybox/pm/e2e/notes.md").exists())
         self.assertFalse(self._runtime_path("runs/raw").exists())
         self.assertFalse(self._runtime_path("buddyswitch/content/runs").exists())
 
     def test_cross_buddy_identity_scope_follows_service_permissions(self) -> None:
-        env_store.create_memory(
-            memory_id="mem-pm-private",
+        env_store.create_task(
+            "task-pm-private",
+            "Private task",
             buddy="pm",
-            kind="fact",
-            title="private",
+            track_id=None,
+            summary="seed",
+        )
+        env_store.create_artifact(
+            artifact_id="art-pm-private-r1",
+            title="Private artifact",
+            buddy="pm",
+            kind="spec",
+            task_id="task-pm-private",
             summary="private",
             content={"body": "private"},
-            source_refs=None,
+            created_by="pm",
+            source_refs=[{"type": "note", "label": "seed"}],
         )
         denied = self._dispatch(
             buddy="design",
-            tool="memory",
-            action="update",
-            args={"memory_id": "mem-pm-private", "summary": "mutate"},
+            tool="artifact",
+            action="update_metadata",
+            args={"artifact_id": "art-pm-private-r1", "summary": "mutate"},
         )
         self.assertFalse(denied["ok"])
-        self.assertEqual(denied["permission_boundary"], "memory.buddy_scope")
+        self.assertEqual(denied["permission_boundary"], "artifact.buddy_scope")
 
 
 if __name__ == "__main__":

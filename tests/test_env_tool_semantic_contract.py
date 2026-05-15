@@ -80,7 +80,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
     def test_registry_semantics_cover_every_registered_tool_and_action(self) -> None:
         desc = contracts.env_tools_description()
         expected_tools, expected_actions = _expected_tool_action_sets()
-        self.assertIn("memory", expected_tools)
+        self.assertNotIn("memory", expected_tools)
         self.assertIn("buddybox", expected_tools)
         self.assertNotIn("run", expected_tools)
         self.assertNotIn("binding", expected_tools)
@@ -191,7 +191,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         }
         self.assertTrue(by_action["search.open_browser"]["risk_hints"]["open_world"])
         self.assertTrue(by_action["search.open_browser"]["risk_hints"]["external_effect"])
-        self.assertFalse(by_action["memory.write"]["risk_hints"]["read_only"])
+        self.assertNotIn("memory.write", by_action)
         self.assertFalse(by_action["buddybox.write"]["risk_hints"]["read_only"])
         self.assertFalse(by_action["evidence.issue_browser"]["risk_hints"]["read_only"])
         self.assertNotIn("run.commit", by_action)

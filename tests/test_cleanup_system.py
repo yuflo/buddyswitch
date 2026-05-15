@@ -114,7 +114,6 @@ class CleanupSystemRunlessTests(unittest.TestCase):
                 "track_id": "track-demo",
                 "source_task_id": "task-pm",
                 "artifact_ids": ["art-pm-r1"],
-                "memory_ids": [],
                 "buddybox_paths": ["pm/notes.md"],
                 "reason": "implement",
                 "context": "",
@@ -170,8 +169,9 @@ class CleanupSystemRunlessTests(unittest.TestCase):
         self.assertIn("art-pm-r1", plan["artifact_object_ids"])
         self.assertNotIn("art-dev-r1", plan["artifact_object_ids"])
         self.assertIn("handoff-pm-dev", plan["handoff_object_ids"])
-        self.assertIn("mem-pm", plan["memory_object_ids"])
+        self.assertNotIn("memory_object_ids", plan)
         self.assertIn("buddyswitch/content/buddybox/pm/notes.md", plan["delete_paths"])
+        self.assertNotIn("buddyswitch/objects/memories/mem-pm.json", plan["delete_paths"])
         self.assertNotIn("buddyswitch/content/buddybox/dev/report.txt", plan["delete_paths"])
 
     def test_execute_all_data_cleanup_removes_runless_state_and_recreates_skeleton(self) -> None:
@@ -188,7 +188,7 @@ class CleanupSystemRunlessTests(unittest.TestCase):
         self.assertFalse(self._path("buddyswitch/objects/tasks/task-dev.json").exists())
         self.assertFalse(self._path("buddyswitch/objects/artifacts/art-pm-r1.json").exists())
         self.assertFalse(self._path("buddyswitch/objects/handoffs/handoff-pm-dev.json").exists())
-        self.assertFalse(self._path("buddyswitch/objects/memories/mem-pm.json").exists())
+        self.assertTrue(self._path("buddyswitch/objects/memories/mem-pm.json").exists())
         self.assertFalse(self._path("buddyswitch/content/buddybox/pm/notes.md").exists())
         self.assertFalse(self._path("buddyswitch/content/buddybox/dev/report.txt").exists())
 
@@ -197,7 +197,6 @@ class CleanupSystemRunlessTests(unittest.TestCase):
             "buddyswitch/objects/tasks",
             "buddyswitch/objects/artifacts",
             "buddyswitch/objects/handoffs",
-            "buddyswitch/objects/memories",
             "buddyswitch/content/buddybox",
         ):
             self.assertTrue(self._path(directory).is_dir(), f"missing recreated skeleton dir: {directory}")

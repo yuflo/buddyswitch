@@ -24,9 +24,9 @@ Product mode:
 ## Product Runtime Loop (Runless)
 
 1. Call context discovery (`context.get` or `context.summarize`).
-2. Pick explicit target ids (`track_id`, `task_id`, `artifact_id`, `memory_id`, buddybox path).
+2. Pick explicit target ids (`track_id`, `task_id`, `artifact_id`, `handoff_id`, buddybox path).
 3. Write durable outputs with env tools:
-   - `task.*`, `track.*`, `artifact.*`, `handoff.*`, `memory.*`, `buddybox.*`
+   - `task.*`, `track.*`, `artifact.*`, `handoff.*`, `buddybox.*`
 4. Summarize what was written.
 
 No `prepare/persist` lifecycle is required.
@@ -53,7 +53,6 @@ Canonical state paths:
 - `buddyswitch/objects/tasks/*.json`
 - `buddyswitch/objects/artifacts/*.json`
 - `buddyswitch/objects/handoffs/*.json`
-- `buddyswitch/objects/memories/*.json`
 - `buddyswitch/content/buddybox/<buddy>/**`
 
 ## Context Panel

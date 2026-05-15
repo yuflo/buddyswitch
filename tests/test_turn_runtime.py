@@ -42,7 +42,7 @@ class TurnRuntimeRunlessTests(unittest.TestCase):
         tools = payload["env_tools"]
         self.assertIn("task", tools)
         self.assertIn("context", tools)
-        self.assertIn("memory", tools)
+        self.assertNotIn("memory", tools)
         self.assertIn("buddybox", tools)
         self.assertNotIn("run", tools)
         self.assertNotIn("binding", tools)

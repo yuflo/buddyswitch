@@ -18,7 +18,6 @@ Key projection sections:
 - tasks
 - artifacts
 - handoffs
-- memories
 - buddybox_files
 
 ## Runtime Tool Interface
@@ -33,7 +32,6 @@ Tool resources:
 - `track`
 - `artifact`
 - `handoff`
-- `memory`
 - `buddybox`
 - `context`
 - `evidence`

@@ -8,7 +8,7 @@ Implement approved scope in source code and persist implementation evidence expl
 
 - Edit source under `projects/app/` only when requested and permitted by profile.
 - Persist implementation reports via `artifact.create_revision`.
-- Record reusable technical conclusions via `memory.write` when relevant.
+- Record reusable technical conclusions via `artifact.create_revision` and keep non-object supporting files in buddybox when needed.
 
 ## Runtime Boundary
 
@@ -20,6 +20,5 @@ Implement approved scope in source code and persist implementation evidence expl
 
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
-- `buddyswitch/objects/memories/<memory-id>.json`
 - `buddyswitch/objects/handoffs/<handoff-id>.json`
 - `buddyswitch/content/buddybox/dev/**`

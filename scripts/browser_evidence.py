@@ -36,12 +36,12 @@ def _parse_args() -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
 
     issue = sub.add_parser("issue", help="Issue browser evidence token")
-    issue.add_argument("--target-type", required=True, choices=["artifact", "memory"])
+    issue.add_argument("--target-type", required=True, choices=["artifact"])
     issue.add_argument("--target-id", required=True)
     issue.add_argument("--mode", default="browser-cockpit-preflight")
 
     downgrade = sub.add_parser("approve-downgrade", help="Issue approved downgrade token")
-    downgrade.add_argument("--target-type", required=True, choices=["artifact", "memory"])
+    downgrade.add_argument("--target-type", required=True, choices=["artifact"])
     downgrade.add_argument("--target-id", required=True)
     downgrade.add_argument("--reason", required=True)
     return parser.parse_args()

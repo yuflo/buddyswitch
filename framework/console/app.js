@@ -11,7 +11,6 @@ const emptyWorkspace = {
   tasks: [],
   artifacts: [],
   handoffs: [],
-  memories: [],
   buddybox_files: [],
 };
 
@@ -30,7 +29,6 @@ function normalizeWorkspaceData(rawData) {
     tasks: Array.isArray(rawData?.tasks) ? rawData.tasks : [],
     artifacts: Array.isArray(rawData?.artifacts) ? rawData.artifacts : [],
     handoffs: Array.isArray(rawData?.handoffs) ? rawData.handoffs : [],
-    memories: Array.isArray(rawData?.memories) ? rawData.memories : [],
     buddybox_files: Array.isArray(rawData?.buddybox_files) ? rawData.buddybox_files : [],
   };
 }

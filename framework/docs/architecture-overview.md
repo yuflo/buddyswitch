@@ -13,7 +13,6 @@ Product layer:
 - tasks
 - artifacts
 - handoffs
-- memories
 - buddybox files
 
 No execution run history is required for durable product outputs.

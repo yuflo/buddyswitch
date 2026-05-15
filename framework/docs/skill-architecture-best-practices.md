@@ -6,7 +6,7 @@ BuddySwitch is a deterministic control layer around host execution.
 
 - Codex discovers and executes native skills from `.agents/skills`.
 - BuddySwitch exposes context discovery and explicit durable env.tool writes.
-- Native skills should write durable outputs directly (artifact/memory/handoff/buddybox) when needed.
+- Native skills should write durable outputs directly (artifact/handoff/buddybox) when needed.
 
 ## Package Contract
 

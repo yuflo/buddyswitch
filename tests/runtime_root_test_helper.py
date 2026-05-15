@@ -59,7 +59,6 @@ class RuntimeWorkspaceSandbox:
             patch.object(env_store, "TASKS_DIR", objects_root / "tasks"),
             patch.object(env_store, "ARTIFACT_OBJECTS_DIR", objects_root / "artifacts"),
             patch.object(env_store, "HANDOFF_OBJECTS_DIR", objects_root / "handoffs"),
-            patch.object(env_store, "MEMORY_OBJECTS_DIR", objects_root / "memories"),
             patch.object(env_store, "CONTENT_ROOT", content_root),
             patch.object(env_store, "BUDDYBOX_CONTENT_DIR", content_root / "buddybox"),
             patch.object(turn_runtime, "ROOT", self.root),

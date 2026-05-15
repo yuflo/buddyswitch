@@ -26,7 +26,6 @@ _VALIDATE_FIELDS = {
     "source_task_id",
     "target_buddy",
     "artifact_ids",
-    "memory_ids",
     "buddybox_paths",
     "source_refs",
     "reason",
@@ -74,7 +73,7 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
         retryable=False,
         retry_guidance="Use owned source objects and valid target buddy ids.",
         allowed_next_actions=[
-            "Use task.list/artifact.list/memory.list to inspect owned source ids.",
+            "Use task.list/artifact.list/context.summarize to inspect owned source ids.",
             "Use handoff.validate with corrected refs.",
         ],
     )
@@ -191,22 +190,6 @@ def _validate_payload(*, args: dict[str, Any], context: HandoffServiceContext, a
                 message=f"artifact '{artifact_id}' is owned by buddy '{artifact.get('buddy')}'",
             )
 
-    memory_ids, memory_err = _normalize_ids(args.get("memory_ids"), label="memory_ids")
-    if memory_err:
-        return None, _reject_payload(action=action, active_buddy=active_buddy, message=memory_err)
-    assert memory_ids is not None
-    for memory_id in memory_ids:
-        memory = env_store.get_memory(memory_id)
-        if memory is None:
-            return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"memory not found: {memory_id}")
-        if memory.get("buddy") != active_buddy:
-            return None, _reject_scope(
-                action=action,
-                active_buddy=active_buddy,
-                boundary="memory.buddy_scope",
-                message=f"memory '{memory_id}' is owned by buddy '{memory.get('buddy')}'",
-            )
-
     buddybox_paths, paths_err = _normalize_paths(args.get("buddybox_paths"), label="buddybox_paths")
     if paths_err:
         return None, _reject_payload(action=action, active_buddy=active_buddy, message=paths_err)
@@ -268,7 +251,6 @@ def _validate_payload(*, args: dict[str, Any], context: HandoffServiceContext, a
         "source_task_id": source_task_id,
         "target_buddy": target_buddy,
         "artifact_ids": artifact_ids,
-        "memory_ids": memory_ids,
         "buddybox_paths": buddybox_paths,
         "source_refs": source_refs,
         "reason": reason.strip(),
@@ -286,7 +268,6 @@ def _handoff_row(row: dict[str, Any]) -> dict[str, Any]:
         "track_id": row.get("track_id"),
         "source_task_id": row.get("source_task_id"),
         "artifact_ids": list(row.get("artifact_ids", [])),
-        "memory_ids": list(row.get("memory_ids", [])),
         "buddybox_paths": list(row.get("buddybox_paths", [])),
         "source_refs": row.get("source_refs"),
         "reason": row.get("reason"),
@@ -399,7 +380,6 @@ def create_handoff_for_active_buddy(*, args: dict[str, Any], context: HandoffSer
             target_buddy=normalized["target_buddy"],
             source_task_id=normalized["source_task_id"],
             artifact_ids=normalized["artifact_ids"],
-            memory_ids=normalized["memory_ids"],
             buddybox_paths=normalized["buddybox_paths"],
             source_refs=normalized["source_refs"],
             reason=normalized["reason"],
@@ -420,7 +400,7 @@ def create_handoff_for_active_buddy(*, args: dict[str, Any], context: HandoffSer
         created_ids=[created["id"]],
         allowed_next_actions=[
             "Use handoff.list to review readable handoff timeline.",
-            "Notify target buddy to consume referenced artifacts/memories/buddybox files.",
+            "Notify target buddy to consume referenced artifacts/buddybox files.",
         ],
         extra={"handoff": row},
     )

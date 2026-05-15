@@ -58,9 +58,9 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
         impact="No evidence token state changed.",
         state_changed=False,
         retryable=False,
-        retry_guidance="Use readable owner-scoped artifact or memory targets.",
+        retry_guidance="Use readable owner-scoped artifact targets.",
         allowed_next_actions=[
-            "Use artifact.list/memory.list to inspect readable targets.",
+            "Use artifact.list to inspect readable targets.",
             "Retry with a target owned by active buddy.",
         ],
     )
@@ -91,25 +91,12 @@ def _resolve_target(*, target_type: str, target_id: str, active_buddy: str, acti
                 message=f"artifact '{target_id}' is owned by buddy '{artifact.get('buddy')}'",
             )
         return artifact, None
-    if target_type == "memory":
-        memory = env_store.get_memory(target_id)
-        if memory is None:
-            return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"memory not found: {target_id}")
-        if memory.get("buddy") != active_buddy:
-            return None, _reject_scope(
-                action=action,
-                active_buddy=active_buddy,
-                boundary="memory.buddy_scope",
-                code="E_EVIDENCE_TARGET_SCOPE",
-                message=f"memory '{target_id}' is owned by buddy '{memory.get('buddy')}'",
-            )
-        return memory, None
     return None, _reject_scope(
         action=action,
         active_buddy=active_buddy,
         boundary="evidence.target_type",
         code="E_EVIDENCE_TARGET_TYPE",
-        message="target_type must be one of: artifact, memory",
+        message="target_type must be: artifact",
     )
 
 
@@ -169,7 +156,7 @@ def issue_browser_for_active_instance(*, args: dict[str, Any], context: Evidence
         durability="transient token",
         created_ids=[token["token_id"]],
         allowed_next_actions=[
-            "Attach evidence token metadata via artifact/memory source_refs when persisting outputs.",
+            "Attach evidence token metadata via artifact source_refs when persisting outputs.",
             "Issue another token for a different target when needed.",
         ],
         extra={"tool_evidence": token},
@@ -220,7 +207,7 @@ def approve_downgrade_for_active_instance(*, args: dict[str, Any], context: Evid
         durability="transient token",
         created_ids=[token["token_id"]],
         allowed_next_actions=[
-            "Persist downgrade reason in artifact/memory source_refs when writing outputs.",
+            "Persist downgrade reason in artifact source_refs when writing outputs.",
             "Use evidence.issue_browser when browser evidence can be produced later.",
         ],
         extra={"tool_evidence": token},

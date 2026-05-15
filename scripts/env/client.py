@@ -115,7 +115,6 @@ def _parse_args() -> argparse.Namespace:
     context_get = context_sub.add_parser("get", help="Get runless context sections")
     context_get.add_argument("--track-id")
     context_get.add_argument("--task-id")
-    context_get.add_argument("--memory-kind")
     context_get.add_argument("--limit", type=int)
     context_summarize = context_sub.add_parser("summarize", help="Summarize runless context")
     context_summarize.add_argument("--track-id")
@@ -134,23 +133,6 @@ def _parse_args() -> argparse.Namespace:
     validate_handoff.add_argument("--payload", required=True, type=Path)
     create_handoff = handoff_sub.add_parser("create", help="Create an explicit handoff record")
     create_handoff.add_argument("--payload", required=True, type=Path)
-
-    memory = sub.add_parser("memory", help="Memory env operations")
-    memory_sub = memory.add_subparsers(dest="operation", required=True)
-    memory_list = memory_sub.add_parser("list", help="List readable memory summaries")
-    memory_list.add_argument("--buddy")
-    memory_list.add_argument("--kind")
-    memory_list.add_argument("--status")
-    memory_list.add_argument("--source-ref")
-    memory_list.add_argument("--limit", type=int)
-    memory_get = memory_sub.add_parser("get", help="Get readable memory by id")
-    memory_get.add_argument("--memory-id", required=True)
-    memory_write = memory_sub.add_parser("write", help="Create a memory object")
-    memory_write.add_argument("--payload", required=True, type=Path)
-    memory_update = memory_sub.add_parser("update", help="Update an active-buddy memory")
-    memory_update.add_argument("--payload", required=True, type=Path)
-    memory_archive = memory_sub.add_parser("archive", help="Archive an active-buddy memory")
-    memory_archive.add_argument("--memory-id", required=True)
 
     buddybox = sub.add_parser("buddybox", help="Buddybox env operations")
     buddybox_sub = buddybox.add_subparsers(dest="operation", required=True)
@@ -200,7 +182,7 @@ def _context_args_from_cli(args: argparse.Namespace) -> dict[str, Any]:
     if args.operation == "list-sources":
         return {}
     payload: dict[str, Any] = {}
-    for field in ("track_id", "task_id", "memory_kind", "limit"):
+    for field in ("track_id", "task_id", "limit"):
         value = getattr(args, field, None)
         if value is not None:
             payload[field] = value
@@ -291,22 +273,6 @@ def _dispatch_handoff(args: argparse.Namespace) -> dict[str, Any]:
     return _dispatch_env_tool("handoff", action, payload)
 
 
-def _dispatch_memory(args: argparse.Namespace) -> dict[str, Any]:
-    action = _operation_to_action(args.operation)
-    if args.operation in {"write", "update"}:
-        return _dispatch_env_tool("memory", action, _load_json_object(args.payload))
-    if args.operation == "archive":
-        return _dispatch_env_tool("memory", action, {"memory_id": args.memory_id})
-    if args.operation == "get":
-        return _dispatch_env_tool("memory", action, {"memory_id": args.memory_id})
-    payload: dict[str, Any] = {}
-    for field in ("buddy", "kind", "status", "source_ref", "limit"):
-        value = getattr(args, field, None)
-        if value is not None:
-            payload[field] = value
-    return _dispatch_env_tool("memory", action, payload)
-
-
 def _dispatch_buddybox(args: argparse.Namespace) -> dict[str, Any]:
     action = _operation_to_action(args.operation)
     if args.operation == "write":
@@ -365,8 +331,6 @@ def main() -> int:
             payload = _dispatch_context(args)
         elif args.resource == "handoff":
             payload = _dispatch_handoff(args)
-        elif args.resource == "memory":
-            payload = _dispatch_memory(args)
         elif args.resource == "buddybox":
             payload = _dispatch_buddybox(args)
         elif args.resource == "evidence":

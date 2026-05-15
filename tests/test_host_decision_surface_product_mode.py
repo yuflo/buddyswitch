@@ -48,19 +48,12 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
     def test_context_summarize_projects_runless_decision_surface(self) -> None:
         track = env_store.create_track("track-market-decision", "Market Decision", current_buddy="market", next_buddy="design")
         env_store.create_task("task-market-decision", "Scan market", buddy="market", track_id=track["id"])
-        env_store.create_memory(
-            memory_id="mem-market-decision",
-            buddy="market",
-            kind="fact",
-            title="Decision memory",
-            summary="Context row",
-            content={"body": "facts"},
-            source_refs=None,
-        )
 
         response = self._dispatch(buddy="market", tool="context", action="summarize", args={})
         self.assertTrue(response["ok"], msg=response)
         self.assertEqual(response["decision_surface"]["binding_state"]["state"], "runless")
+        self.assertNotIn("has_memories", response["decision_surface"]["context_readiness"])
+        self.assertNotIn("memory_summaries", response)
         self.assertIn("candidate_tracks", response)
         self.assertTrue(any(row.get("track_id") == "track-market-decision" for row in response["candidate_tracks"]))
 

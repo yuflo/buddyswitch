@@ -84,9 +84,56 @@ class RepoConsistencyTests(unittest.TestCase):
             permissions = set(buddy.get("permissions", []))
             self.assertNotIn("run.commit", permissions)
             self.assertNotIn("binding.get", permissions)
-            self.assertIn("memory.read", permissions)
+            self.assertFalse(any(item.startswith("memory.") for item in permissions))
             self.assertIn("buddybox.read", permissions)
             self.assertIn("context.read", permissions)
+
+    def test_active_runtime_surface_excludes_memory(self) -> None:
+        pattern = (
+            r"memory|memories|memory_ids|memory_kind|MEMORY_|"
+            r"create_memory|get_memory|list_memories|update_memory|memory\."
+        )
+        scopes = [
+            "README.md",
+            "scripts",
+            "framework",
+            "buddyswitch",
+            "tools",
+            "projects/app/README.md",
+        ]
+        completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                pattern,
+                *scopes,
+                "-g",
+                "!docs/memo/**",
+                "-g",
+                "!docs/spec/2026-05-14-*",
+                "-g",
+                "!docs/spec/2026-05-15-memory-removal-*",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_memory_lifecycle_tests_are_removed(self) -> None:
+        self.assertFalse((ROOT / "tests" / "test_memory_env_tool.py").exists())
+        collected = subprocess.run(
+            ["python3", "-m", "pytest", "--collect-only", "-q", "tests"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(collected.returncode, 0, msg=collected.stdout + collected.stderr)
+        self.assertNotIn("memory_owner_lifecycle", collected.stdout)
 
     def test_legacy_run_contract_and_run_tool_are_removed(self) -> None:
         self.assertFalse((ROOT / "framework" / "contracts" / "persist-buddy-run.json").exists())
@@ -104,7 +151,7 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertEqual(set(env_tools), {row["tool"] for row in tool_contracts.TOOL_REGISTRY})
         self.assertEqual(
             set(env_tools),
-            {"task", "track", "artifact", "handoff", "memory", "buddybox", "context", "evidence", "search"},
+            {"task", "track", "artifact", "handoff", "buddybox", "context", "evidence", "search"},
         )
         self.assertNotIn("run", env_tools)
         self.assertNotIn("binding", env_tools)
@@ -188,7 +235,7 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertEqual(payload.get("contract_id"), "workspace-projection")
         top = set(payload.get("top_level_key_order", []))
         self.assertIn("handoffs", top)
-        self.assertIn("memories", top)
+        self.assertNotIn("memories", top)
         self.assertIn("buddybox_files", top)
         self.assertNotIn("run_audits", top)
 

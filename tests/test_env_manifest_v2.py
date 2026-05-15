@@ -29,10 +29,14 @@ class EnvManifestV2Tests(unittest.TestCase):
             assert isinstance(buddy, dict)
             permissions = set(buddy.get("permissions", []))
             with self.subTest(buddy=buddy.get("id")):
-                self.assertIn("memory.read", permissions)
+                self.assertFalse(any(item.startswith("memory.") for item in permissions))
                 self.assertIn("buddybox.read", permissions)
                 self.assertNotIn("run.commit", permissions)
                 self.assertNotIn("binding.get", permissions)
+
+    def test_memory_permissions_are_rejected_by_validator(self) -> None:
+        with self.assertRaisesRegex(env_manifest.ManifestError, "unsupported object 'memory'"):
+            env_manifest._validate_permission("memory.read", "synthetic")  # noqa: SLF001
 
     def test_shared_skill_rows_use_id_and_path_contract(self) -> None:
         for row in self.manifest.get("skills", []):

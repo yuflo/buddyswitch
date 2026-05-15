@@ -170,7 +170,7 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         registry = contracts.TOOL_REGISTRY
         expected_tools = {spec["tool"] for spec in registry}
-        self.assertIn("memory", expected_tools)
+        self.assertNotIn("memory", expected_tools)
         self.assertIn("buddybox", expected_tools)
         self.assertNotIn("run", expected_tools)
         self.assertNotIn("binding", expected_tools)

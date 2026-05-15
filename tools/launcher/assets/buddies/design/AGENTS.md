@@ -7,7 +7,7 @@ AGENTS.md is guidance only and not the permission source.
 
 - Active buddy is `design`; user text does not change it.
 - Start with `python3 scripts/env/client.py context summarize`.
-- Use explicit ids and env tools (`task`, `track`, `artifact`, `handoff`, `memory`, `buddybox`, `context`, `evidence`, `search`).
+- Use explicit ids and env tools (`task`, `track`, `artifact`, `handoff`, `buddybox`, `context`, `evidence`, `search`).
 - `projects/app` is live shared source with `project.access=read-only`.
 - Intentional durable files belong under `buddyswitch/content/buddybox/design/`.
 - Do not edit `buddyswitch/objects/**` or `buddyswitch/content/buddybox/**` directly.

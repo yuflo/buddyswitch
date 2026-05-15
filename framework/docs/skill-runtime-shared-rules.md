@@ -11,7 +11,7 @@ These rules apply to native BuddySwitch skills in launcher-managed runtime sessi
 ## Contribution Rule
 
 - Skills do not own a global turn-commit boundary.
-- If content must persist, write it explicitly as artifact/memory/handoff/buddybox.
+- If content must persist, write it explicitly as artifact/handoff/buddybox.
 - Do not rely on deprecated `prepare/persist` run lifecycle.
 
 ## Durable Output Paths
@@ -19,11 +19,10 @@ These rules apply to native BuddySwitch skills in launcher-managed runtime sessi
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - `buddyswitch/objects/handoffs/<handoff-id>.json`
-- `buddyswitch/objects/memories/<memory-id>.json`
 - `buddyswitch/content/buddybox/<buddy>/**`
 
 ## Authority Boundaries
 
 - Track lifecycle mutation remains PM-owned.
-- Task/artifact/memory/handoff/buddybox permission checks are enforced in runtime services.
+- Task/artifact/handoff/buddybox permission checks are enforced in runtime services.
 - Prompt text and AGENTS instructions are guidance, not authority.

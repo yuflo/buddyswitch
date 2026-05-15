@@ -57,7 +57,7 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("run", tools)
         self.assertNotIn("binding", tools)
         self.assertIn("context", tools)
-        self.assertIn("memory", tools)
+        self.assertNotIn("memory", tools)
         self.assertIn("buddybox", tools)
 
     def test_router_rejects_retired_run_tool(self) -> None:
@@ -69,15 +69,6 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_context_summarize_exposes_runless_decision_surface(self) -> None:
         track = env_store.create_track("track-runless-router", "Runless Router", current_buddy="pm", next_buddy="design")
         task = env_store.create_task("task-pm-router", "Prepare handoff", buddy="pm", track_id=track["id"])
-        env_store.create_memory(
-            memory_id="mem-pm-router",
-            buddy="pm",
-            kind="decision",
-            title="Router memory",
-            summary="A runless memory row",
-            content={"body": "summary"},
-            source_refs=None,
-        )
         env_store.create_artifact(
             artifact_id="art-pm-router-r1",
             title="Router PRD",
@@ -98,7 +89,7 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(payload["ok"], msg=payload)
         decision_surface = payload["decision_surface"]
         self.assertEqual(decision_surface["binding_state"]["state"], "runless")
-        self.assertIn("memory_summaries", payload)
+        self.assertNotIn("memory_summaries", payload)
         self.assertIn("buddybox_files", payload)
 
 

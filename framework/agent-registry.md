@@ -22,4 +22,4 @@ All buddy definitions come from `buddyswitch/manifest.toml`:
 
 - `pm` owns track lifecycle coordination.
 - Other buddies operate on task/artifact outputs within their manifest scope.
-- Track, task, artifact, handoff, and memory objects are persisted under `buddyswitch/objects/`; durable files are under `buddyswitch/content/buddybox/<buddy>/`.
+- Track, task, artifact, and handoff objects are persisted under `buddyswitch/objects/`; durable files are under `buddyswitch/content/buddybox/<buddy>/`.

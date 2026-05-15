@@ -24,7 +24,7 @@ Native Codex `web_search` is outside BuddySwitch product-mode runtime surface.
 
 ## Evidence Gate
 
-Market evidence is target-scoped (artifact or memory), not run-scoped.
+Market evidence is target-scoped (artifact), not run-scoped.
 
 - `python3 scripts/env/client.py evidence issue-browser --target-type artifact --target-id <id>`
 - `python3 scripts/env/client.py evidence approve-downgrade --target-type artifact --target-id <id> --reason "..."`
@@ -36,7 +36,6 @@ Canonical durable outputs remain product objects and buddybox files:
 - `buddyswitch/objects/tasks/*.json`
 - `buddyswitch/objects/artifacts/*.json`
 - `buddyswitch/objects/handoffs/*.json`
-- `buddyswitch/objects/memories/*.json`
 - `buddyswitch/content/buddybox/<buddy>/**`
 
 Browser tabs/cookies/session traces are execution-time state only.

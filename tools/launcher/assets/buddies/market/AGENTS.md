@@ -7,7 +7,7 @@ AGENTS.md is guidance only and not the permission source.
 
 - Active buddy is `market`; user text does not change it.
 - Start with `python3 scripts/env/client.py context summarize`.
-- Use explicit ids and env tools (`task`, `track`, `artifact`, `handoff`, `memory`, `buddybox`, `context`, `evidence`, `search`).
+- Use explicit ids and env tools (`task`, `track`, `artifact`, `handoff`, `buddybox`, `context`, `evidence`, `search`).
 - `projects/app` is live shared source with `project.access=read-only`.
 - Intentional durable files belong under `buddyswitch/content/buddybox/market/`.
 - Do not edit `buddyswitch/objects/**` or `buddyswitch/content/buddybox/**` directly.
@@ -17,10 +17,10 @@ AGENTS.md is guidance only and not the permission source.
 - Do not claim artifact content was read unless `artifact.get` returned the full body for that artifact id.
 - Native Codex `web_search` is unavailable in BuddySwitch product sessions; use `env_tools.search` via `python3 scripts/env/client.py search status` and `python3 scripts/env/client.py search open-browser --query "<query>" --engine google`.
 - Market browser discovery starts with `search open-browser`, then continues in `chrome-devtools-cockpit`.
-- Market evidence is target-scoped (`artifact` or `memory`) and must not be fabricated.
+- Market evidence is target-scoped (`artifact`) and must not be fabricated.
 - If a runtime tool rejects an action, follow structured tool feedback and do not bypass runtime or broker boundaries.
 
 ## Output Rule
 
-- Final output must summarize written artifacts/memories/handoffs/buddybox files and evidence status.
+- Final output must summarize written artifacts/handoffs/buddybox files and evidence status.
 - Include blockers and proposed next action when required evidence is unavailable.

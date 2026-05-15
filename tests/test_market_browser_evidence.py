@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import socket
+import subprocess
 import threading
 import sys
 import unittest
@@ -219,7 +220,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return task["id"], artifact["id"]
 
-    def test_market_evidence_requires_target_artifact_or_memory(self) -> None:
+    def test_market_evidence_requires_artifact_target(self) -> None:
         instance_json = self._instance_json(instance_id="inst-market-target")
         _, artifact_id = self._seed_market_task_and_artifact()
 
@@ -254,6 +255,36 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"target_type": "artifact", "target_id": artifact_id},
         )
         self.assertTrue(ok_issue.get("ok"), msg=ok_issue)
+
+    def test_browser_evidence_cli_target_type_is_artifact_only(self) -> None:
+        help_result = subprocess.run(
+            ["python3", "scripts/browser_evidence.py", "issue", "--help"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(help_result.returncode, 0, msg=help_result.stderr)
+        self.assertIn("artifact", help_result.stdout)
+        self.assertNotIn("memory", help_result.stdout)
+
+        rejected = subprocess.run(
+            [
+                "python3",
+                "scripts/browser_evidence.py",
+                "issue",
+                "--target-type",
+                "memory",
+                "--target-id",
+                "mem-old",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(rejected.returncode, 2, msg=rejected.stdout + rejected.stderr)
+        self.assertIn("invalid choice", rejected.stderr)
 
     def test_market_artifact_write_with_browser_evidence_is_runless(self) -> None:
         instance_id = "inst-market-write"

@@ -1600,7 +1600,6 @@ exec "$real_git" "$@"
                 "scripts/env/services/artifacts.py",
                 "scripts/env/services/context.py",
                 "scripts/env/services/handoffs.py",
-                "scripts/env/services/memories.py",
                 "scripts/env/services/buddybox.py",
                 "scripts/env/services/evidence.py",
             ):
@@ -1690,7 +1689,6 @@ exec "$real_git" "$@"
                 "buddyswitch/objects/tracks": shared_root / "state" / "buddyswitch" / "objects" / "tracks",
                 "buddyswitch/objects/artifacts": shared_root / "state" / "buddyswitch" / "objects" / "artifacts",
                 "buddyswitch/objects/handoffs": shared_root / "state" / "buddyswitch" / "objects" / "handoffs",
-                "buddyswitch/objects/memories": shared_root / "state" / "buddyswitch" / "objects" / "memories",
                 "buddyswitch/content/buddybox": shared_root / "state" / "buddyswitch" / "content" / "buddybox",
             }
             for relative_path, state_path in projection_pairs.items():

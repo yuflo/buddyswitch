@@ -36,7 +36,7 @@ class PrepareRuntimeContextRunlessTests(unittest.TestCase):
         self.assertEqual(payload["runtime_mode"], "runless")
         env_tools = payload.get("env_tools", {})
         self.assertIn("context", env_tools)
-        self.assertIn("memory", env_tools)
+        self.assertNotIn("memory", env_tools)
         self.assertIn("buddybox", env_tools)
         self.assertNotIn("run", env_tools)
         self.assertNotIn("binding", env_tools)

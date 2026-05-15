@@ -129,24 +129,6 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertTrue(created_task.get("state_changed"), msg=created_task)
         self.assertEqual(created_task.get("durability"), "durable")
 
-        created_memory = self._dispatch(
-            instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="pm",
-            tool="memory",
-            action="write",
-            args={
-                "kind": "decision",
-                "title": "Response memory",
-                "summary": "seed",
-                "content": {"body": "stable decision"},
-            },
-        )
-        self.assertTrue(created_memory.get("ok"), msg=created_memory)
-        self.assertTrue(created_memory.get("state_changed"), msg=created_memory)
-        self.assertEqual(created_memory.get("durability"), "durable")
-        memory_id = str(created_memory.get("memory_id"))
-
         written_file = self._dispatch(
             instance_json=instance_json,
             instance_id=instance_id,
@@ -172,7 +154,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "summary": "seed",
                 "content": {"body": "prd"},
                 "source_refs": [
-                    {"type": "memory", "id": memory_id},
+                    {"type": "note", "label": "response-seed"},
                     {"type": "buddybox", "path": "pm/prototypes/response.html"},
                 ],
             },
@@ -225,38 +207,42 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self._assert_rejection_contract(traversal)
         self.assertEqual((traversal.get("error") or {}).get("code"), "E_BUDDYBOX_SCOPE")
 
-        bad_kind = self._dispatch(
+        created_pm_task = self._dispatch(
             instance_json=pm_instance,
             instance_id="inst-pm-reject",
             buddy="pm",
-            tool="memory",
-            action="write",
-            args={"kind": "transcript", "title": "bad", "summary": "bad", "content": {"body": "x"}},
+            tool="task",
+            action="create",
+            args={"task_id": "task-pm-reject", "title": "Owned task", "summary": "seed"},
         )
-        self._assert_rejection_contract(bad_kind)
-        self.assertEqual((bad_kind.get("error") or {}).get("code"), "E_MEMORY_KIND")
-
-        created_pm_memory = self._dispatch(
+        self.assertTrue(created_pm_task.get("ok"), msg=created_pm_task)
+        created_pm_artifact = self._dispatch(
             instance_json=pm_instance,
             instance_id="inst-pm-reject",
             buddy="pm",
-            tool="memory",
-            action="write",
-            args={"kind": "fact", "title": "owned", "summary": "seed", "content": {"body": "pm"}},
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-pm-reject-r1",
+                "task_id": "task-pm-reject",
+                "kind": "spec",
+                "title": "Owned artifact",
+                "summary": "seed",
+                "content": {"body": "pm"},
+            },
         )
-        self.assertTrue(created_pm_memory.get("ok"), msg=created_pm_memory)
-        memory_id = str(created_pm_memory.get("memory_id"))
+        self.assertTrue(created_pm_artifact.get("ok"), msg=created_pm_artifact)
 
         foreign_update = self._dispatch(
             instance_json=design_instance,
             instance_id="inst-design-reject",
             buddy="design",
-            tool="memory",
-            action="update",
-            args={"memory_id": memory_id, "summary": "overwrite"},
+            tool="artifact",
+            action="update_metadata",
+            args={"artifact_id": "art-pm-reject-r1", "summary": "overwrite"},
         )
         self._assert_rejection_contract(foreign_update)
-        self.assertEqual((foreign_update.get("error") or {}).get("code"), "E_MEMORY_BUDDY_SCOPE")
+        self.assertEqual((foreign_update.get("error") or {}).get("code"), "E_ARTIFACT_BUDDY_SCOPE")
 
         bad_target = self._dispatch(
             instance_json=pm_instance,

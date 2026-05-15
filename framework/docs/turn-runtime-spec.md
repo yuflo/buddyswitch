@@ -9,7 +9,6 @@ BuddySwitch runtime is runless.
   - `buddyswitch/objects/tasks/*.json`
   - `buddyswitch/objects/artifacts/*.json`
   - `buddyswitch/objects/handoffs/*.json`
-  - `buddyswitch/objects/memories/*.json`
   - `buddyswitch/content/buddybox/<buddy>/**`
 
-`prepare`/`persist` run lifecycle is retired. If a turn matters later, write artifact/memory/handoff/buddybox objects directly.
+`prepare`/`persist` run lifecycle is retired. If a turn matters later, write artifact/handoff/buddybox objects directly.

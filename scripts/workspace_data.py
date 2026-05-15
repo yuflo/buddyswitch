@@ -41,12 +41,6 @@ def build_handoff_view(handoff: dict[str, Any]) -> dict[str, Any]:
     return _build_handoff_view(handoff)
 
 
-def build_memory_view(memory: dict[str, Any]) -> dict[str, Any]:
-    from runtime_store.projections import build_memory_view as _build_memory_view
-
-    return _build_memory_view(memory)
-
-
 def scan_buddybox_files() -> list[dict[str, Any]]:
     from runtime_store.projections import scan_buddybox_files as _scan_buddybox_files
 

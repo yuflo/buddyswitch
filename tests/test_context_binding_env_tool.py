@@ -99,15 +99,6 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             created_by="dev",
             source_refs=[{"type": "note", "label": "context"}],
         )
-        env_store.create_memory(
-            memory_id="mem-dev-context",
-            buddy="dev",
-            kind="fact",
-            title="Context Memory",
-            summary="memory summary",
-            content={"value": "x"},
-            source_refs=[{"type": "note", "label": "memory"}],
-        )
         buddybox = env_store.BUDDYBOX_CONTENT_DIR / "dev" / "notes"
         buddybox.mkdir(parents=True, exist_ok=True)
         (buddybox / "context.txt").write_text("hello\n", encoding="utf-8")
@@ -129,14 +120,14 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(decision_surface, dict)
         self.assertEqual(((decision_surface.get("binding_state") or {}).get("state")), "runless")
 
-    def test_context_list_sources_includes_memory_and_buddybox(self) -> None:
+    def test_context_list_sources_excludes_memory_and_includes_buddybox(self) -> None:
         instance_json = self._instance_json()
         listed = self._dispatch(instance_json=instance_json, tool="context", action="list_sources", args={})
         self.assertTrue(listed.get("ok"), msg=listed)
         sources = listed.get("sources")
         self.assertIsInstance(sources, dict, msg=listed)
         assert isinstance(sources, dict)
-        self.assertIn("memories", sources)
+        self.assertNotIn("memories", sources)
         self.assertIn("buddybox", sources)
 
     def test_context_get_applies_filters(self) -> None:

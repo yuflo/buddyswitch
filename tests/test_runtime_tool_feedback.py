@@ -65,24 +65,33 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(payload["permission_boundary"], "buddybox.owner_scope")
         self.assertFalse(payload["state_changed"])
 
-    def test_memory_owner_scope_rejection_has_structured_feedback(self) -> None:
-        env_store.create_memory(
-            memory_id="mem-pm-owner-scope",
+    def test_artifact_owner_scope_rejection_has_structured_feedback(self) -> None:
+        env_store.create_task(
+            "task-pm-owner-scope",
+            "Owner task",
             buddy="pm",
-            kind="decision",
+            track_id=None,
+            summary="pm private",
+        )
+        env_store.create_artifact(
+            artifact_id="art-pm-owner-scope-r1",
             title="Owner scope",
+            buddy="pm",
+            kind="spec",
+            task_id="task-pm-owner-scope",
             summary="pm private",
             content={"body": "private"},
-            source_refs=None,
+            created_by="pm",
+            source_refs=[{"type": "note", "label": "seed"}],
         )
         payload = self._dispatch(
             buddy="design",
-            tool="memory",
-            action="update",
-            args={"memory_id": "mem-pm-owner-scope", "summary": "rewrite"},
+            tool="artifact",
+            action="update_metadata",
+            args={"artifact_id": "art-pm-owner-scope-r1", "summary": "rewrite"},
         )
         self._assert_rejection_contract(payload)
-        self.assertEqual(payload["permission_boundary"], "memory.buddy_scope")
+        self.assertEqual(payload["permission_boundary"], "artifact.buddy_scope")
 
     def test_evidence_target_rejection_has_structured_feedback(self) -> None:
         payload = self._dispatch(

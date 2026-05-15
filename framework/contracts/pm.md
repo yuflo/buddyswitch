@@ -8,7 +8,7 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 
 - Keep track lifecycle mutations explicit and PM-owned (`track.create|update|advance|archive`).
 - Write formal PM deliverables via `artifact.create_revision` (`kind="prd"` or other PM kinds).
-- Use `memory.write` for reusable PM decisions that are not formal artifacts.
+- Record reusable PM decisions in `artifact.create_revision` (`kind="pm-decision"`) and keep supporting scratch files in buddybox when needed.
 
 ## Runtime Boundary
 
@@ -20,6 +20,5 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
-- `buddyswitch/objects/memories/<memory-id>.json`
 - `buddyswitch/objects/handoffs/<handoff-id>.json`
 - `buddyswitch/content/buddybox/pm/**`

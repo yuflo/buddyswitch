@@ -13,7 +13,6 @@
     "tasks",
     "artifacts",
     "handoffs",
-    "memories",
     "buddybox_files"
   ],
   "data_sources": [
@@ -22,7 +21,6 @@
     "buddyswitch/objects/tasks/*.json",
     "buddyswitch/objects/artifacts/*.json",
     "buddyswitch/objects/handoffs/*.json",
-    "buddyswitch/objects/memories/*.json",
     "buddyswitch/content/buddybox/**/*"
   ],
   "read_only": true,
@@ -165,7 +163,6 @@
         "track_id",
         "source_task_id",
         "artifact_ids",
-        "memory_ids",
         "buddybox_paths",
         "source_refs",
         "reason",
@@ -184,43 +181,10 @@
         "track_id": "string",
         "source_task_id": "string-or-null",
         "artifact_ids": "string-array",
-        "memory_ids": "string-array",
         "buddybox_paths": "string-array",
         "source_refs": "object-array-or-null",
         "reason": "string",
         "context": "string",
-        "status": "string",
-        "created_at": "string",
-        "updated_at": "string",
-        "object_path": "repo-relative-path",
-        "file_name": "basename",
-        "missing": "boolean"
-      }
-    },
-    "memory": {
-      "key_order": [
-        "id",
-        "buddy",
-        "kind",
-        "title",
-        "summary",
-        "content",
-        "source_refs",
-        "status",
-        "created_at",
-        "updated_at",
-        "object_path",
-        "file_name",
-        "missing"
-      ],
-      "field_types": {
-        "id": "string",
-        "buddy": "string",
-        "kind": "string",
-        "title": "string",
-        "summary": "string",
-        "content": "object",
-        "source_refs": "object-array-or-null",
         "status": "string",
         "created_at": "string",
         "updated_at": "string",

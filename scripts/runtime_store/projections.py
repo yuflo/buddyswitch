@@ -75,7 +75,6 @@ def _workspace_uses_projected_state(workspace_root: Path) -> bool:
         workspace_root / "buddyswitch" / "objects" / "tasks",
         workspace_root / "buddyswitch" / "objects" / "artifacts",
         workspace_root / "buddyswitch" / "objects" / "handoffs",
-        workspace_root / "buddyswitch" / "objects" / "memories",
         workspace_root / "buddyswitch" / "content" / "buddybox",
     )
     return any(path.is_symlink() for path in projected_paths)
@@ -150,10 +149,6 @@ def task_object_path(task_id: str) -> str:
 
 def handoff_object_path(handoff_id: str) -> str:
     return f"buddyswitch/objects/handoffs/{handoff_id}.json"
-
-
-def memory_object_path(memory_id: str) -> str:
-    return f"buddyswitch/objects/memories/{memory_id}.json"
 
 
 def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
@@ -240,7 +235,6 @@ def build_handoff_view(handoff: dict[str, Any]) -> dict[str, Any]:
         "track_id": handoff["track_id"],
         "source_task_id": handoff.get("source_task_id"),
         "artifact_ids": handoff.get("artifact_ids", []),
-        "memory_ids": handoff.get("memory_ids", []),
         "buddybox_paths": handoff.get("buddybox_paths", []),
         "source_refs": handoff.get("source_refs"),
         "reason": handoff.get("reason", ""),
@@ -252,17 +246,6 @@ def build_handoff_view(handoff: dict[str, Any]) -> dict[str, Any]:
         "file_name": Path(object_path).name,
         "missing": False,
     }
-
-
-def build_memory_view(memory: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **memory,
-        "object_path": memory_object_path(memory["id"]),
-        "file_name": Path(memory_object_path(memory["id"])).name,
-        "missing": False,
-    }
-
-
 def scan_buddybox_files() -> list[dict[str, Any]]:
     root = env_store.BUDDYBOX_CONTENT_DIR
     if not root.exists():
@@ -312,7 +295,6 @@ def build_workspace_projection() -> dict[str, Any]:
     standalone_tasks.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
 
     handoffs = [build_handoff_view(handoff) for handoff in env_store.list_handoffs()]
-    memories = [build_memory_view(memory) for memory in env_store.list_memories()]
     buddybox_files = scan_buddybox_files()
 
     return {
@@ -329,7 +311,6 @@ def build_workspace_projection() -> dict[str, Any]:
         "tasks": tasks,
         "artifacts": artifacts,
         "handoffs": handoffs,
-        "memories": memories,
         "buddybox_files": buddybox_files,
     }
 

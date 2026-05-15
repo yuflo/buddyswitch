@@ -352,7 +352,6 @@ buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
 buddyswitch/objects/handoffs
-buddyswitch/objects/memories
 buddyswitch/content/buddybox
 EOF
 }
@@ -363,7 +362,6 @@ buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
 buddyswitch/objects/handoffs
-buddyswitch/objects/memories
 buddyswitch/content/buddybox
 EOF
 }
@@ -668,7 +666,6 @@ buddyswitch/objects/tracks/**
 buddyswitch/objects/tasks/**
 buddyswitch/objects/artifacts/**
 buddyswitch/objects/handoffs/**
-buddyswitch/objects/memories/**
 buddyswitch/content/buddybox/**
 .agents/skills/**
 EOF
@@ -693,7 +690,6 @@ buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
 buddyswitch/objects/handoffs
-buddyswitch/objects/memories
 buddyswitch/content/buddybox
 EOF
 }

@@ -9,7 +9,6 @@ import env_store
 
 _ALLOWED_TYPES = {
     "artifact",
-    "memory",
     "track",
     "task",
     "handoff",
@@ -56,7 +55,7 @@ def normalize_source_refs(
             raise ValueError(f"unsupported source_ref type: {ref_type}")
 
         item: dict[str, Any] = {"type": ref_type}
-        if ref_type in {"artifact", "memory", "track", "task", "handoff"}:
+        if ref_type in {"artifact", "track", "task", "handoff"}:
             item["id"] = env_store.require_id(raw.get("id"), f"source_refs.{ref_type}.id")
         elif ref_type == "buddybox":
             item["path"] = validate_buddybox_ref_path(raw.get("path"))
@@ -82,24 +81,15 @@ def normalize_source_refs(
     if isinstance(read_claim, str) and read_claim.strip() == "summarized-full-content":
         for row in normalized:
             ref_type = row["type"]
-            if ref_type in {"artifact", "memory"}:
+            if ref_type == "artifact":
                 ref_id = row["id"]
-                if ref_type == "artifact":
-                    artifact = env_store.get_artifact(ref_id)
-                    if artifact is None or artifact.get("buddy") != active_buddy:
-                        scope_error = {
-                            "permission_boundary": "source_refs.read_scope",
-                            "why_blocked": f"cannot claim full summary of unreadable artifact '{ref_id}'",
-                        }
-                        break
-                else:
-                    memory = env_store.get_memory(ref_id)
-                    if memory is None or memory.get("buddy") != active_buddy:
-                        scope_error = {
-                            "permission_boundary": "source_refs.read_scope",
-                            "why_blocked": f"cannot claim full summary of unreadable memory '{ref_id}'",
-                        }
-                        break
+                artifact = env_store.get_artifact(ref_id)
+                if artifact is None or artifact.get("buddy") != active_buddy:
+                    scope_error = {
+                        "permission_boundary": "source_refs.read_scope",
+                        "why_blocked": f"cannot claim full summary of unreadable artifact '{ref_id}'",
+                    }
+                    break
 
     return normalized, scope_error
 

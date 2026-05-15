@@ -69,7 +69,7 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(payload["ok"], msg=payload)
         sources = payload["sources"]
-        self.assertIn("memories", sources)
+        self.assertNotIn("memories", sources)
         self.assertIn("buddybox", sources)
         self.assertNotIn("runs", sources)
 

@@ -236,7 +236,7 @@ def read_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
         read_scope="active scope buddybox file content",
         allowed_next_actions=[
             "Use buddybox.write to replace content.",
-            "Reference this path in artifact or memory source_refs.",
+            "Reference this path in artifact or handoff source_refs.",
         ],
         extra=payload,
     )
@@ -305,7 +305,7 @@ def write_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSe
         updated_ids=[normalized] if existed else None,
         allowed_next_actions=[
             "Use buddybox.read to verify content.",
-            "Attach this path via source_refs in artifact/memory/handoff writes.",
+            "Attach this path via source_refs in artifact/handoff writes.",
         ],
         extra=payload,
     )

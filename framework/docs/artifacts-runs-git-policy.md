@@ -27,7 +27,6 @@ Object source of truth:
 - tasks: `buddyswitch/objects/tasks/*.json`
 - artifacts with structured content: `buddyswitch/objects/artifacts/*.json`
 - handoff objects: `buddyswitch/objects/handoffs/*.json`
-- memory objects: `buddyswitch/objects/memories/*.json`
 - buddy-owned files: `buddyswitch/content/buddybox/<buddy>/**`
 
 ### `buddyswitch/content/buddybox/<buddy>/` (intentional durable files)
@@ -71,4 +70,4 @@ Ask this before writing output:
 Decision:
 - If 1 or 2 is yes, write to an artifact object under `buddyswitch/objects/artifacts/`.
 - If 3 is yes, write to `buddyswitch/content/buddybox/`.
-- If content should become BuddySwitch state, write artifact/memory/handoff objects or intentional buddybox files explicitly.
+- If content should become BuddySwitch state, write artifact/handoff objects or intentional buddybox files explicitly.

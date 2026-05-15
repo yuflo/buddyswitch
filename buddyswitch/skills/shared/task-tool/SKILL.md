@@ -6,7 +6,7 @@ description: Use when you need to create, list, read, update, or archive explici
 # task-tool
 
 ## Purpose
-- Manage explicit task ids used by artifacts, handoffs, and memories.
+- Manage explicit task ids used by artifacts and handoffs.
 - Keep task writes within active-buddy ownership boundaries.
 
 ## Runtime Contract

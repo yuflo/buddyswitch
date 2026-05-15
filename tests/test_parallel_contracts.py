@@ -14,7 +14,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import workspace_data  # noqa: E402
-from env_store import create_artifact, create_handoff, create_memory, create_task, create_track  # noqa: E402
+from env_store import create_artifact, create_handoff, create_task, create_track  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
@@ -121,15 +121,6 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
             created_by="dev",
             source_refs=[{"type": "note", "label": "contract freeze"}],
         )
-        memory = create_memory(
-            memory_id="mem-dev-contract-freeze",
-            buddy="dev",
-            kind="decision",
-            title="Contract freeze decision",
-            summary="Keep one runless path.",
-            content={"body": "No run/binding compatibility path."},
-            source_refs=[{"type": "artifact", "id": artifact["id"]}],
-        )
         create_handoff(
             handoff_id="handoff-dev-test-contract-freeze",
             track_id=track["id"],
@@ -137,7 +128,6 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
             target_buddy="test",
             source_task_id=tracked_task["id"],
             artifact_ids=[artifact["id"]],
-            memory_ids=[memory["id"]],
             buddybox_paths=["dev/contracts/freeze.md"],
             source_refs=[{"type": "artifact", "id": artifact["id"]}],
             reason="Need test validation.",
@@ -153,6 +143,7 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
         self.assertEqual(contract["contract_id"], "workspace-projection")
         self.assertEqual(list(payload.keys()), contract["top_level_key_order"])
         self.assertNotIn("run_audits", payload)
+        self.assertNotIn("memories", payload)
 
         _assert_type_case(self, payload["manifest_path"], contract["field_constraints"]["manifest_path"]["type"])
         _assert_type_case(self, payload["objects_root"], contract["field_constraints"]["objects_root"]["type"])
@@ -166,7 +157,6 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
         self.assertGreaterEqual(len(payload["tasks"]), 1)
         self.assertGreaterEqual(len(payload["artifacts"]), 1)
         self.assertGreaterEqual(len(payload["handoffs"]), 1)
-        self.assertGreaterEqual(len(payload["memories"]), 1)
         self.assertGreaterEqual(len(payload["buddybox_files"]), 1)
 
         _assert_shape(self, payload["buddies"][0], contract["view_shapes"]["buddy"])
@@ -174,7 +164,6 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
         _assert_shape(self, payload["tasks"][0], contract["view_shapes"]["task"])
         _assert_shape(self, payload["artifacts"][0], contract["view_shapes"]["artifact"])
         _assert_shape(self, payload["handoffs"][0], contract["view_shapes"]["handoff"])
-        _assert_shape(self, payload["memories"][0], contract["view_shapes"]["memory"])
         _assert_shape(self, payload["buddybox_files"][0], contract["view_shapes"]["buddybox_file"])
 
         task_rows = {task["id"]: task for task in payload["tasks"]}

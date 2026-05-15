@@ -20,7 +20,7 @@ class ContextServiceContext(TypedDict):
     manifest: dict[str, Any]
 
 
-_GET_FIELDS = {"track_id", "task_id", "memory_kind", "limit"}
+_GET_FIELDS = {"track_id", "task_id", "limit"}
 _SUMMARIZE_FIELDS = {"track_id", "task_id", "limit"}
 _LIST_SOURCES_FIELDS: set[str] = set()
 
@@ -52,19 +52,6 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str
     if unknown:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")
     return None
-
-
-def _memory_summary(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": row.get("id"),
-        "buddy": row.get("buddy"),
-        "kind": row.get("kind"),
-        "title": row.get("title"),
-        "summary": row.get("summary"),
-        "status": row.get("status"),
-        "source_refs": row.get("source_refs"),
-        "updated_at": row.get("updated_at"),
-    }
 
 
 def _buddybox_files(active_buddy: str, *, limit: int = 20) -> list[dict[str, Any]]:
@@ -102,7 +89,6 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any]) -> dic
     tasks = env_store.list_tasks()
     artifacts = env_store.list_artifacts()
     handoffs = env_store.list_handoffs()
-    memories = env_store.list_memories()
 
     track_filter = args.get("track_id")
     if isinstance(track_filter, str) and track_filter.strip():
@@ -111,10 +97,6 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any]) -> dic
     task_filter = args.get("task_id")
     if isinstance(task_filter, str) and task_filter.strip():
         tasks = [row for row in tasks if row.get("id") == task_filter.strip()]
-
-    memory_kind = args.get("memory_kind")
-    if isinstance(memory_kind, str) and memory_kind.strip():
-        memories = [row for row in memories if row.get("kind") == memory_kind.strip()]
 
     limit = args.get("limit")
     limit_value = limit if isinstance(limit, int) and limit > 0 else 20
@@ -134,12 +116,6 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any]) -> dic
         row
         for row in handoffs
         if row.get("source_buddy") == active_buddy or row.get("target_buddy") == active_buddy or active_buddy == "pm"
-    ][:limit_value]
-
-    visible_memories = [
-        _memory_summary(row)
-        for row in memories
-        if row.get("buddy") == active_buddy or active_buddy == "pm"
     ][:limit_value]
 
     buddybox_files = _buddybox_files(active_buddy, limit=limit_value)
@@ -173,7 +149,6 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any]) -> dic
         "tasks": visible_tasks,
         "artifact_summaries": visible_artifacts,
         "handoff_summaries": visible_handoffs,
-        "memory_summaries": visible_memories,
         "buddybox_files": buddybox_files,
         "candidate_tracks": candidate_tracks,
         "decision_surface": {
@@ -184,7 +159,6 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any]) -> dic
                 "has_tasks": bool(visible_tasks),
                 "has_artifacts": bool(visible_artifacts),
                 "has_handoffs": bool(visible_handoffs),
-                "has_memories": bool(visible_memories),
                 "has_buddybox_files": bool(buddybox_files),
             },
         },
@@ -193,7 +167,6 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any]) -> dic
             "tasks": len(visible_tasks),
             "artifacts": len(visible_artifacts),
             "handoffs": len(visible_handoffs),
-            "memories": len(visible_memories),
             "buddybox_files": len(buddybox_files),
         },
     }
@@ -221,11 +194,6 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "scope": "cross-buddy collaboration state",
             "source_of_truth": "buddyswitch/objects/handoffs/*.json",
         },
-        "memories": {
-            "description": "Durable reusable memory summaries.",
-            "scope": "reusable knowledge state",
-            "source_of_truth": "buddyswitch/objects/memories/*.json",
-        },
         "buddybox": {
             "description": "Durable buddy-owned file summaries.",
             "scope": "durable file output state",
@@ -251,7 +219,7 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
         durability="none",
         read_scope="read-only product-state orientation",
         allowed_next_actions=[
-            "Use task/track/artifact/handoff/memory/buddybox tools with explicit ids.",
+            "Use task/track/artifact/handoff/buddybox tools with explicit ids.",
             "Use context.summarize for compact orientation.",
         ],
         extra=sections,
@@ -269,7 +237,6 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
     summary = {
         "current_context_summary": sections["current_context_summary"],
         "candidate_tracks": sections["candidate_tracks"],
-        "memory_summaries": sections["memory_summaries"],
         "buddybox_files": sections["buddybox_files"],
         "decision_surface": sections["decision_surface"],
     }

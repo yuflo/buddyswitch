@@ -11,7 +11,6 @@ from env.services import buddybox as buddybox_service
 from env.services import context as context_service
 from env.services import evidence as evidence_service
 from env.services import handoffs as handoff_service
-from env.services import memories as memory_service
 from env.services import search as search_service
 from env.services import tasks as task_service
 from env.services import tracks as track_service
@@ -47,13 +46,6 @@ HANDLERS_BY_TOOL = {
         "list": handoff_service.list_handoffs_for_active_buddy,
         "validate": handoff_service.validate_handoff,
         "create": handoff_service.create_handoff_for_active_buddy,
-    },
-    "memory": {
-        "list": memory_service.list_memories_for_active_buddy,
-        "get": memory_service.get_memory_for_active_buddy,
-        "write": memory_service.write_memory_for_active_buddy,
-        "update": memory_service.update_memory_for_active_buddy,
-        "archive": memory_service.archive_memory_for_active_buddy,
     },
     "buddybox": {
         "list": buddybox_service.list_buddybox_for_active_buddy,

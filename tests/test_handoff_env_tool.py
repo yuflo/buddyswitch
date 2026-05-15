@@ -99,15 +99,6 @@ class HandoffEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             created_by="design",
             source_refs=[{"type": "note", "label": "seed"}],
         )
-        env_store.create_memory(
-            memory_id="mem-design-handoff",
-            buddy="design",
-            kind="decision",
-            title="Design Decision",
-            summary="memory",
-            content={"body": "m1"},
-            source_refs=[{"type": "note", "label": "memory"}],
-        )
         buddybox = env_store.BUDDYBOX_CONTENT_DIR / "design" / "handoff"
         buddybox.mkdir(parents=True, exist_ok=True)
         (buddybox / "handoff.txt").write_text("hello\n", encoding="utf-8")
@@ -120,7 +111,6 @@ class HandoffEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "source_task_id": "task-design-handoff",
             "target_buddy": "dev",
             "artifact_ids": ["art-task-design-handoff-r1"],
-            "memory_ids": ["mem-design-handoff"],
             "buddybox_paths": ["design/handoff/handoff.txt"],
             "reason": "handoff to dev",
             "context": "implement UI",
@@ -161,7 +151,6 @@ class HandoffEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "source_task_id": "task-design-handoff",
             "target_buddy": "dev",
             "artifact_ids": ["art-task-design-handoff-r1"],
-            "memory_ids": ["mem-design-handoff"],
             "buddybox_paths": ["design/handoff/handoff.txt"],
             "reason": "handoff to dev",
             "context": "implement UI",
@@ -226,6 +215,28 @@ class HandoffEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_HANDOFF_SCOPE")
+
+    def test_handoff_validate_rejects_retired_memory_ids_field(self) -> None:
+        self._seed_source_objects()
+        design_instance = self._instance_json(instance_id="inst-design-handoff", buddy="design")
+        rejected = self._dispatch(
+            instance_json=design_instance,
+            instance_id="inst-design-handoff",
+            buddy="design",
+            tool="handoff",
+            action="validate",
+            args={
+                "track_id": "track-handoff-runless",
+                "source_task_id": "task-design-handoff",
+                "target_buddy": "dev",
+                "artifact_ids": ["art-task-design-handoff-r1"],
+                "memory_ids": ["mem-old"],
+                "reason": "handoff to dev",
+                "context": "implement UI",
+            },
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_HANDOFF_PAYLOAD")
 
 
 if __name__ == "__main__":

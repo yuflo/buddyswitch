@@ -8,7 +8,7 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 
 - Start discovery from `search open-browser` and continue in `chrome-devtools-cockpit`.
 - Write market deliverables via `artifact.create_revision` with explicit `task_id`.
-- Use target-scoped evidence (`artifact` or `memory`) when market quality gates require it.
+- Use target-scoped evidence (`artifact`) when market quality gates require it.
 
 ## Runtime Boundary
 
@@ -21,6 +21,5 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
-- `buddyswitch/objects/memories/<memory-id>.json`
 - `buddyswitch/objects/handoffs/<handoff-id>.json`
 - `buddyswitch/content/buddybox/market/**`

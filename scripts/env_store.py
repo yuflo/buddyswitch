@@ -25,7 +25,6 @@ TRACKS_DIR = OBJECTS_ROOT / "tracks"
 TASKS_DIR = OBJECTS_ROOT / "tasks"
 ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
 HANDOFF_OBJECTS_DIR = OBJECTS_ROOT / "handoffs"
-MEMORY_OBJECTS_DIR = OBJECTS_ROOT / "memories"
 CONTENT_ROOT = STATE_ROOT / "buddyswitch" / "content"
 BUDDYBOX_CONTENT_DIR = CONTENT_ROOT / "buddybox"
 
@@ -34,8 +33,6 @@ RUNTIME_WORKSPACE_AGENTS_HEADER = "# BuddySwitch Runtime Workspace"
 VALID_TRACK_STATUS = ("active", "blocked", "done", "archived")
 VALID_TASK_STATUS = ("active", "blocked", "done", "archived")
 VALID_HANDOFF_STATUS = ("active", "superseded", "archived")
-VALID_MEMORY_STATUS = ("active", "archived")
-VALID_MEMORY_KINDS = ("decision", "fact", "preference", "constraint", "lesson", "context-summary")
 
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _LEGACY_TASK_RUN_IDS = "run" + "_ids"
@@ -85,7 +82,6 @@ def ensure_runtime_dirs() -> None:
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
     HANDOFF_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
-    MEMORY_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
     BUDDYBOX_CONTENT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -114,10 +110,6 @@ def artifact_file(artifact_id: str) -> Path:
 
 def handoff_file(handoff_id: str) -> Path:
     return HANDOFF_OBJECTS_DIR / f"{require_id(handoff_id, 'handoff id')}.json"
-
-
-def memory_file(memory_id: str) -> Path:
-    return MEMORY_OBJECTS_DIR / f"{require_id(memory_id, 'memory id')}.json"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -167,7 +159,7 @@ def _normalize_source_refs(raw_refs: Any) -> list[dict[str, Any]] | None:
         ref_type = ref_type.strip()
         row: dict[str, Any] = {"type": ref_type}
 
-        if ref_type in {"artifact", "memory", "track", "task", "handoff"}:
+        if ref_type in {"artifact", "track", "task", "handoff"}:
             row["id"] = require_id(raw.get("id"), f"source_ref.{ref_type}.id")
         elif ref_type == "buddybox":
             row["path"] = _validate_buddybox_ref_path(raw.get("path"))
@@ -381,7 +373,6 @@ def validate_handoff_record(record: dict[str, Any]) -> dict[str, Any]:
     target_buddy = record.get("target_buddy")
     source_task_id = record.get("source_task_id")
     artifact_ids = record.get("artifact_ids", [])
-    memory_ids = record.get("memory_ids", [])
     buddybox_paths = record.get("buddybox_paths", [])
     source_refs = _normalize_source_refs(record.get("source_refs"))
     reason = record.get("reason")
@@ -404,11 +395,6 @@ def validate_handoff_record(record: dict[str, Any]) -> dict[str, Any]:
     for artifact_id in artifact_ids:
         require_id(artifact_id, "handoff.artifact_ids[]")
 
-    if not isinstance(memory_ids, list) or any(not isinstance(item, str) or not item.strip() for item in memory_ids):
-        raise ValueError("handoff.memory_ids must be a list of non-empty strings")
-    for memory_id in memory_ids:
-        require_id(memory_id, "handoff.memory_ids[]")
-
     if not isinstance(buddybox_paths, list) or any(not isinstance(item, str) or not item.strip() for item in buddybox_paths):
         raise ValueError("handoff.buddybox_paths must be a list of non-empty strings")
     normalized_buddybox_paths = [_validate_buddybox_ref_path(path) for path in buddybox_paths]
@@ -429,54 +415,10 @@ def validate_handoff_record(record: dict[str, Any]) -> dict[str, Any]:
         "target_buddy": target_buddy.strip(),
         "source_task_id": source_task_id,
         "artifact_ids": list(dict.fromkeys(artifact_ids)),
-        "memory_ids": list(dict.fromkeys(memory_ids)),
         "buddybox_paths": list(dict.fromkeys(normalized_buddybox_paths)),
         "source_refs": source_refs,
         "reason": reason.strip(),
         "context": context.strip(),
-        "status": status,
-        "created_at": created_at,
-        "updated_at": updated_at,
-    }
-
-
-def validate_memory(memory: dict[str, Any]) -> dict[str, Any]:
-    memory_id = require_id(memory.get("id", ""), "memory.id")
-    buddy = memory.get("buddy")
-    kind = memory.get("kind")
-    title = memory.get("title")
-    summary = memory.get("summary")
-    content = memory.get("content")
-    source_refs = _normalize_source_refs(memory.get("source_refs"))
-    status = memory.get("status")
-    created_at = memory.get("created_at")
-    updated_at = memory.get("updated_at")
-
-    if not isinstance(buddy, str) or not buddy.strip():
-        raise ValueError("memory.buddy must be a non-empty string")
-    if kind not in VALID_MEMORY_KINDS:
-        raise ValueError(f"memory.kind must be one of {', '.join(VALID_MEMORY_KINDS)}")
-    if not isinstance(title, str) or not title.strip():
-        raise ValueError("memory.title must be a non-empty string")
-    if not isinstance(summary, str) or not summary.strip():
-        raise ValueError("memory.summary must be a non-empty string")
-    if not isinstance(content, dict):
-        raise ValueError("memory.content must be an object")
-    if status not in VALID_MEMORY_STATUS:
-        raise ValueError(f"memory.status must be one of {', '.join(VALID_MEMORY_STATUS)}")
-    if not isinstance(created_at, str) or not created_at:
-        raise ValueError("memory.created_at must be a non-empty string")
-    if not isinstance(updated_at, str) or not updated_at:
-        raise ValueError("memory.updated_at must be a non-empty string")
-
-    return {
-        "id": memory_id,
-        "buddy": buddy.strip(),
-        "kind": kind,
-        "title": title.strip(),
-        "summary": summary.strip(),
-        "content": content,
-        "source_refs": source_refs,
         "status": status,
         "created_at": created_at,
         "updated_at": updated_at,
@@ -530,14 +472,6 @@ def list_handoffs() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in HANDOFF_OBJECTS_DIR.glob("*.json"):
         rows.append(validate_handoff_record(_read_json(path)))
-    rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
-    return rows
-
-
-def list_memories() -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for path in MEMORY_OBJECTS_DIR.glob("*.json"):
-        rows.append(validate_memory(_read_json(path)))
     rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
     return rows
 
@@ -635,13 +569,6 @@ def get_handoff(handoff_id: str) -> dict[str, Any] | None:
     return validate_handoff_record(_read_json(path))
 
 
-def get_memory(memory_id: str) -> dict[str, Any] | None:
-    path = memory_file(memory_id)
-    if not path.exists():
-        return None
-    return validate_memory(_read_json(path))
-
-
 def save_track(track: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_track(track)
     ensure_runtime_dirs()
@@ -667,13 +594,6 @@ def save_handoff(record: dict[str, Any]) -> dict[str, Any]:
     ensure_runtime_dirs()
     normalized = validate_handoff_record(record)
     _write_json(handoff_file(normalized["id"]), normalized)
-    return normalized
-
-
-def save_memory(memory: dict[str, Any]) -> dict[str, Any]:
-    ensure_runtime_dirs()
-    normalized = validate_memory(memory)
-    _write_json(memory_file(normalized["id"]), normalized)
     return normalized
 
 
@@ -1024,7 +944,6 @@ def create_handoff(
     target_buddy: str,
     source_task_id: str | None,
     artifact_ids: list[str],
-    memory_ids: list[str],
     buddybox_paths: list[str],
     source_refs: list[dict[str, Any]] | None,
     reason: str,
@@ -1041,7 +960,6 @@ def create_handoff(
         "target_buddy": target_buddy,
         "source_task_id": source_task_id,
         "artifact_ids": artifact_ids,
-        "memory_ids": memory_ids,
         "buddybox_paths": buddybox_paths,
         "source_refs": source_refs,
         "reason": reason,
@@ -1051,51 +969,6 @@ def create_handoff(
         "updated_at": now_iso(),
     }
     return save_handoff(payload)
-
-
-def create_memory(
-    *,
-    memory_id: str,
-    buddy: str,
-    kind: str,
-    title: str,
-    summary: str,
-    content: dict[str, Any],
-    source_refs: list[dict[str, Any]] | None,
-    status: str = "active",
-) -> dict[str, Any]:
-    require_id(memory_id, "memory id")
-    if get_memory(memory_id) is not None:
-        raise ValueError(f"memory already exists: {memory_id}")
-    timestamp = now_iso()
-    payload = {
-        "id": memory_id,
-        "buddy": buddy,
-        "kind": kind,
-        "title": title,
-        "summary": summary,
-        "content": content,
-        "source_refs": source_refs,
-        "status": status,
-        "created_at": timestamp,
-        "updated_at": timestamp,
-    }
-    return save_memory(payload)
-
-
-def update_memory(memory_id: str, patch: dict[str, Any]) -> dict[str, Any]:
-    memory = get_memory(memory_id)
-    if memory is None:
-        raise ValueError(f"memory not found: {memory_id}")
-
-    allowed = {"kind", "title", "summary", "content", "source_refs", "status"}
-    for key, value in patch.items():
-        if key not in allowed:
-            raise ValueError(f"unsupported memory field: {key}")
-        memory[key] = value
-
-    memory["updated_at"] = now_iso()
-    return save_memory(memory)
 
 
 def delete_artifact(artifact_id: str) -> dict[str, Any]:
