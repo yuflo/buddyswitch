@@ -31,11 +31,11 @@ Market evidence is target-scoped (artifact), not run-scoped.
 
 ## Source Of Truth
 
-Canonical durable outputs remain product objects and buddybox files:
+Canonical product outputs remain product objects. Buddybox remains private local workspace state:
 
 - `buddyswitch/objects/tasks/*.json`
 - `buddyswitch/objects/artifacts/*.json`
 - `buddyswitch/objects/handoffs/*.json`
-- `buddyswitch/content/buddybox/<buddy>/**`
+- `buddyswitch/local/buddybox/<active-buddy>/**` (private local workspace per active buddy)
 
 Browser tabs/cookies/session traces are execution-time state only.

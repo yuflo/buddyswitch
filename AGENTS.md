@@ -85,8 +85,8 @@ Runtime state is projected under:
 - `buddyswitch/objects/tracks/*.json`
 - `buddyswitch/objects/tasks/*.json`
 - `buddyswitch/objects/artifacts/*.json`
-- `buddyswitch/content/buddybox/*.json`
-- `buddyswitch/content/buddybox/`
+- `buddyswitch/objects/handoffs/*.json`
+- `buddyswitch/local/buddybox/<active-buddy>/**`
 
 ## Done
 

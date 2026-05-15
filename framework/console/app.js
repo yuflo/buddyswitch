@@ -4,14 +4,12 @@ const emptyWorkspace = {
   generated_at: null,
   manifest_path: null,
   objects_root: null,
-  content_root: null,
   buddies: [],
   tracks: [],
   standalone_tasks: [],
   tasks: [],
   artifacts: [],
   handoffs: [],
-  buddybox_files: [],
 };
 
 const generatedAt = document.getElementById("generatedAt");
@@ -29,7 +27,6 @@ function normalizeWorkspaceData(rawData) {
     tasks: Array.isArray(rawData?.tasks) ? rawData.tasks : [],
     artifacts: Array.isArray(rawData?.artifacts) ? rawData.artifacts : [],
     handoffs: Array.isArray(rawData?.handoffs) ? rawData.handoffs : [],
-    buddybox_files: Array.isArray(rawData?.buddybox_files) ? rawData.buddybox_files : [],
   };
 }
 

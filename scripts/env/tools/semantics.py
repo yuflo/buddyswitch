@@ -51,7 +51,7 @@ _CAPABILITIES: dict[str, dict[str, Any]] = {
         "title": "Handoff Records",
         "plain_description": "Create explicit cross-buddy handoff objects referencing product objects.",
         "use_when": [
-            "You need to transfer work context across buddies with artifact/buddybox/source_refs.",
+            "You need to transfer work context across buddies with explicit readable artifact/object references.",
             "You need structured validation before writing a handoff record.",
         ],
         "do_not_use_when": [
@@ -62,22 +62,25 @@ _CAPABILITIES: dict[str, dict[str, Any]] = {
     },
     "buddybox": {
         "title": "Buddybox Files",
-        "plain_description": "Manage intentional durable buddy-owned files under buddybox roots.",
+        "plain_description": (
+            "Describe and operate the active buddy private local workspace; it is not collaborative, "
+            "not visible to other buddies, and not a product object."
+        ),
         "use_when": [
-            "You need durable file outputs such as prototypes, exports, screenshots, or reports.",
-            "You need to reference durable files from artifacts or handoffs.",
+            "You need active buddy private local working files and summaries.",
+            "You may later use artifact when content must become product-readable across buddies.",
         ],
         "do_not_use_when": [
-            "You need to edit source code under projects/app; use normal project editing workflow.",
-            "You need disposable scratch data that should not become durable state.",
+            "You need cross-buddy readable payload transport; buddybox paths do not grant read authority.",
+            "You need to mutate product objects directly; use task/track/artifact/handoff tools.",
         ],
-        "capability_boundary": "Writes/deletes are restricted to active buddy root with path validation.",
+        "capability_boundary": "Only active buddy private local root paths are allowed.",
     },
     "context": {
         "title": "Context Discovery",
         "plain_description": "Read-only orientation payload for runless product state and tool catalog.",
         "use_when": [
-            "You need a snapshot of readable tracks/tasks/artifacts/handoffs/buddybox files.",
+            "You need a snapshot of readable tracks/tasks/artifacts/handoffs and buddybox_desc.",
             "You need candidate ids for subsequent explicit tool writes.",
         ],
         "do_not_use_when": [
@@ -183,7 +186,7 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
         side_effects=_side_effects(
             mutates="runtime_objects",
             writes=["buddyswitch/objects/tasks/*.json", "buddyswitch/objects/tracks/*.json (optional relation update)"],
-            does_not_write=["buddyswitch/content/buddybox", "buddyswitch/content/buddybox", "instance current binding"],
+            does_not_write=["buddyswitch/local/buddybox", "buddyswitch/local/buddybox", "instance current binding"],
             durability="durable",
             idempotency="non-idempotent when task_id omitted",
         ),
@@ -221,7 +224,7 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             side_effects=_side_effects(
                 mutates=mut,
                 writes=[] if mut == "none" else ["buddyswitch/objects/tasks/*.json", "buddyswitch/objects/tracks/*.json (optional relation update)"],
-                does_not_write=["buddyswitch/content/buddybox", "instance current binding"],
+                does_not_write=["buddyswitch/local/buddybox", "instance current binding"],
                 durability="none" if mut == "none" else "durable",
                 idempotency="idempotent for reads" if mut == "none" else "conditionally idempotent",
             ),
@@ -254,7 +257,7 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             side_effects=_side_effects(
                 mutates=mut,
                 writes=[] if mut == "none" else ["buddyswitch/objects/tracks/*.json", "buddyswitch/objects/tasks/*.json"],
-                does_not_write=["instance current binding", "buddyswitch/content/buddybox", "buddyswitch/content/buddybox"],
+                does_not_write=["instance current binding", "buddyswitch/local/buddybox", "buddyswitch/local/buddybox"],
                 durability="none" if mut == "none" else "durable",
                 idempotency="idempotent for reads" if mut == "none" else "conditionally idempotent",
             ),
@@ -315,7 +318,7 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             side_effects=_side_effects(
                 mutates=mut,
                 writes=[] if mut == "none" else ["buddyswitch/objects/artifacts/*.json", "buddyswitch/objects/tasks/*.json"],
-                does_not_write=["buddyswitch/content/buddybox", "instance current binding"],
+                does_not_write=["buddyswitch/local/buddybox", "instance current binding"],
                 durability="none" if mut == "none" else "durable",
                 idempotency="idempotent for reads" if mut == "none" else "conditionally idempotent",
             ),
@@ -332,7 +335,6 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             "source_task_id": "Optional source task id.",
             "target_buddy": "Required target buddy id.",
             "artifact_ids": "Optional artifact id list.",
-            "buddybox_paths": "Optional buddybox path list.",
             "source_refs": "Optional source_refs list.",
             "reason": "Required handoff reason.",
             "context": "Required handoff context.",
@@ -345,7 +347,6 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             "source_task_id": "Optional source task id.",
             "target_buddy": "Required target buddy id.",
             "artifact_ids": "Optional artifact id list.",
-            "buddybox_paths": "Optional buddybox path list.",
             "source_refs": "Optional source_refs list.",
             "reason": "Required handoff reason.",
             "context": "Required handoff context.",
@@ -366,7 +367,7 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             side_effects=_side_effects(
                 mutates=mut,
                 writes=[] if mut == "none" else ["buddyswitch/objects/handoffs/*.json"],
-                does_not_write=["buddyswitch/content/buddybox", "instance current binding"],
+                does_not_write=["buddyswitch/local/buddybox", "instance current binding"],
                 durability="none" if mut == "none" else "durable",
                 idempotency="idempotent for reads/validate" if mut == "none" else "non-idempotent unless handoff_id reused",
             ),
@@ -377,30 +378,88 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
 
     # buddybox actions
     buddybox_rows = {
-        "list": ("none", {"path": "Optional relative path prefix.", "recursive": "Optional recursion flag.", "limit": "Optional positive limit."}),
-        "read": ("none", {"path": "Required buddybox path.", "encoding": "Optional output encoding preference: auto, utf-8, or base64."}),
-        "write": ("runtime_files", {"path": "Required write path under active buddy root.", "content": "Optional UTF-8 text content.", "content_base64": "Optional base64 binary content.", "content_type": "Optional mime hint."}),
-        "delete": ("runtime_files", {"path": "Required delete path under active buddy root."}),
+        "desc": (
+            "none",
+            {},
+            "Return active buddy private local workspace semantics and compact state summary only.",
+            "desc returned semantic description and compact local summary only.",
+        ),
+        "list": (
+            "none",
+            {
+                "path": "Optional active buddy local path prefix under <active_buddy>/.",
+                "recursive": "Whether to include nested files under the active buddy local root.",
+                "limit": "Optional positive maximum number of summary rows.",
+            },
+            "List active-buddy private local file summaries only (no file content).",
+            "list returned summaries only; no file content read and no product state changed.",
+        ),
+        "read": (
+            "none",
+            {
+                "path": "Required active buddy private local file path.",
+                "encoding": "Optional output encoding: auto, utf-8, or base64.",
+            },
+            "Read one active-buddy private local file without mutating product/collaboration state.",
+            "read returned one active buddy private local file and no product/collaboration object changed.",
+        ),
+        "write": (
+            "runtime_files",
+            {
+                "path": "Required active buddy private local write path under <active_buddy>/.",
+                "content": "Optional UTF-8 text body.",
+                "content_base64": "Optional base64 binary body.",
+                "content_type": "Optional MIME hint.",
+            },
+            "Create or replace one active-buddy private local file.",
+            "write created or overwrote one active buddy private local file and did not create product/collaboration objects.",
+        ),
+        "delete": (
+            "runtime_files",
+            {"path": "Required active buddy private local file path under <active_buddy>/."},
+            "Delete one active-buddy private local file if present.",
+            "delete removed one active buddy private local file or confirmed it was absent; no product/collaboration object changed.",
+        ),
     }
-    for action, (mut, fields) in buddybox_rows.items():
+    for action, (mut, fields, plain_description, success_means) in buddybox_rows.items():
         add(
             "buddybox",
             action,
             title=f"Buddybox {action.replace('_', ' ').title()}",
-            plain_description=f"Execute buddybox.{action} inside active buddy durable file scope.",
-            use_when=[f"You need buddybox.{action} behavior for durable file outputs."],
-            do_not_use_when=["You need source checkout edits under projects/app.", "You need non-durable temporary scratch storage."],
+            plain_description=plain_description,
+            use_when=[
+                f"You need buddybox.{action} within active buddy private local workspace.",
+                "Use artifact for product-readable deliverables when host decides cross-buddy readability is required.",
+            ],
+            do_not_use_when=[
+                "You need cross-buddy readable payload authority from a buddybox path.",
+                "You need to mutate product objects directly.",
+            ],
             inputs_explained=fields,
             side_effects=_side_effects(
                 mutates=mut,
-                writes=[] if mut == "none" else ["buddyswitch/content/buddybox/<buddy>/**"],
-                does_not_write=["buddyswitch/content/buddybox", "instance current binding"],
+                writes=[] if mut == "none" else ["buddyswitch/local/buddybox/<active_buddy>/**"],
+                does_not_write=[
+                    "buddyswitch/objects/tracks/*.json",
+                    "buddyswitch/objects/tasks/*.json",
+                    "buddyswitch/objects/artifacts/*.json",
+                    "buddyswitch/objects/handoffs/*.json",
+                    "instance current binding",
+                ],
                 durability="none" if mut == "none" else "durable",
-                idempotency="idempotent for list/read" if mut == "none" else "write non-idempotent, delete conditionally idempotent",
+                idempotency="idempotent for desc/list/read" if mut == "none" else "write non-idempotent, delete conditionally idempotent",
             ),
             risk_hints=_risk_hints(mutates=mut, open_world=False, destructive=(action == "delete")),
-            success_means=f"buddybox.{action} completed with path-scope enforcement and structured file signals.",
-            common_failures=["path traversal", "absolute path", "foreign buddy scope write", "missing file", "invalid base64"],
+            success_means=success_means,
+            common_failures=[
+                "unsupported payload fields",
+                "path traversal or absolute path",
+                "foreign buddy prefix outside active root",
+                "missing file",
+                "invalid encoding",
+                "invalid base64",
+                "attempt to treat buddybox path as cross-buddy readable content authority",
+            ],
         )
 
     # context actions
@@ -421,7 +480,7 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             side_effects=_side_effects(
                 mutates="none",
                 writes=[],
-                does_not_write=["buddyswitch/content/buddybox", "buddyswitch/content/buddybox", "instance current binding", "product objects"],
+                does_not_write=["buddyswitch/local/buddybox", "buddyswitch/local/buddybox", "instance current binding", "product objects"],
                 durability="none",
                 idempotency="idempotent",
             ),
@@ -446,7 +505,7 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             side_effects=_side_effects(
                 mutates="broker_token",
                 writes=["target-scoped evidence token state"],
-                does_not_write=["buddyswitch/content/buddybox", "task run lineage"],
+                does_not_write=["buddyswitch/local/buddybox", "task run lineage"],
                 durability="transient token",
                 idempotency="non-idempotent token issuance",
             ),

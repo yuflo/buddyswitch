@@ -14,11 +14,11 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 
 - Use `python3 scripts/env/client.py ...` (`env.tool`) for all durable operations.
 - No `prepare/persist` turn transaction.
-- Do not edit `buddyswitch/objects/**` or `buddyswitch/content/buddybox/**` directly.
+- Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
 
 ## Durable Output Targets
 
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - `buddyswitch/objects/handoffs/<handoff-id>.json`
-- `buddyswitch/content/buddybox/pm/**`
+- `buddyswitch/local/buddybox/pm/**` (active buddy private local workspace)

@@ -48,6 +48,7 @@ HANDLERS_BY_TOOL = {
         "create": handoff_service.create_handoff_for_active_buddy,
     },
     "buddybox": {
+        "desc": buddybox_service.describe_buddybox_for_active_buddy,
         "list": buddybox_service.list_buddybox_for_active_buddy,
         "read": buddybox_service.read_buddybox_for_active_buddy,
         "write": buddybox_service.write_buddybox_for_active_buddy,

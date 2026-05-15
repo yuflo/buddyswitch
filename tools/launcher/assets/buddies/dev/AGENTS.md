@@ -9,8 +9,9 @@ AGENTS.md is guidance only and not the permission source.
 - Start with `python3 scripts/env/client.py context summarize`.
 - Use explicit ids and env tools (`task`, `track`, `artifact`, `handoff`, `buddybox`, `context`, `evidence`, `search`).
 - `projects/app` is live shared source with `project.access=write`.
-- Intentional durable files belong under `buddyswitch/content/buddybox/dev/`.
-- Do not edit `buddyswitch/objects/**` or `buddyswitch/content/buddybox/**` directly.
+- Buddybox is the active buddy private local working directory: `buddyswitch/local/buddybox/dev/`.
+- Other buddies cannot list/read/write/delete these local files; use artifact when content must become product-readable.
+- Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
 - If you see a `track_id`, use `python3 scripts/env/client.py track get --track-id <track-id>`.
 - If you see a `task_id`, use `python3 scripts/env/client.py task get --task-id <task-id>`.
 - If you see an `artifact_id`, use `python3 scripts/env/client.py artifact get --artifact-id <artifact-id>`.

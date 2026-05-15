@@ -27,6 +27,7 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
+_LEGACY_HANDOFF_PRIVATE_PATHS_FIELD = "buddybox_" + "paths"
 
 
 class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -360,7 +361,7 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             created_by="pm",
             source_refs=[{"type": "note", "label": "seed"}],
         )
-        buddybox_path = self._runtime_path("buddyswitch/content/buddybox/pm/brief.md")
+        buddybox_path = self._runtime_path("buddyswitch/local/buddybox/pm/brief.md")
         buddybox_path.parent.mkdir(parents=True, exist_ok=True)
         buddybox_path.write_text("brief", encoding="utf-8")
 
@@ -376,7 +377,6 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "target_buddy": "dev",
                 "artifact_ids": [artifact["id"]],
                 "memory_ids": ["mem-old"],
-                "buddybox_paths": ["pm/brief.md"],
                 "source_refs": [{"type": "note", "label": "seed"}],
                 "reason": "handoff",
                 "context": "context",
@@ -398,7 +398,6 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "source_task_id": "task-pm-handoff-memory",
                 "target_buddy": "dev",
                 "artifact_ids": [artifact["id"]],
-                "buddybox_paths": ["pm/brief.md"],
                 "source_refs": [{"type": "note", "label": "seed"}],
                 "reason": "handoff",
                 "context": "context",
@@ -409,6 +408,7 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(handoff, dict, msg=created)
         assert isinstance(handoff, dict)
         self.assertNotIn("memory_ids", handoff)
+        self.assertNotIn(_LEGACY_HANDOFF_PRIVATE_PATHS_FIELD, handoff)
 
         saved_handoff = self._runtime_path("buddyswitch/objects/handoffs/handoff-pm-dev-memory-removed.json")
         self.assertTrue(saved_handoff.exists())
@@ -426,7 +426,7 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "source_task_id": "task-pm-handoff-memory",
                     "artifact_ids": [artifact["id"]],
                     "memory_ids": ["mem-old"],
-                    "buddybox_paths": ["pm/brief.md"],
+                    _LEGACY_HANDOFF_PRIVATE_PATHS_FIELD: ["pm/brief.md"],
                     "source_refs": [{"type": "note", "label": "legacy handoff"}],
                     "reason": "old handoff",
                     "context": "old context",
@@ -443,6 +443,7 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         old_rows = {row["id"]: row for row in env_store.list_handoffs()}
         self.assertIn("handoff-old-memory-ids", old_rows)
         self.assertNotIn("memory_ids", old_rows["handoff-old-memory-ids"])
+        self.assertNotIn(_LEGACY_HANDOFF_PRIVATE_PATHS_FIELD, old_rows["handoff-old-memory-ids"])
 
         dev_instance = self._instance_json(buddy="dev", instance_id="inst-dev-handoff-old-memory")
         listed = self._dispatch(
@@ -460,6 +461,7 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         listed_old = [row for row in listed_rows if isinstance(row, dict) and row.get("id") == "handoff-old-memory-ids"]
         self.assertEqual(len(listed_old), 1, msg=listed_rows)
         self.assertNotIn("memory_ids", listed_old[0])
+        self.assertNotIn(_LEGACY_HANDOFF_PRIVATE_PATHS_FIELD, listed_old[0])
 
     def test_workspace_projection_launcher_and_cleanup_ignore_old_memory_files(self) -> None:
         runtime_manifest = self._copy_manifest_into_runtime()

@@ -9,6 +9,6 @@ BuddySwitch runtime is runless.
   - `buddyswitch/objects/tasks/*.json`
   - `buddyswitch/objects/artifacts/*.json`
   - `buddyswitch/objects/handoffs/*.json`
-  - `buddyswitch/content/buddybox/<buddy>/**`
+  - `buddyswitch/local/buddybox/<active-buddy>/**` (private local workspace per active buddy)
 
-`prepare`/`persist` run lifecycle is retired. If a turn matters later, write artifact/handoff/buddybox objects directly.
+`prepare`/`persist` run lifecycle is retired. If a turn matters later, write product-readable content through artifact/handoff objects; keep private working files in the active buddy local buddybox.

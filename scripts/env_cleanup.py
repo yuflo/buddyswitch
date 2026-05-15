@@ -25,7 +25,6 @@ CATEGORY_ORDER = (
     "task_objects",
     "track_objects",
     "handoff_objects",
-    "buddybox_files",
 )
 
 
@@ -725,7 +724,6 @@ def ensure_required_skeleton(root: Path, *, warnings: list[str] | None = None) -
         "buddyswitch/objects/tasks",
         "buddyswitch/objects/artifacts",
         "buddyswitch/objects/handoffs",
-        "buddyswitch/content/buddybox",
     ):
         directory, blocked_reason = resolve_guarded_relative_dir(root, relative_dir, allow_missing=True)
         if directory is None:
@@ -779,7 +777,6 @@ def build_cleanup_plan(
     handoff_objects, invalid_handoff_objects = discover_handoff_objects(repo_root)
 
     if scope == "buddy":
-        add_dir_files(plan, f"buddyswitch/content/buddybox/{buddy}", "buddybox_files")
         for record in artifact_objects:
             if record["producer_buddy"] == buddy:
                 add_indexed_artifact(plan, record)
@@ -810,7 +807,6 @@ def build_cleanup_plan(
         add_dir_files(plan, "buddyswitch/objects/tasks", "task_objects")
         add_dir_files(plan, "buddyswitch/objects/artifacts", "artifact_objects")
         add_dir_files(plan, "buddyswitch/objects/handoffs", "handoff_objects")
-        add_dir_files(plan, "buddyswitch/content/buddybox", "buddybox_files")
         for record in artifact_objects:
             if record["id"] not in plan["artifact_object_ids"]:
                 plan["artifact_object_ids"].append(record["id"])
@@ -831,26 +827,6 @@ def build_cleanup_plan(
             add_warning(plan, f"All-data cleanup will delete malformed handoff object: {item['path']} ({item['reason']}).")
     else:
         raise ValueError(f"Unsupported cleanup scope: {scope}")
-
-    if shared_root is not None:
-        if scope == "buddy":
-            for workspace in discover_instance_workspaces(plan, shared_root=shared_root, buddy_filter=buddy):
-                add_instance_workspace_dir_files(
-                    plan,
-                    shared_root=shared_root,
-                    workspace_dir=workspace,
-                    relative_dir=f"buddyswitch/content/buddybox/{buddy}",
-                    category="buddybox_files",
-                )
-        elif scope == "all-data":
-            for workspace in discover_instance_workspaces(plan, shared_root=shared_root, buddy_filter=None):
-                add_instance_workspace_dir_files(
-                    plan,
-                    shared_root=shared_root,
-                    workspace_dir=workspace,
-                    relative_dir="buddyswitch/content/buddybox",
-                    category="buddybox_files",
-                )
 
     plan["delete_paths"].sort()
     plan["artifact_object_ids"].sort()

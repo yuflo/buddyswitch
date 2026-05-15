@@ -46,7 +46,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
             )
             self.assertEqual(list(profile.keys()), env_profiles.profile_contract(ROOT)["top_level_key_order"])
             self.assertEqual(profile["buddy_id"], buddy_id)
-            self.assertEqual(profile["buddybox"]["root"], f"buddyswitch/content/buddybox/{buddy_id}")
+            self.assertEqual(profile["buddybox"]["root"], f"buddyswitch/local/buddybox/{buddy_id}")
             self.assertEqual(profile["filesystem_capability"]["raw_state"], "broker-only")
             if buddy_id == "dev":
                 self.assertEqual(profile["project"]["access"], "write")

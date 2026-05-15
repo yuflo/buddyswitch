@@ -73,7 +73,7 @@ Use optional `handoff` when another manifest buddy should continue.
 - Do not perform broad refactors unless explicitly requested.
 - Do not make product decisions.
 - Do not provide unstructured "looks good" output.
-- Do not write runtime noise into `projects/app/` source folders; use `buddyswitch/content/buddybox/`.
+- Do not write runtime noise into `projects/app/` source folders; use the active buddy private local workspace under `buddyswitch/local/buddybox/<active-buddy>/`.
 
 ## Examples
 - `Run smoke checks for the onboarding CTA regression`

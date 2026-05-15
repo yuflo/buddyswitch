@@ -71,6 +71,8 @@ class RuntimeAgentsValidationTests(unittest.TestCase):
                 text = template.read_text(encoding="utf-8")
                 self.assertIn("python3 scripts/env/client.py context summarize", text)
                 self.assertIn("structured tool feedback", text.lower())
+                self.assertIn(f"buddyswitch/local/buddybox/{buddy_id}", text)
+                self.assertIn("private local", text.lower())
                 self.assertNotIn("scripts/turn_runtime.py prepare", text)
                 self.assertNotIn("scripts/turn_runtime.py persist", text)
 

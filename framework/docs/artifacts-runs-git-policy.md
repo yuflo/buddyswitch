@@ -27,11 +27,11 @@ Object source of truth:
 - tasks: `buddyswitch/objects/tasks/*.json`
 - artifacts with structured content: `buddyswitch/objects/artifacts/*.json`
 - handoff objects: `buddyswitch/objects/handoffs/*.json`
-- buddy-owned files: `buddyswitch/content/buddybox/<buddy>/**`
+- active buddy private local files: `buddyswitch/local/buddybox/<active-buddy>/**`
 
-### `buddyswitch/content/buddybox/<buddy>/` (intentional durable files)
+### `buddyswitch/local/buddybox/<active-buddy>/` (private local working files)
 
-Use `buddyswitch/content/buddybox/` for intentional durable file output that does not fit JSON object fields:
+Use `buddyswitch/local/buddybox/<active-buddy>/` for private local working files that do not fit JSON object fields:
 - scratch notes
 - transient logs
 - debugging traces
@@ -53,8 +53,8 @@ Do not write temporary runtime noise into `projects/app/` source folders.
 ### Do not commit by default
 
 - generated state under `buddyswitch/objects/**`
-- generated buddybox content under `buddyswitch/content/buddybox/<buddy>/**`
-- `buddyswitch/content/buddybox/**`
+- generated buddybox local files under `buddyswitch/local/buddybox/<active-buddy>/**`
+- `buddyswitch/local/buddybox/**`
 - temporary logs and traces
 - scratch dumps
 - machine-local clutter
@@ -69,5 +69,5 @@ Ask this before writing output:
 
 Decision:
 - If 1 or 2 is yes, write to an artifact object under `buddyswitch/objects/artifacts/`.
-- If 3 is yes, write to `buddyswitch/content/buddybox/`.
-- If content should become BuddySwitch state, write artifact/handoff objects or intentional buddybox files explicitly.
+- If 3 is yes, write to `buddyswitch/local/buddybox/<active-buddy>/`.
+- If content should become product-readable BuddySwitch state, write artifact/handoff objects explicitly; keep private working files in the active buddy local buddybox.

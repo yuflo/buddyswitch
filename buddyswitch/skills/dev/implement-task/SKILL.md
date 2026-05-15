@@ -73,7 +73,7 @@ Use optional `handoff` when another manifest buddy should continue.
 - Do not change product scope silently.
 - Do not make architecture direction changes without explicit note.
 - Do not skip verification reporting.
-- Do not write runtime noise into `projects/app/` source folders; use `buddyswitch/content/buddybox/`.
+- Do not write runtime noise into `projects/app/` source folders; use the active buddy private local workspace under `buddyswitch/local/buddybox/<active-buddy>/`.
 
 ## Examples
 - `Implement the approved P0 creator profile flow in projects/app`

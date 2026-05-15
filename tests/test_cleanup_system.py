@@ -18,6 +18,9 @@ if str(SCRIPTS) not in sys.path:
 
 import env_cleanup  # noqa: E402
 
+_RETIRED_HANDOFF_PRIVATE_PATHS_FIELD = "buddybox_" + "paths"
+_RETIRED_BUDDYBOX_CONTENT_ROOT = "buddyswitch/content/" + "buddybox"
+
 
 class CleanupSystemRunlessTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -114,10 +117,10 @@ class CleanupSystemRunlessTests(unittest.TestCase):
                 "track_id": "track-demo",
                 "source_task_id": "task-pm",
                 "artifact_ids": ["art-pm-r1"],
-                "buddybox_paths": ["pm/notes.md"],
+                _RETIRED_HANDOFF_PRIVATE_PATHS_FIELD: ["pm/notes.md"],
                 "reason": "implement",
-                "context": "",
-                "status": "proposed",
+                "context": "seed",
+                "status": "active",
                 "created_at": "2026-05-15T00:00:00+00:00",
                 "updated_at": "2026-05-15T00:00:00+00:00",
             },
@@ -137,8 +140,8 @@ class CleanupSystemRunlessTests(unittest.TestCase):
                 "updated_at": "2026-05-15T00:00:00+00:00",
             },
         )
-        self._write_text("buddyswitch/content/buddybox/pm/notes.md", "# pm\n")
-        self._write_text("buddyswitch/content/buddybox/dev/report.txt", "dev\n")
+        self._write_text(f"{_RETIRED_BUDDYBOX_CONTENT_ROOT}/pm/notes.md", "# pm\n")
+        self._write_text(f"{_RETIRED_BUDDYBOX_CONTENT_ROOT}/dev/report.txt", "dev\n")
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -170,9 +173,9 @@ class CleanupSystemRunlessTests(unittest.TestCase):
         self.assertNotIn("art-dev-r1", plan["artifact_object_ids"])
         self.assertIn("handoff-pm-dev", plan["handoff_object_ids"])
         self.assertNotIn("memory_object_ids", plan)
-        self.assertIn("buddyswitch/content/buddybox/pm/notes.md", plan["delete_paths"])
+        self.assertNotIn(f"{_RETIRED_BUDDYBOX_CONTENT_ROOT}/pm/notes.md", plan["delete_paths"])
         self.assertNotIn("buddyswitch/objects/memories/mem-pm.json", plan["delete_paths"])
-        self.assertNotIn("buddyswitch/content/buddybox/dev/report.txt", plan["delete_paths"])
+        self.assertNotIn(f"{_RETIRED_BUDDYBOX_CONTENT_ROOT}/dev/report.txt", plan["delete_paths"])
 
     def test_execute_all_data_cleanup_removes_runless_state_and_recreates_skeleton(self) -> None:
         plan = env_cleanup.build_cleanup_plan(
@@ -189,15 +192,14 @@ class CleanupSystemRunlessTests(unittest.TestCase):
         self.assertFalse(self._path("buddyswitch/objects/artifacts/art-pm-r1.json").exists())
         self.assertFalse(self._path("buddyswitch/objects/handoffs/handoff-pm-dev.json").exists())
         self.assertTrue(self._path("buddyswitch/objects/memories/mem-pm.json").exists())
-        self.assertFalse(self._path("buddyswitch/content/buddybox/pm/notes.md").exists())
-        self.assertFalse(self._path("buddyswitch/content/buddybox/dev/report.txt").exists())
+        self.assertTrue(self._path(f"{_RETIRED_BUDDYBOX_CONTENT_ROOT}/pm/notes.md").exists())
+        self.assertTrue(self._path(f"{_RETIRED_BUDDYBOX_CONTENT_ROOT}/dev/report.txt").exists())
 
         for directory in (
             "buddyswitch/objects/tracks",
             "buddyswitch/objects/tasks",
             "buddyswitch/objects/artifacts",
             "buddyswitch/objects/handoffs",
-            "buddyswitch/content/buddybox",
         ):
             self.assertTrue(self._path(directory).is_dir(), f"missing recreated skeleton dir: {directory}")
 
@@ -221,7 +223,7 @@ class CleanupSystemRunlessTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertIn("buddyswitch/content/buddybox/pm/notes.md", payload["delete_paths"])
+        self.assertNotIn(f"{_RETIRED_BUDDYBOX_CONTENT_ROOT}/pm/notes.md", payload["delete_paths"])
         self.assertNotIn("buddyswitch/content/runs", json.dumps(payload, ensure_ascii=True))
         self.assertNotIn("runs/raw", json.dumps(payload, ensure_ascii=True))
 

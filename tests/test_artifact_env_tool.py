@@ -205,6 +205,59 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_ARTIFACT_TASK_SCOPE")
 
+    def test_artifact_buddybox_source_ref_is_private_provenance(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-pm-art", buddy="pm")
+        self._seed_pm_track_and_task()
+        local_path = self._runtime_path("buddyswitch/local/buddybox/pm/provenance/notes.md")
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text("notes\n", encoding="utf-8")
+
+        created = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-art",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "task_id": "task-pm-artifact",
+                "kind": "prd",
+                "title": "Runless PRD",
+                "summary": "seed",
+                "content": {"body": "v1"},
+                "source_refs": [{"type": "buddybox", "path": "pm/provenance/notes.md"}],
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+        artifact = created.get("artifact")
+        self.assertIsInstance(artifact, dict, msg=created)
+        assert isinstance(artifact, dict)
+        refs = artifact.get("source_refs")
+        self.assertIsInstance(refs, list, msg=artifact)
+        assert isinstance(refs, list)
+        row = refs[0]
+        self.assertEqual(row.get("type"), "buddybox")
+        self.assertEqual(row.get("path"), "pm/provenance/notes.md")
+        self.assertEqual(row.get("private_to_buddy"), "pm")
+        self.assertFalse(row.get("read_grant"))
+
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-art",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "task_id": "task-pm-artifact",
+                "kind": "prd",
+                "title": "Runless PRD 2",
+                "summary": "seed",
+                "content": {"body": "v2"},
+                "source_refs": [{"type": "buddybox", "path": "dev/provenance/notes.md"}],
+            },
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_SOURCE_REFS")
+
 
 if __name__ == "__main__":
     unittest.main()

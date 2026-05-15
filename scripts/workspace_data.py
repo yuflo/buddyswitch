@@ -41,12 +41,6 @@ def build_handoff_view(handoff: dict[str, Any]) -> dict[str, Any]:
     return _build_handoff_view(handoff)
 
 
-def scan_buddybox_files() -> list[dict[str, Any]]:
-    from runtime_store.projections import scan_buddybox_files as _scan_buddybox_files
-
-    return _scan_buddybox_files()
-
-
 def build_workspace_data() -> dict[str, Any]:
     from runtime_store.projections import build_workspace_projection
 

@@ -18,6 +18,10 @@ import env_manifest  # noqa: E402
 import turn_runtime  # noqa: E402
 from env.tools import contracts as tool_contracts  # noqa: E402
 
+_RETIRED_BUDDYBOX_FILES_FIELD = "buddybox_" + "files"
+_RETIRED_BUDDYBOX_PATHS_FIELD = "buddybox_" + "paths"
+_RETIRED_BUDDYBOX_CONTENT_ROOT = "buddyswitch/content/" + "buddybox"
+
 
 class RepoConsistencyTests(unittest.TestCase):
     def _scan(self, pattern: str) -> list[str]:
@@ -36,9 +40,57 @@ class RepoConsistencyTests(unittest.TestCase):
         hits = self._scan(pattern)
         return [line for line in hits if not any(token in line for token in allowed)]
 
-    def test_worktree_isolated_for_dev2258(self) -> None:
-        pwd = subprocess.run(["pwd"], cwd=ROOT, text=True, capture_output=True, check=True).stdout.strip()
-        self.assertIn("/.worktrees/dev2258", pwd)
+    def _git_worktree_entries(self) -> dict[Path, dict[str, str]]:
+        completed = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        entries: dict[Path, dict[str, str]] = {}
+        block: dict[str, str] = {}
+        for raw_line in [*completed.stdout.splitlines(), ""]:
+            line = raw_line.strip()
+            if not line:
+                if "worktree" in block:
+                    entries[Path(block["worktree"]).resolve()] = dict(block)
+                block = {}
+                continue
+            key, _, value = raw_line.partition(" ")
+            block[key] = value
+        return entries
+
+    def test_worktree_isolated_for_dev_worktree(self) -> None:
+        current_root = ROOT.resolve()
+        worktrees = self._git_worktree_entries()
+        self.assertIn(current_root, worktrees)
+        self.assertIn(".worktrees", current_root.parts)
+
+        current_branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        self.assertNotIn(current_branch, {"", "HEAD", "main"})
+        self.assertEqual(current_root.name, current_branch)
+        self.assertEqual(worktrees[current_root].get("branch"), f"refs/heads/{current_branch}")
+
+        common_git_dir = Path(
+            subprocess.run(
+                ["git", "rev-parse", "--git-common-dir"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+        ).resolve()
+        primary_checkout_root = common_git_dir.parent
+        self.assertIn(primary_checkout_root, worktrees)
+        self.assertNotEqual(current_root, primary_checkout_root)
 
     def test_runless_architecture_residue_scan(self) -> None:
         disallowed_1 = self._scan_with_allowlist(
@@ -205,7 +257,7 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("If you see a `task_id`", text)
                 self.assertIn("If you see an `artifact_id`", text)
                 self.assertIn(guard, text)
-                self.assertIn("do not edit `buddyswitch/objects/**` or `buddyswitch/content/buddybox/**` directly", text.lower())
+                self.assertIn("do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly", text.lower())
                 self.assertNotIn("scripts/turn_runtime.py prepare", text)
                 self.assertNotIn("scripts/turn_runtime.py persist", text)
 
@@ -236,7 +288,8 @@ class RepoConsistencyTests(unittest.TestCase):
         top = set(payload.get("top_level_key_order", []))
         self.assertIn("handoffs", top)
         self.assertNotIn("memories", top)
-        self.assertIn("buddybox_files", top)
+        self.assertNotIn(_RETIRED_BUDDYBOX_FILES_FIELD, top)
+        self.assertNotIn("content_root", top)
         self.assertNotIn("run_audits", top)
 
     def test_legacy_prepare_persist_entrypoints_are_absent(self) -> None:
@@ -259,6 +312,43 @@ class RepoConsistencyTests(unittest.TestCase):
         pattern = "|".join((legacy_prepare, legacy_persist_key, prepare_subparser, persist_subparser))
         completed = subprocess.run(
             ["rg", "-n", pattern, "scripts", "tests", "framework"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_retired_buddybox_tokens_are_absent_from_active_surfaces(self) -> None:
+        pattern = "|".join(
+            (
+                "BUDDYBOX_CONTENT_" + "DIR",
+                _RETIRED_BUDDYBOX_CONTENT_ROOT,
+                _RETIRED_BUDDYBOX_FILES_FIELD,
+                _RETIRED_BUDDYBOX_PATHS_FIELD,
+                "durable buddy-" + "owned",
+                "readable buddybox " + "scope",
+            )
+        )
+        completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                pattern,
+                "README.md",
+                "AGENTS.md",
+                "scripts",
+                "framework",
+                "buddyswitch",
+                "tools",
+                "tests",
+                "-g",
+                "!docs/memo/**",
+                "-g",
+                "!docs/spec/**",
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,

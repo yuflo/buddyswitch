@@ -88,6 +88,24 @@ def validate_runtime_agents_template(
     _require_contains_any(
         text=lowered,
         needles=[
+            "private local workspace",
+            "private local working directory",
+            "active-buddy private local",
+        ],
+        message="missing buddybox private-local workspace wording",
+    )
+    _require_contains_any(
+        text=lowered,
+        needles=[
+            "use artifact when content must become product-readable",
+            "create an artifact when content must become product-readable",
+            "artifact when content must become product-readable",
+        ],
+        message="missing artifact promotion wording for cross-buddy readable content",
+    )
+    _require_contains_any(
+        text=lowered,
+        needles=[
             "do not edit `buddyswitch/objects/**`",
             "broker-only state",
         ],

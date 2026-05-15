@@ -24,8 +24,8 @@ Product mode:
 ## Product Runtime Loop (Runless)
 
 1. Call context discovery (`context.get` or `context.summarize`).
-2. Pick explicit target ids (`track_id`, `task_id`, `artifact_id`, `handoff_id`, buddybox path).
-3. Write durable outputs with env tools:
+2. Pick explicit target ids (`track_id`, `task_id`, `artifact_id`, `handoff_id`, or active buddy private buddybox path).
+3. Write product objects or active buddy private local files with env tools:
    - `task.*`, `track.*`, `artifact.*`, `handoff.*`, `buddybox.*`
 4. Summarize what was written.
 
@@ -47,13 +47,13 @@ Launcher product mode:
 - `${BUDDYSWITCH_SHARED_ROOT}/project/workspace` shared product source
 - `${BUDDYSWITCH_SHARED_ROOT}/instances/<instance-id>/workspace/.agents/skills` instance-only runtime skills
 
-Canonical state paths:
+Canonical product state and private local paths:
 
 - `buddyswitch/objects/tracks/*.json`
 - `buddyswitch/objects/tasks/*.json`
 - `buddyswitch/objects/artifacts/*.json`
 - `buddyswitch/objects/handoffs/*.json`
-- `buddyswitch/content/buddybox/<buddy>/**`
+- `buddyswitch/local/buddybox/<active-buddy>/**` (private local workspace per active buddy)
 
 ## Context Panel
 

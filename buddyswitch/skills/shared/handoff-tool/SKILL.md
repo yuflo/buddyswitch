@@ -7,7 +7,7 @@ description: Use when you need explicit cross-buddy handoff validation or creati
 
 ## Purpose
 - Create explicit collaboration handoff records between buddies.
-- Keep handoff provenance object-based (`artifact_ids`, `buddybox_paths`, `source_refs`).
+- Keep handoff provenance object-based (`artifact_ids`, `source_refs`).
 
 ## Runtime Contract
 - CLI: `python3 scripts/env/client.py handoff <operation>`

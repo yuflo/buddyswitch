@@ -14,6 +14,8 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import workspace_data  # noqa: E402
+
+_RETIRED_BUDDYBOX_FILE_ROWS_FIELD = "buddybox_" + "files"
 from env_store import create_artifact, create_handoff, create_task, create_track  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -128,16 +130,11 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
             target_buddy="test",
             source_task_id=tracked_task["id"],
             artifact_ids=[artifact["id"]],
-            buddybox_paths=["dev/contracts/freeze.md"],
             source_refs=[{"type": "artifact", "id": artifact["id"]}],
             reason="Need test validation.",
             context="Run focused test suite.",
             status="active",
         )
-
-        buddybox_path = self._runtime_path("buddyswitch/content/buddybox/dev/contracts/freeze.md")
-        buddybox_path.parent.mkdir(parents=True, exist_ok=True)
-        buddybox_path.write_text("contract freeze\n", encoding="utf-8")
 
         payload = workspace_data.build_workspace_data()
         self.assertEqual(contract["contract_id"], "workspace-projection")
@@ -147,24 +144,22 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
 
         _assert_type_case(self, payload["manifest_path"], contract["field_constraints"]["manifest_path"]["type"])
         _assert_type_case(self, payload["objects_root"], contract["field_constraints"]["objects_root"]["type"])
-        _assert_type_case(self, payload["content_root"], contract["field_constraints"]["content_root"]["type"])
         self.assertEqual(payload["manifest_path"], contract["field_constraints"]["manifest_path"]["exact"])
         self.assertEqual(payload["objects_root"], contract["field_constraints"]["objects_root"]["exact"])
-        self.assertEqual(payload["content_root"], contract["field_constraints"]["content_root"]["exact"])
+        self.assertNotIn("content_root", payload)
 
         self.assertGreaterEqual(len(payload["buddies"]), 1)
         self.assertGreaterEqual(len(payload["tracks"]), 1)
         self.assertGreaterEqual(len(payload["tasks"]), 1)
         self.assertGreaterEqual(len(payload["artifacts"]), 1)
         self.assertGreaterEqual(len(payload["handoffs"]), 1)
-        self.assertGreaterEqual(len(payload["buddybox_files"]), 1)
+        self.assertNotIn(_RETIRED_BUDDYBOX_FILE_ROWS_FIELD, payload)
 
         _assert_shape(self, payload["buddies"][0], contract["view_shapes"]["buddy"])
         _assert_shape(self, payload["tracks"][0], contract["view_shapes"]["track"])
         _assert_shape(self, payload["tasks"][0], contract["view_shapes"]["task"])
         _assert_shape(self, payload["artifacts"][0], contract["view_shapes"]["artifact"])
         _assert_shape(self, payload["handoffs"][0], contract["view_shapes"]["handoff"])
-        _assert_shape(self, payload["buddybox_files"][0], contract["view_shapes"]["buddybox_file"])
 
         task_rows = {task["id"]: task for task in payload["tasks"]}
         task_row = task_rows[tracked_task["id"]]

@@ -26,7 +26,8 @@ TASKS_DIR = OBJECTS_ROOT / "tasks"
 ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
 HANDOFF_OBJECTS_DIR = OBJECTS_ROOT / "handoffs"
 CONTENT_ROOT = STATE_ROOT / "buddyswitch" / "content"
-BUDDYBOX_CONTENT_DIR = CONTENT_ROOT / "buddybox"
+LOCAL_ROOT = STATE_ROOT / "buddyswitch" / "local"
+BUDDYBOX_LOCAL_DIR = LOCAL_ROOT / "buddybox"
 
 RUNTIME_WORKSPACE_AGENTS_HEADER = "# BuddySwitch Runtime Workspace"
 
@@ -38,6 +39,7 @@ ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _LEGACY_TASK_RUN_IDS = "run" + "_ids"
 _LEGACY_TASK_LATEST_RUN = "latest" + "_run_id"
 _LEGACY_SOURCE_RUN = "source" + "_run_id"
+_LEGACY_HANDOFF_PRIVATE_PATHS_KEY = "buddybox_" + "paths"
 
 
 def now_iso() -> str:
@@ -82,7 +84,6 @@ def ensure_runtime_dirs() -> None:
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
     HANDOFF_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
-    BUDDYBOX_CONTENT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def require_id(value: str, label: str) -> str:
@@ -143,7 +144,12 @@ def _validate_buddybox_ref_path(path: Any) -> str:
     return "/".join(parts)
 
 
-def _normalize_source_refs(raw_refs: Any) -> list[dict[str, Any]] | None:
+def _normalize_source_refs(
+    raw_refs: Any,
+    *,
+    active_buddy: str | None = None,
+    allow_buddybox: bool = True,
+) -> list[dict[str, Any]] | None:
     if raw_refs is None:
         return None
     if not isinstance(raw_refs, list):
@@ -162,7 +168,19 @@ def _normalize_source_refs(raw_refs: Any) -> list[dict[str, Any]] | None:
         if ref_type in {"artifact", "track", "task", "handoff"}:
             row["id"] = require_id(raw.get("id"), f"source_ref.{ref_type}.id")
         elif ref_type == "buddybox":
-            row["path"] = _validate_buddybox_ref_path(raw.get("path"))
+            if not allow_buddybox:
+                raise ValueError("source_ref.buddybox is private provenance and cannot be used in this payload")
+            normalized_path = _validate_buddybox_ref_path(raw.get("path"))
+            if isinstance(active_buddy, str) and active_buddy:
+                owner = normalized_path.split("/", 1)[0]
+                if owner != active_buddy:
+                    raise ValueError(
+                        f"source_ref.buddybox path must stay under active buddy root '{active_buddy}/'"
+                    )
+            row["path"] = normalized_path
+            if isinstance(active_buddy, str) and active_buddy:
+                row["private_to_buddy"] = active_buddy
+            row["read_grant"] = False
         elif ref_type == "external":
             label = raw.get("label")
             if not isinstance(label, str) or not label.strip():
@@ -310,7 +328,11 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     supersedes_artifact_id = artifact.get("supersedes_artifact_id", supersedes_sentinel)
     is_current = artifact.get("is_current")
     created_by = artifact.get("created_by")
-    source_refs = _normalize_source_refs(artifact.get("source_refs"))
+    source_refs = _normalize_source_refs(
+        artifact.get("source_refs"),
+        active_buddy=buddy if isinstance(buddy, str) else None,
+        allow_buddybox=True,
+    )
     summary = artifact.get("summary")
     content = artifact.get("content", {})
     created_at = artifact.get("created_at")
@@ -373,8 +395,8 @@ def validate_handoff_record(record: dict[str, Any]) -> dict[str, Any]:
     target_buddy = record.get("target_buddy")
     source_task_id = record.get("source_task_id")
     artifact_ids = record.get("artifact_ids", [])
-    buddybox_paths = record.get("buddybox_paths", [])
-    source_refs = _normalize_source_refs(record.get("source_refs"))
+    legacy_private_paths = record.get(_LEGACY_HANDOFF_PRIVATE_PATHS_KEY)
+    source_refs = _normalize_source_refs(record.get("source_refs"), allow_buddybox=False)
     reason = record.get("reason")
     context = record.get("context")
     status = record.get("status")
@@ -395,9 +417,11 @@ def validate_handoff_record(record: dict[str, Any]) -> dict[str, Any]:
     for artifact_id in artifact_ids:
         require_id(artifact_id, "handoff.artifact_ids[]")
 
-    if not isinstance(buddybox_paths, list) or any(not isinstance(item, str) or not item.strip() for item in buddybox_paths):
-        raise ValueError("handoff.buddybox_paths must be a list of non-empty strings")
-    normalized_buddybox_paths = [_validate_buddybox_ref_path(path) for path in buddybox_paths]
+    if legacy_private_paths is not None:
+        if not isinstance(legacy_private_paths, list):
+            raise ValueError("legacy handoff private path list must be a list when present")
+        for path in legacy_private_paths:
+            _validate_buddybox_ref_path(path)
 
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("handoff.reason must be a non-empty string")
@@ -415,7 +439,6 @@ def validate_handoff_record(record: dict[str, Any]) -> dict[str, Any]:
         "target_buddy": target_buddy.strip(),
         "source_task_id": source_task_id,
         "artifact_ids": list(dict.fromkeys(artifact_ids)),
-        "buddybox_paths": list(dict.fromkeys(normalized_buddybox_paths)),
         "source_refs": source_refs,
         "reason": reason.strip(),
         "context": context.strip(),
@@ -944,7 +967,6 @@ def create_handoff(
     target_buddy: str,
     source_task_id: str | None,
     artifact_ids: list[str],
-    buddybox_paths: list[str],
     source_refs: list[dict[str, Any]] | None,
     reason: str,
     context: str,
@@ -960,7 +982,6 @@ def create_handoff(
         "target_buddy": target_buddy,
         "source_task_id": source_task_id,
         "artifact_ids": artifact_ids,
-        "buddybox_paths": buddybox_paths,
         "source_refs": source_refs,
         "reason": reason,
         "context": context,

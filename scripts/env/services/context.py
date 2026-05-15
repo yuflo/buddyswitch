@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import env_store
+from env.services import buddybox as buddybox_service
 from env.services import track_relations
 from env.tools import contracts as tool_contracts
 from env.tools import responses as tool_responses
@@ -54,29 +55,6 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str
     return None
 
 
-def _buddybox_files(active_buddy: str, *, limit: int = 20) -> list[dict[str, Any]]:
-    root = env_store.BUDDYBOX_CONTENT_DIR / active_buddy
-    if not root.exists():
-        return []
-    rows: list[dict[str, Any]] = []
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        rel_path = path.relative_to(env_store.BUDDYBOX_CONTENT_DIR).as_posix()
-        rows.append(
-            {
-                "buddy": active_buddy,
-                "path": rel_path,
-                "size_bytes": path.stat().st_size,
-                "updated_at": env_store.now_iso(),
-                "content_type": "application/octet-stream",
-                "source_ref": {"type": "buddybox", "path": rel_path},
-            }
-        )
-    rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("path") or "")), reverse=True)
-    return rows[:limit]
-
-
 def _artifact_summary(artifact: dict[str, Any], active_buddy: str) -> dict[str, Any]:
     row = track_relations.artifact_summary_row(artifact, active_buddy)
     row["task_id"] = artifact.get("task_id")
@@ -118,7 +96,7 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any]) -> dic
         if row.get("source_buddy") == active_buddy or row.get("target_buddy") == active_buddy or active_buddy == "pm"
     ][:limit_value]
 
-    buddybox_files = _buddybox_files(active_buddy, limit=limit_value)
+    buddybox_desc = buddybox_service.build_buddybox_desc(active_buddy)
 
     candidate_tracks = []
     for track in visible_tracks:
@@ -149,7 +127,7 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any]) -> dic
         "tasks": visible_tasks,
         "artifact_summaries": visible_artifacts,
         "handoff_summaries": visible_handoffs,
-        "buddybox_files": buddybox_files,
+        "buddybox_desc": buddybox_desc,
         "candidate_tracks": candidate_tracks,
         "decision_surface": {
             "binding_state": {"state": "runless", "enum_values": ["runless"]},
@@ -159,7 +137,7 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any]) -> dic
                 "has_tasks": bool(visible_tasks),
                 "has_artifacts": bool(visible_artifacts),
                 "has_handoffs": bool(visible_handoffs),
-                "has_buddybox_files": bool(buddybox_files),
+                "has_buddybox_workspace": bool(buddybox_desc),
             },
         },
         "current_context_summary": {
@@ -167,7 +145,7 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any]) -> dic
             "tasks": len(visible_tasks),
             "artifacts": len(visible_artifacts),
             "handoffs": len(visible_handoffs),
-            "buddybox_files": len(buddybox_files),
+            "has_buddybox_workspace": bool(buddybox_desc),
         },
     }
 
@@ -195,9 +173,9 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "buddyswitch/objects/handoffs/*.json",
         },
         "buddybox": {
-            "description": "Durable buddy-owned file summaries.",
-            "scope": "durable file output state",
-            "source_of_truth": "buddyswitch/content/buddybox/<buddy>/**",
+            "description": "Active buddy private local workspace description and tool-backed data plane.",
+            "scope": "active-buddy private local workspace state",
+            "source_of_truth": "buddyswitch/local/buddybox/<active_buddy>/**",
         },
     }
 
@@ -237,7 +215,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
     summary = {
         "current_context_summary": sections["current_context_summary"],
         "candidate_tracks": sections["candidate_tracks"],
-        "buddybox_files": sections["buddybox_files"],
+        "buddybox_desc": sections["buddybox_desc"],
         "decision_surface": sections["decision_surface"],
     }
 

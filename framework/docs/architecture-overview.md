@@ -13,6 +13,8 @@ Product layer:
 - tasks
 - artifacts
 - handoffs
-- buddybox files
+- active buddy private local workspace description via `buddybox_desc`
+
+Buddybox files live under `buddyswitch/local/buddybox/<active-buddy>/` as private local working files, not product objects or cross-buddy payloads. Use artifact content when a deliverable must become product-readable.
 
 No execution run history is required for durable product outputs.

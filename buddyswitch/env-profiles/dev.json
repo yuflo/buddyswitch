@@ -7,7 +7,7 @@
     "path": "projects/app"
   },
   "buddybox": {
-    "root": "buddyswitch/content/buddybox/dev"
+    "root": "buddyswitch/local/buddybox/dev"
   },
   "filesystem_capability": {
     "host_writable": [

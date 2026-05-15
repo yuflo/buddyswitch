@@ -136,7 +136,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "codex-home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "xdg-config").resolve(strict=False)), writable_paths)
-            self.assertIn(str((workspace_dir / "buddyswitch/content/buddybox/pm").resolve(strict=False)), writable_paths)
+            self.assertIn(str((workspace_dir / "buddyswitch/local/buddybox/pm").resolve(strict=False)), writable_paths)
             self.assertIn(str(Path("/tmp").resolve(strict=False)), writable_paths)
 
             forbidden = [
@@ -214,7 +214,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertEqual(filesystem["/"], "read")
             self.assertEqual(filesystem[":project_roots"], {".": "read"})
             self.assertIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
-            self.assertIn(str((workspace_dir / "buddyswitch/content/buddybox/dev").resolve(strict=False)), writable_paths)
+            self.assertIn(str((workspace_dir / "buddyswitch/local/buddybox/dev").resolve(strict=False)), writable_paths)
             self.assertNotIn(str((shared_root / "state").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(shared_root.resolve(strict=False)), writable_paths)
             self.assertNotIn(str((shared_root / "project").resolve(strict=False)), writable_paths)

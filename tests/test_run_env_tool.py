@@ -19,6 +19,8 @@ from env.tools import contracts as tool_contracts  # noqa: E402
 from env.tools import router as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
+_RETIRED_BUDDYBOX_FILE_ROWS_FIELD = "buddybox_" + "files"
+
 
 class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def setUp(self) -> None:
@@ -81,7 +83,7 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             source_refs=None,
         )
 
-        buddybox = self._runtime_path("buddyswitch/content/buddybox/pm")
+        buddybox = self._runtime_path("buddyswitch/local/buddybox/pm")
         buddybox.mkdir(parents=True, exist_ok=True)
         (buddybox / "notes.md").write_text("# notes\n", encoding="utf-8")
 
@@ -90,7 +92,8 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         decision_surface = payload["decision_surface"]
         self.assertEqual(decision_surface["binding_state"]["state"], "runless")
         self.assertNotIn("memory_summaries", payload)
-        self.assertIn("buddybox_files", payload)
+        self.assertIn("buddybox_desc", payload)
+        self.assertNotIn(_RETIRED_BUDDYBOX_FILE_ROWS_FIELD, payload)
 
 
 if __name__ == "__main__":

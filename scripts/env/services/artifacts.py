@@ -136,7 +136,10 @@ def _normalized_create_payload(*, args: dict[str, Any], active_buddy: str, actio
 
     try:
         normalized_refs, scope_error = source_ref_service.normalize_source_refs(
-            args.get("source_refs"), active_buddy=active_buddy, read_claim=read_claim if isinstance(read_claim, str) else None
+            args.get("source_refs"),
+            active_buddy=active_buddy,
+            read_claim=read_claim if isinstance(read_claim, str) else None,
+            allow_buddybox=True,
         )
     except ValueError as exc:
         return None, _reject_scope(
@@ -369,7 +372,10 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
             return _reject_payload(action=action, active_buddy=active_buddy, message="read_claim must be a string")
         try:
             normalized_refs, scope_error = source_ref_service.normalize_source_refs(
-                args.get("source_refs"), active_buddy=active_buddy, read_claim=read_claim if isinstance(read_claim, str) else None
+                args.get("source_refs"),
+                active_buddy=active_buddy,
+                read_claim=read_claim if isinstance(read_claim, str) else None,
+                allow_buddybox=True,
             )
         except ValueError as exc:
             return _reject_scope(

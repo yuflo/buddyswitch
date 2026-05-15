@@ -37,6 +37,7 @@ def normalize_source_refs(
     *,
     active_buddy: str,
     read_claim: str | None = None,
+    allow_buddybox: bool = True,
 ) -> tuple[list[dict[str, Any]] | None, dict[str, Any] | None]:
     if raw_refs is None:
         return None, None
@@ -58,7 +59,15 @@ def normalize_source_refs(
         if ref_type in {"artifact", "track", "task", "handoff"}:
             item["id"] = env_store.require_id(raw.get("id"), f"source_refs.{ref_type}.id")
         elif ref_type == "buddybox":
-            item["path"] = validate_buddybox_ref_path(raw.get("path"))
+            if not allow_buddybox:
+                raise ValueError("source_refs.buddybox is private provenance and not allowed in handoff payloads")
+            normalized_path = validate_buddybox_ref_path(raw.get("path"))
+            owner = normalized_path.split("/", 1)[0]
+            if owner != active_buddy:
+                raise ValueError(f"source_refs.buddybox.path must stay under active buddy root '{active_buddy}/'")
+            item["path"] = normalized_path
+            item["private_to_buddy"] = active_buddy
+            item["read_grant"] = False
         elif ref_type == "external":
             label = raw.get("label")
             if not isinstance(label, str) or not label.strip():
@@ -107,7 +116,12 @@ def source_ref_summary(refs: list[dict[str, Any]] | None) -> list[dict[str, Any]
         if "id" in row:
             summary.append({"type": ref_type, "id": row.get("id")})
         elif "path" in row:
-            summary.append({"type": ref_type, "path": row.get("path")})
+            entry = {"type": ref_type, "path": row.get("path")}
+            if "private_to_buddy" in row:
+                entry["private_to_buddy"] = row.get("private_to_buddy")
+            if "read_grant" in row:
+                entry["read_grant"] = row.get("read_grant")
+            summary.append(entry)
         elif "label" in row:
             entry = {"type": ref_type, "label": row.get("label")}
             if "url" in row:

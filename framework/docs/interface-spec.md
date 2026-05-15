@@ -18,7 +18,7 @@ Key projection sections:
 - tasks
 - artifacts
 - handoffs
-- buddybox_files
+- no top-level buddybox file rows; buddybox is surfaced via `context.get/summarize` as `buddybox_desc`
 
 ## Runtime Tool Interface
 

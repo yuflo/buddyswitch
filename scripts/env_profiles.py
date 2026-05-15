@@ -221,7 +221,7 @@ def validate_env_profile(
 
     buddybox = _require_dict(profile.get("buddybox"), "buddybox")
     buddybox_root = _require_string(buddybox.get("root"), "buddybox.root")
-    expected_buddybox_root = f"buddyswitch/content/buddybox/{buddy_id}"
+    expected_buddybox_root = f"buddyswitch/local/buddybox/{buddy_id}"
     if buddybox_root != expected_buddybox_root:
         raise EnvProfileError(
             f"buddybox.root mismatch for '{buddy_id}': expected {expected_buddybox_root!r}, got {buddybox_root!r}"

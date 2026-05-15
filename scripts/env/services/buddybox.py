@@ -7,6 +7,7 @@ import base64
 import mimetypes
 import os
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -22,6 +23,13 @@ class BuddyboxServiceContext(TypedDict):
     manifest: dict[str, Any]
 
 
+BUDDYBOX_PRIVACY_MESSAGE = (
+    "This is the active buddy's private local working directory. "
+    "Other buddies cannot list, read, write, or delete these files. "
+    "Use artifact when content must become product-readable."
+)
+
+_DESC_FIELDS: set[str] = set()
 _LIST_FIELDS = {"path", "recursive", "limit"}
 _READ_FIELDS = {"path", "encoding"}
 _WRITE_FIELDS = {"path", "content", "content_base64", "content_type"}
@@ -29,10 +37,10 @@ _DELETE_FIELDS = {"path"}
 
 
 def buddybox_root_for_buddy(buddy: str) -> Path:
-    return env_store.BUDDYBOX_CONTENT_DIR / buddy
+    return env_store.BUDDYBOX_LOCAL_DIR / buddy
 
 
-def normalize_buddybox_path(path: Any, *, active_buddy: str, for_write: bool) -> str:
+def normalize_active_buddybox_path(path: Any, *, active_buddy: str) -> str:
     if not isinstance(path, str) or not path.strip():
         raise ValueError("path must be a non-empty string")
     normalized = path.replace("\\", "/").strip()
@@ -44,28 +52,120 @@ def normalize_buddybox_path(path: Any, *, active_buddy: str, for_write: bool) ->
     if not pieces:
         raise ValueError("path must not be empty")
     normalized = "/".join(pieces)
-    if for_write and pieces[0] != active_buddy:
-        raise ValueError(f"path must stay under active buddy root '{active_buddy}/'")
+    if pieces[0] != active_buddy:
+        raise ValueError(f"path must stay under active buddy private local root '{active_buddy}/'")
+    return normalized
+
+
+def normalize_buddybox_prefix(path: Any, *, active_buddy: str) -> str:
+    if path is None:
+        return active_buddy
+    if not isinstance(path, str) or not path.strip():
+        return active_buddy
+    normalized = normalize_active_buddybox_path(path, active_buddy=active_buddy)
     return normalized
 
 
 def _resolve_path(path: str) -> Path:
-    return env_store.BUDDYBOX_CONTENT_DIR / path
+    return env_store.BUDDYBOX_LOCAL_DIR / path
 
 
-def _file_summary(path: Path, *, root: Path | None = None) -> dict[str, Any]:
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _resolved_active_root(active_buddy: str) -> Path:
+    return buddybox_root_for_buddy(active_buddy).resolve(strict=False)
+
+
+def _resolved_path_stays_in_active_root(path: Path, *, active_buddy: str) -> bool:
+    try:
+        resolved = path.resolve(strict=True)
+    except FileNotFoundError:
+        return False
+    return _path_is_within(resolved, _resolved_active_root(active_buddy))
+
+
+def _write_parent_stays_in_active_root(path: Path, *, active_buddy: str) -> bool:
+    parent = path.parent.resolve(strict=False)
+    return _path_is_within(parent, _resolved_active_root(active_buddy))
+
+
+def _updated_at_from_stat(path: Path) -> str:
+    stat = path.stat()
+    return datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds")
+
+
+def _file_summary(path: Path, *, active_buddy: str) -> dict[str, Any]:
     stat = path.stat()
     content_type, _ = mimetypes.guess_type(path.name)
-    normalized_root = root or env_store.BUDDYBOX_CONTENT_DIR
-    rel_path = path.relative_to(normalized_root).as_posix()
-    buddy = rel_path.split("/", 1)[0] if "/" in rel_path else rel_path
+    rel_path = path.relative_to(env_store.BUDDYBOX_LOCAL_DIR).as_posix()
     return {
-        "buddy": buddy,
+        "buddy": active_buddy,
         "path": rel_path,
         "size_bytes": stat.st_size,
-        "updated_at": env_store.now_iso(),
+        "updated_at": _updated_at_from_stat(path),
         "content_type": content_type or "application/octet-stream",
-        "source_ref": {"type": "buddybox", "path": rel_path},
+        "private_to_buddy": active_buddy,
+    }
+
+
+def _buddybox_state_summary(root: Path, *, active_buddy: str) -> dict[str, Any]:
+    file_count = 0
+    total_bytes = 0
+    latest_mtime: float | None = None
+    if root.exists():
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if not _resolved_path_stays_in_active_root(path, active_buddy=active_buddy):
+                continue
+            stat = path.stat()
+            file_count += 1
+            total_bytes += stat.st_size
+            if latest_mtime is None or stat.st_mtime > latest_mtime:
+                latest_mtime = stat.st_mtime
+    latest_update_at = (
+        datetime.fromtimestamp(latest_mtime).astimezone().isoformat(timespec="seconds")
+        if latest_mtime is not None
+        else None
+    )
+    return {
+        "file_count": file_count,
+        "total_bytes": total_bytes,
+        "latest_update_at": latest_update_at,
+    }
+
+
+def build_buddybox_desc(active_buddy: str) -> dict[str, Any]:
+    root = buddybox_root_for_buddy(active_buddy)
+    env_store.ensure_runtime_dirs()
+    root.mkdir(parents=True, exist_ok=True)
+    return {
+        "active_buddy": active_buddy,
+        "logical_root": f"buddyswitch/local/buddybox/{active_buddy}",
+        "privacy_boundary": "active-buddy-private-local-workspace",
+        "message": BUDDYBOX_PRIVACY_MESSAGE,
+        "available_operations": [
+            "buddybox.desc",
+            "buddybox.list",
+            "buddybox.read",
+            "buddybox.write",
+            "buddybox.delete",
+        ],
+        "state_summary": _buddybox_state_summary(root, active_buddy=active_buddy),
+        "allowed_next_actions": [
+            "Use buddybox.list to inspect active buddy private file summaries.",
+            "Use buddybox.write for private local drafts or generated files.",
+            (
+                "When the host decides another buddy must read this content, create an artifact revision "
+                "or another explicit readable reference that carries the content."
+            ),
+        ],
     }
 
 
@@ -77,20 +177,27 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         code="E_BUDDYBOX_PAYLOAD",
         message=message,
         permission_boundary="request-payload",
-        human_summary="Buddybox payload is invalid.",
+        human_summary="Buddybox payload is invalid for the active buddy private local workspace.",
         why_blocked=message,
-        impact="No buddybox file state changed.",
+        impact="No private local buddybox file changed and no product/collaboration object changed.",
         state_changed=False,
         retryable=True,
-        retry_guidance="Fix buddybox payload and retry.",
+        retry_guidance="Fix the payload fields and retry with an active-buddy private local path.",
         allowed_next_actions=[
-            "Use buddybox.list to inspect readable paths.",
-            "Retry with valid relative path and payload encoding.",
+            "Use buddybox.desc to review private local workspace semantics.",
+            "Use buddybox.list with an active buddy local prefix.",
         ],
     )
 
 
-def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str, code: str = "E_BUDDYBOX_SCOPE") -> dict[str, Any]:
+def _reject_scope(
+    *,
+    action: str,
+    active_buddy: str,
+    boundary: str,
+    message: str,
+    code: str = "E_BUDDYBOX_SCOPE",
+) -> dict[str, Any]:
     return tool_responses.rejection(
         tool="buddybox",
         action=action,
@@ -98,25 +205,61 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
         code=code,
         message=message,
         permission_boundary=boundary,
-        human_summary="Buddybox scope check failed.",
+        human_summary="Buddybox request crossed the active-buddy private local boundary.",
         why_blocked=message,
-        impact="No buddybox file state changed.",
+        impact="No private local buddybox file changed and no product/collaboration object changed.",
         state_changed=False,
         retryable=False,
-        retry_guidance="Use active-buddy-owned paths under buddybox root.",
+        retry_guidance="Stay under the active buddy local root and retry.",
         allowed_next_actions=[
-            "Use buddybox.list to confirm path scope.",
-            "Use active buddy root prefix for write/delete operations.",
+            "Use buddybox.desc to confirm the private local boundary.",
+            "Retry with a path under the active buddy local root.",
         ],
     )
 
 
 def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
-    allowed = _LIST_FIELDS if action == "buddybox.list" else _READ_FIELDS if action == "buddybox.read" else _WRITE_FIELDS if action == "buddybox.write" else _DELETE_FIELDS
+    if action == "buddybox.desc":
+        allowed = _DESC_FIELDS
+    elif action == "buddybox.list":
+        allowed = _LIST_FIELDS
+    elif action == "buddybox.read":
+        allowed = _READ_FIELDS
+    elif action == "buddybox.write":
+        allowed = _WRITE_FIELDS
+    else:
+        allowed = _DELETE_FIELDS
     unknown = sorted(key for key in args if key not in allowed)
     if unknown:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")
     return None
+
+
+def describe_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxServiceContext) -> dict[str, Any]:
+    action = "buddybox.desc"
+    active_buddy = context["active_buddy"]
+    payload_error = _require_allowed_fields(action, args, active_buddy)
+    if payload_error is not None:
+        return payload_error
+
+    desc = build_buddybox_desc(active_buddy)
+    desc_payload = dict(desc)
+    allowed_next_actions = list(desc_payload.pop("allowed_next_actions", []))
+    desc_payload.pop("active_buddy", None)
+    return tool_responses.success(
+        tool="buddybox",
+        action=action,
+        active_buddy=active_buddy,
+        effect_summary=(
+            "Returned active buddy private local workspace semantics and compact state summary only. "
+            "No file content and no product/collaboration object state were changed."
+        ),
+        state_changed=False,
+        durability="none",
+        read_scope="active-buddy private local workspace description",
+        allowed_next_actions=allowed_next_actions,
+        extra=desc_payload,
+    )
 
 
 def list_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxServiceContext) -> dict[str, Any]:
@@ -130,14 +273,10 @@ def list_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
     env_store.ensure_runtime_dirs()
     root.mkdir(parents=True, exist_ok=True)
 
-    path_filter = args.get("path")
-    prefix = f"{active_buddy}"
-    if isinstance(path_filter, str) and path_filter.strip():
-        try:
-            normalized = normalize_buddybox_path(path_filter, active_buddy=active_buddy, for_write=False)
-        except ValueError as exc:
-            return _reject_scope(action=action, active_buddy=active_buddy, boundary="buddybox.path", message=str(exc))
-        prefix = normalized
+    try:
+        prefix = normalize_buddybox_prefix(args.get("path"), active_buddy=active_buddy)
+    except ValueError as exc:
+        return _reject_scope(action=action, active_buddy=active_buddy, boundary="buddybox.path", message=str(exc))
 
     recursive = bool(args.get("recursive", False))
     limit = args.get("limit")
@@ -148,10 +287,12 @@ def list_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
     for path in walker:
         if not path.is_file():
             continue
-        rel_path = path.relative_to(env_store.BUDDYBOX_CONTENT_DIR).as_posix()
+        if not _resolved_path_stays_in_active_root(path, active_buddy=active_buddy):
+            continue
+        rel_path = path.relative_to(env_store.BUDDYBOX_LOCAL_DIR).as_posix()
         if not rel_path.startswith(prefix):
             continue
-        files.append(_file_summary(path))
+        files.append(_file_summary(path, active_buddy=active_buddy))
 
     files.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("path") or "")), reverse=True)
     files = files[:limit_value]
@@ -160,13 +301,16 @@ def list_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
         tool="buddybox",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Listed {len(files)} buddybox file summary row(s).",
+        effect_summary=(
+            f"Listed {len(files)} active-buddy private local file summary row(s). "
+            "No file content was returned and no product/collaboration object changed."
+        ),
         state_changed=False,
         durability="none",
-        read_scope="active-buddy buddybox file summaries",
+        read_scope="active-buddy private local file summaries",
         allowed_next_actions=[
-            "Use buddybox.read for file content.",
-            "Use buddybox.write to add or replace durable files.",
+            "Use buddybox.read for one active buddy private local file.",
+            "Use buddybox.write to create or replace one active buddy private local file.",
         ],
         extra={"files": files},
     )
@@ -179,26 +323,24 @@ def read_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
     if payload_error is not None:
         return payload_error
 
-    path = args.get("path")
     try:
-        normalized = normalize_buddybox_path(path, active_buddy=active_buddy, for_write=False)
+        normalized = normalize_active_buddybox_path(args.get("path"), active_buddy=active_buddy)
     except ValueError as exc:
         return _reject_scope(action=action, active_buddy=active_buddy, boundary="buddybox.path", message=str(exc))
 
-    if normalized.split("/", 1)[0] != active_buddy and active_buddy != "pm":
-        return _reject_scope(
-            action=action,
-            active_buddy=active_buddy,
-            boundary="buddybox.read_scope",
-            code="E_BUDDYBOX_READ_SCOPE",
-            message=f"path '{normalized}' is outside readable scope for buddy '{active_buddy}'",
-        )
-
     resolved = _resolve_path(normalized)
+    if not _resolved_path_stays_in_active_root(resolved, active_buddy=active_buddy):
+        if resolved.exists():
+            return _reject_scope(
+                action=action,
+                active_buddy=active_buddy,
+                boundary="buddybox.path",
+                message="path resolves outside the active buddy private local root",
+            )
+        return _reject_payload(action=action, active_buddy=active_buddy, message=f"buddybox file not found: {normalized}")
     if not resolved.exists() or not resolved.is_file():
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"buddybox file not found: {normalized}")
 
-    raw = resolved.read_bytes()
     preferred = args.get("encoding")
     encoding = "auto"
     if isinstance(preferred, str) and preferred.strip():
@@ -206,12 +348,13 @@ def read_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
         if encoding not in {"auto", "utf-8", "base64"}:
             return _reject_payload(action=action, active_buddy=active_buddy, message="encoding must be auto, utf-8, or base64")
 
+    raw = resolved.read_bytes()
     payload: dict[str, Any] = {
-        "buddy": normalized.split("/", 1)[0],
+        "buddy": active_buddy,
         "path": normalized,
         "size_bytes": len(raw),
         "content_type": mimetypes.guess_type(resolved.name)[0] or "application/octet-stream",
-        "source_ref": {"type": "buddybox", "path": normalized},
+        "private_to_buddy": active_buddy,
     }
 
     if encoding == "base64":
@@ -219,9 +362,8 @@ def read_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
         payload["content_base64"] = base64.b64encode(raw).decode("ascii")
     else:
         try:
-            text = raw.decode("utf-8")
+            payload["content"] = raw.decode("utf-8")
             payload["encoding"] = "utf-8"
-            payload["content"] = text
         except UnicodeDecodeError:
             payload["encoding"] = "base64"
             payload["content_base64"] = base64.b64encode(raw).decode("ascii")
@@ -230,13 +372,16 @@ def read_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
         tool="buddybox",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Read buddybox file '{normalized}'.",
+        effect_summary=(
+            f"Read one active-buddy private local file '{normalized}'. "
+            "No artifact/handoff/task/track/context/evidence state changed."
+        ),
         state_changed=False,
         durability="none",
-        read_scope="active scope buddybox file content",
+        read_scope="one active-buddy private local file content",
         allowed_next_actions=[
-            "Use buddybox.write to replace content.",
-            "Reference this path in artifact or handoff source_refs.",
+            "Use buddybox.write to replace this private local file.",
+            "When cross-buddy readability is needed, create an artifact with readable content.",
         ],
         extra=payload,
     )
@@ -249,11 +394,10 @@ def write_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSe
     if payload_error is not None:
         return payload_error
 
-    path = args.get("path")
     try:
-        normalized = normalize_buddybox_path(path, active_buddy=active_buddy, for_write=True)
+        normalized = normalize_active_buddybox_path(args.get("path"), active_buddy=active_buddy)
     except ValueError as exc:
-        return _reject_scope(action=action, active_buddy=active_buddy, boundary="buddybox.owner_scope", message=str(exc))
+        return _reject_scope(action=action, active_buddy=active_buddy, boundary="buddybox.path", message=str(exc))
 
     content = args.get("content")
     content_base64 = args.get("content_base64")
@@ -273,9 +417,16 @@ def write_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSe
             return _reject_payload(action=action, active_buddy=active_buddy, message="content_base64 must be valid base64")
 
     resolved = _resolve_path(normalized)
+    env_store.ensure_runtime_dirs()
+    if not _write_parent_stays_in_active_root(resolved, active_buddy=active_buddy):
+        return _reject_scope(
+            action=action,
+            active_buddy=active_buddy,
+            boundary="buddybox.path",
+            message="path parent resolves outside the active buddy private local root",
+        )
     resolved.parent.mkdir(parents=True, exist_ok=True)
     existed = resolved.exists()
-
     with tempfile.NamedTemporaryFile("wb", delete=False, dir=resolved.parent) as handle:
         handle.write(raw)
         temp_name = handle.name
@@ -286,26 +437,29 @@ def write_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSe
         content_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
 
     payload = {
-        "buddy": normalized.split("/", 1)[0],
+        "buddy": active_buddy,
         "path": normalized,
         "size_bytes": len(raw),
         "content_type": content_type,
-        "source_ref": {"type": "buddybox", "path": normalized},
+        "private_to_buddy": active_buddy,
         "overwrote": existed,
     }
-
+    change_word = "overwrote" if existed else "created"
     return tool_responses.success(
         tool="buddybox",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Wrote buddybox file '{normalized}'.",
+        effect_summary=(
+            f"{change_word.capitalize()} one active-buddy private local file '{normalized}'. "
+            "No artifact/handoff/task/track/context/evidence state changed."
+        ),
         state_changed=True,
         durability="durable",
         created_ids=[normalized] if not existed else None,
         updated_ids=[normalized] if existed else None,
         allowed_next_actions=[
-            "Use buddybox.read to verify content.",
-            "Attach this path via source_refs in artifact/handoff writes.",
+            "Use buddybox.read to confirm this private local file.",
+            "Keep iterating locally, or create an artifact when host decides readable promotion is needed.",
         ],
         extra=payload,
     )
@@ -318,11 +472,10 @@ def delete_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxS
     if payload_error is not None:
         return payload_error
 
-    path = args.get("path")
     try:
-        normalized = normalize_buddybox_path(path, active_buddy=active_buddy, for_write=True)
+        normalized = normalize_active_buddybox_path(args.get("path"), active_buddy=active_buddy)
     except ValueError as exc:
-        return _reject_scope(action=action, active_buddy=active_buddy, boundary="buddybox.owner_scope", message=str(exc))
+        return _reject_scope(action=action, active_buddy=active_buddy, boundary="buddybox.path", message=str(exc))
 
     resolved = _resolve_path(normalized)
     if resolved.exists() and resolved.is_dir():
@@ -337,10 +490,18 @@ def delete_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxS
         tool="buddybox",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Deleted buddybox file '{normalized}'." if deleted else f"Buddybox file '{normalized}' did not exist.",
+        effect_summary=(
+            f"Deleted active-buddy private local file '{normalized}'."
+            if deleted
+            else f"Active-buddy private local file '{normalized}' was already absent."
+        )
+        + " No artifact/handoff/task/track/context/evidence state changed.",
         state_changed=deleted,
         durability="durable" if deleted else "none",
         updated_ids=[normalized] if deleted else None,
-        allowed_next_actions=["Use buddybox.list to inspect remaining files."],
-        extra={"path": normalized, "deleted": deleted},
+        allowed_next_actions=[
+            "Use buddybox.list to inspect remaining private local summaries.",
+            "Use buddybox.write to create a replacement private local file if needed.",
+        ],
+        extra={"path": normalized, "deleted": deleted, "private_to_buddy": active_buddy},
     )

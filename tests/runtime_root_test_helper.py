@@ -51,6 +51,7 @@ class RuntimeWorkspaceSandbox:
 
         objects_root = self.root / "buddyswitch" / "objects"
         content_root = self.root / "buddyswitch" / "content"
+        local_root = self.root / "buddyswitch" / "local"
         patches = [
             patch.object(env_store, "ROOT", self.root),
             patch.object(env_store, "STATE_ROOT", self.root),
@@ -60,7 +61,8 @@ class RuntimeWorkspaceSandbox:
             patch.object(env_store, "ARTIFACT_OBJECTS_DIR", objects_root / "artifacts"),
             patch.object(env_store, "HANDOFF_OBJECTS_DIR", objects_root / "handoffs"),
             patch.object(env_store, "CONTENT_ROOT", content_root),
-            patch.object(env_store, "BUDDYBOX_CONTENT_DIR", content_root / "buddybox"),
+            patch.object(env_store, "LOCAL_ROOT", local_root),
+            patch.object(env_store, "BUDDYBOX_LOCAL_DIR", local_root / "buddybox"),
             patch.object(turn_runtime, "ROOT", self.root),
             patch.object(workspace_data, "ROOT", self.root),
             patch.object(workspace_data, "rel", _relative_to_runtime_or_repo),

@@ -13,9 +13,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONSOLE_APP = ROOT / "framework" / "console" / "app.js"
+_RETIRED_BUDDYBOX_FILE_ROWS_FIELD = "buddybox_" + "files"
 
 
 class ConsoleAppContractTests(unittest.TestCase):
+    def test_console_workspace_normalization_has_no_buddybox_file_projection(self) -> None:
+        source = CONSOLE_APP.read_text(encoding="utf-8")
+        self.assertNotIn(_RETIRED_BUDDYBOX_FILE_ROWS_FIELD, source)
+        self.assertNotIn("content_root", source)
+
     def _derive_track_next_step_state(self, workspace_payload: dict, track_payload: dict) -> dict:
         script = textwrap.dedent(
             """

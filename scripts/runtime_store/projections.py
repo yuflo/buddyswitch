@@ -75,7 +75,6 @@ def _workspace_uses_projected_state(workspace_root: Path) -> bool:
         workspace_root / "buddyswitch" / "objects" / "tasks",
         workspace_root / "buddyswitch" / "objects" / "artifacts",
         workspace_root / "buddyswitch" / "objects" / "handoffs",
-        workspace_root / "buddyswitch" / "content" / "buddybox",
     )
     return any(path.is_symlink() for path in projected_paths)
 
@@ -235,7 +234,6 @@ def build_handoff_view(handoff: dict[str, Any]) -> dict[str, Any]:
         "track_id": handoff["track_id"],
         "source_task_id": handoff.get("source_task_id"),
         "artifact_ids": handoff.get("artifact_ids", []),
-        "buddybox_paths": handoff.get("buddybox_paths", []),
         "source_refs": handoff.get("source_refs"),
         "reason": handoff.get("reason", ""),
         "context": handoff.get("context", ""),
@@ -246,32 +244,6 @@ def build_handoff_view(handoff: dict[str, Any]) -> dict[str, Any]:
         "file_name": Path(object_path).name,
         "missing": False,
     }
-def scan_buddybox_files() -> list[dict[str, Any]]:
-    root = env_store.BUDDYBOX_CONTENT_DIR
-    if not root.exists():
-        return []
-
-    rows: list[dict[str, Any]] = []
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
-        rel_path = path.relative_to(root).as_posix()
-        buddy = rel_path.split("/", 1)[0] if "/" in rel_path else rel_path
-        stat = path.stat()
-        rows.append(
-            {
-                "buddy": buddy,
-                "path": rel_path,
-                "size_bytes": stat.st_size,
-                "updated_at": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds"),
-                "content_type": "application/octet-stream",
-                "source_ref": {"type": "buddybox", "path": rel_path},
-            }
-        )
-    rows.sort(key=lambda row: (str(row.get("updated_at", "")), str(row.get("path", ""))), reverse=True)
-    return rows
-
-
 def build_workspace_projection() -> dict[str, Any]:
     manifest = load_manifest(DEFAULT_MANIFEST)
     artifacts = [build_artifact_view(artifact) for artifact in env_store.list_artifacts()]
@@ -295,13 +267,10 @@ def build_workspace_projection() -> dict[str, Any]:
     standalone_tasks.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
 
     handoffs = [build_handoff_view(handoff) for handoff in env_store.list_handoffs()]
-    buddybox_files = scan_buddybox_files()
-
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "manifest_path": rel(DEFAULT_MANIFEST),
         "objects_root": "buddyswitch/objects",
-        "content_root": "buddyswitch/content",
         "buddies": [
             {"id": buddy["id"], "label": buddy["label"], "scope": buddy["scope"]}
             for buddy in manifest.get("buddies", [])
@@ -311,7 +280,6 @@ def build_workspace_projection() -> dict[str, Any]:
         "tasks": tasks,
         "artifacts": artifacts,
         "handoffs": handoffs,
-        "buddybox_files": buddybox_files,
     }
 
 

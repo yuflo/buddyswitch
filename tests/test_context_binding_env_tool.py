@@ -20,6 +20,8 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
+_RETIRED_BUDDYBOX_FILE_ROWS_FIELD = "buddybox_" + "files"
+_RETIRED_BUDDYBOX_READINESS_FIELD = "has_" + "buddybox_" + "files"
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -99,7 +101,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             created_by="dev",
             source_refs=[{"type": "note", "label": "context"}],
         )
-        buddybox = env_store.BUDDYBOX_CONTENT_DIR / "dev" / "notes"
+        buddybox = env_store.BUDDYBOX_LOCAL_DIR / "dev" / "notes"
         buddybox.mkdir(parents=True, exist_ok=True)
         (buddybox / "context.txt").write_text("hello\n", encoding="utf-8")
 
@@ -119,6 +121,22 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(decision_surface, dict, msg=summary)
         assert isinstance(decision_surface, dict)
         self.assertEqual(((decision_surface.get("binding_state") or {}).get("state")), "runless")
+        self.assertIn("buddybox_desc", summary)
+        self.assertNotIn(_RETIRED_BUDDYBOX_FILE_ROWS_FIELD, summary)
+
+    def test_context_uses_buddybox_desc_not_file_projection(self) -> None:
+        self._seed_context_state()
+        instance_json = self._instance_json()
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="get", args={})
+        self.assertTrue(payload.get("ok"), msg=payload)
+        self.assertIn("buddybox_desc", payload)
+        self.assertNotIn(_RETIRED_BUDDYBOX_FILE_ROWS_FIELD, payload)
+        desc = payload.get("buddybox_desc")
+        self.assertIsInstance(desc, dict, msg=payload)
+        assert isinstance(desc, dict)
+        self.assertEqual(desc.get("active_buddy"), "dev")
+        self.assertEqual(desc.get("logical_root"), "buddyswitch/local/buddybox/dev")
+        self.assertIn("private", str(desc.get("message", "")).lower())
 
     def test_context_list_sources_excludes_memory_and_includes_buddybox(self) -> None:
         instance_json = self._instance_json()
@@ -129,6 +147,11 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(sources, dict)
         self.assertNotIn("memories", sources)
         self.assertIn("buddybox", sources)
+        buddybox = sources["buddybox"]
+        self.assertIsInstance(buddybox, dict, msg=listed)
+        assert isinstance(buddybox, dict)
+        self.assertIn("private local workspace", str(buddybox.get("description", "")).lower())
+        self.assertEqual(buddybox.get("source_of_truth"), "buddyswitch/local/buddybox/<active_buddy>/**")
 
     def test_context_get_applies_filters(self) -> None:
         self._seed_context_state()
@@ -145,6 +168,16 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(tasks, list, msg=filtered)
         assert isinstance(tasks, list)
         self.assertEqual({row.get("id") for row in tasks if isinstance(row, dict)}, {"task-dev-context"})
+        self.assertIn("buddybox_desc", filtered)
+        self.assertNotIn(_RETIRED_BUDDYBOX_FILE_ROWS_FIELD, filtered)
+        decision_surface = filtered.get("decision_surface")
+        self.assertIsInstance(decision_surface, dict, msg=filtered)
+        assert isinstance(decision_surface, dict)
+        readiness = decision_surface.get("context_readiness")
+        self.assertIsInstance(readiness, dict, msg=filtered)
+        assert isinstance(readiness, dict)
+        self.assertIn("has_buddybox_workspace", readiness)
+        self.assertNotIn(_RETIRED_BUDDYBOX_READINESS_FIELD, readiness)
 
     def test_context_rejects_unknown_payload_field(self) -> None:
         instance_json = self._instance_json()

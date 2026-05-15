@@ -26,7 +26,6 @@ _VALIDATE_FIELDS = {
     "source_task_id",
     "target_buddy",
     "artifact_ids",
-    "buddybox_paths",
     "source_refs",
     "reason",
     "context",
@@ -119,20 +118,6 @@ def _normalize_ids(value: Any, *, label: str) -> tuple[list[str] | None, str | N
     return list(dict.fromkeys(rows)), None
 
 
-def _normalize_paths(value: Any, *, label: str) -> tuple[list[str] | None, str | None]:
-    if value is None:
-        return [], None
-    if not isinstance(value, list):
-        return None, f"{label} must be a list"
-    rows: list[str] = []
-    for raw in value:
-        try:
-            rows.append(source_ref_service.validate_buddybox_ref_path(raw))
-        except ValueError as exc:
-            return None, str(exc)
-    return list(dict.fromkeys(rows)), None
-
-
 def _validate_payload(*, args: dict[str, Any], context: HandoffServiceContext, action: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     active_buddy = context["active_buddy"]
     track_id = args.get("track_id")
@@ -190,20 +175,6 @@ def _validate_payload(*, args: dict[str, Any], context: HandoffServiceContext, a
                 message=f"artifact '{artifact_id}' is owned by buddy '{artifact.get('buddy')}'",
             )
 
-    buddybox_paths, paths_err = _normalize_paths(args.get("buddybox_paths"), label="buddybox_paths")
-    if paths_err:
-        return None, _reject_payload(action=action, active_buddy=active_buddy, message=paths_err)
-    assert buddybox_paths is not None
-
-    for path in buddybox_paths:
-        if path.split("/", 1)[0] != active_buddy:
-            return None, _reject_scope(
-                action=action,
-                active_buddy=active_buddy,
-                boundary="buddybox.owner_scope",
-                message=f"buddybox path '{path}' is outside active buddy root '{active_buddy}/'",
-            )
-
     reason = args.get("reason")
     context_text = args.get("context")
     if not isinstance(reason, str) or not reason.strip():
@@ -227,7 +198,10 @@ def _validate_payload(*, args: dict[str, Any], context: HandoffServiceContext, a
 
     try:
         source_refs, scope_error = source_ref_service.normalize_source_refs(
-            args.get("source_refs"), active_buddy=active_buddy, read_claim=read_claim if isinstance(read_claim, str) else None
+            args.get("source_refs"),
+            active_buddy=active_buddy,
+            read_claim=read_claim if isinstance(read_claim, str) else None,
+            allow_buddybox=False,
         )
     except ValueError as exc:
         return None, _reject_scope(
@@ -251,7 +225,6 @@ def _validate_payload(*, args: dict[str, Any], context: HandoffServiceContext, a
         "source_task_id": source_task_id,
         "target_buddy": target_buddy,
         "artifact_ids": artifact_ids,
-        "buddybox_paths": buddybox_paths,
         "source_refs": source_refs,
         "reason": reason.strip(),
         "context": context_text.strip(),
@@ -268,7 +241,6 @@ def _handoff_row(row: dict[str, Any]) -> dict[str, Any]:
         "track_id": row.get("track_id"),
         "source_task_id": row.get("source_task_id"),
         "artifact_ids": list(row.get("artifact_ids", [])),
-        "buddybox_paths": list(row.get("buddybox_paths", [])),
         "source_refs": row.get("source_refs"),
         "reason": row.get("reason"),
         "context": row.get("context"),
@@ -380,7 +352,6 @@ def create_handoff_for_active_buddy(*, args: dict[str, Any], context: HandoffSer
             target_buddy=normalized["target_buddy"],
             source_task_id=normalized["source_task_id"],
             artifact_ids=normalized["artifact_ids"],
-            buddybox_paths=normalized["buddybox_paths"],
             source_refs=normalized["source_refs"],
             reason=normalized["reason"],
             context=normalized["context"],
@@ -400,7 +371,7 @@ def create_handoff_for_active_buddy(*, args: dict[str, Any], context: HandoffSer
         created_ids=[created["id"]],
         allowed_next_actions=[
             "Use handoff.list to review readable handoff timeline.",
-            "Notify target buddy to consume referenced artifacts/buddybox files.",
+            "Notify target buddy to consume referenced readable artifacts.",
         ],
         extra={"handoff": row},
     )

@@ -289,6 +289,25 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("get-current", help_text)
         self.assertNotIn("set-current", help_text)
 
+    def test_env_client_buddybox_help_exposes_desc_subcommand(self) -> None:
+        buddybox_help = subprocess.run(
+            ["python3", "scripts/env/client.py", "buddybox", "--help"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertIn("desc", buddybox_help.stdout)
+
+        desc_help = subprocess.run(
+            ["python3", "scripts/env/client.py", "buddybox", "desc", "--help"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertIn("usage:", desc_help.stdout.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

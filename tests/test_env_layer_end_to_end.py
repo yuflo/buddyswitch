@@ -18,6 +18,8 @@ import env_store  # noqa: E402
 from env.tools import router as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
+_OLD_BUDDYBOX_ROOT = "buddyswitch/content/" + "buddybox"
+
 
 class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def setUp(self) -> None:
@@ -95,7 +97,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "source_task_id": "task-pm-e2e-runless",
                 "target_buddy": "dev",
                 "artifact_ids": ["art-pm-e2e-prd-r1"],
-                "buddybox_paths": ["pm/e2e/notes.md"],
+                "source_refs": [{"type": "artifact", "id": "art-pm-e2e-prd-r1"}],
                 "reason": "implement",
                 "context": "handoff context",
                 "status": "active",
@@ -107,7 +109,8 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsNotNone(env_store.get_task("task-pm-e2e-runless"))
         self.assertIsNotNone(env_store.get_artifact("art-pm-e2e-prd-r1"))
         self.assertIsNotNone(env_store.get_handoff("handoff-pm-dev-e2e"))
-        self.assertTrue(self._runtime_path("buddyswitch/content/buddybox/pm/e2e/notes.md").exists())
+        self.assertTrue(self._runtime_path("buddyswitch/local/buddybox/pm/e2e/notes.md").exists())
+        self.assertFalse(self._runtime_path(f"{_OLD_BUDDYBOX_ROOT}/pm/e2e/notes.md").exists())
         self.assertFalse(self._runtime_path("runs/raw").exists())
         self.assertFalse(self._runtime_path("buddyswitch/content/runs").exists())
 

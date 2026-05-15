@@ -15,11 +15,11 @@ Validate behavior, report pass/fail/blocked outcomes, and persist test evidence 
 - Use `python3 scripts/env/client.py ...` (`env.tool`) for durable operations.
 - No `prepare/persist` turn transaction.
 - Test buddy must not edit source code when profile is read-only.
-- Do not edit `buddyswitch/objects/**` or `buddyswitch/content/buddybox/**` directly.
+- Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
 
 ## Durable Output Targets
 
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - `buddyswitch/objects/handoffs/<handoff-id>.json`
-- `buddyswitch/content/buddybox/test/**`
+- `buddyswitch/local/buddybox/test/**` (active buddy private local workspace)

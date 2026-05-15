@@ -136,6 +136,7 @@ def _parse_args() -> argparse.Namespace:
 
     buddybox = sub.add_parser("buddybox", help="Buddybox env operations")
     buddybox_sub = buddybox.add_subparsers(dest="operation", required=True)
+    buddybox_sub.add_parser("desc", help="Describe active buddy private local workspace")
     buddybox_list = buddybox_sub.add_parser("list", help="List buddybox files")
     buddybox_list.add_argument("--path")
     buddybox_list.add_argument("--recursive", action="store_true")
@@ -275,6 +276,8 @@ def _dispatch_handoff(args: argparse.Namespace) -> dict[str, Any]:
 
 def _dispatch_buddybox(args: argparse.Namespace) -> dict[str, Any]:
     action = _operation_to_action(args.operation)
+    if args.operation == "desc":
+        return _dispatch_env_tool("buddybox", action, {})
     if args.operation == "write":
         return _dispatch_env_tool("buddybox", action, _load_json_object(args.payload))
     if args.operation == "read":

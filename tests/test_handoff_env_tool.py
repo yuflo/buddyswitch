@@ -20,6 +20,7 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
+_LEGACY_HANDOFF_PRIVATE_PATHS_FIELD = "buddybox_" + "paths"
 
 
 class HandoffEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -99,9 +100,6 @@ class HandoffEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             created_by="design",
             source_refs=[{"type": "note", "label": "seed"}],
         )
-        buddybox = env_store.BUDDYBOX_CONTENT_DIR / "design" / "handoff"
-        buddybox.mkdir(parents=True, exist_ok=True)
-        (buddybox / "handoff.txt").write_text("hello\n", encoding="utf-8")
 
     def test_validate_and_create_handoff_with_object_refs(self) -> None:
         self._seed_source_objects()
@@ -111,7 +109,6 @@ class HandoffEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "source_task_id": "task-design-handoff",
             "target_buddy": "dev",
             "artifact_ids": ["art-task-design-handoff-r1"],
-            "buddybox_paths": ["design/handoff/handoff.txt"],
             "reason": "handoff to dev",
             "context": "implement UI",
             "source_refs": [{"type": "note", "label": "handoff"}],
@@ -151,7 +148,6 @@ class HandoffEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "source_task_id": "task-design-handoff",
             "target_buddy": "dev",
             "artifact_ids": ["art-task-design-handoff-r1"],
-            "buddybox_paths": ["design/handoff/handoff.txt"],
             "reason": "handoff to dev",
             "context": "implement UI",
         }
@@ -215,6 +211,47 @@ class HandoffEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_HANDOFF_SCOPE")
+
+    def test_handoff_rejects_retired_private_path_list_and_buddybox_source_refs(self) -> None:
+        self._seed_source_objects()
+        design_instance = self._instance_json(instance_id="inst-design-handoff", buddy="design")
+        with_paths = self._dispatch(
+            instance_json=design_instance,
+            instance_id="inst-design-handoff",
+            buddy="design",
+            tool="handoff",
+            action="validate",
+            args={
+                "track_id": "track-handoff-runless",
+                "source_task_id": "task-design-handoff",
+                "target_buddy": "dev",
+                "artifact_ids": ["art-task-design-handoff-r1"],
+                _LEGACY_HANDOFF_PRIVATE_PATHS_FIELD: ["design/handoff/handoff.txt"],
+                "reason": "handoff to dev",
+                "context": "implement UI",
+            },
+        )
+        self.assertFalse(with_paths.get("ok"), msg=with_paths)
+        self.assertEqual((with_paths.get("error") or {}).get("code"), "E_HANDOFF_PAYLOAD")
+
+        with_buddybox_ref = self._dispatch(
+            instance_json=design_instance,
+            instance_id="inst-design-handoff",
+            buddy="design",
+            tool="handoff",
+            action="validate",
+            args={
+                "track_id": "track-handoff-runless",
+                "source_task_id": "task-design-handoff",
+                "target_buddy": "dev",
+                "artifact_ids": ["art-task-design-handoff-r1"],
+                "source_refs": [{"type": "buddybox", "path": "design/handoff/handoff.txt"}],
+                "reason": "handoff to dev",
+                "context": "implement UI",
+            },
+        )
+        self.assertFalse(with_buddybox_ref.get("ok"), msg=with_buddybox_ref)
+        self.assertEqual((with_buddybox_ref.get("error") or {}).get("code"), "E_SOURCE_REFS")
 
     def test_handoff_validate_rejects_retired_memory_ids_field(self) -> None:
         self._seed_source_objects()

@@ -1689,7 +1689,7 @@ exec "$real_git" "$@"
                 "buddyswitch/objects/tracks": shared_root / "state" / "buddyswitch" / "objects" / "tracks",
                 "buddyswitch/objects/artifacts": shared_root / "state" / "buddyswitch" / "objects" / "artifacts",
                 "buddyswitch/objects/handoffs": shared_root / "state" / "buddyswitch" / "objects" / "handoffs",
-                "buddyswitch/content/buddybox": shared_root / "state" / "buddyswitch" / "content" / "buddybox",
+                "buddyswitch/local/buddybox/pm": shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm",
             }
             for relative_path, state_path in projection_pairs.items():
                 projected_path = workspace_dir / relative_path
@@ -1699,6 +1699,9 @@ exec "$real_git" "$@"
                 live_probe = state_path / "live-projection-probe.json"
                 live_probe.write_text('{"ok":true}\n', encoding="utf-8")
                 self.assertEqual((projected_path / live_probe.name).read_text(encoding="utf-8"), '{"ok":true}\n')
+
+            self.assertFalse((workspace_dir / "buddyswitch/local/buddybox/dev").exists())
+            self.assertFalse((workspace_dir / "buddyswitch/content/" / "buddybox").exists())
 
             for retired_relative_path in ("runs/raw", "buddyswitch/content/runs"):
                 self.assertFalse((workspace_dir / retired_relative_path).exists())

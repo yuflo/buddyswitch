@@ -347,13 +347,17 @@ buddyswitch_workspace_repair_runtime_projects_app_projection() {
 }
 
 buddyswitch_workspace_runtime_output_paths() {
+  local active_buddy
+  active_buddy="$(buddyswitch_workspace_active_buddy)"
   cat <<'EOF'
 buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
 buddyswitch/objects/handoffs
-buddyswitch/content/buddybox
 EOF
+  if [[ -n "${active_buddy}" ]]; then
+    printf 'buddyswitch/local/buddybox/%s\n' "${active_buddy}"
+  fi
 }
 
 buddyswitch_workspace_projected_state_paths() {
@@ -362,7 +366,6 @@ buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
 buddyswitch/objects/handoffs
-buddyswitch/content/buddybox
 EOF
 }
 
@@ -666,7 +669,7 @@ buddyswitch/objects/tracks/**
 buddyswitch/objects/tasks/**
 buddyswitch/objects/artifacts/**
 buddyswitch/objects/handoffs/**
-buddyswitch/content/buddybox/**
+buddyswitch/local/buddybox/**
 .agents/skills/**
 EOF
 }
@@ -690,8 +693,31 @@ buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
 buddyswitch/objects/handoffs
-buddyswitch/content/buddybox
+buddyswitch/local/buddybox
 EOF
+}
+
+buddyswitch_workspace_install_active_buddybox_root() {
+  local workspace_dir state_root active_buddy relative_dir state_dir projected_dir projected_resolved state_resolved
+
+  workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
+  state_root="${BUDDYSWITCH_SHARED_ROOT}/state"
+  active_buddy="$(buddyswitch_workspace_active_buddy)"
+  if [[ -z "${active_buddy}" ]]; then
+    return 0
+  fi
+  relative_dir="buddyswitch/local/buddybox/${active_buddy}"
+  state_dir="${state_root}/${relative_dir}"
+  projected_dir="${workspace_dir}/${relative_dir}"
+  mkdir -p "${state_dir}"
+  projected_resolved="$(buddyswitch_workspace_canonical_path "${projected_dir}")"
+  state_resolved="$(buddyswitch_workspace_canonical_path "${state_dir}")"
+  if [[ -L "${projected_dir}" && "${projected_resolved}" == "${state_resolved}" ]]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "${projected_dir}")"
+  buddyswitch_workspace_force_remove_path "${projected_dir}"
+  ln -s "${state_dir}" "${projected_dir}"
 }
 
 buddyswitch_workspace_install_state_projections() {
@@ -712,6 +738,8 @@ buddyswitch_workspace_install_state_projections() {
     buddyswitch_workspace_force_remove_path "${projected_dir}"
     ln -s "${state_dir}" "${projected_dir}"
   done < <(buddyswitch_workspace_projected_state_paths)
+
+  buddyswitch_workspace_install_active_buddybox_root
 }
 
 buddyswitch_workspace_active_buddy() {

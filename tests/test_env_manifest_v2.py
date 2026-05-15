@@ -34,6 +34,20 @@ class EnvManifestV2Tests(unittest.TestCase):
                 self.assertNotIn("run.commit", permissions)
                 self.assertNotIn("binding.get", permissions)
 
+    def test_buddy_permissions_have_no_buddybox_special_cases(self) -> None:
+        expected = {"buddybox.read", "buddybox.write", "buddybox.delete"}
+        for buddy in self.manifest.get("buddies", []):
+            assert isinstance(buddy, dict)
+            buddy_id = str(buddy.get("id"))
+            permissions = set(buddy.get("permissions", []))
+            with self.subTest(buddy=buddy_id):
+                self.assertTrue(expected.issubset(permissions))
+                for permission in permissions:
+                    lowered = permission.lower()
+                    self.assertFalse(lowered.startswith("buddybox.read_foreign"))
+                    self.assertFalse(lowered.startswith("buddybox.pm_override"))
+                    self.assertFalse(lowered.startswith("buddybox." + buddy_id + "_"))
+
     def test_memory_permissions_are_rejected_by_validator(self) -> None:
         with self.assertRaisesRegex(env_manifest.ManifestError, "unsupported object 'memory'"):
             env_manifest._validate_permission("memory.read", "synthetic")  # noqa: SLF001

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -212,6 +213,72 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertTrue(required.issubset(set(row)))
                 self.assertIsInstance(row["requires"], list)
                 self.assertIsInstance(row["returns"], list)
+
+    def test_buddybox_semantics_explain_private_local_workspace_boundary(self) -> None:
+        desc = contracts.env_tools_description()
+        buddybox = desc["buddybox"]
+        capability_text = json.dumps(
+            {
+                "plain_description": buddybox["plain_description"],
+                "use_when": buddybox["use_when"],
+                "do_not_use_when": buddybox["do_not_use_when"],
+            },
+            ensure_ascii=True,
+        ).lower()
+        for token in (
+            "active buddy",
+            "private",
+            "local workspace",
+            "not collaborative",
+            "not visible to other buddies",
+            "artifact",
+        ):
+            self.assertIn(token, capability_text)
+        self.assertTrue(
+            "not product object" in capability_text or "not a product object" in capability_text,
+            msg=capability_text,
+        )
+
+        actions = buddybox["action_semantics"]
+        self.assertIn("desc", actions)
+        desc_semantic = actions["desc"]
+        self.assertEqual(desc_semantic["inputs_explained"], {})
+        self.assertEqual(desc_semantic["side_effects"]["writes"], [])
+        self.assertTrue(desc_semantic["risk_hints"]["read_only"])
+
+    def test_buddybox_semantics_reject_old_ambiguous_wording(self) -> None:
+        desc = contracts.env_tools_description()
+        packed = json.dumps(desc["buddybox"], ensure_ascii=True).lower()
+        self.assertNotIn("durable buddy-" + "owned", packed)
+        self.assertNotIn("readable buddybox " + "scope", packed)
+        self.assertNotIn("source_ref read authority", packed)
+
+    def test_buddybox_semantics_keep_host_decision_space(self) -> None:
+        desc = contracts.env_tools_description()
+        actions = desc["buddybox"]["action_semantics"]
+        packed = json.dumps(actions, ensure_ascii=True).lower()
+        for forbidden in (
+            "only next action",
+            "always create artifact",
+            "must create artifact after buddybox.write",
+            "artifact-required-for-cross-buddy-readable-content",
+        ):
+            self.assertNotIn(forbidden, packed)
+
+        local_affordance_actions = 0
+        conditional_readable_actions = 0
+        for action_name, row in sorted(actions.items()):
+            with self.subTest(action=action_name):
+                use_when_text = " ".join(str(item) for item in row.get("use_when", [])).lower()
+                if "private local" in use_when_text:
+                    local_affordance_actions += 1
+                if "artifact" in use_when_text and "host decides" in use_when_text:
+                    conditional_readable_actions += 1
+                self.assertNotIn("only", use_when_text)
+                self.assertNotIn("must ", use_when_text)
+
+        self.assertGreaterEqual(local_affordance_actions, 2)
+        self.assertGreaterEqual(conditional_readable_actions, 1)
 
 
 if __name__ == "__main__":
