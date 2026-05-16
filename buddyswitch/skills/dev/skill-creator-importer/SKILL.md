@@ -31,10 +31,11 @@ description: Use when importing an external Codex-native skill package into Budd
 5. Report the imported skill id, target buddy, package path, manifest registration, and verification output.
 
 ## Shared Runtime Rules
-- See `framework/docs/skill-runtime-shared-rules.md`.
-- This native skill contributes content to the current buddy run.
-- Do not rely on deprecated prepare/persist flows.
-- The locked buddy session returns after explicit durable writes are complete.
+
+- Runtime execution uses env.tool through python3 scripts/env/client.py ... .
+- Product-readable durable state is written explicitly as task, artifact, or handoff objects.
+- Use buddyswitch/local/buddybox/<active-buddy>/** only for active buddy private local working files.
+- Return after required explicit durable writes are complete.
 - Do not introduce transcript parsing, runtime adapter layers, or legacy markdown output paths.
 
 ## BuddySwitch Commit Output

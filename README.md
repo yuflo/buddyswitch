@@ -73,10 +73,13 @@ Open `http://127.0.0.1:8765/` and click `Refresh workspace`.
 ./buddyswitch-codex instance delete <instance-id>
 ```
 
-## Architecture Docs
+## Canonical Runtime Sources
 
-- `framework/docs/architecture-overview.md`
-- `framework/docs/turn-runtime-spec.md`
-- `framework/docs/skill-runtime-shared-rules.md`
-- `framework/docs/track-registry.md`
-- `framework/docs/interface-spec.md`
+- `scripts/env/tools/contracts.py` for env tool registry, action payloads, and status/catalog projection.
+- `scripts/env/tools/semantics.py` for machine-readable operation semantics.
+- `scripts/runtime_kernel/protocol.py` for runtime broker protocol envelope.
+- `scripts/runtime_kernel/dispatcher.py` for supported broker methods: `env.tool`, `ping`, `status`.
+- `framework/contracts/prepare-turn-context.json` for context payload contract compatibility.
+- `framework/contracts/workspace-projection.json` for context panel workspace projection shape.
+- `framework/contracts/{pm,design,dev,market,test}.md` for role-specific runtime boundaries.
+- `tests/` for behavior and consistency gates.

@@ -129,7 +129,7 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
         }
         return {
             "execution_summary": f"{buddy_id} result summary",
-            "working_notes": ["Focused on buddy-run commit contract."],
+            "working_notes": ["Focused on runless commit contract."],
             "artifacts": [
                 {
                     "kind": kind_by_buddy[buddy_id],

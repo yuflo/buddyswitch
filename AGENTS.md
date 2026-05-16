@@ -88,6 +88,9 @@ Runtime state is projected under:
 - `buddyswitch/objects/handoffs/*.json`
 - `buddyswitch/local/buddybox/<active-buddy>/**`
 
+Use env tools for product-mode runtime state. Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
+Runtime contracts are owned by code, JSON contracts, role contracts, and tests; do not create prose mirrors for runtime behavior.
+
 ## Done
 
 A task is done only when the bottleneck moved forward, the scope stayed focused, important behavior is covered by meaningful tests, replaced baggage was removed or explicitly justified, relevant verification passed, and the final response states what changed, how it was verified, and what risk remains.

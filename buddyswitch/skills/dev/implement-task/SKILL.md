@@ -45,10 +45,10 @@ description: Use when the task is implementing scoped product changes, bug fixes
 
 ## Shared Runtime Rules
 
-- See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
-- This native skill contributes content to the current buddy run.
-- Do not rely on deprecated prepare/persist flows.
-- The locked buddy session returns after explicit durable writes are complete.
+- Runtime execution uses env.tool through python3 scripts/env/client.py ... .
+- Product-readable durable state is written explicitly as task, artifact, or handoff objects.
+- Use buddyswitch/local/buddybox/<active-buddy>/** only for active buddy private local working files.
+- Return after required explicit durable writes are complete.
 
 ## BuddySwitch Commit Output
 

@@ -39,7 +39,6 @@ description: Use when the task is sharpening external positioning, value framing
 
 ## Market Research Cockpit Runtime
 
-- This skill follows `framework/docs/browser-cockpit.md`.
 - It uses `chrome-devtools-cockpit` as the browser executor.
 - It runs in an instance headed cockpit (`browser_mode=headed-only`) with profile `instance-browser`.
 - Discovery starts with `search.open_browser` to open the browser-native entry page, then continues into real result pages, details, comments, and related pages where relevant via `chrome-devtools-cockpit`.
@@ -47,7 +46,8 @@ description: Use when the task is sharpening external positioning, value framing
 - Do not silently downgrade to low-density public alternatives when critical evidence refresh is blocked.
 - Do not use silent search API/snippet/crawler fallback.
 - If browser-native access is genuinely blocked, only explicit user-approved one-off downgrade is allowed.
-- The cockpit is execution-time only; canonical outputs remain BuddySwitch task/artifact/run objects.
+- The cockpit is execution-time only; canonical outputs remain BuddySwitch task, artifact, or handoff objects; buddybox remains active-buddy private local workspace state.
+- Market evidence is target-scoped to artifact ids; do not invent evidence tokens.
 
 ## Verification
 - Confirm the positioning statement and message house are grounded in evidence from `market-scan`, `pmf-report`, and `customer-discovery` where available.
@@ -56,10 +56,11 @@ description: Use when the task is sharpening external positioning, value framing
 
 ## Shared Runtime Rules
 
-- See `framework/docs/skill-runtime-shared-rules.md` for execution summary persistence, task/artifact boundaries, and durable output path rules.
-- This native skill contributes content to the current buddy run.
+- Runtime execution uses env.tool through python3 scripts/env/client.py ... .
+- Product-readable durable state is written explicitly as task, artifact, or handoff objects.
+- Use buddyswitch/local/buddybox/<active-buddy>/** only for active buddy private local working files.
+- Return after required explicit durable writes are complete.
 - Do not rely on deprecated prepare/persist flows.
-- The locked buddy session returns after explicit durable writes are complete.
 
 ## BuddySwitch Commit Output
 

@@ -135,9 +135,10 @@ def _append_buddyswitch_rules(skill_md: Path, *, buddy_id: str) -> None:
     addition = (
         "\n\n## BuddySwitch Runtime Closing Rules\n\n"
         f"- Target BuddySwitch buddy: `{buddy_id}`.\n"
-        "- This native skill contributes content to the current buddy run.\n"
-        "- Do not call persist from the skill perspective.\n"
-        "- The locked buddy session persists one buddy run commit after all needed native skill work is integrated.\n"
+        "- Runtime execution uses env.tool through python3 scripts/env/client.py ... .\n"
+        "- Product-readable durable state is written explicitly as task, artifact, or handoff objects.\n"
+        "- Use buddyswitch/local/buddybox/<active-buddy>/** only for active buddy private local working files.\n"
+        "- Return after required explicit durable writes are complete.\n"
     )
     skill_md.write_text(original.rstrip() + addition, encoding="utf-8")
 

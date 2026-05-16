@@ -206,9 +206,19 @@ class SkillCreatorImporterTests(unittest.TestCase):
         self.assertTrue((target / "scripts" / "helper.sh").exists())
 
         skill_text = (target / "SKILL.md").read_text(encoding="utf-8")
+        retired_current_buddy_run = "current buddy " + "run"
+        retired_persist_one_buddy_run = "persist one buddy " + "run"
         self.assertIn("## BuddySwitch Runtime Closing Rules", skill_text)
-        self.assertIn("contributes content to the current buddy run", skill_text)
-        self.assertIn("Do not call persist from the skill perspective", skill_text)
+        self.assertIn("Target BuddySwitch buddy: `dev`.", skill_text)
+        self.assertIn("Runtime execution uses env.tool through python3 scripts/env/client.py", skill_text)
+        self.assertIn(
+            "Product-readable durable state is written explicitly as task, artifact, or handoff objects.",
+            skill_text,
+        )
+        self.assertIn("active buddy private local working files", skill_text)
+        self.assertNotIn(retired_current_buddy_run, skill_text)
+        self.assertNotIn("Do not call " + "persist", skill_text)
+        self.assertNotIn(retired_persist_one_buddy_run, skill_text)
         self.assertNotIn("persist --skill-id", skill_text)
 
         manifest = env_manifest.load_manifest(repo_root / "buddyswitch" / "manifest.toml")

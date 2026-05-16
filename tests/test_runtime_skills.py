@@ -13,6 +13,8 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+_RETIRED_BUDDY_RUN_COMMIT = ("buddy-" + "run") + " " + "commit"
+
 
 class RuntimeSkillsTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -142,7 +144,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertIn("env.tool", text)
                 self.assertNotIn("prepare", text)
                 self.assertNotIn("persist", text)
-                self.assertNotIn("buddy-run commit", text)
+                self.assertNotIn(_RETIRED_BUDDY_RUN_COMMIT, text)
 
 
 if __name__ == "__main__":

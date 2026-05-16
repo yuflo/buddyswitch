@@ -21,6 +21,40 @@ from env.tools import contracts as tool_contracts  # noqa: E402
 _RETIRED_BUDDYBOX_FILES_FIELD = "buddybox_" + "files"
 _RETIRED_BUDDYBOX_PATHS_FIELD = "buddybox_" + "paths"
 _RETIRED_BUDDYBOX_CONTENT_ROOT = "buddyswitch/content/" + "buddybox"
+_RETIRED_FRAMEWORK_DOCS = "framework/" + "docs"
+_RETIRED_BUDDY_RUN = "buddy " + "run"
+_RETIRED_BUDDY_RUN_HYPHEN = "buddy-" + "run"
+_RETIRED_BUDDY_RUN_COMMIT = _RETIRED_BUDDY_RUN_HYPHEN + " " + "commit"
+_RETIRED_CURRENT_BUDDY_RUN = "current buddy " + "run"
+_RETIRED_PERSIST_ONE_BUDDY_RUN = "persist one buddy " + "run"
+_RETIRED_DOC_FILENAMES = (
+    "architecture-" + "overview.md",
+    "artifacts-runs-git-" + "policy.md",
+    "browser-" + "cockpit.md",
+    "buddyswitch-development-" + "constitution.md",
+    "interface-" + "spec.md",
+    "multi-codex-worktree-" + "guide.md",
+    "runtime-broker-v2-" + "runbook.md",
+    "skill-architecture-best-" + "practices.md",
+    "skill-runtime-shared-" + "rules.md",
+    "track-" + "registry.md",
+    "turn-runtime-" + "spec.md",
+)
+_MARKET_SKILL_PATHS = (
+    "buddyswitch/skills/market/channel-discovery/SKILL.md",
+    "buddyswitch/skills/market/customer-discovery/SKILL.md",
+    "buddyswitch/skills/market/launch-prep/SKILL.md",
+    "buddyswitch/skills/market/pmf-recon/SKILL.md",
+    "buddyswitch/skills/market/positioning-copy/SKILL.md",
+    "buddyswitch/skills/market/research-scan/SKILL.md",
+)
+_ROLE_SKILL_PATHS = (
+    "buddyswitch/skills/design/shape-prototype/SKILL.md",
+    "buddyswitch/skills/dev/implement-task/SKILL.md",
+    "buddyswitch/skills/dev/skill-creator-importer/SKILL.md",
+    "buddyswitch/skills/pm/write-prd/SKILL.md",
+    "buddyswitch/skills/test/smoke-test/SKILL.md",
+)
 
 
 class RepoConsistencyTests(unittest.TestCase):
@@ -188,7 +222,7 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("memory_owner_lifecycle", collected.stdout)
 
     def test_legacy_run_contract_and_run_tool_are_removed(self) -> None:
-        self.assertFalse((ROOT / "framework" / "contracts" / "persist-buddy-run.json").exists())
+        self.assertFalse((ROOT / "framework" / "contracts" / ("persist-buddy-" + "run.json")).exists())
         self.assertFalse((ROOT / "buddyswitch" / "skills" / "shared" / "run-tool" / "SKILL.md").exists())
 
     def test_turn_runtime_is_runless_runtime_support(self) -> None:
@@ -234,21 +268,158 @@ class RepoConsistencyTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, router_text)
 
-    def test_active_docs_teach_runless_flow(self) -> None:
+    def test_readme_points_to_canonical_runtime_sources(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        runtime_doc = (ROOT / "framework" / "docs" / "turn-runtime-spec.md").read_text(encoding="utf-8")
-        self.assertIn("runless", readme.lower())
-        self.assertIn("context", readme.lower())
-        self.assertIn("env.tool", runtime_doc)
-        self.assertNotIn("persist-buddy-run", readme)
+        lowered = readme.lower()
+        self.assertIn("runless", lowered)
+        self.assertIn("env.tool", lowered)
+        self.assertIn("context discovery", lowered)
+        for token in (
+            "scripts/env/tools/contracts.py",
+            "scripts/env/tools/semantics.py",
+            "scripts/runtime_kernel/protocol.py",
+            "scripts/runtime_kernel/dispatcher.py",
+            "framework/contracts/prepare-turn-context.json",
+            "framework/contracts/workspace-projection.json",
+            "framework/contracts/{pm,design,dev,market,test}.md",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, readme)
+        self.assertNotIn(_RETIRED_FRAMEWORK_DOCS, readme)
+        self.assertNotIn("Architecture Docs", readme)
 
-    def test_runtime_broker_runbook_is_runless(self) -> None:
-        runbook = (ROOT / "framework" / "docs" / "runtime-broker-v2-runbook.md").read_text(encoding="utf-8")
-        for token in ("env.tool", "ping", "status"):
-            self.assertIn(token, runbook)
-        self.assertNotIn("prepare`: no blind retry", runbook)
-        self.assertNotIn("E_RUNTIME_IDEMPOTENCY_REQUIRED", runbook)
-        self.assertNotIn("E_RUNTIME_PERSIST_CONFLICT", runbook)
+    def test_root_agents_names_runtime_state_boundary(self) -> None:
+        text = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        lowered = text.lower()
+        self.assertIn("use env tools for product-mode runtime state", lowered)
+        self.assertIn(
+            "do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly",
+            lowered,
+        )
+        self.assertIn("runtime contracts are owned by code, json contracts, role contracts, and tests", lowered)
+        self.assertIn("do not create prose mirrors for runtime behavior", lowered)
+        self.assertNotIn(_RETIRED_FRAMEWORK_DOCS, text)
+
+    def test_runtime_broker_methods_are_owned_by_runtime_code(self) -> None:
+        protocol_text = (ROOT / "scripts" / "runtime_kernel" / "protocol.py").read_text(encoding="utf-8")
+        dispatcher_text = (ROOT / "scripts" / "runtime_kernel" / "dispatcher.py").read_text(encoding="utf-8")
+        self.assertIn('PROTOCOL = "buddyswitch-runtime-broker/v2"', protocol_text)
+        self.assertIn('if method == "env.tool"', dispatcher_text)
+        self.assertIn('if method == "ping"', dispatcher_text)
+        self.assertIn('if method == "status"', dispatcher_text)
+        self.assertIn("Use supported runtime methods: env.tool, ping, status.", dispatcher_text)
+        self.assertNotIn("prepare`", protocol_text)
+        self.assertNotIn("persist`", protocol_text)
+        self.assertNotIn("prepare`", dispatcher_text)
+        self.assertNotIn("persist`", dispatcher_text)
+
+    def test_active_surfaces_do_not_reference_retired_framework_docs(self) -> None:
+        pattern = "|".join((_RETIRED_FRAMEWORK_DOCS, *_RETIRED_DOC_FILENAMES))
+        completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                pattern,
+                "README.md",
+                "AGENTS.md",
+                "tests",
+                "scripts",
+                "buddyswitch",
+                "framework",
+                "tools",
+                "-g",
+                "!docs/**",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_active_surfaces_do_not_reference_stale_run_wording(self) -> None:
+        pattern = "|".join(
+            (
+                "task/artifact/" + "run objects",
+                _RETIRED_CURRENT_BUDDY_RUN,
+                _RETIRED_BUDDY_RUN,
+                _RETIRED_BUDDY_RUN_HYPHEN,
+                _RETIRED_BUDDY_RUN_COMMIT,
+                _RETIRED_PERSIST_ONE_BUDDY_RUN,
+                "Do not call " + "persist",
+                "locked buddy " + "session",
+                _RETIRED_FRAMEWORK_DOCS,
+            )
+        )
+        completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                pattern,
+                "README.md",
+                "AGENTS.md",
+                "tests",
+                "scripts",
+                "buddyswitch",
+                "framework",
+                "tools",
+                "-g",
+                "!docs/**",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_framework_docs_directory_is_removed(self) -> None:
+        self.assertFalse((ROOT / "framework" / "docs").exists())
+
+    def test_active_skill_runtime_wording_is_runless(self) -> None:
+        disallowed = (
+            _RETIRED_FRAMEWORK_DOCS,
+            _RETIRED_BUDDY_RUN,
+            _RETIRED_BUDDY_RUN_HYPHEN,
+            _RETIRED_BUDDY_RUN_COMMIT,
+            _RETIRED_CURRENT_BUDDY_RUN,
+            _RETIRED_PERSIST_ONE_BUDDY_RUN,
+            "Do not call " + "persist",
+            "task/artifact/" + "run objects",
+        )
+        for relative_path in (*_MARKET_SKILL_PATHS, *_ROLE_SKILL_PATHS):
+            path = ROOT / relative_path
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=relative_path):
+                for token in disallowed:
+                    self.assertNotIn(token, text)
+                self.assertIn("Write durable outputs explicitly via env tools", text)
+        for relative_path in _MARKET_SKILL_PATHS:
+            text = (ROOT / relative_path).read_text(encoding="utf-8")
+            with self.subTest(market_skill=relative_path):
+                self.assertIn("chrome-devtools-cockpit", text)
+                self.assertIn("search.open_browser", text)
+                self.assertIn("browser_mode=headed-only", text)
+                self.assertIn("instance-browser", text)
+                self.assertIn("mandatory takeover", text)
+                self.assertIn("no silent degrade", text)
+                self.assertIn("Do not use silent search API/snippet/crawler fallback.", text)
+                self.assertIn("Market evidence is target-scoped to artifact ids", text)
+                self.assertIn("artifact", text.lower())
+
+    def test_market_role_contract_owns_browser_boundary(self) -> None:
+        text = (ROOT / "framework" / "contracts" / "market.md").read_text(encoding="utf-8")
+        lowered = text.lower()
+        self.assertIn("search open-browser", text)
+        self.assertIn("chrome-devtools-cockpit", text)
+        self.assertIn("target-scoped evidence", lowered)
+        self.assertIn("artifact for market deliverables", lowered)
+        self.assertIn("buddybox for private research exports", lowered)
+        self.assertNotIn(_RETIRED_FRAMEWORK_DOCS, text)
 
     def test_shared_skills_are_runless(self) -> None:
         shared = [
@@ -262,7 +433,7 @@ class RepoConsistencyTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             lowered = text.lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
-                self.assertNotIn("buddy-run commit", lowered)
+                self.assertNotIn(_RETIRED_BUDDY_RUN_COMMIT, lowered)
                 self.assertNotIn("turn_runtime.py persist", lowered)
                 self.assertNotIn("prepare.runtime_context", lowered)
                 self.assertNotIn("run-tool", lowered)

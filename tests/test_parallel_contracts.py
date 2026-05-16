@@ -93,7 +93,7 @@ def _assert_shape(
 class ParallelContractFreezeTests(unittest.TestCase):
     def test_legacy_parallel_contract_files_are_removed(self) -> None:
         retired = (
-            CONTRACTS_DIR / "persist-buddy-run.json",
+            CONTRACTS_DIR / ("persist-buddy-" + "run.json"),
             CONTRACTS_DIR / "selected-skill-packet.json",
         )
         for path in retired:
@@ -172,9 +172,16 @@ class WorkspaceProjectionContractTests(RuntimeWorkspaceTestMixin, unittest.TestC
         self.assertIn("source_refs", artifact_row)
         self.assertNotIn("source_run_id", artifact_row)
 
-    def test_docs_point_to_workspace_projection_contract(self) -> None:
-        interface_spec = (ROOT / "framework" / "docs" / "interface-spec.md").read_text(encoding="utf-8")
-        self.assertIn("framework/contracts/workspace-projection.json", interface_spec)
+    def test_readme_points_to_workspace_projection_contract(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        contract = _load_json(WORKSPACE_PROJECTION_CONTRACT)
+        self.assertIn("framework/contracts/workspace-projection.json", readme)
+        self.assertEqual(contract["contract_id"], "workspace-projection")
+        top_keys = set(contract["top_level_key_order"])
+        self.assertIn("handoffs", top_keys)
+        self.assertNotIn("memories", top_keys)
+        self.assertNotIn("run_audits", top_keys)
+        self.assertNotIn("content_root", top_keys)
 
 
 if __name__ == "__main__":
