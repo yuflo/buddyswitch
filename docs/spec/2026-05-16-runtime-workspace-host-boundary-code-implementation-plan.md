@@ -4,7 +4,9 @@
 
 **Goal:** Product-mode buddies run inside an env-shaped runtime workspace and a Codex permission profile that cannot use source-only repo surfaces as runtime inputs.
 
-**Architecture:** Keep the current two-workspace model. `shared_root/project/workspace` remains the sparse product source checkout for `projects/app/`; `shared_root/instances/<id>/workspace` becomes a sparse runtime checkout plus launcher-managed runtime projections, active skills, and active buddybox. Host permissions move from broad filesystem read to explicit runtime/project/env access with deny rules for stale source-only paths.
+**Architecture:** Keep the current two-workspace model. `shared_root/project/workspace` remains the sparse product source checkout for `projects/app/`; `shared_root/instances/<id>/workspace` becomes a sparse runtime checkout plus launcher-managed runtime projections, active skills, and active buddybox. Host permissions must prevent source-only repo surfaces from becoming runtime inputs while still allowing Codex CLI and macOS sandboxed shell commands to start; preserve system read access unless a real Codex sandbox smoke proves a narrower system allowlist works.
+
+> **Revision note (2026-05-16):** Earlier versions of this plan treated removal of `"/" = "read"` as a correctness goal. Real Codex CLI 0.130.0 on macOS showed that profile caused `/bin/echo`, `/bin/zsh`, and Python command execution to abort during dyld startup, producing `(no output)` in the host. The boundary goal is source-surface exclusion, not breaking system runtime reads.
 
 **Tech Stack:** Bash launcher helpers, Git worktrees and sparse checkout, Python Codex config renderer, runtime broker/env tool Python modules, TOML/JSON contracts, pytest/unittest.
 
@@ -12,9 +14,9 @@
 
 ## 1. 任务目标
 
-完成后，BuddySwitch product-mode instance 的 host-visible workspace 不再像完整仓库，而是只包含 active buddy 运行所需的 runtime tool layer、runtime skills、project context projection、shared object projections 和 active buddybox。当前核心瓶颈是 `instances/<id>/workspace` 仍由完整 Git worktree 创建，且 Codex profile 仍渲染 `"/" = "read"`；这会让 PM 等非设计 buddy 通过普通 shell 扫描读到 `buddyswitch/skills/design/**` 等 source-only surfaces，并让提示词/AGENTS 只能充当提醒而非边界。
+完成后，BuddySwitch product-mode instance 的 host-visible workspace 不再像完整仓库，而是只包含 active buddy 运行所需的 runtime tool layer、runtime skills、project context projection、shared object projections 和 active buddybox。当前核心瓶颈是 `instances/<id>/workspace` 仍由完整 Git worktree 创建，且 source-only surfaces 没有被结构性移除或 deny；这会让 PM 等非设计 buddy 通过普通 shell 扫描读到 `buddyswitch/skills/design/**` 等 source-only surfaces，并让提示词/AGENTS 只能充当提醒而非边界。
 
-最重要的问题是读边界，不只是写边界。观察到的失败来自 PM 读取 source skill 后按设计能力行动；因此最短可验证路径是先让 runtime workspace by construction 不含 source skills，再让 Codex filesystem profile by policy 不读 full repo 或 stale source-only paths。
+最重要的问题是 runtime source-surface read boundary，不只是写边界。观察到的失败来自 PM 读取 source skill 后按设计能力行动；因此最短可验证路径是先让 runtime workspace by construction 不含 source skills，再让 Codex filesystem profile deny stale source-only paths if they ever appear。不要把系统级只读访问误当成 source-surface 访问；macOS/Codex shell 启动依赖系统 dyld/cache 路径可读。
 
 ## 2. 需求提取
 
@@ -31,13 +33,13 @@
 - `REQ-011`：Migration must not silently delete active buddybox files or runtime object projections; existing runtime output staging/restoration remains in the rebuild path.
 - `REQ-012`：Runtime-managed generated paths must be excluded from local Git noise: `AGENTS.md`, `.agents/skills/**`, `projects/app`, `.runtime/**`, `buddyswitch/objects/**`, and `buddyswitch/local/buddybox/**`.
 - `REQ-013`：`buddyswitch_workspace_sync_runtime_surface` must stop masking a full checkout by copying runtime files over it; runtime surface correctness must come from sparse checkout plus active runtime installation.
-- `REQ-014`：Host permission profile must not grant broad read access through `"/" = "read"` or source repo root read in product mode.
-- `REQ-015`：Host permission profile must keep reads for runtime workspace, active `.agents/skills/**`, shared `projects/app/**`, instance `HOME`, `CODEX_HOME`, `XDG_CONFIG_HOME`, runtime broker socket access, and safe temp roots.
+- `REQ-014`：Host permission profile must not grant source repo root read as a runtime input in product mode. It may keep `"/" = "read"` only as system-read compatibility for Codex CLI/macOS command startup, provided project-root-relative deny rules and sparse workspace shape block source-only repo surfaces.
+- `REQ-015`：Host permission profile must keep reads for runtime workspace, active `.agents/skills/**`, shared `projects/app/**`, instance `HOME`, `CODEX_HOME`, `XDG_CONFIG_HOME`, runtime broker socket access, safe temp roots, and system files required for Codex CLI/macOS sandboxed shell commands to launch.
 - `REQ-016`：Host permission profile must keep writes for instance `HOME`, instance `CODEX_HOME`, instance `XDG_CONFIG_HOME`, active buddybox root, safe temp roots, and shared project workspace only for buddies whose env profile has `project.access = "write"`.
 - `REQ-017`：PM/design/market/test must not receive write permission for `projects/app/**` or `.sandbox/design/**`; dev must receive project workspace write permission.
 - `REQ-018`：Host permission profile must deny stale source-only paths if they exist in the runtime workspace: `buddyswitch/skills/**`, `tools/**`, `tests/**`, `docs/**`, root `README.md`, root `buddyswitch-codex`, and inactive launcher prompt assets.
 - `REQ-019`：`request_permissions = false`, disabled native Codex web search, MCP approval hardening, and broker Unix socket allowlist behavior must remain intact.
-- `REQ-020`：Normal runtime commands must not degrade into permission failures: `python3 scripts/env/client.py context summarize`, `python3 scripts/turn_runtime.py status`, `python3 scripts/env/client.py buddybox desc`, and search/browser env tool commands must still work where the active buddy has `search.use`.
+- `REQ-020`：Normal runtime commands must not degrade into permission failures: `/bin/echo hi`, `/bin/zsh -lc pwd`, `python3 scripts/env/client.py context summarize`, `python3 scripts/turn_runtime.py status`, `python3 scripts/env/client.py buddybox desc`, and search/browser env tool commands must still work where the active buddy has `search.use` under the real Codex sandbox/profile, not only in fake Codex launcher tests.
 - `REQ-021`：Do not rely on prompt instructions or AGENTS as enforcement; AGENTS remains route-map guidance.
 - `REQ-022`：Do not replace Git worktrees with ad hoc copying, do not build a virtual filesystem, rule engine, skill selection engine, prompt workaround, generic permission framework, or new env tool invocation system.
 - `REQ-023`：Do not remove env tools, runtime broker, `.agents/skills` materialization, project workspace sparse checkout, active buddybox, or runtime object projections.
@@ -104,7 +106,7 @@
 - 替换：execution worktree creation from full `git worktree add --detach "${workspace_dir}" HEAD` to sparse `--no-checkout` flow.
 - 替换：execution worktree validity from "same common Git dir only" to "same common Git dir plus repairable runtime sparse boundary".
 - 替换：runtime surface refresh from Python copy overlay to Git sparse checkout configuration and checkout refresh.
-- 替换：Codex profile read model from `"/" = "read"` to explicit runtime/project/env reads plus stale-source denies.
+- 替换：Codex profile source-surface model from broad trust in a full checkout to sparse runtime workspace plus stale-source denies, while preserving system reads needed for Codex/macOS command startup.
 - 删除 from runtime workspace: `buddyswitch/skills/**`, `tools/**`, `tests/**`, `docs/**`, root `README.md`, root `buddyswitch-codex`, source-only launcher assets, source memos/specs/fixtures.
 - 迁移：existing clean full execution worktrees are narrowed in place on open/start; active buddybox files under `buddyswitch/local/buddybox/<active_buddy>` are staged/restored if rebuild is needed.
 - 阻塞条件：an existing execution worktree with unmanaged local changes outside runtime-managed paths fails with a clear message, because preserving arbitrary source edits in a product-mode runtime instance would keep the boundary ambiguous.
@@ -180,8 +182,8 @@ For a design instance, `.agents/skills/shape-prototype/SKILL.md` exists and `bud
     - `":project_roots"` maps `"."` to `"read"` and the deny rules above to `"none"`.
     - `project_workspace_dir` maps to `"read"` for all buddies, `"write"` for dev or any profile with `project.access = "write"`.
     - instance `home`, `codex_home`, `xdg_config_home`, active `buddybox_root`, and safe temp roots map to `"write"`.
-    - no `"/" = "read"` entry is emitted in profile mode.
-    - no source repo root, shared root, project root parent, state root, instance root, or workspace root absolute entry is emitted.
+    - keep `"/" = "read"` in profile mode unless a real Codex macOS sandbox smoke proves a narrower system read allowlist can launch `/bin/echo`, `/bin/zsh`, and Python commands.
+    - never grant the source repo root, shared root, project root parent, state root, instance root, or workspace root as absolute read/write entries.
   - Keep `_safe_temp_roots`, `_build_profile_mode_unix_sockets`, MCP approval patching, native web search disabled, and `request_permissions = false`.
   - Keep `_build_local_mode_roots` and non-profile sandbox behavior unchanged.
 
@@ -280,7 +282,7 @@ mode = "full"
 unix_sockets = { "/.../runtime-broker.sock" = "allow" }
 ```
 
-The renderer must not emit `"/" = "read"` in profile mode.
+The renderer may emit `"/" = "read"` in profile mode for system-read compatibility. It must not emit absolute read/write grants for the source repo root, shared root, state root, instance root, or workspace root, and it must deny stale source-only project-root paths through `:project_roots`.
 
 ## 5. 分阶段实施计划
 
@@ -429,9 +431,9 @@ python3 -m pytest tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::
 
 阶段完成标准：all listed tests pass; `git sparse-checkout list` inside a captured runtime workspace is the expected runtime path list; PM and design active runtime skills behave as required.
 
-### 阶段 3：收窄 Codex host permission profile
+### 阶段 3：harden Codex host permission profile without breaking shell startup
 
-目标：生成的 `buddyswitch-runtime` profile no longer grants full filesystem read, while preserving necessary runtime/project/env access and dev project write.
+目标：生成的 `buddyswitch-runtime` profile blocks source-only runtime inputs, preserves necessary runtime/project/env access and dev project write, and keeps real Codex shell execution functional on macOS. Do not remove system read access just to satisfy a config-shape assertion.
 
 具体文件变更：
 
@@ -444,7 +446,7 @@ python3 -m pytest tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::
 
 1. In `tests/test_buddy_env_sandbox.py`, add helper `_profile_filesystem_entries(config_text) -> dict[str, object]` using existing TOML parser.
 2. Update `test_non_dev_permission_profile_keeps_workspace_read_only_and_writes_only_safe_roots`:
-   - Assert `"/"` is not in filesystem.
+   - Assert `filesystem["/"] == "read"` unless the implementation introduces a narrower explicit system read allowlist and the real Codex sandbox smoke below passes.
    - Assert `filesystem[":project_roots"]["."] == "read"`.
    - Assert deny rows for `buddyswitch/skills/**`, `tools/**`, `tests/**`, `docs/**`, `README.md`, `buddyswitch-codex` are `"none"`.
    - Assert project workspace absolute path is `"read"`, not `"write"`.
@@ -452,7 +454,7 @@ python3 -m pytest tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::
    - Assert shared root, state root, instance root, workspace root, source repo root, and source Codex home are absent.
 3. Update `test_dev_permission_profile_includes_project_workspace_but_keeps_state_read_only`:
    - Assert project workspace absolute path is `"write"`.
-   - Assert no `"/"` entry and no source repo root entry.
+   - Assert system read compatibility remains available and no source repo root entry exists.
 4. Add `test_permission_profile_denies_stale_runtime_source_surfaces` to `tests/test_buddy_env_sandbox.py`:
    - Render PM config.
    - Assert `:project_roots` deny table covers source skill, tools, tests, docs, root README, and launcher executable.
@@ -466,7 +468,7 @@ python3 -m pytest tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::
    - Assert project workspace is write.
    - Assert runtime project root table is present with `"." = "read"` and source denies.
 7. Update `tests/test_buddyswitch_launcher.py::_assert_codex_automation_config`:
-   - In profile mode, replace expectations for `"/" = "read"` with expectations that it is absent.
+   - In profile mode, assert system read compatibility exists (`filesystem["/"] == "read"`) or assert a named explicit system-read allowlist exists and is covered by real Codex sandbox smoke.
    - Keep expectations for `default_permissions`, network full mode, `request_permissions = false`, disabled web search, no source repo common dir, and broker socket allowlist.
 8. In `tools/launcher/codex_config.py`, replace `render_permission_profile_block`:
    - Render filesystem entries from a dict preserving insertion order.
@@ -479,8 +481,12 @@ python3 -m pytest tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::
     - Keep `build_writable_roots` available for local mode tests.
 11. Ensure `_safe_temp_roots` still rejects temp roots inside shared/project/state/instance/workspace boundaries.
 12. Ensure `_build_profile_mode_unix_sockets` is unchanged and still canonicalizes broker socket.
+13. Add a no-model real Codex sandbox smoke to the verification checklist and run it against the generated profile:
+    - `codex sandbox macos /bin/echo hi` must print `hi`.
+    - `codex sandbox macos /bin/zsh -lc pwd` must print the runtime workspace path.
+    - `codex sandbox macos python3 scripts/turn_runtime.py status` must return JSON with `ok=true`.
 
-预期行为变化：generated Codex product-mode config denies source-only reads by default category and no longer grants broad `"/"` read. Dev remains the only built-in buddy with project workspace write.
+预期行为变化：generated Codex product-mode config denies source-only workspace reads by category, keeps system reads needed for Codex/macOS command startup, and keeps dev as the only built-in buddy with project workspace write.
 
 对应需求编号：`REQ-014` to `REQ-019`, `REQ-024`, `REQ-025`.
 
@@ -491,9 +497,11 @@ python3 -m pytest tests/test_buddy_env_sandbox.py -q
 python3 -m pytest tests/test_env_layer_boundaries.py -q
 python3 -m pytest tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::test_start_execution_worktree_uses_runtime_workspace_agents_header -q
 python3 -m pytest tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::test_instance_start_materializes_runtime_skills_from_manifest_for_each_buddy -q
+HOME=<instance-home> CODEX_HOME=<instance-codex-home> XDG_CONFIG_HOME=<instance-xdg-config> codex sandbox macos /bin/echo hi
+HOME=<instance-home> CODEX_HOME=<instance-codex-home> XDG_CONFIG_HOME=<instance-xdg-config> codex sandbox macos /bin/zsh -lc pwd
 ```
 
-阶段完成标准：profile-mode TOML has no `"/"` filesystem grant, denies stale source runtime paths with `"none"`, grants project write only for dev, grants PM active buddybox write, and keeps broker socket/network/approval settings.
+阶段完成标准：profile-mode TOML denies stale source runtime paths with `"none"`, grants project write only for dev, grants PM active buddybox write, keeps broker socket/network/approval settings, and passes real Codex sandbox command-startup smoke. A profile that passes fake Codex tests but makes `/bin/echo` or `/bin/zsh` abort is not complete.
 
 ### 阶段 4：验证 runtime commands, broker, search/browser surfaces after narrowing
 
@@ -564,8 +572,10 @@ python3 -m pytest tests/test_search_env_tool.py -q
 2. Run focused launcher and sandbox suites from stages 1 to 4.
 3. Run broader launcher/runtime suites listed below.
 4. Run grep checks:
-   - `rg -n '"/" = "read"|buddyswitch/skills/design/shape-prototype|tools/launcher/assets/buddies|workspace.*full repository|full repo' tools scripts tests README.md AGENTS.md framework buddyswitch`
+   - `rg -n 'buddyswitch/skills/design/shape-prototype|tools/launcher/assets/buddies|workspace.*full repository|full repo' tools scripts tests README.md AGENTS.md framework buddyswitch`
    - Filter expected source definitions/tests only; no runtime guidance should instruct product-mode host to depend on those paths.
+   - `rg -n 'assertNotIn\\("/", filesystem\\)|no `"/"` entry|must not appear.*"/" = "read"' docs tests tools`
+   - Expected: no product-mode test or plan asserts removal of system read as an invariant. Mentions are allowed only when explaining why that invariant is forbidden.
 5. Confirm `git status --short` shows only intended implementation/test/doc changes.
 
 预期行为变化：no stale source-surface guidance remains in active runtime docs; broad verification passes.
@@ -577,11 +587,12 @@ python3 -m pytest tests/test_search_env_tool.py -q
 ```bash
 python3 -m pytest tests/test_buddyswitch_launcher.py tests/test_buddy_env_sandbox.py tests/test_env_layer_boundaries.py tests/test_runtime_broker.py tests/test_runtime_skills.py tests/test_runtime_agents.py tests/test_search_env_tool.py -q
 python3 -m pytest tests/test_runless_runtime_contract.py tests/test_host_decision_surface_product_mode.py tests/test_repo_consistency.py -q
-rg -n '"/" = "read"|workspace.*full repository|full repo' tools scripts tests README.md AGENTS.md framework buddyswitch
+rg -n 'workspace.*full repository|full repo' tools scripts tests README.md AGENTS.md framework buddyswitch
+rg -n 'assertNotIn\("/", filesystem\)|no `"/"` entry|must not appear.*"/" = "read"' docs tests tools
 git status --short
 ```
 
-阶段完成标准：all focused and broader checks pass; grep output contains no active runtime-surface regression; final status contains only scoped changes.
+阶段完成标准：all focused and broader checks pass; grep output contains no active runtime-surface regression and no assertion that system-read removal is a correctness invariant; final status contains only scoped changes.
 
 ## 6. 迁移 / 删除策略
 
@@ -599,7 +610,7 @@ git status --short
 - Active buddybox files under `buddyswitch/local/buddybox/<active_buddy>` remain workspace-local and survive rebuild through existing staging/restore.
 - Shared object projections are recreated from `shared_root/state` and remain symlinks.
 - `.agents/skills` and runtime `AGENTS.md` are regenerated every start/open and excluded from Git noise.
-- Codex profile removes `"/" = "read"` in product mode. If a legitimate runtime command fails after this removal, the fix is to add a category-level runtime read/write grant, not to restore broad filesystem read.
+- Codex profile preserves system read compatibility in product mode unless a real Codex sandbox smoke proves a narrower system read allowlist. If source-only runtime reads are still possible, fix the sparse workspace or source-path deny rules; do not break `/bin/echo`, `/bin/zsh`, or Python startup to hide the leak.
 
 ## 7. 完成定义
 
@@ -610,7 +621,7 @@ The task is complete only when all conditions hold:
 - Existing workspaces with unmanaged source-only edits fail clearly before migration and are not silently deleted.
 - PM `.agents/skills` contains PM skills and shared tool skills only; design `.agents/skills` contains `shape-prototype`; source skill trees are absent for both.
 - `projects/app` in runtime workspace resolves to the shared sparse project workspace, and project workspace remains sparse to `projects/app/`.
-- Generated Codex profile has no `"/" = "read"` product-mode grant, denies stale source runtime paths with `"none"`, keeps PM project workspace read-only, and keeps dev project workspace writable.
+- Generated Codex profile denies stale source runtime paths with `"none"`, keeps PM project workspace read-only, keeps dev project workspace writable, and passes real Codex sandbox command-startup smoke (`/bin/echo`, `/bin/zsh`, Python runtime command).
 - `request_permissions = false`, disabled native web search, network mode, and broker Unix socket allowlist remain in generated config.
 - `python3 scripts/turn_runtime.py status`, `python3 scripts/env/client.py context summarize`, `python3 scripts/env/client.py buddybox desc`, and `python3 scripts/env/client.py search status --query boundary-smoke` work from a PM sparse runtime workspace.
 - Focused tests from every phase pass.

@@ -109,6 +109,7 @@ class BuddySwitchLauncherTests(unittest.TestCase):
 
     def _assert_codex_automation_config(self, config_text: str, *, shared_root: Path, repo_root: Path = ROOT) -> None:
         repo_git_common_dir = self._repo_git_common_dir(repo_root)
+        repo_root_resolved = str(repo_root.resolve(strict=False))
         top_level_text = config_text.split("[", 1)[0]
         shared_root_resolved = str(shared_root.resolve(strict=False))
         profile_mode = "/instances/" in config_text and shared_root_resolved in config_text
@@ -128,7 +129,8 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             parsed = tomllib.loads(config_text)
             filesystem = parsed["permissions"]["buddyswitch-runtime"]["filesystem"]
             project_roots = filesystem[":project_roots"]
-            self.assertNotIn("/", filesystem)
+            self.assertEqual(filesystem["/"], "read")
+            self.assertEqual(filesystem[repo_root_resolved], "none")
             self.assertIsInstance(project_roots, dict)
             assert isinstance(project_roots, dict)
             self.assertEqual(project_roots["."], "read")
@@ -152,16 +154,29 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             self.assertIn(str(repo_git_common_dir), config_text)
 
         masked_config = config_text
-        for allowed_path in (
+        allowed_paths = [
             shared_root_resolved,
             str(repo_git_common_dir),
             str(Path("/tmp").resolve(strict=False)),
             str(Path(os.environ["TMPDIR"]).resolve(strict=False)) if os.environ.get("TMPDIR") else "",
-        ):
+        ]
+        if profile_mode:
+            allowed_paths.append(repo_root_resolved)
+        for allowed_path in allowed_paths:
             if allowed_path:
                 masked_config = masked_config.replace(allowed_path, "")
         self.assertNotIn(str(Path.home()), masked_config)
-        self.assertNotIn(str(repo_root.resolve(strict=False)), config_text.replace(str(repo_git_common_dir), ""))
+        if profile_mode:
+            self.assertNotIn(
+                f'{json.dumps(repo_root_resolved)} = "read"',
+                config_text,
+            )
+            self.assertNotIn(
+                f'{json.dumps(repo_root_resolved)} = "write"',
+                config_text,
+            )
+        else:
+            self.assertNotIn(repo_root_resolved, config_text.replace(str(repo_git_common_dir), ""))
 
     def _write_exec(self, path: Path, content: str) -> None:
         path.write_text(content, encoding="utf-8")

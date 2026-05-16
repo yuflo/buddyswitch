@@ -440,6 +440,8 @@ def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, object
     filesystem_entries[str(project_workspace_dir)] = (
         "write" if profile.get("project", {}).get("access") == "write" else "read"
     )
+    filesystem_entries["/"] = "read"
+    filesystem_entries[str(canonical_repo_root)] = "none"
 
     writable_roots: list[Path] = [home, codex_home, xdg_config_home, buddybox_root]
     forbidden_temp = [

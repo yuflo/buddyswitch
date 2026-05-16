@@ -8,7 +8,7 @@
 - Negative tests are required for stale source paths, unmanaged local changes, PM project writes, PM `.sandbox/design` writes, and missing runtime files.
 - No happy-path-only coverage. PM, design, and dev must all be represented because their skill and project-write boundaries differ.
 - Tests must keep SHARP scope: no generic permission engine, no virtual filesystem, no prompt workaround, and no compatibility test that accepts full source checkout visibility.
-- Actual Codex sandbox enforcement is external to the fake Codex binary used by launcher tests. Automated tests must prove the generated profile rules and workspace absence; one manual real-Codex smoke is the final enforcement check when credentials/local Codex are available.
+- Actual Codex sandbox enforcement is external to the fake Codex binary used by launcher tests. Automated tests must prove generated profile rules and workspace absence; real Codex sandbox command-startup smoke is required before completion because fake Codex does not exercise macOS seatbelt/dyld behavior.
 
 ## 2. 需求覆盖矩阵
 
@@ -40,7 +40,7 @@
 | `REQ-024` | `RWH-SPARSE-002`, `RWH-SKILL-001`, `RWH-SKILL-002`, `RWH-PERM-002`, `RWH-PERM-003`, `RWH-RUNTIME-002` |
 | `REQ-025` | `RWH-PERM-001`, `RWH-PERM-004` |
 
-All requirements have automated coverage except the real external Codex sandbox attempt to write or read denied paths. Automated tests verify generated policy and absent files; manual verification executes real Codex shell commands under the generated profile.
+All requirements have automated coverage except the real external Codex sandbox behavior. Automated tests verify generated policy and absent files; real verification must execute both no-model `codex sandbox macos ...` commands and, when credentials are available, a model-driven Codex shell command under the generated profile.
 
 ## 3. 测试分层
 
@@ -111,9 +111,9 @@ Run:
 python3 -m pytest tests/test_runtime_skills.py tests/test_runtime_agents.py tests/test_host_decision_surface_product_mode.py tests/test_repo_consistency.py -q
 ```
 
-### 手动验证
+### Real Codex sandbox verification
 
-Purpose: verify real Codex sandbox enforcement because fake launcher tests cannot enforce filesystem policy.
+Purpose: verify real Codex sandbox enforcement because fake launcher tests cannot enforce filesystem policy and cannot catch macOS dyld/startup failures. This is a completion gate, not optional polish.
 
 Steps:
 
@@ -132,7 +132,27 @@ Steps:
    ./buddyswitch-codex instance start --buddy pm -- debug prompt-input "runtime boundary smoke"
    ```
 
-3. In the launched runtime workspace, run:
+3. Capture the launched instance paths from the launcher output:
+
+   ```bash
+   export BS_INSTANCE_ROOT="$HOME/.codex-buddyswitch/instances/<instance-id>"
+   export HOME="$BS_INSTANCE_ROOT/home"
+   export CODEX_HOME="$BS_INSTANCE_ROOT/codex-home"
+   export XDG_CONFIG_HOME="$BS_INSTANCE_ROOT/xdg-config"
+   cd "$BS_INSTANCE_ROOT/workspace"
+   ```
+
+4. Run no-model Codex sandbox command-startup smoke:
+
+   ```bash
+   codex sandbox macos /bin/echo hi
+   codex sandbox macos /bin/zsh -lc pwd
+   codex sandbox macos python3 scripts/turn_runtime.py status
+   ```
+
+   Expected: `/bin/echo` prints `hi`; `/bin/zsh -lc pwd` prints the runtime workspace path; `turn_runtime.py status` exits 0 and prints JSON with `ok=true`. Any `exit 134`, empty output from `/bin/echo`, or macOS crash report for `echo`, `zsh`, `bash`, or `python3` is a blocker.
+
+5. In the launched runtime workspace, run ordinary shell checks:
 
    ```bash
    test ! -e buddyswitch/skills/design/shape-prototype/SKILL.md
@@ -142,7 +162,7 @@ Steps:
    python3 scripts/env/client.py buddybox desc
    ```
 
-4. Ask Codex shell to attempt:
+6. Ask Codex shell to attempt:
 
    ```bash
    cat buddyswitch/skills/design/shape-prototype/SKILL.md
@@ -152,7 +172,15 @@ Steps:
 
    Expected: source skill file is absent; PM write attempts are denied by sandbox or fail due read-only profile; `projects/app/pm-blocked.txt` is not created.
 
-5. Start a dev instance and verify project write is allowed:
+7. When credentials/network are available, run one model-driven shell-tool smoke:
+
+   ```bash
+   codex exec --json -m gpt-5.4-mini -c model_reasoning_effort='"low"' "Run exactly this shell command: /bin/echo hi. Then answer with the exact stdout you observed."
+   ```
+
+   Expected: JSONL includes a command execution for `/bin/echo hi` with aggregated output containing `hi`, exit code 0, and a non-empty final answer. If command execution reports empty aggregated output or exit code -1/134, the profile is still broken.
+
+8. Start a dev instance and verify project write is allowed:
 
    ```bash
    ./buddyswitch-codex instance start --buddy dev -- debug prompt-input "project write smoke"
@@ -286,13 +314,13 @@ Manual verification is supplemental. Completion still requires automated tests.
 - 测试类型：Launcher regression.
 - 建议测试文件路径和测试名称：Existing `tests/test_buddyswitch_launcher.py::BuddySwitchLauncherTests::test_instance_open_refreshes_runtime_skills_and_removes_stale_skill`
 
-### `RWH-PERM-001`: PM profile uses explicit runtime reads and no broad filesystem read
+### `RWH-PERM-001`: PM profile blocks source reads while preserving system command startup
 
 - 覆盖需求：`REQ-014`, `REQ-015`, `REQ-016`, `REQ-025`
 - 用户 / 系统场景：Launcher patches PM `CODEX_HOME/config.toml`.
 - 前置条件：Temp shared root and profile patch helper.
 - 输入：Run `python3 tools/launcher/codex_config.py` with `--buddy pm`.
-- 预期输出或状态变化：TOML has `default_permissions = "buddyswitch-runtime"`; `permissions.buddyswitch-runtime.filesystem` has no `"/"` key; `:project_roots["."] == "read"`; project workspace is `"read"`; instance home/codex/xdg, buddybox, temp are `"write"`.
+- 预期输出或状态变化：TOML has `default_permissions = "buddyswitch-runtime"`; `permissions.buddyswitch-runtime.filesystem["/"] == "read"` unless a narrower explicit system read allowlist has passed real Codex sandbox startup smoke; `:project_roots["."] == "read"`; source-only project-root paths map to `"none"`; project workspace is `"read"`; instance home/codex/xdg, buddybox, temp are `"write"`.
 - 断言重点：No source repo, shared root, state root, instance root, or workspace root absolute read/write grant.
 - 测试类型：Config unit/integration.
 - 建议测试文件路径和测试名称：`tests/test_buddy_env_sandbox.py::BuddyEnvSandboxTests::test_non_dev_permission_profile_keeps_workspace_read_only_and_writes_only_safe_roots`
@@ -480,7 +508,7 @@ Manual verification is supplemental. Completion still requires automated tests.
 - 重复操作：Opening the same repaired instance twice must keep sparse list unchanged and must not duplicate local excludes; extend `RWH-SPARSE-004` or add a second open assertion if local excludes duplicate.
 - 并发或顺序敏感行为：Launcher tests use runtime lock path through existing start/open flows; `RWH-RUNTIME-001` proves broker starts after workspace preparation.
 - 空输入、空集合、空记录：Existing `instance open missing record`, `unknown buddy`, and env profile validation tests remain in `tests/test_buddyswitch_launcher.py` and `tests/test_buddy_env_profiles.py`; this task does not change their product meaning.
-- 权限异常：`RWH-PERM-001` to `RWH-PERM-005` cover missing broad read, stale source deny, PM project read-only, dev project write, broker socket allowlist, and temp-root filtering.
+- 权限异常：`RWH-PERM-001` to `RWH-PERM-005` cover system-read compatibility, stale source deny, PM project read-only, dev project write, broker socket allowlist, and temp-root filtering.
 - 路径异常：`RWH-SPARSE-005` rejects unmanaged source edits; `RWH-PERM-004` denies stale source paths; existing workspace path safety tests cover workspace outside shared root and unsafe symlink reset/delete behavior.
 - 外部依赖异常：Real Codex sandbox enforcement remains manual because fake Codex cannot enforce filesystem permissions; automated proof is generated config plus absent runtime files.
 
@@ -492,9 +520,10 @@ Manual verification is supplemental. Completion still requires automated tests.
 - Permission tests parse TOML and assert exact read/write/none entries, not substrings in config text.
 - Project access tests compare PM and dev profiles, preventing a blanket project read-only or blanket project write policy.
 - Runtime command smoke runs real Python commands through the runtime broker/client from the runtime cwd, preventing tests that only inspect copied files.
+- Fake Codex runtime command smoke is not enough for completion; the real `codex sandbox macos /bin/echo hi` and `/bin/zsh -lc pwd` checks must pass to prove command startup under the generated profile.
 - Migration tests create real existing full worktrees and real buddybox files, preventing a helper-only implementation that never repairs `instance open`.
 - Negative unmanaged-change test asserts the source edit remains after failure, preventing silent deletion.
-- Manual real Codex smoke attempts denied reads/writes after automated proof, covering the external sandbox layer that fake Codex cannot enforce.
+- Real Codex smoke verifies command startup plus denied reads/writes after automated proof, covering the external sandbox layer that fake Codex cannot enforce.
 
 ## 7. 验证命令清单
 
@@ -536,20 +565,21 @@ python3 -m pytest tests/test_runless_runtime_contract.py tests/test_host_decisio
 Final grep and status verification:
 
 ```bash
-rg -n '"/" = "read"|workspace.*full repository|full repo' tools scripts tests README.md AGENTS.md framework buddyswitch
+rg -n 'workspace.*full repository|full repo' tools scripts tests README.md AGENTS.md framework buddyswitch
 rg -n 'buddyswitch/skills/design/shape-prototype|tools/launcher/assets/buddies|docs/|tests/' tools/launcher/assets/buddies framework/contracts README.md AGENTS.md
+rg -n 'assertNotIn\("/", filesystem\)|no `"/"` entry|must not appear.*"/" = "read"' docs tests tools
 git status --short --branch
 ```
 
 Expected final grep handling:
 
-- `"/" = "read"` must not appear in product-mode expected config assertions or generated profile renderer.
+- Product-mode tests/plans must not assert removal of `"/" = "read"` as a correctness invariant. Mentions are allowed only when documenting why that invariant is unsafe or when preserving system-read compatibility.
 - Source skill paths may appear in manifest source definitions and runtime skill source-copy tests, but active runtime guidance must not tell buddies to inspect those paths inside product-mode workspace.
 
-Final manual smoke command when local Codex credentials are available:
+Final real Codex smoke command when local Codex credentials are available:
 
 ```bash
 ./buddyswitch-codex instance start --buddy pm -- debug prompt-input "runtime boundary smoke"
 ```
 
-Inside the launched PM workspace, run the manual checks from section 3 and record denied write/read outcomes in the implementation summary.
+Inside the launched PM workspace, run the real Codex sandbox checks from section 3 and record command-startup output plus denied write/read outcomes in the implementation summary.

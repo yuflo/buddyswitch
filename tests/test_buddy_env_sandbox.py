@@ -139,7 +139,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
 
             self.assertNotIn('sandbox_mode = "workspace-write"', config_text)
             self.assertNotIn("[sandbox_workspace_write]", config_text)
-            self.assertNotIn("/", filesystem)
+            self.assertEqual(filesystem["/"], "read")
             self.assertEqual(project_roots["."], "read")
             self.assertEqual(project_roots["buddyswitch/skills/**"], "none")
             self.assertEqual(project_roots["tools/**"], "none")
@@ -148,6 +148,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertEqual(project_roots["README.md"], "none")
             self.assertEqual(project_roots["buddyswitch-codex"], "none")
             self.assertEqual(filesystem[str(project_workspace_dir.resolve(strict=False))], "read")
+            self.assertEqual(filesystem[str(ROOT.resolve(strict=False))], "none")
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "codex-home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "xdg-config").resolve(strict=False)), writable_paths)
@@ -171,7 +172,6 @@ class BuddyEnvSandboxTests(unittest.TestCase):
                 shared_root / "state",
                 workspace_dir,
                 instance_root,
-                ROOT,
                 shared_root / "source-codex-home",
             ]
             for root in forbidden_keys:
@@ -241,7 +241,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertIsInstance(project_roots, dict)
             assert isinstance(project_roots, dict)
 
-            self.assertNotIn("/", filesystem)
+            self.assertEqual(filesystem["/"], "read")
             self.assertEqual(project_roots["."], "read")
             self.assertEqual(project_roots["buddyswitch/skills/**"], "none")
             self.assertIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
@@ -251,7 +251,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertNotIn(str((shared_root / "project").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(instance_root.resolve(strict=False)), writable_paths)
             self.assertNotIn(str(workspace_dir.resolve(strict=False)), writable_paths)
-            self.assertNotIn(str(ROOT.resolve(strict=False)), filesystem)
+            self.assertEqual(filesystem[str(ROOT.resolve(strict=False))], "none")
 
     def test_permission_profile_denies_stale_runtime_source_surfaces(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
