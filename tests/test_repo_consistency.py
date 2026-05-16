@@ -151,6 +151,7 @@ class RepoConsistencyTests(unittest.TestCase):
                 "deprecated prepare/persist",
                 "runless mode",
                 "Retired in runless mode",
+                "tools/launcher/workspace.sh",
             ),
         )
         self.assertEqual(disallowed_3, [], msg="\n".join(disallowed_3))
@@ -667,6 +668,44 @@ class RepoConsistencyTests(unittest.TestCase):
                 "buddyswitch",
                 "tools",
                 "tests",
+                "-g",
+                "!docs/memo/**",
+                "-g",
+                "!docs/spec/**",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        disallowed_hits = [
+            line
+            for line in hits
+            if not ("tools/launcher/workspace.sh" in line and _RETIRED_BUDDYBOX_CONTENT_ROOT in line)
+        ]
+        self.assertEqual(disallowed_hits, [], msg="\n".join(disallowed_hits))
+
+    def test_product_mode_runtime_workspace_source_surfaces_are_not_required_by_guidance(self) -> None:
+        path_group = r"(buddyswitch/skills/\*\*|tools/launcher/assets/buddies/\*\*|docs/\*\*|tests/\*\*)"
+        verb_group = r"(scan|inspect|read|open|search|browse)"
+        pattern = "|".join(
+            (
+                rf"{verb_group}.{{0,80}}{path_group}",
+                rf"{path_group}.{{0,80}}{verb_group}",
+            )
+        )
+        completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                pattern,
+                "tools/launcher/assets/buddies",
+                "buddyswitch/skills",
+                "framework/contracts",
+                "README.md",
+                "AGENTS.md",
                 "-g",
                 "!docs/memo/**",
                 "-g",

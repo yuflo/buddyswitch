@@ -179,6 +179,147 @@ projects/app/
 EOF
 }
 
+buddyswitch_workspace_execution_sparse_paths() {
+  cat <<'EOF'
+scripts/env/
+scripts/runtime_kernel/
+scripts/turn_runtime.py
+scripts/env_store.py
+scripts/env_manifest.py
+scripts/env_profiles.py
+scripts/browser_evidence.py
+buddyswitch/manifest.toml
+buddyswitch/env-profiles/
+framework/contracts/
+EOF
+}
+
+buddyswitch_workspace_execution_forbidden_entries() {
+  cat <<'EOF'
+buddyswitch/skills
+tools
+tests
+docs
+README.md
+buddyswitch-codex
+buddyswitch/content/buddybox
+runs
+buddyswitch/content/runs
+EOF
+}
+
+buddyswitch_workspace_runtime_managed_paths() {
+  local active_buddy
+
+  active_buddy="$(buddyswitch_workspace_active_buddy)"
+  cat <<'EOF'
+AGENTS.md
+.agents/skills
+.runtime
+.codex
+projects/app
+buddyswitch/objects/tracks
+buddyswitch/objects/tasks
+buddyswitch/objects/artifacts
+buddyswitch/objects/handoffs
+EOF
+  if [[ -n "${active_buddy}" ]]; then
+    printf 'buddyswitch/local/buddybox/%s\n' "${active_buddy}"
+  fi
+}
+
+buddyswitch_workspace_execution_worktree_has_sparse_boundary() {
+  local workspace_dir="$1"
+  local sparse_paths expected forbidden_entry required_runtime_file
+
+  git -C "${workspace_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  sparse_paths="$(git -C "${workspace_dir}" sparse-checkout list 2>/dev/null || true)"
+  expected="$(buddyswitch_workspace_execution_sparse_paths)"
+  [[ "${sparse_paths}" == "${expected}" ]] || return 1
+
+  while IFS= read -r forbidden_entry; do
+    [[ -n "${forbidden_entry}" ]] || continue
+    if [[ -e "${workspace_dir}/${forbidden_entry}" || -L "${workspace_dir}/${forbidden_entry}" ]]; then
+      return 1
+    fi
+  done < <(buddyswitch_workspace_execution_forbidden_entries)
+
+  for required_runtime_file in \
+    scripts/env/client.py \
+    scripts/runtime_kernel/broker.py \
+    scripts/turn_runtime.py \
+    buddyswitch/manifest.toml \
+    framework/contracts/pm.md; do
+    [[ -e "${workspace_dir}/${required_runtime_file}" ]] || return 1
+  done
+}
+
+buddyswitch_workspace_execution_worktree_has_dirty_unmanaged_changes() {
+  local workspace_dir="$1"
+  local status_output managed_path
+  local -a status_args
+
+  status_args=(status --porcelain --untracked-files=all -- .)
+  while IFS= read -r managed_path; do
+    [[ -n "${managed_path}" ]] || continue
+    status_args+=(":(exclude)${managed_path}")
+    status_args+=(":(exclude)${managed_path}/**")
+  done < <(buddyswitch_workspace_runtime_managed_paths)
+
+  status_output="$(git -C "${workspace_dir}" "${status_args[@]}")"
+  [[ -n "${status_output}" ]]
+}
+
+buddyswitch_workspace_report_dirty_unmanaged_execution_changes() {
+  local workspace_dir="$1"
+  local managed_path
+  local -a status_args
+
+  echo "execution workspace has local changes outside runtime-managed paths; refusing to narrow sparse checkout" >&2
+  echo "execution workspace: ${workspace_dir}" >&2
+
+  status_args=(status --short --untracked-files=all -- .)
+  while IFS= read -r managed_path; do
+    [[ -n "${managed_path}" ]] || continue
+    status_args+=(":(exclude)${managed_path}")
+    status_args+=(":(exclude)${managed_path}/**")
+  done < <(buddyswitch_workspace_runtime_managed_paths)
+
+  git -C "${workspace_dir}" "${status_args[@]}" >&2 || true
+}
+
+buddyswitch_workspace_configure_execution_sparse_checkout() {
+  local workspace_dir="$1"
+  local mode="${2:-existing}"
+  local sparse_path
+  local -a sparse_paths
+
+  if [[ "${mode}" != "fresh" && "${mode}" != "existing" ]]; then
+    echo "unsupported execution sparse checkout mode: ${mode}" >&2
+    return 2
+  fi
+
+  if [[ "${mode}" != "fresh" ]] && buddyswitch_workspace_execution_worktree_has_dirty_unmanaged_changes "${workspace_dir}"; then
+    buddyswitch_workspace_report_dirty_unmanaged_execution_changes "${workspace_dir}"
+    return 3
+  fi
+
+  sparse_paths=()
+  while IFS= read -r sparse_path; do
+    [[ -n "${sparse_path}" ]] || continue
+    sparse_paths+=("${sparse_path}")
+  done < <(buddyswitch_workspace_execution_sparse_paths)
+  git -C "${workspace_dir}" sparse-checkout init --no-cone >/dev/null
+  git -C "${workspace_dir}" sparse-checkout set --no-cone "${sparse_paths[@]}" >/dev/null
+  git -C "${workspace_dir}" checkout HEAD >/dev/null
+
+  if ! buddyswitch_workspace_execution_worktree_has_sparse_boundary "${workspace_dir}"; then
+    echo "execution workspace sparse checkout did not reach expected runtime boundary" >&2
+    echo "execution workspace: ${workspace_dir}" >&2
+    return 1
+  fi
+}
+
 buddyswitch_workspace_project_worktree_has_sparse_boundary() {
   local project_workspace="$1"
   local sparse_paths forbidden_entry expected
@@ -464,7 +605,14 @@ buddyswitch_workspace_force_rebuild_execution_worktree() {
     return 1
   fi
   git -C "${repo_root}" worktree prune >/dev/null 2>&1 || true
-  if ! git -C "${repo_root}" worktree add --detach "${workspace_dir}" HEAD >/dev/null; then
+  if ! git -C "${repo_root}" worktree add --detach --no-checkout "${workspace_dir}" HEAD >/dev/null; then
+    if [[ "${cleanup_staging}" -eq 1 ]]; then
+      buddyswitch_workspace_restore_runtime_outputs "${staging_root}"
+      buddyswitch_workspace_force_remove_path "${staging_root}"
+    fi
+    return 1
+  fi
+  if ! buddyswitch_workspace_configure_execution_sparse_checkout "${workspace_dir}" fresh; then
     if [[ "${cleanup_staging}" -eq 1 ]]; then
       buddyswitch_workspace_restore_runtime_outputs "${staging_root}"
       buddyswitch_workspace_force_remove_path "${staging_root}"
@@ -546,12 +694,21 @@ buddyswitch_workspace_remove_registered_worktrees_under_strict() {
 }
 
 buddyswitch_workspace_ensure_execution_worktree() {
-  if buddyswitch_workspace_is_valid_execution_worktree; then
+  local workspace_dir
+
+  workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
+  if ! buddyswitch_workspace_is_valid_execution_worktree; then
+    buddyswitch_workspace_force_rebuild_execution_worktree || return $?
     buddyswitch_workspace_sync_runtime_surface
-    return 0
+    return $?
   fi
 
-  buddyswitch_workspace_force_rebuild_execution_worktree
+  if buddyswitch_workspace_execution_worktree_has_sparse_boundary "${workspace_dir}"; then
+    buddyswitch_workspace_sync_runtime_surface
+    return $?
+  fi
+
+  buddyswitch_workspace_configure_execution_sparse_checkout "${workspace_dir}" existing || return $?
   buddyswitch_workspace_sync_runtime_surface
 }
 
@@ -601,46 +758,22 @@ buddyswitch_workspace_install_runtime_skills() {
 }
 
 buddyswitch_workspace_sync_runtime_surface() {
-  local repo_root workspace_dir
+  local workspace_dir
+  local sparse_path
+  local -a sparse_paths
 
-  repo_root="$(buddyswitch_workspace_repo_root)"
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
 
-  python3 - "${repo_root}" "${workspace_dir}" <<'PY'
-import shutil
-import sys
-from pathlib import Path
-
-repo_root = Path(sys.argv[1]).resolve(strict=False)
-workspace_dir = Path(sys.argv[2]).resolve(strict=False)
-runtime_surface = (
-    "scripts/turn_runtime.py",
-    "scripts/env_store.py",
-    "scripts/env",
-    "scripts/env_profiles.py",
-    "scripts/env_manifest.py",
-    "scripts/browser_evidence.py",
-    "scripts/runtime_kernel",
-    "buddyswitch/manifest.toml",
-    "buddyswitch/env-profiles",
-    "framework/contracts",
-)
-
-for relative in runtime_surface:
-    source = repo_root / relative
-    target = workspace_dir / relative
-    if not source.exists():
-        raise SystemExit(f"runtime surface sync source is missing: {source}")
-    if target.is_symlink() or target.is_file():
-        target.unlink()
-    elif target.is_dir():
-        shutil.rmtree(target)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if source.is_dir():
-        shutil.copytree(source, target, symlinks=True)
-    else:
-        shutil.copy2(source, target)
-PY
+  sparse_paths=()
+  while IFS= read -r sparse_path; do
+    [[ -n "${sparse_path}" ]] || continue
+    sparse_paths+=("${sparse_path}")
+  done < <(buddyswitch_workspace_execution_sparse_paths)
+  if buddyswitch_workspace_execution_worktree_has_sparse_boundary "${workspace_dir}"; then
+    git -C "${workspace_dir}" checkout HEAD -- "${sparse_paths[@]}" >/dev/null
+  else
+    buddyswitch_workspace_configure_execution_sparse_checkout "${workspace_dir}" existing || return $?
+  fi
 
   buddyswitch_workspace_neutralize_project_codex_config
 }
@@ -665,6 +798,10 @@ buddyswitch_workspace_install_local_excludes() {
       printf '%s\n' "${pattern}" >> "${exclude_path}"
     fi
   done <<'EOF'
+AGENTS.md
+.runtime/**
+.codex/config.toml
+projects/app
 buddyswitch/objects/tracks/**
 buddyswitch/objects/tasks/**
 buddyswitch/objects/artifacts/**

@@ -79,9 +79,12 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         return config_path.read_text(encoding="utf-8")
 
-    def _writable_paths(self, config_text: str) -> set[str]:
+    def _filesystem_entries(self, config_text: str) -> dict[str, object]:
         parsed = tomllib.loads(config_text)
-        filesystem = parsed["permissions"][PERMISSION_PROFILE]["filesystem"]
+        return parsed["permissions"][PERMISSION_PROFILE]["filesystem"]
+
+    def _writable_paths(self, config_text: str) -> set[str]:
+        filesystem = self._filesystem_entries(config_text)
         return {key for key, value in filesystem.items() if value == "write"}
 
     def _instance_json(self) -> Path:
@@ -165,6 +168,42 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), pm_writable)
             self.assertNotIn(str((shared_root / "state").resolve(strict=False)), dev_writable)
             self.assertNotIn(str(shared_root.resolve(strict=False)), dev_writable)
+
+    def test_permission_profile_does_not_grant_pm_project_or_design_sandbox_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            shared_root = temp_root / "shared"
+            instance_root = shared_root / "instances" / "inst-pm-boundary"
+            workspace_dir = instance_root / "workspace"
+            project_workspace_dir = shared_root / "project" / "workspace"
+
+            config_text = self._patch_config(temp_root=temp_root, buddy="pm", shared_root=shared_root)
+            writable_paths = self._writable_paths(config_text)
+            self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
+            self.assertNotIn(str(workspace_dir.resolve(strict=False)), writable_paths)
+            self.assertNotIn(str((workspace_dir / ".sandbox").resolve(strict=False)), writable_paths)
+            self.assertNotIn(str((workspace_dir / ".sandbox" / "design").resolve(strict=False)), writable_paths)
+            self.assertNotIn(str(shared_root.resolve(strict=False)), writable_paths)
+            self.assertIn(
+                str((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").resolve(strict=False)),
+                writable_paths,
+            )
+
+    def test_permission_profile_keeps_dev_project_write_and_runtime_reads(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            shared_root = temp_root / "shared"
+            project_workspace_dir = shared_root / "project" / "workspace"
+            config_text = self._patch_config(temp_root=temp_root, buddy="dev", shared_root=shared_root)
+            writable_paths = self._writable_paths(config_text)
+            filesystem = self._filesystem_entries(config_text)
+            project_roots = filesystem[":project_roots"]
+            self.assertIsInstance(project_roots, dict)
+            assert isinstance(project_roots, dict)
+            self.assertIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
+            self.assertEqual(project_roots["."], "read")
+            self.assertEqual(project_roots["buddyswitch/skills/**"], "none")
+            self.assertEqual(project_roots["tools/**"], "none")
 
     def test_env_tool_rejects_payload_paths_instead_of_bypassing_project_or_raw_state_boundaries(self) -> None:
         project_probe = self._runtime_path("projects/app/env-tool-bypass.txt")

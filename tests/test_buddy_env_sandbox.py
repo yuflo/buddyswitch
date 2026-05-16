@@ -40,10 +40,14 @@ def _parse_writable_roots(config_text: str) -> list[str]:
     return roots
 
 
-def _parse_profile_filesystem(config_text: str) -> dict[str, object]:
+def _profile_filesystem_entries(config_text: str) -> dict[str, object]:
     parsed = tomllib.loads(config_text)
     assert parsed["default_permissions"] == PERMISSION_PROFILE
     return parsed["permissions"][PERMISSION_PROFILE]["filesystem"]
+
+
+def _parse_profile_filesystem(config_text: str) -> dict[str, object]:
+    return _profile_filesystem_entries(config_text)
 
 
 def _parse_profile_network(config_text: str) -> dict[str, object]:
@@ -126,20 +130,31 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             config_text = config_path.read_text(encoding="utf-8")
-            filesystem = _parse_profile_filesystem(config_text)
+            filesystem = _profile_filesystem_entries(config_text)
             writable_paths = {key for key, value in filesystem.items() if value == "write"}
+            filesystem_keys = set(filesystem.keys())
+            project_roots = filesystem[":project_roots"]
+            self.assertIsInstance(project_roots, dict)
+            assert isinstance(project_roots, dict)
 
             self.assertNotIn('sandbox_mode = "workspace-write"', config_text)
             self.assertNotIn("[sandbox_workspace_write]", config_text)
-            self.assertEqual(filesystem["/"], "read")
-            self.assertEqual(filesystem[":project_roots"], {".": "read"})
+            self.assertNotIn("/", filesystem)
+            self.assertEqual(project_roots["."], "read")
+            self.assertEqual(project_roots["buddyswitch/skills/**"], "none")
+            self.assertEqual(project_roots["tools/**"], "none")
+            self.assertEqual(project_roots["tests/**"], "none")
+            self.assertEqual(project_roots["docs/**"], "none")
+            self.assertEqual(project_roots["README.md"], "none")
+            self.assertEqual(project_roots["buddyswitch-codex"], "none")
+            self.assertEqual(filesystem[str(project_workspace_dir.resolve(strict=False))], "read")
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "codex-home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "xdg-config").resolve(strict=False)), writable_paths)
             self.assertIn(str((workspace_dir / "buddyswitch/local/buddybox/pm").resolve(strict=False)), writable_paths)
             self.assertIn(str(Path("/tmp").resolve(strict=False)), writable_paths)
 
-            forbidden = [
+            forbidden_writes = [
                 shared_root,
                 shared_root / "project",
                 project_workspace_dir,
@@ -147,8 +162,20 @@ class BuddyEnvSandboxTests(unittest.TestCase):
                 workspace_dir,
                 instance_root,
             ]
-            for root in forbidden:
+            for root in forbidden_writes:
                 self.assertNotIn(str(root.resolve(strict=False)), writable_paths)
+
+            forbidden_keys = [
+                shared_root,
+                shared_root / "project",
+                shared_root / "state",
+                workspace_dir,
+                instance_root,
+                ROOT,
+                shared_root / "source-codex-home",
+            ]
+            for root in forbidden_keys:
+                self.assertNotIn(str(root.resolve(strict=False)), filesystem_keys)
             self.assertEqual(_parse_profile_network(config_text), {"enabled": True, "mode": "full"})
 
     def test_profile_mode_rejects_temp_roots_inside_protected_project_and_state_boundaries(self) -> None:
@@ -208,11 +235,15 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             config_text = config_path.read_text(encoding="utf-8")
-            filesystem = _parse_profile_filesystem(config_text)
+            filesystem = _profile_filesystem_entries(config_text)
             writable_paths = {key for key, value in filesystem.items() if value == "write"}
+            project_roots = filesystem[":project_roots"]
+            self.assertIsInstance(project_roots, dict)
+            assert isinstance(project_roots, dict)
 
-            self.assertEqual(filesystem["/"], "read")
-            self.assertEqual(filesystem[":project_roots"], {".": "read"})
+            self.assertNotIn("/", filesystem)
+            self.assertEqual(project_roots["."], "read")
+            self.assertEqual(project_roots["buddyswitch/skills/**"], "none")
             self.assertIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
             self.assertIn(str((workspace_dir / "buddyswitch/local/buddybox/dev").resolve(strict=False)), writable_paths)
             self.assertNotIn(str((shared_root / "state").resolve(strict=False)), writable_paths)
@@ -220,6 +251,40 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertNotIn(str((shared_root / "project").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(instance_root.resolve(strict=False)), writable_paths)
             self.assertNotIn(str(workspace_dir.resolve(strict=False)), writable_paths)
+            self.assertNotIn(str(ROOT.resolve(strict=False)), filesystem)
+
+    def test_permission_profile_denies_stale_runtime_source_surfaces(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            shared_root = temp_root / "shared"
+            instance_root = shared_root / "instances" / "inst-pm-example"
+            workspace_dir = instance_root / "workspace"
+            project_workspace_dir = shared_root / "project" / "workspace"
+            config_path = temp_root / "config.toml"
+
+            completed = self._run_patch(
+                config_path=config_path,
+                shared_root=shared_root,
+                buddy="pm",
+                instance_root=instance_root,
+                workspace_dir=workspace_dir,
+                project_workspace_dir=project_workspace_dir,
+                home=instance_root / "home",
+                codex_home=instance_root / "codex-home",
+                xdg_config_home=instance_root / "xdg-config",
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            filesystem = _profile_filesystem_entries(config_path.read_text(encoding="utf-8"))
+            project_roots = filesystem[":project_roots"]
+            self.assertIsInstance(project_roots, dict)
+            assert isinstance(project_roots, dict)
+            self.assertEqual(project_roots["buddyswitch/skills/**"], "none")
+            self.assertEqual(project_roots["tools/**"], "none")
+            self.assertEqual(project_roots["tests/**"], "none")
+            self.assertEqual(project_roots["docs/**"], "none")
+            self.assertEqual(project_roots["README.md"], "none")
+            self.assertEqual(project_roots["buddyswitch-codex"], "none")
+            self.assertNotIn(".agents/skills/**", project_roots)
 
     def test_patch_keeps_mcp_sections_and_forces_approve(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -92,10 +92,26 @@ writable_roots = [
     )
 
 
-def render_permission_profile_block(writable_paths: list[Path], unix_sockets: list[Path] | None = None) -> str:
-    write_entries = "\n".join(f"{toml_string(str(path))} = \"write\"" for path in writable_paths)
-    if write_entries:
-        write_entries = "\n" + write_entries
+def render_permission_profile_block(
+    filesystem_entries: dict[str, object],
+    unix_sockets: list[Path] | None = None,
+) -> str:
+    rendered_filesystem_rows: list[str] = []
+    for key, value in filesystem_entries.items():
+        if isinstance(value, str):
+            rendered_filesystem_rows.append(f"{toml_string(str(key))} = {toml_string(value)}")
+            continue
+        if isinstance(value, dict):
+            rendered_pairs: list[str] = []
+            for nested_key, nested_value in value.items():
+                if not isinstance(nested_key, str) or not isinstance(nested_value, str):
+                    raise ValueError("permission profile filesystem nested table must use string keys and values")
+                rendered_pairs.append(f"{toml_string(nested_key)} = {toml_string(nested_value)}")
+            rendered_filesystem_rows.append(f"{toml_string(str(key))} = {{ {', '.join(rendered_pairs)} }}")
+            continue
+        raise ValueError("permission profile filesystem entries must be string or inline-table values")
+
+    filesystem_block = "\n".join(rendered_filesystem_rows)
     unix_socket_entries = ""
     if unix_sockets:
         rendered_sockets = ", ".join(f"{toml_string(str(path))} = \"allow\"" for path in unix_sockets)
@@ -103,8 +119,7 @@ def render_permission_profile_block(writable_paths: list[Path], unix_sockets: li
     return (
         f"""
 [permissions.{PERMISSION_PROFILE}.filesystem]
-\"/\" = \"read\"
-\":project_roots\" = {{ \".\" = \"read\" }}{write_entries}
+{filesystem_block}
 
 [permissions.{PERMISSION_PROFILE}.network]
 enabled = true
@@ -370,7 +385,20 @@ def _safe_temp_roots(
     return allowed
 
 
-def _build_profile_mode_roots(args: argparse.Namespace) -> list[Path]:
+def _profile_mode_workspace_deny_rules(workspace_dir: Path) -> dict[str, str]:
+    # Project-root-relative deny rules block stale source-only surfaces if they ever appear in runtime workspaces.
+    _ = workspace_dir
+    return {
+        "buddyswitch/skills/**": "none",
+        "tools/**": "none",
+        "tests/**": "none",
+        "docs/**": "none",
+        "README.md": "none",
+        "buddyswitch-codex": "none",
+    }
+
+
+def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, object]:
     _require_profile_mode_args(args)
 
     canonical_repo_root = canonical(args.repo_root)
@@ -405,10 +433,15 @@ def _build_profile_mode_roots(args: argparse.Namespace) -> list[Path]:
     )
     buddybox_root = workspace_dir / buddybox_root_relative
 
-    roots: list[Path] = [home, codex_home, xdg_config_home, buddybox_root]
-    if profile.get("project", {}).get("access") == "write":
-        roots.append(project_workspace_dir)
+    filesystem_entries: dict[str, object] = {}
+    project_roots: dict[str, str] = {".": "read"}
+    project_roots.update(_profile_mode_workspace_deny_rules(workspace_dir))
+    filesystem_entries[":project_roots"] = project_roots
+    filesystem_entries[str(project_workspace_dir)] = (
+        "write" if profile.get("project", {}).get("access") == "write" else "read"
+    )
 
+    writable_roots: list[Path] = [home, codex_home, xdg_config_home, buddybox_root]
     forbidden_temp = [
         canonical_shared_root,
         project_root,
@@ -417,7 +450,7 @@ def _build_profile_mode_roots(args: argparse.Namespace) -> list[Path]:
         instance_root,
         workspace_dir,
     ]
-    roots.extend(
+    writable_roots.extend(
         _safe_temp_roots(
             temp_roots=args.temp_root,
             repo_root=canonical_repo_root,
@@ -427,7 +460,7 @@ def _build_profile_mode_roots(args: argparse.Namespace) -> list[Path]:
     )
 
     blocked_roots = [canonical_shared_root, project_root, state_root, instance_root, workspace_dir]
-    for root in roots:
+    for root in writable_roots:
         if not is_safe_writable_root(root, canonical_repo_root, canonical_source_codex_home):
             raise ValueError(f"refusing writable root: {root}")
         if root in blocked_roots:
@@ -435,7 +468,9 @@ def _build_profile_mode_roots(args: argparse.Namespace) -> list[Path]:
         for blocked in blocked_roots:
             if path_contains(root, blocked):
                 raise ValueError(f"refusing writable root that grants boundary: {root}")
-    return dedupe_paths([canonical(str(path)) for path in roots])
+    for path in dedupe_paths([canonical(str(path)) for path in writable_roots]):
+        filesystem_entries[str(path)] = "write"
+    return filesystem_entries
 
 
 def _build_profile_mode_unix_sockets(args: argparse.Namespace) -> list[Path]:
@@ -468,8 +503,6 @@ def _build_local_mode_roots(args: argparse.Namespace) -> list[Path]:
 
 
 def build_writable_roots(args: argparse.Namespace) -> list[Path]:
-    if _profile_mode(args):
-        return _build_profile_mode_roots(args)
     return _build_local_mode_roots(args)
 
 
@@ -478,15 +511,17 @@ def patched_config_text(
     roots: list[Path],
     *,
     profile_mode: bool = False,
+    profile_filesystem_entries: dict[str, object] | None = None,
     unix_sockets: list[Path] | None = None,
 ) -> str:
     preserved = patch_mcp_server_approvals(strip_managed_sections(existing_text)).rstrip("\n")
     managed_top_level = render_managed_permission_top_level_block() if profile_mode else render_managed_top_level_block()
-    permissions_block = (
-        render_permission_profile_block(roots, unix_sockets=unix_sockets)
-        if profile_mode
-        else render_sandbox_workspace_write_block(roots)
-    )
+    if profile_mode:
+        if profile_filesystem_entries is None:
+            raise ValueError("profile filesystem entries are required in profile mode")
+        permissions_block = render_permission_profile_block(profile_filesystem_entries, unix_sockets=unix_sockets)
+    else:
+        permissions_block = render_sandbox_workspace_write_block(roots)
     if preserved:
         return f"{managed_top_level}\n{preserved}\n\n{permissions_block}"
     return f"{managed_top_level}\n{permissions_block}"
@@ -497,18 +532,29 @@ def main() -> int:
     config_path = canonical(args.config)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     existing_text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    profile_mode = _profile_mode(args)
+    roots: list[Path] = []
+    profile_filesystem_entries: dict[str, object] | None = None
     try:
-        roots = build_writable_roots(args)
+        if profile_mode:
+            profile_filesystem_entries = _build_profile_mode_filesystem(args)
+        else:
+            roots = build_writable_roots(args)
     except Exception as exc:
         if exc.__class__.__name__ == "EnvProfileError":
             print(f"Env profile invalid: {exc}", file=sys.stderr)
             return 2
         print(f"refusing writable root: {exc}", file=sys.stderr)
         return 2
-    profile_mode = _profile_mode(args)
     unix_sockets = _build_profile_mode_unix_sockets(args) if profile_mode else []
     config_path.write_text(
-        patched_config_text(existing_text, roots, profile_mode=profile_mode, unix_sockets=unix_sockets),
+        patched_config_text(
+            existing_text,
+            roots,
+            profile_mode=profile_mode,
+            profile_filesystem_entries=profile_filesystem_entries,
+            unix_sockets=unix_sockets,
+        ),
         encoding="utf-8",
     )
     return 0

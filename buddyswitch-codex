@@ -278,12 +278,13 @@ instance_open_locked_bootstrap() {
     export BUDDYSWITCH_BROWSER_PORT="${browser_port}"
   fi
   buddyswitch_browser_init_defaults
+  export BUDDYSWITCH_ACTIVE_BUDDY="${buddy}"
 
   if ! buddyswitch_workspace_is_valid_execution_worktree; then
     echo "Instance open blocked: workspace is missing or invalid for ${instance_id}; delete this instance or start a new one." >&2
     return 3
   fi
-  buddyswitch_workspace_sync_runtime_surface
+  buddyswitch_workspace_ensure_execution_worktree
   if buddyswitch_instance_live_target_launcher_marker_exists "${instance_id}"; then
     echo "Instance open blocked: ${instance_id} is already active." >&2
     return 3
@@ -292,8 +293,6 @@ instance_open_locked_bootstrap() {
     echo "Instance open blocked: live legacy launcher marker exists and cannot be attributed to an instance." >&2
     return 3
   fi
-
-  export BUDDYSWITCH_ACTIVE_BUDDY="${buddy}"
   buddyswitch_ensure_shared_env
   buddyswitch_workspace_ensure_state_skeleton
   buddyswitch_workspace_install_runtime_agents

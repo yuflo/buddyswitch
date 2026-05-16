@@ -15,6 +15,11 @@ import time
 import unittest
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - python<3.11 fallback
+    import tomli as tomllib
+
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "buddyswitch-codex"
@@ -54,6 +59,18 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         "cross-buddy-sentinel.txt",
         "relative-path-sentinel.txt",
         "shared-product-sentinel.txt",
+    )
+    _RUNTIME_SPARSE_PATHS = (
+        "scripts/env/",
+        "scripts/runtime_kernel/",
+        "scripts/turn_runtime.py",
+        "scripts/env_store.py",
+        "scripts/env_manifest.py",
+        "scripts/env_profiles.py",
+        "scripts/browser_evidence.py",
+        "buddyswitch/manifest.toml",
+        "buddyswitch/env-profiles/",
+        "framework/contracts/",
     )
 
     def setUp(self) -> None:
@@ -108,8 +125,19 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             self.assertNotIn("[sandbox_workspace_write]", config_text)
             self.assertIn('default_permissions = "buddyswitch-runtime"', top_level_text)
             self.assertIn("[permissions.buddyswitch-runtime.filesystem]", config_text)
-            self.assertIn('"/" = "read"', config_text)
-            self.assertIn('":project_roots" = { "." = "read" }', config_text)
+            parsed = tomllib.loads(config_text)
+            filesystem = parsed["permissions"]["buddyswitch-runtime"]["filesystem"]
+            project_roots = filesystem[":project_roots"]
+            self.assertNotIn("/", filesystem)
+            self.assertIsInstance(project_roots, dict)
+            assert isinstance(project_roots, dict)
+            self.assertEqual(project_roots["."], "read")
+            self.assertEqual(project_roots["buddyswitch/skills/**"], "none")
+            self.assertEqual(project_roots["tools/**"], "none")
+            self.assertEqual(project_roots["tests/**"], "none")
+            self.assertEqual(project_roots["docs/**"], "none")
+            self.assertEqual(project_roots["README.md"], "none")
+            self.assertEqual(project_roots["buddyswitch-codex"], "none")
             self.assertIn("[permissions.buddyswitch-runtime.network]", config_text)
             self.assertIn("enabled = true", config_text)
             self.assertIn('mode = "full"', config_text)
@@ -366,6 +394,37 @@ if os.environ.get("BUDDYSWITCH_TEST_BROKER_STATUS") and entry["instance_json"]:
         except json.JSONDecodeError as exc:
             broker_status_probe["json_error"] = str(exc)
 
+runtime_command_smoke = None
+if os.environ.get("BUDDYSWITCH_TEST_RUNTIME_COMMAND_SMOKE") == "1":
+    runtime_command_smoke = []
+    smoke_commands = (
+        ("turn_runtime.status", ["python3", "scripts/turn_runtime.py", "status"]),
+        ("context.summarize", ["python3", "scripts/env/client.py", "context", "summarize"]),
+        ("buddybox.desc", ["python3", "scripts/env/client.py", "buddybox", "desc"]),
+        ("search.status", ["python3", "scripts/env/client.py", "search", "status", "--query", "boundary-smoke"]),
+    )
+    for name, command in smoke_commands:
+        result = subprocess.run(
+            command,
+            cwd=os.getcwd(),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        row = {
+            "name": name,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "json": None,
+        }
+        if result.stdout.strip():
+            try:
+                row["json"] = json.loads(result.stdout)
+            except json.JSONDecodeError as exc:
+                row["json_error"] = str(exc)
+        runtime_command_smoke.append(row)
+
 payload = {
     **entry,
     "product_probe": product_probe,
@@ -373,6 +432,7 @@ payload = {
     "relative_probe": relative_probe,
     "prepare_probe": prepare_probe,
     "broker_status_probe": broker_status_probe,
+    "runtime_command_smoke": runtime_command_smoke,
     "launch_count": launch_count,
     "config_toml": (codex_home / "config.toml").read_text(encoding="utf-8"),
     "auth_json": json.loads((codex_home / "auth.json").read_text(encoding="utf-8")),
@@ -858,6 +918,61 @@ exec "$real_git" "$@"
             check=False,
         )
 
+    def _runtime_sparse_list(self, workspace_dir: Path) -> list[str]:
+        return subprocess.check_output(
+            ["git", "-C", str(workspace_dir), "sparse-checkout", "list"],
+            text=True,
+        ).splitlines()
+
+    def _assert_runtime_workspace_excludes_source_surfaces(self, workspace_dir: Path) -> None:
+        for relative_path in (
+            "buddyswitch/skills",
+            "tools",
+            "tests",
+            "docs",
+            "README.md",
+            "buddyswitch-codex",
+        ):
+            candidate = workspace_dir / relative_path
+            self.assertFalse(
+                candidate.exists() or candidate.is_symlink(),
+                msg=f"runtime workspace must not expose source surface: {relative_path}",
+            )
+
+    def _assert_pm_runtime_shape(self, workspace_dir: Path, shared_root: Path) -> None:
+        required_runtime_surface = (
+            "scripts/env/client.py",
+            "scripts/runtime_kernel/broker.py",
+            "scripts/turn_runtime.py",
+            "scripts/env_store.py",
+            "scripts/env_manifest.py",
+            "scripts/env_profiles.py",
+            "scripts/browser_evidence.py",
+            "buddyswitch/manifest.toml",
+            "buddyswitch/env-profiles/pm.json",
+            "framework/contracts/pm.md",
+            "AGENTS.md",
+            ".agents/skills/write-prd/SKILL.md",
+        )
+        for relative_path in required_runtime_surface:
+            candidate = workspace_dir / relative_path
+            self.assertTrue(candidate.exists(), msg=f"runtime workspace missing: {relative_path}")
+
+        self.assertEqual(
+            (workspace_dir / "projects" / "app").resolve(strict=True),
+            (shared_root / "project" / "workspace" / "projects" / "app").resolve(strict=True),
+        )
+
+        for kind in ("tracks", "tasks", "artifacts", "handoffs"):
+            projected = workspace_dir / "buddyswitch" / "objects" / kind
+            target = shared_root / "state" / "buddyswitch" / "objects" / kind
+            self.assertTrue(projected.is_symlink(), msg=f"runtime state projection should be symlink: {kind}")
+            self.assertEqual(projected.resolve(), target.resolve())
+
+        buddybox_root = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm"
+        self.assertTrue(buddybox_root.is_dir())
+        self.assertFalse(buddybox_root.is_symlink())
+
     def _cleanup_runtime_broker(self, instance_root: Path) -> None:
         pid_file = instance_root / "runtime" / "runtime-broker.pid"
         try:
@@ -1109,6 +1224,548 @@ exec "$real_git" "$@"
             for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
                 self.assertFalse((runtime_skills / removed).exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
+
+    def test_instance_start_execution_workspace_is_sparse_runtime_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            shared_root = source_home_path / ".codex-buddyswitch"
+            workspace_dir = shared_root / "instances" / payload["instance_id"] / "workspace"
+            self.assertEqual(payload["cwd"], str(workspace_dir.resolve()))
+            self.assertEqual(self._runtime_sparse_list(workspace_dir), list(self._RUNTIME_SPARSE_PATHS))
+            self._assert_pm_runtime_shape(workspace_dir, shared_root)
+            self._assert_runtime_workspace_excludes_source_surfaces(workspace_dir)
+
+            self.assertTrue((workspace_dir / ".agents" / "skills" / "write-prd" / "SKILL.md").exists())
+            self.assertFalse((workspace_dir / ".agents" / "skills" / "shape-prototype").exists())
+            self.assertFalse(
+                (workspace_dir / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists()
+            )
+
+    def test_instance_start_design_runtime_skill_exists_without_source_skill_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture-design.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "design", "debug", "prompt-input", "Shape prototype"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            workspace_dir = Path(payload["cwd"])
+            self.assertTrue((workspace_dir / ".agents" / "skills" / "shape-prototype" / "SKILL.md").exists())
+            self.assertFalse((workspace_dir / "buddyswitch" / "skills" / "design" / "shape-prototype").exists())
+            self.assertFalse((workspace_dir / "tools" / "launcher" / "assets" / "buddies" / "design").exists())
+
+    def test_instance_open_narrows_existing_full_execution_worktree_and_preserves_active_buddybox(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_id = "inst-pm-open-sparse-narrow"
+            _instance_root, workspace_dir = self._write_instance_record(shared_root, instance_id, browser_port=9222)
+            self._add_test_worktree(workspace_dir)
+
+            probe = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm" / "reopen" / "probe.txt"
+            probe.parent.mkdir(parents=True, exist_ok=True)
+            probe.write_text("survives\n", encoding="utf-8")
+            self.assertTrue((workspace_dir / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists())
+
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture-open.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "open", instance_id, "debug", "prompt-input", "continue"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(self._runtime_sparse_list(workspace_dir), list(self._RUNTIME_SPARSE_PATHS))
+            self._assert_runtime_workspace_excludes_source_surfaces(workspace_dir)
+            self._assert_pm_runtime_shape(workspace_dir, shared_root)
+
+            self.assertFalse((workspace_dir / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists())
+            self.assertTrue((workspace_dir / ".agents" / "skills" / "write-prd" / "SKILL.md").exists())
+            self.assertFalse((workspace_dir / ".agents" / "skills" / "shape-prototype").exists())
+            self.assertTrue(probe.exists())
+            self.assertEqual(probe.read_text(encoding="utf-8"), "survives\n")
+
+    def test_instance_open_rejects_unmanaged_source_changes_before_sparse_narrowing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_id = "inst-pm-open-unmanaged-source"
+            _instance_root, workspace_dir = self._write_instance_record(shared_root, instance_id, browser_port=9222)
+            self._add_test_worktree(workspace_dir)
+
+            dirty_file = workspace_dir / "tools" / "launcher" / "source-edit.txt"
+            dirty_file.parent.mkdir(parents=True, exist_ok=True)
+            dirty_file.write_text("unmanaged\n", encoding="utf-8")
+            self.assertTrue((workspace_dir / "tools").exists())
+
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture-open.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "open", instance_id, "debug", "prompt-input", "continue"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("execution workspace has local changes outside runtime-managed paths", completed.stderr)
+            self.assertTrue(dirty_file.exists())
+            self.assertTrue((workspace_dir / "tools").exists())
+            self.assertFalse(capture_path.exists())
+
+    def test_runtime_local_excludes_cover_generated_runtime_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            workspace_dir = Path(payload["cwd"])
+            exclude_path = subprocess.check_output(
+                ["git", "-C", str(workspace_dir), "rev-parse", "--git-path", "info/exclude"],
+                text=True,
+            ).strip()
+            resolved_exclude = Path(exclude_path)
+            if not resolved_exclude.is_absolute():
+                resolved_exclude = workspace_dir / resolved_exclude
+            exclude_lines = {line.strip() for line in resolved_exclude.read_text(encoding="utf-8").splitlines() if line.strip()}
+            expected_lines = {
+                "AGENTS.md",
+                ".agents/skills/**",
+                "projects/app",
+                ".runtime/**",
+                "buddyswitch/objects/tracks/**",
+                "buddyswitch/objects/tasks/**",
+                "buddyswitch/objects/artifacts/**",
+                "buddyswitch/objects/handoffs/**",
+                "buddyswitch/local/buddybox/**",
+            }
+            for line in expected_lines:
+                self.assertIn(line, exclude_lines)
+
+    def test_pm_runtime_commands_work_after_sparse_execution_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_RUNTIME_COMMAND_SMOKE"] = "1"
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "runtime commands smoke"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            smoke = payload["runtime_command_smoke"]
+            self.assertIsInstance(smoke, list)
+            assert isinstance(smoke, list)
+            by_name = {row["name"]: row for row in smoke if isinstance(row, dict) and isinstance(row.get("name"), str)}
+            self.assertEqual(set(by_name.keys()), {"turn_runtime.status", "context.summarize", "buddybox.desc", "search.status"})
+            for row in by_name.values():
+                self.assertEqual(row["returncode"], 0, msg=row)
+                self.assertIsInstance(row["json"], dict, msg=row)
+
+            turn_status = by_name["turn_runtime.status"]["json"]
+            assert isinstance(turn_status, dict)
+            self.assertTrue(turn_status.get("ok"), msg=turn_status)
+            env_tools_text = json.dumps(turn_status.get("env_tools"), ensure_ascii=True)
+            for tool_name in ("context", "buddybox", "search"):
+                self.assertIn(tool_name, env_tools_text)
+
+            context_summary = by_name["context.summarize"]["json"]
+            assert isinstance(context_summary, dict)
+            self.assertTrue(context_summary.get("ok"), msg=context_summary)
+            affordances = context_summary.get("tool_affordances")
+            self.assertIsInstance(affordances, dict, msg=context_summary)
+            assert isinstance(affordances, dict)
+            buddybox_affordance = affordances.get("buddybox")
+            self.assertIsInstance(buddybox_affordance, dict, msg=context_summary)
+            assert isinstance(buddybox_affordance, dict)
+            self.assertEqual(buddybox_affordance.get("capability"), "private_file_workspace")
+
+            buddybox_desc = by_name["buddybox.desc"]["json"]
+            assert isinstance(buddybox_desc, dict)
+            self.assertTrue(buddybox_desc.get("ok"), msg=buddybox_desc)
+            self.assertEqual(buddybox_desc.get("lifetime_scope"), "active_instance_workspace")
+
+            search_status = by_name["search.status"]["json"]
+            assert isinstance(search_status, dict)
+            self.assertTrue(search_status.get("ok"), msg=search_status)
+            search_status_text = json.dumps(search_status, ensure_ascii=True).lower()
+            self.assertIn("native_codex_web_search", search_status_text)
+            self.assertIn("disabled", search_status_text)
+
+    def test_runtime_broker_starts_from_sparse_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_BROKER_STATUS"] = "1"
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "broker sparse smoke"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            status_probe = payload["broker_status_probe"]
+            self.assertIsInstance(status_probe, dict)
+            assert isinstance(status_probe, dict)
+            self.assertEqual(status_probe["returncode"], 0, msg=status_probe)
+            status_payload = status_probe["json"]
+            self.assertIsInstance(status_payload, dict, msg=status_probe)
+            assert isinstance(status_payload, dict)
+            self.assertTrue(status_payload.get("healthy"), msg=status_payload)
+            self.assertIs(status_payload.get("runtime_workspace"), True)
+
+            workspace_dir = Path(payload["cwd"])
+            self.assertTrue((workspace_dir / "scripts" / "runtime_kernel" / "broker.py").exists())
+            self.assertTrue((workspace_dir / "buddyswitch" / "manifest.toml").exists())
+
+    def test_no_runtime_test_depends_on_source_dirs_inside_instance_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_RUNTIME_COMMAND_SMOKE"] = "1"
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "runtime no-source-dir smoke"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            workspace_dir = Path(payload["cwd"])
+            self.assertFalse((workspace_dir / "tools").exists())
+            self.assertFalse((workspace_dir / "tests").exists())
+            self.assertFalse((workspace_dir / "docs").exists())
+
+            smoke = payload["runtime_command_smoke"]
+            self.assertIsInstance(smoke, list)
+            assert isinstance(smoke, list)
+            for row in smoke:
+                self.assertIsInstance(row, dict)
+                assert isinstance(row, dict)
+                self.assertEqual(row["returncode"], 0, msg=row)
 
     def test_product_instance_start_rejects_native_search_args_before_codex_launch(self) -> None:
         escape_args = (
@@ -1990,6 +2647,9 @@ exec "$real_git" "$@"
 
             source_git_common_dir = self._repo_git_common_dir(ROOT)
             self.assertEqual(self._repo_git_common_dir(project_workspace_dir), source_git_common_dir)
+
+    def test_start_uses_shared_project_workspace_and_instance_workspace(self) -> None:
+        self.test_start_with_buddy_creates_shared_project_workspace()
 
     def test_start_narrows_existing_full_project_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
