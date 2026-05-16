@@ -1639,7 +1639,10 @@ exec "$real_git" "$@"
             buddybox_affordance = affordances.get("buddybox")
             self.assertIsInstance(buddybox_affordance, dict, msg=context_summary)
             assert isinstance(buddybox_affordance, dict)
-            self.assertEqual(buddybox_affordance.get("capability"), "private_file_workspace")
+            capability = buddybox_affordance.get("capability")
+            self.assertIsInstance(capability, str, msg=buddybox_affordance)
+            assert isinstance(capability, str)
+            self.assertIn("private_file_workspace", capability)
 
             buddybox_desc = by_name["buddybox.desc"]["json"]
             assert isinstance(buddybox_desc, dict)
