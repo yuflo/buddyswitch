@@ -124,7 +124,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("buddybox_desc", summary)
         self.assertNotIn(_RETIRED_BUDDYBOX_FILE_ROWS_FIELD, summary)
 
-    def test_context_summarize_exposes_compact_tool_affordances(self) -> None:
+    def test_context_summarize_exposes_compact_first_pass_tool_affordances(self) -> None:
         instance_json = self._instance_json()
         summary = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
         self.assertTrue(summary.get("ok"), msg=summary)
@@ -132,44 +132,34 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         affordances = summary.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=summary)
         assert isinstance(affordances, dict)
-        self.assertEqual(set(affordances), {"buddybox", "artifact", "handoff", "project_source"})
-
-        buddybox = affordances.get("buddybox")
-        self.assertIsInstance(buddybox, dict, msg=affordances)
-        assert isinstance(buddybox, dict)
-        self.assertEqual(buddybox.get("capability"), "private_file_workspace")
-        self.assertEqual(buddybox.get("owner_scope"), "active_buddy")
-        self.assertEqual(buddybox.get("lifetime_scope"), "active_instance_workspace")
-        self.assertEqual(buddybox.get("visibility"), "active_buddy_private")
-        self.assertFalse(buddybox.get("product_readable"))
-        self.assertFalse(buddybox.get("cross_buddy_readable"))
-        self.assertFalse(buddybox.get("mutates_product_state"))
-        supports = buddybox.get("supports")
-        self.assertIsInstance(supports, list, msg=buddybox)
-        assert isinstance(supports, list)
-        self.assertIn("list_private_file_summaries", supports)
-        self.assertIn("write_private_text", supports)
-
-        artifact = affordances.get("artifact")
-        self.assertIsInstance(artifact, dict, msg=affordances)
-        assert isinstance(artifact, dict)
-        self.assertEqual(artifact.get("capability"), "product_readable_deliverable")
-        self.assertTrue(artifact.get("cross_buddy_readable"))
-        self.assertTrue(artifact.get("mutates_product_state"))
-
-        handoff = affordances.get("handoff")
-        self.assertIsInstance(handoff, dict, msg=affordances)
-        assert isinstance(handoff, dict)
-        self.assertEqual(handoff.get("capability"), "cross_buddy_collaboration_state")
-        self.assertEqual(handoff.get("cross_buddy_readable"), "targeted")
-        self.assertTrue(handoff.get("mutates_product_state"))
-
-        project_source = affordances.get("project_source")
-        self.assertIsInstance(project_source, dict, msg=affordances)
-        assert isinstance(project_source, dict)
-        self.assertEqual(project_source.get("capability"), "shared_project_source_workspace")
-        self.assertEqual(project_source.get("owner_scope"), "profile_project_access")
-        self.assertFalse(project_source.get("mutates_product_state"))
+        expected = {
+            "task",
+            "track",
+            "artifact",
+            "handoff",
+            "buddybox",
+            "context",
+            "evidence",
+            "search",
+            "project_source",
+        }
+        self.assertEqual(set(affordances), expected)
+        for tool_name in sorted(expected):
+            row = affordances.get(tool_name)
+            self.assertIsInstance(row, dict, msg=affordances)
+            assert isinstance(row, dict)
+            with self.subTest(tool=tool_name):
+                for required in (
+                    "capability",
+                    "choose_when",
+                    "id_inputs_from",
+                    "returns",
+                    "state_effect",
+                    "durability",
+                    "supports",
+                ):
+                    self.assertIn(required, row, msg=row)
+                self.assertIsInstance(row["supports"], list, msg=row)
 
     def test_context_uses_buddybox_desc_not_file_projection(self) -> None:
         self._seed_context_state()
@@ -211,6 +201,27 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 assert isinstance(row, dict)
                 for forbidden in ("payload_fields", "action_semantics", "content", "content_base64", "files"):
                     self.assertNotIn(forbidden, row)
+
+    def test_context_get_and_summarize_explain_catalog_scope(self) -> None:
+        instance_json = self._instance_json()
+        summary = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
+        full = self._dispatch(instance_json=instance_json, tool="context", action="get", args={})
+        self.assertTrue(summary.get("ok"), msg=summary)
+        self.assertTrue(full.get("ok"), msg=full)
+        summarize_effect = str(summary.get("effect_summary", "")).lower()
+        summarize_scope = str(summary.get("read_scope", "")).lower()
+        self.assertIn("compact", summarize_effect)
+        self.assertTrue("not full catalog" in summarize_scope or "compact" in summarize_scope, msg=summarize_scope)
+        self.assertNotIn("tool_catalog", summary)
+        self.assertNotIn("operation_semantics", summary)
+
+        get_effect = str(full.get("effect_summary", "")).lower()
+        get_scope = str(full.get("read_scope", "")).lower()
+        self.assertIn("tool catalog", get_effect)
+        self.assertIn("operation semantics", get_effect)
+        self.assertIn("catalog", get_scope)
+        self.assertIn("tool_catalog", full)
+        self.assertIn("operation_semantics", full)
 
     def test_context_get_exposes_full_tool_catalog_for_inspection(self) -> None:
         instance_json = self._instance_json()

@@ -235,6 +235,57 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(denied["ok"])
         self.assertEqual(denied["permission_boundary"], "artifact.buddy_scope")
 
+    def test_response_planes_distinguish_product_private_token_and_browser_session(self) -> None:
+        track = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="create",
+            args={"track_id": "track-e2e-planes", "title": "Planes", "summary": "planes"},
+        )
+        self.assertTrue(track["ok"], msg=track)
+        task = self._dispatch(
+            buddy="pm",
+            tool="task",
+            action="create",
+            args={"task_id": "task-e2e-planes", "title": "Planes task", "track_id": "track-e2e-planes"},
+        )
+        self.assertTrue(task["ok"], msg=task)
+        artifact = self._dispatch(
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-e2e-planes-r1",
+                "task_id": "task-e2e-planes",
+                "kind": "spec",
+                "title": "Planes spec",
+                "content": {"body": "seed"},
+            },
+        )
+        self.assertTrue(artifact["ok"], msg=artifact)
+        self.assertEqual(artifact.get("durability"), "durable")
+        self.assertIsInstance(artifact.get("state_changes"), list, msg=artifact)
+
+        buddybox_write = self._dispatch(
+            buddy="pm",
+            tool="buddybox",
+            action="write",
+            args={"logical_name": "planes/private.txt", "content": "private"},
+        )
+        self.assertTrue(buddybox_write["ok"], msg=buddybox_write)
+        self.assertEqual(buddybox_write.get("durability"), "active_instance_local")
+        self.assertFalse(buddybox_write.get("mutates_product_state"), msg=buddybox_write)
+
+        evidence = self._dispatch(
+            buddy="pm",
+            tool="evidence",
+            action="issue_browser",
+            args={"target_type": "artifact", "target_id": "art-e2e-planes-r1"},
+        )
+        self.assertTrue(evidence["ok"], msg=evidence)
+        self.assertEqual(evidence.get("durability"), "transient token")
+        self.assertFalse(evidence.get("mutates_product_state"), msg=evidence)
+
 
 if __name__ == "__main__":
     unittest.main()

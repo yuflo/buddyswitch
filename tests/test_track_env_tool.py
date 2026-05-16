@@ -373,6 +373,47 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(detached.get("ok"), msg=detached)
         self.assertIsNone((detached.get("task") or {}).get("track_id"))
 
+    def test_join_attach_detach_reject_foreign_task_with_scope_feedback(self) -> None:
+        pm_instance = self._instance_json(instance_id="inst-pm-track-foreign", buddy="pm")
+        self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-track-foreign",
+            buddy="pm",
+            tool="track",
+            action="create",
+            args={"track_id": "track-foreign-task-scope", "title": "Scope Flow", "current_buddy": "pm"},
+        )
+        env_store.create_task("task-pm-foreign-scope", "PM owned task", buddy="pm", track_id=None, summary="pm only")
+
+        dev_instance = self._instance_json(instance_id="inst-dev-track-foreign", buddy="dev")
+        for action in ("join", "attach_task", "detach_task"):
+            args = {"track_id": "track-foreign-task-scope", "task_id": "task-pm-foreign-scope"}
+            rejected = self._dispatch(
+                instance_json=dev_instance,
+                instance_id="inst-dev-track-foreign",
+                buddy="dev",
+                tool="track",
+                action=action,
+                args=args,
+            )
+            with self.subTest(action=action):
+                self.assertFalse(rejected.get("ok"), msg=rejected)
+                self.assertEqual(rejected.get("permission_boundary"), "task.buddy_scope", msg=rejected)
+                self.assertFalse(rejected.get("state_changed"), msg=rejected)
+                self.assertIn("ownership", str(rejected.get("retry_guidance", "")).lower(), msg=rejected)
+                self.assertIn("task_id", rejected.get("correctable_fields", []), msg=rejected)
+                alternatives = rejected.get("alternative_capabilities")
+                self.assertIsInstance(alternatives, list, msg=rejected)
+                assert isinstance(alternatives, list)
+                alt_pairs = {
+                    (row.get("tool"), row.get("action"))
+                    for row in alternatives
+                    if isinstance(row, dict)
+                }
+                self.assertIn(("task", "list"), alt_pairs)
+                self.assertIn(("track", "get"), alt_pairs)
+                self.assertIn(("track", "join"), alt_pairs)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,6 +37,15 @@ _LEGACY_SOURCE_RUN = "source" + "_run_id"
 
 
 def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+    correctable_fields: list[str] | None = None
+    for field in ("track_id", "source_task_id", "target_buddy", "artifact_ids", "source_refs", "reason", "context", "status"):
+        if field in message:
+            correctable_fields = [field]
+            break
+    if "unsupported payload fields:" in message:
+        suffix = message.split("unsupported payload fields:", 1)[1].strip()
+        if suffix:
+            correctable_fields = [row.strip() for row in suffix.split(",") if row.strip()]
     return tool_responses.rejection(
         tool="handoff",
         action=action,
@@ -54,10 +63,34 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
             "Use context.summarize to inspect candidate ids.",
             "Use handoff.validate before handoff.create.",
         ],
+        correctable_fields=correctable_fields,
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="context",
+                action="summarize",
+                condition="Use when you need candidate ids before retrying handoff payloads.",
+            ),
+            tool_responses.alternative_capability(
+                tool="task",
+                action="list",
+                condition="Use when you need owned source_task_id values.",
+            ),
+            tool_responses.alternative_capability(
+                tool="artifact",
+                action="list",
+                condition="Use when you need owned artifact_ids for handoff payloads.",
+            ),
+        ],
     )
 
 
 def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str, code: str = "E_HANDOFF_SCOPE") -> dict[str, Any]:
+    correctable_fields: list[str] = []
+    for field in ("track_id", "source_task_id", "target_buddy", "artifact_ids", "source_refs"):
+        if field in message:
+            correctable_fields.append(field)
+    if not correctable_fields:
+        correctable_fields = ["target_buddy", "source_refs"]
     return tool_responses.rejection(
         tool="handoff",
         action=action,
@@ -74,6 +107,24 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
         allowed_next_actions=[
             "Use task.list/artifact.list/context.summarize to inspect owned source ids.",
             "Use handoff.validate with corrected refs.",
+        ],
+        correctable_fields=correctable_fields,
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="handoff",
+                action="validate",
+                condition="Use when you need a read-only validation pass before create.",
+            ),
+            tool_responses.alternative_capability(
+                tool="artifact",
+                action="list",
+                condition="Use when you need readable artifact ids before handoff retry.",
+            ),
+            tool_responses.alternative_capability(
+                tool="task",
+                action="list",
+                condition="Use when you need owned task ids before handoff retry.",
+            ),
         ],
     )
 
@@ -284,7 +335,7 @@ def list_handoffs_for_active_buddy(*, args: dict[str, Any], context: HandoffServ
         tool="handoff",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Listed {len(payload_rows)} readable handoff record(s).",
+        effect_summary=f"Returned {len(payload_rows)} readable handoff record(s) visible to source, target, or PM scope.",
         state_changed=False,
         durability="none",
         read_scope="explicit handoff object records",
@@ -309,12 +360,20 @@ def validate_handoff(*, args: dict[str, Any], context: HandoffServiceContext) ->
         tool="handoff",
         action=action,
         active_buddy=active_buddy,
-        effect_summary="Handoff payload validated with explicit product object refs.",
+        effect_summary="Validated and normalized handoff candidate payload without writing a handoff record.",
         state_changed=False,
         durability="none",
         validation_only=True,
         read_scope="request payload validation",
         allowed_next_actions=["Use handoff.create with the same validated payload."],
+        allowed_next_action_options=[
+            tool_responses.next_action_option(
+                tool="handoff",
+                action="create",
+                option_id="handoff_create_when_host_decides_to_persist",
+                reason="Use when the host decides to persist the validated handoff candidate.",
+            )
+        ],
         extra={
             "handoff": normalized,
             "track_alignment": {
@@ -365,10 +424,11 @@ def create_handoff_for_active_buddy(*, args: dict[str, Any], context: HandoffSer
         tool="handoff",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Created handoff '{created['id']}' from '{active_buddy}' to '{created['target_buddy']}'.",
+        effect_summary=f"Created durable handoff record '{created['id']}' from '{active_buddy}' to '{created['target_buddy']}' with readable object refs.",
         state_changed=True,
         durability="durable",
         created_ids=[created["id"]],
+        state_changes=[{"object_type": "handoff", "change": "created", "handoff_id": created["id"]}],
         allowed_next_actions=[
             "Use handoff.list to review readable handoff timeline.",
             "Notify target buddy to consume referenced readable artifacts.",

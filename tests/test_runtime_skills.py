@@ -34,7 +34,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             with self.subTest(buddy=buddy.get("id")):
                 self.assertTrue(required.issubset(skills))
 
-    def test_buddybox_tool_skill_exists_with_required_frontmatter_and_sections(self) -> None:
+    def test_buddybox_tool_skill_exists_with_required_frontmatter_and_boundary_guidance(self) -> None:
         skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "buddybox-tool" / "SKILL.md"
         self.assertTrue(skill_path.exists())
         text = skill_path.read_text(encoding="utf-8")
@@ -53,20 +53,9 @@ class RuntimeSkillsTests(unittest.TestCase):
         ):
             with self.subTest(token=token):
                 self.assertIn(token, lowered)
-        for token in (
-            "what buddybox is",
-            "when to use",
-            "when not to use",
-            "commands",
-            "logical name",
-            "payload",
-            "response",
-            "promotion",
-            "runtime closing",
-            "common flows",
-        ):
-            with self.subTest(section=token):
-                self.assertIn(token, lowered)
+        self.assertIn("context.get.tool_catalog['buddybox']", lowered)
+        self.assertIn("runtime feedback", lowered)
+        self.assertNotIn("common flows", lowered)
 
     def test_buddybox_tool_teaches_env_tool_not_direct_filesystem(self) -> None:
         skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "buddybox-tool" / "SKILL.md"
@@ -85,9 +74,10 @@ class RuntimeSkillsTests(unittest.TestCase):
             "content_type",
             "encoding",
             "artifact.create_revision",
-            "allowed_next_actions",
-            "allowed_next_action_options",
             "env.tool",
+            "allowed_next_action_options",
+            "correctable_fields",
+            "alternative_capabilities",
         ):
             with self.subTest(token=token):
                 self.assertIn(token, lowered)
@@ -115,15 +105,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "buddybox-tool" / "SKILL.md"
         text = skill_path.read_text(encoding="utf-8")
         lowered = text.lower()
-        self.assertIn("search", lowered)
-        self.assertTrue(
-            "when available" in lowered
-            or "if the runtime exposes" in lowered
-            or "if tool catalog exposes" in lowered,
-            msg=lowered,
-        )
         self.assertTrue("context.get" in lowered or "scripts/turn_runtime.py status" in lowered, msg=lowered)
-        self.assertTrue("do not shell-search" in lowered or "do not use shell search" in lowered, msg=lowered)
         for forbidden in (
             "rg buddyswitch/local/buddybox",
             "grep -r buddyswitch/local/buddybox",
@@ -145,8 +127,32 @@ class RuntimeSkillsTests(unittest.TestCase):
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("env.tool", text)
                 self.assertNotIn("prepare", text)
-                self.assertNotIn("persist", text)
                 self.assertNotIn(_RETIRED_BUDDY_RUN_COMMIT, text)
+                self.assertTrue(
+                    "context.get.tool_catalog" in text
+                    or "context.summarize.tool_affordances" in text
+                    or "scripts/turn_runtime.py status" in text
+                )
+                self.assertNotIn("payload_fields", text)
+                self.assertNotIn("action_semantics", text)
+                self.assertNotIn("after writing a prd", text)
+                self.assertNotIn("if the user says", text)
+
+    def test_buddybox_tool_skill_stays_workflow_level_and_defers_to_runtime_feedback(self) -> None:
+        skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "buddybox-tool" / "SKILL.md"
+        lowered = skill_path.read_text(encoding="utf-8").lower()
+        self.assertIn("active buddy private file capability", lowered)
+        self.assertIn("logical_name", lowered)
+        self.assertIn("runtime feedback", lowered)
+        self.assertIn("state_changed", lowered)
+        self.assertIn("durability", lowered)
+        self.assertIn("allowed_next_action_options", lowered)
+        self.assertIn("correctable_fields", lowered)
+        self.assertIn("alternative_capabilities", lowered)
+        self.assertNotIn("common flows", lowered)
+        self.assertNotIn("--path", lowered)
+        self.assertNotIn("buddyswitch/local/buddybox", lowered)
+        self.assertNotIn("must promote", lowered)
 
 
 if __name__ == "__main__":

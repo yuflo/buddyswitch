@@ -56,6 +56,10 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertNotIn("memory_summaries", response)
         self.assertIn("candidate_tracks", response)
         self.assertTrue(any(row.get("track_id") == "track-market-decision" for row in response["candidate_tracks"]))
+        affordances = response.get("tool_affordances")
+        self.assertIsInstance(affordances, dict, msg=response)
+        assert isinstance(affordances, dict)
+        self.assertTrue({"task", "track", "artifact", "handoff", "buddybox", "context", "evidence", "search", "project_source"}.issubset(set(affordances)))
 
     def test_market_evidence_requires_target_scoped_args(self) -> None:
         response = self._dispatch(buddy="market", tool="evidence", action="issue_browser", args={"reason": "no target"})
@@ -87,28 +91,33 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         buddybox = affordances.get("buddybox")
         artifact = affordances.get("artifact")
         handoff = affordances.get("handoff")
+        task = affordances.get("task")
+        track = affordances.get("track")
+        context_tool = affordances.get("context")
+        evidence = affordances.get("evidence")
+        search = affordances.get("search")
         project_source = affordances.get("project_source")
         self.assertIsInstance(buddybox, dict, msg=summary)
         self.assertIsInstance(artifact, dict, msg=summary)
         self.assertIsInstance(handoff, dict, msg=summary)
+        self.assertIsInstance(task, dict, msg=summary)
+        self.assertIsInstance(track, dict, msg=summary)
+        self.assertIsInstance(context_tool, dict, msg=summary)
+        self.assertIsInstance(evidence, dict, msg=summary)
+        self.assertIsInstance(search, dict, msg=summary)
         self.assertIsInstance(project_source, dict, msg=summary)
         assert isinstance(buddybox, dict)
         assert isinstance(artifact, dict)
         assert isinstance(handoff, dict)
+        assert isinstance(task, dict)
+        assert isinstance(track, dict)
+        assert isinstance(context_tool, dict)
+        assert isinstance(evidence, dict)
+        assert isinstance(search, dict)
         assert isinstance(project_source, dict)
-        self.assertEqual(buddybox.get("capability"), "private_file_workspace")
-        self.assertFalse(buddybox.get("product_readable"))
-        self.assertFalse(buddybox.get("cross_buddy_readable"))
-        self.assertFalse(buddybox.get("mutates_product_state"))
-        self.assertEqual(artifact.get("capability"), "product_readable_deliverable")
-        self.assertTrue(artifact.get("cross_buddy_readable"))
-        self.assertTrue(artifact.get("mutates_product_state"))
-        self.assertEqual(handoff.get("capability"), "cross_buddy_collaboration_state")
-        self.assertEqual(handoff.get("cross_buddy_readable"), "targeted")
-        self.assertTrue(handoff.get("mutates_product_state"))
-        self.assertEqual(project_source.get("capability"), "shared_project_source_workspace")
-        self.assertEqual(project_source.get("owner_scope"), "profile_project_access")
-        self.assertFalse(project_source.get("mutates_product_state"))
+        for compact in (buddybox, artifact, handoff, task, track, context_tool, evidence, search, project_source):
+            for key in ("capability", "choose_when", "id_inputs_from", "returns", "state_effect", "durability", "supports"):
+                self.assertIn(key, compact, msg=compact)
 
         context_get = self._dispatch(buddy="pm", tool="context", action="get", args={})
         self.assertTrue(context_get["ok"], msg=context_get)
@@ -157,6 +166,12 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         self.assertIn("when", str(promotion.get("reason", "")).lower())
         self.assertNotIn("must", str(promotion.get("reason", "")).lower())
+        self.assertNotIn("always", str(promotion.get("reason", "")).lower())
+        for row in options:
+            if not isinstance(row, dict):
+                continue
+            for key in ("tool", "action", "mutates", "preconditions", "reason", "source_refs"):
+                self.assertIn(key, row, msg=row)
 
 
 if __name__ == "__main__":

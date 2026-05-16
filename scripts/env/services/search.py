@@ -122,6 +122,14 @@ def _engine_error(*, action: str, context: SearchServiceContext) -> dict[str, An
             "Choose a supported search engine and retry.",
             "Use search.status to inspect the available search capability boundary.",
         ],
+        correctable_fields=["engine"],
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="search",
+                action="status",
+                condition="Use when you need backend and engine boundary metadata before retrying.",
+            )
+        ],
         extra={
             "allowed_engines": list(ALLOWED_ENGINES),
             "command_hint": "python3 scripts/env/client.py search open-browser --query '<query>' --engine google",
@@ -147,6 +155,14 @@ def _query_error(*, action: str, context: SearchServiceContext) -> dict[str, Any
             "Provide a non-empty query and retry.",
             "Use search.status to inspect the available search capability boundary.",
         ],
+        correctable_fields=["query"],
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="search",
+                action="status",
+                condition="Use when you need search boundary metadata before retrying a query.",
+            )
+        ],
         extra={
             "command_hint": "python3 scripts/env/client.py search open-browser --query '<query>' --engine google",
         },
@@ -170,6 +186,14 @@ def _backend_error(*, context: SearchServiceContext) -> dict[str, Any]:
         allowed_next_actions=[
             "Choose backend browser for browser-native discovery.",
             "Do not use implicit backend auto selection.",
+        ],
+        correctable_fields=["backend"],
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="search",
+                action="status",
+                condition="Use when you need the allowed backend set before retrying.",
+            )
         ],
         extra={
             "allowed_backends": list(ALLOWED_BACKENDS),
@@ -211,6 +235,14 @@ def _browser_unavailable(
             "Ensure the launcher-managed browser for this instance is running.",
             "Retry search.open_browser after browser ensure succeeds.",
         ],
+        correctable_fields=["browser readiness"],
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="search",
+                action="status",
+                condition="Use when you need browser readiness metadata before retrying browser actions.",
+            )
+        ],
         extra=extra,
     )
 
@@ -238,6 +270,19 @@ def _browser_open_failed(
         allowed_next_actions=[
             "Ensure the launcher-managed browser endpoint is reachable.",
             "Retry search.open_browser or open the target URL manually in the instance browser.",
+        ],
+        correctable_fields=["browser readiness", "query", "engine"],
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="search",
+                action="status",
+                condition="Use when you need browser endpoint health metadata before retrying.",
+            ),
+            tool_responses.alternative_capability(
+                tool="search",
+                action="request",
+                condition="Use when you need to re-validate target URL intent before opening browser.",
+            ),
         ],
         extra={
             "target_url": target_url,
@@ -268,6 +313,19 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
                 "Use search.open_browser for browser-native discovery.",
                 "Ask the user for explicit one-off approval before requesting a non-browser downgrade.",
             ],
+            correctable_fields=["backend"],
+            alternative_capabilities=[
+                tool_responses.alternative_capability(
+                    tool="search",
+                    action="open_browser",
+                    condition="Use when browser backend is available and search_api is blocked.",
+                ),
+                tool_responses.alternative_capability(
+                    tool="search",
+                    action="status",
+                    condition="Use when you need backend availability metadata before retrying.",
+                ),
+            ],
             extra={
                 "command_hint": "python3 scripts/env/client.py search open-browser --query '<query>' --engine google",
                 "reason": "No BuddySwitch-managed search API provider is configured.",
@@ -289,6 +347,19 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
         allowed_next_actions=[
             "Use search.open_browser for browser-native discovery.",
             "Configure a BuddySwitch-managed search API provider before using search_api.",
+        ],
+        correctable_fields=["backend"],
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="search",
+                action="open_browser",
+                condition="Use when browser backend is available and search_api provider is unavailable.",
+            ),
+            tool_responses.alternative_capability(
+                tool="search",
+                action="status",
+                condition="Use when you need backend availability metadata before retrying.",
+            ),
         ],
         extra={
             "command_hint": "python3 scripts/env/client.py search open-browser --query '<query>' --engine google",
@@ -333,10 +404,10 @@ def status_for_active_instance(*, args: dict[str, Any], context: SearchServiceCo
         tool="search",
         action="search.status",
         active_buddy=context["active_buddy"],
-        effect_summary="Returned search capability boundary and backend status for the active instance without changing state.",
+        effect_summary="Returned search capability metadata and backend/browser readiness status without opening a browser page.",
         state_changed=False,
         durability="none",
-        read_scope="search capability boundary and backend availability snapshot",
+        read_scope="search capability and backend/browser readiness metadata",
         allowed_next_actions=[
             "Use search.open_browser with backend browser for browser-native discovery.",
         ],
@@ -381,12 +452,20 @@ def request_for_active_instance(*, args: dict[str, Any], context: SearchServiceC
         tool="search",
         action="search.request",
         active_buddy=context["active_buddy"],
-        effect_summary="Validated browser backend request and produced target URL plan without opening a browser page.",
+        effect_summary="Validated search request and returned target URL browser intent with page_opened=false.",
         state_changed=False,
         durability="none",
-        read_scope="search request planning over profile boundary and browser endpoint availability",
+        read_scope="search request planning metadata and target URL intent without browser session mutation",
         allowed_next_actions=[
             "Call search.open_browser to open the target in the instance browser, then traverse result pages in chrome-devtools-cockpit.",
+        ],
+        allowed_next_action_options=[
+            tool_responses.next_action_option(
+                tool="search",
+                action="open_browser",
+                option_id="search_open_when_host_needs_page_open",
+                reason="Use when the host needs to open the planned target URL in the browser session.",
+            )
         ],
         extra={
             "backend": "browser",
@@ -437,7 +516,7 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
         tool="search",
         action="search.open_browser",
         active_buddy=context["active_buddy"],
-        effect_summary="Opened the search target URL in launcher-managed browser session for open-world discovery.",
+        effect_summary="Opened the planned target URL in launcher-managed browser session without writing product objects.",
         state_changed=True,
         durability="browser_session",
         state_changes=[
@@ -457,6 +536,7 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
             "browser_endpoint": browser_endpoint,
             "page_opened": True,
             "permission_boundary": "search.browser",
+            "mutates_product_state": False,
             "command_hint": "Use the chrome-devtools-cockpit MCP page tools against the opened search page.",
         },
     )

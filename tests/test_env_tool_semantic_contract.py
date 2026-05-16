@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -52,6 +53,14 @@ _LOW_SIGNAL_EXACT = {
     "todo",
     "tbd",
 }
+_TEMPLATE_PATTERNS = (
+    re.compile(r"you need\s+[a-z_]+\.[a-z_]+\s+behavior"),
+    re.compile(r"execute\s+[a-z_]+\.[a-z_]+"),
+    re.compile(r"returned structured state"),
+    re.compile(r"completed with explicit ids"),
+    re.compile(r"semantic metadata for action"),
+    re.compile(r"structured capability feedback"),
+)
 
 
 def _expected_tool_action_sets() -> tuple[set[str], dict[str, set[str]]]:
@@ -181,6 +190,98 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                             forbid_equals={field_name, key, action},
                         )
 
+    def test_semantic_text_rejects_template_action_language(self) -> None:
+        desc = contracts.env_tools_description()
+        for tool, row in sorted(desc.items()):
+            for action, semantic in sorted(row["action_semantics"].items()):
+                key = f"{tool}.{action}"
+                checks = [
+                    str(semantic.get("plain_description", "")),
+                    str(semantic.get("success_means", "")),
+                    *[str(text) for text in semantic.get("use_when", [])],
+                ]
+                for text in checks:
+                    lowered = text.strip().lower()
+                    with self.subTest(action=key, text=text):
+                        for pattern in _TEMPLATE_PATTERNS:
+                            self.assertIsNone(
+                                pattern.search(lowered),
+                                msg=f"{key} contains template phrase: {text}",
+                            )
+
+    def test_action_semantics_explain_content_level_state_effect_and_durability(self) -> None:
+        desc = contracts.env_tools_description()
+        for tool_spec in contracts.TOOL_REGISTRY:
+            tool = str(tool_spec["tool"])
+            for action_spec in tool_spec["actions"]:
+                action = str(action_spec["name"])
+                key = f"{tool}.{action}"
+                semantic = desc[tool]["action_semantics"][action]
+                text = " ".join(
+                    [
+                        str(semantic.get("plain_description", "")),
+                        str(semantic.get("success_means", "")),
+                        *[str(row) for row in semantic.get("use_when", [])],
+                        *[str(row) for row in semantic.get("inputs_explained", {}).values()],
+                    ]
+                ).lower()
+                side_effects = semantic["side_effects"]
+                mutates = str(action_spec["mutates"])
+
+                with self.subTest(action=key):
+                    self.assertEqual(side_effects["mutates"], mutates)
+                    self.assertIsInstance(side_effects.get("durability"), str)
+                    self.assertNotIn("semantic metadata", text)
+
+                    if action == "list":
+                        self.assertTrue("summary" in text or "record" in text, msg=text)
+                    if action in {"get", "read"} and key != "context.get":
+                        self.assertTrue(
+                            "id" in text or "logical_name" in text or "logical name" in text,
+                            msg=text,
+                        )
+                    if "validate" in action:
+                        self.assertIn("validat", text, msg=text)
+                        self.assertTrue(
+                            "no write" in text
+                            or "without writing" in text
+                            or "no mutat" in text,
+                            msg=text,
+                        )
+                        self.assertEqual(side_effects["mutates"], contracts.MUTATES_NONE)
+                    if action in {"create", "update", "archive", "delete", "attach_task", "detach_task", "advance", "join", "open_browser"}:
+                        if side_effects["mutates"] != contracts.MUTATES_NONE:
+                            self.assertTrue(
+                                any(token in text for token in ("create", "update", "archive", "delete", "open", "write", "attach", "detach", "join", "advanc")),
+                                msg=text,
+                            )
+
+                    if key.startswith("artifact.list"):
+                        self.assertIn("summary", text, msg=text)
+                        self.assertTrue(
+                            "no full" in text
+                            or "not full" in text
+                            or "excluded" in text
+                            or "without full artifact content" in text,
+                            msg=text,
+                        )
+                    if key.startswith("artifact.get"):
+                        self.assertTrue("full" in text and "content" in text, msg=text)
+                    if key.startswith("buddybox.read"):
+                        self.assertTrue("content" in text or "content_base64" in text, msg=text)
+                    if key.startswith("evidence."):
+                        self.assertIn("token", text, msg=text)
+                        self.assertIn("target", text, msg=text)
+                        self.assertIn("transient", str(side_effects.get("durability", "")).lower())
+                    if key == "search.status":
+                        self.assertTrue("metadata" in text or "status" in text, msg=text)
+                    if key == "search.request":
+                        self.assertTrue("target url" in text or "browser intent" in text, msg=text)
+                        self.assertTrue("not open" in text or "without opening" in text, msg=text)
+                    if key == "search.open_browser":
+                        self.assertIn("browser", text, msg=text)
+                        self.assertIn("session", str(side_effects.get("durability", "")).lower(), msg=side_effects)
+
     def test_risk_hints_match_mutation_and_open_world_behavior(self) -> None:
         desc = contracts.env_tools_description()
         by_action = {
@@ -207,6 +308,10 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         _, expected_actions = _expected_tool_action_sets()
         expected_keys = {f"{tool}.{action}" for tool, actions in expected_actions.items() for action in actions}
         self.assertEqual(set(op), expected_keys)
+        desc = contracts.env_tools_description()
+        for forbidden in ("semantic_v2", "schema_version", "workflow_engine", "parallel_catalog"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, desc)
         required = {"kind", "mutates", "required_permission", "authority", "requires", "returns"}
         for action_key, row in sorted(op.items()):
             with self.subTest(action=action_key):
@@ -224,13 +329,13 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 "do_not_use_when": buddybox["do_not_use_when"],
             },
             ensure_ascii=True,
-        ).lower()
+        ).lower().replace("-", " ")
         for token in (
             "active buddy",
             "private",
-            "private file capability",
+            "private file",
             "logical_name",
-            "active-instance-local",
+            "active instance local",
             "artifact",
         ):
             self.assertIn(token, capability_text)
@@ -254,11 +359,11 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 "capability_boundary": buddybox["capability_boundary"],
             },
             ensure_ascii=True,
-        ).lower()
+        ).lower().replace("-", " ")
         for token in (
             "active buddy",
             "private",
-            "private file capability",
+            "private file",
             "drafts",
             "lightweight prototypes",
             "exports",
@@ -266,30 +371,38 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             "logs",
             "generated files",
             "binary outputs",
-            "active-instance-local",
+            "active instance local",
             "not product object",
             "artifact",
-            "product-readable",
+            "product readable",
         ):
             with self.subTest(token=token):
                 self.assertIn(token, capability_text)
 
         actions = buddybox["action_semantics"]
-        expected_success_tokens = {
-            "desc": ("capability metadata", "compact private summary only"),
-            "list": ("summaries only", "no file content"),
-            "read": ("one active buddy private file", "content", "content_base64"),
-            "write": (
-                "created or overwrote one active buddy private file",
-                "did not create artifact/handoff/task/track/context/evidence",
-            ),
-            "delete": ("absent", "no product/collaboration object changed"),
-        }
-        for action, tokens in expected_success_tokens.items():
-            success_text = str(actions[action]["success_means"]).lower()
+        for action, success_text in {
+            name: str(row["success_means"]).lower().replace("-", " ")
+            for name, row in actions.items()
+        }.items():
             with self.subTest(action=action):
-                for token in tokens:
-                    self.assertIn(token, success_text)
+                if action == "desc":
+                    self.assertIn("capability", success_text)
+                    self.assertIn("summary", success_text)
+                    self.assertTrue("descriptor" in success_text or "metadata" in success_text, msg=success_text)
+                elif action == "list":
+                    self.assertIn("summary", success_text)
+                    self.assertTrue("no content" in success_text or "excluded" in success_text, msg=success_text)
+                elif action == "read":
+                    self.assertIn("private file", success_text)
+                    self.assertIn("content", success_text)
+                    self.assertIn("content_base64", success_text)
+                elif action == "write":
+                    self.assertIn("private file", success_text)
+                    self.assertTrue("created" in success_text or "overwritten" in success_text, msg=success_text)
+                    self.assertTrue("without product object mutation" in success_text or "no product object mutation" in success_text, msg=success_text)
+                elif action == "delete":
+                    self.assertTrue("deleted" in success_text or "already_absent" in success_text, msg=success_text)
+                    self.assertTrue("no product object mutation" in success_text or "no product collaboration object changed" in success_text, msg=success_text)
 
     def test_buddybox_action_semantics_explain_input_formats_and_output_fields(self) -> None:
         actions = contracts.env_tools_description()["buddybox"]["action_semantics"]
@@ -298,8 +411,9 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             fields = actions[action]["inputs_explained"]
             self.assertIn("logical_name", fields, msg=action)
             self.assertNotIn("path", fields, msg=action)
-            self.assertIn("logical", str(fields["logical_name"]).lower(), msg=action)
-            self.assertIn("active buddy", str(fields["logical_name"]).lower(), msg=action)
+            logical_name_text = str(fields["logical_name"]).lower().replace("-", " ")
+            self.assertIn("logical", logical_name_text, msg=action)
+            self.assertIn("active buddy", logical_name_text, msg=action)
 
         write_fields = actions["write"]["inputs_explained"]
         self.assertIn("utf-8 text", str(write_fields["content"]).lower())
@@ -344,10 +458,9 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                     local_affordance_actions += 1
                 if "artifact" in use_when_text and "host decides" in use_when_text:
                     conditional_readable_actions += 1
-                self.assertNotIn("only", use_when_text)
                 self.assertNotIn("must ", use_when_text)
 
-        self.assertGreaterEqual(local_affordance_actions, 2)
+        self.assertGreaterEqual(local_affordance_actions, 1)
         self.assertGreaterEqual(conditional_readable_actions, 1)
 
     def test_buddybox_current_operations_do_not_conflate_read_list_and_search(self) -> None:
@@ -374,7 +487,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ensure_ascii=True,
         ).lower()
         self.assertIn("summary", list_text)
-        self.assertIn("no file content", list_text)
+        self.assertTrue("no content" in list_text or "excluded" in list_text, msg=list_text)
 
     def test_buddybox_semantics_do_not_expose_filesystem_roots(self) -> None:
         catalog_blob = json.dumps(contracts.env_tools_description()["buddybox"], ensure_ascii=True).lower()

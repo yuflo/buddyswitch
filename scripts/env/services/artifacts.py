@@ -30,6 +30,23 @@ _LEGACY_SOURCE_RUN = "source" + "_run_id"
 
 
 def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+    correctable_fields: list[str] | None = None
+    if "task_id" in message:
+        correctable_fields = ["task_id"]
+    elif "artifact_id" in message:
+        correctable_fields = ["artifact_id"]
+    elif "kind" in message:
+        correctable_fields = ["kind"]
+    elif "title" in message:
+        correctable_fields = ["title"]
+    elif "content" in message:
+        correctable_fields = ["content"]
+    elif "source_refs" in message:
+        correctable_fields = ["source_refs"]
+    elif "unsupported payload fields:" in message:
+        suffix = message.split("unsupported payload fields:", 1)[1].strip()
+        if suffix:
+            correctable_fields = [row.strip() for row in suffix.split(",") if row.strip()]
     return tool_responses.rejection(
         tool="artifact",
         action=action,
@@ -47,10 +64,29 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
             "Use track.list/track.get to inspect candidate track and task ids.",
             "Retry with explicit task_id and supported fields.",
         ],
+        correctable_fields=correctable_fields,
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="task",
+                action="list",
+                condition="Use when you need owned task ids before retrying artifact payloads.",
+            ),
+            tool_responses.alternative_capability(
+                tool="context",
+                action="get",
+                condition="Use when you need full catalog and id-source semantics.",
+            ),
+        ],
     )
 
 
 def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str, code: str = "E_ARTIFACT_SCOPE") -> dict[str, Any]:
+    correctable_fields: list[str] = []
+    for field in ("task_id", "artifact_id", "source_refs"):
+        if field in message:
+            correctable_fields.append(field)
+    if not correctable_fields:
+        correctable_fields = ["artifact_id", "task_id"]
     return tool_responses.rejection(
         tool="artifact",
         action=action,
@@ -67,6 +103,24 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
         allowed_next_actions=[
             "Use task.list to inspect owned tasks.",
             "Use artifact.list to inspect readable artifacts.",
+        ],
+        correctable_fields=correctable_fields,
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="task",
+                action="list",
+                condition="Use when you need owned task ids before retrying artifact writes.",
+            ),
+            tool_responses.alternative_capability(
+                tool="artifact",
+                action="list",
+                condition="Use when you need readable artifact ids for get/update flows.",
+            ),
+            tool_responses.alternative_capability(
+                tool="track",
+                action="get",
+                condition="Use when you need relation context and artifact summary ids.",
+            ),
         ],
     )
 
@@ -205,7 +259,7 @@ def list_artifacts_for_track(*, args: dict[str, Any], context: ArtifactServiceCo
         tool="artifact",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Listed {len(rows)} artifact summary row(s) for track '{track_id}'.",
+        effect_summary=f"Returned {len(rows)} artifact summary row(s) for track '{track_id}' without full artifact content.",
         state_changed=False,
         durability="none",
         read_scope="track-related readable artifact summaries",
@@ -248,10 +302,10 @@ def get_artifact_for_active_buddy(*, args: dict[str, Any], context: ArtifactServ
         tool="artifact",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Read artifact '{artifact_id}'.",
+        effect_summary=f"Read one readable artifact '{artifact_id}' including full artifact body content.",
         state_changed=False,
         durability="none",
-        read_scope="owner-or-track relation readable artifact",
+        read_scope="one readable artifact record with full body content",
         allowed_next_actions=[
             "Use artifact.update_metadata to revise title/summary/source_refs.",
             "Use artifact.create_revision with explicit task_id for a new revision.",
@@ -276,12 +330,20 @@ def validate_artifact_payload(*, args: dict[str, Any], context: ArtifactServiceC
         tool="artifact",
         action=action,
         active_buddy=active_buddy,
-        effect_summary="Artifact create payload validated without writing state.",
+        effect_summary="Validated and normalized artifact revision payload without writing runtime state.",
         state_changed=False,
         durability="none",
         validation_only=True,
         read_scope="request payload validation",
         allowed_next_actions=["Use artifact.create_revision with the same normalized payload."],
+        allowed_next_action_options=[
+            tool_responses.next_action_option(
+                tool="artifact",
+                action="create_revision",
+                option_id="artifact_create_when_host_decides_to_write",
+                reason="Use when the host decides to write the validated artifact payload.",
+            )
+        ],
         extra={"normalized": normalized},
     )
 
@@ -318,11 +380,15 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
         tool="artifact",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Created artifact revision '{artifact['id']}' on task '{artifact['task_id']}'.",
+        effect_summary=f"Created durable artifact revision '{artifact['id']}' for task '{artifact['task_id']}' and updated task linkage.",
         state_changed=True,
         durability="durable",
         created_ids=[artifact["id"]],
         updated_ids=[artifact["task_id"]],
+        state_changes=[
+            {"object_type": "artifact", "change": "revision_created", "artifact_id": artifact["id"]},
+            {"object_type": "task", "change": "artifact_linkage_updated", "task_id": artifact["task_id"]},
+        ],
         allowed_next_actions=[
             "Use artifact.get with artifact_id for full verification.",
             "Use handoff.create to share this artifact with another buddy.",
@@ -408,10 +474,11 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
         tool="artifact",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Updated metadata for artifact '{artifact_id}'.",
+        effect_summary=f"Updated metadata fields for artifact '{artifact_id}' without replacing artifact body content.",
         state_changed=True,
         durability="durable",
         updated_ids=[artifact_id],
+        state_changes=[{"object_type": "artifact", "change": "metadata_updated", "artifact_id": artifact_id}],
         allowed_next_actions=[
             "Use artifact.get for updated record.",
             "Use handoff.create if this artifact should be shared.",

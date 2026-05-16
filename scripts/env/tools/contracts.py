@@ -198,7 +198,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             },
             {
                 "name": "validate_payload",
-                "payload_fields": ["artifact_id", "task_id", "kind", "title", "summary", "content", "source_refs"],
+                "payload_fields": ["artifact_id", "task_id", "kind", "title", "summary", "content", "source_refs", "read_claim"],
                 "kind": "validate",
                 "mutates": MUTATES_NONE,
                 "required_permission": "artifact.create",

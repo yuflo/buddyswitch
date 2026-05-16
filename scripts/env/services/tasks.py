@@ -41,6 +41,31 @@ def _allowed_set(action: str) -> set[str]:
 
 
 def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+    alternative_capabilities = [
+        tool_responses.alternative_capability(
+            tool="context",
+            action="summarize",
+            condition="Use when you need candidate ids before retrying a task payload.",
+        ),
+        tool_responses.alternative_capability(
+            tool="context",
+            action="get",
+            condition="Use when you need full tool catalog and id source details.",
+        ),
+    ]
+    correctable_fields: list[str] | None = None
+    if "title" in message:
+        correctable_fields = ["title"]
+    elif "status" in message:
+        correctable_fields = ["status"]
+    elif "track_id" in message:
+        correctable_fields = ["track_id"]
+    elif "task_id" in message:
+        correctable_fields = ["task_id"]
+    elif "unsupported payload fields:" in message:
+        suffix = message.split("unsupported payload fields:", 1)[1].strip()
+        if suffix:
+            correctable_fields = [row.strip() for row in suffix.split(",") if row.strip()]
     return tool_responses.rejection(
         tool="task",
         action=action,
@@ -58,6 +83,8 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
             "Use task.list to inspect current task ids.",
             "Retry with only documented task payload fields.",
         ],
+        correctable_fields=correctable_fields,
+        alternative_capabilities=alternative_capabilities,
     )
 
 
@@ -78,6 +105,20 @@ def _reject_scope(*, action: str, active_buddy: str, task_id: str, message: str)
         allowed_next_actions=[
             "Use task.list to find active-buddy task ids.",
             "Use track.join to create or attach your own task to a track.",
+        ],
+        correctable_fields=["task_id"],
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="task",
+                action="list",
+                condition="Use when you need owned task ids before retrying with task_id.",
+            ),
+            tool_responses.alternative_capability(
+                tool="track",
+                action="join",
+                condition="Use when you need to create or attach an owned task relation first.",
+                mutates_product_state=True,
+            ),
         ],
         extra={"task_id": task_id},
     )
@@ -168,10 +209,11 @@ def create_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCo
         tool="task",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Created task '{task['id']}' for buddy '{active_buddy}'.",
+        effect_summary=f"Created one active-buddy durable task '{task['id']}' with optional track relation support.",
         state_changed=True,
         durability="durable",
         created_ids=[task["id"]],
+        state_changes=[{"object_type": "task", "change": "created", "task_id": task["id"]}],
         allowed_next_actions=[
             "Use artifact.create_revision with this task_id to write deliverables.",
             "Use task.update to refine task status or summary.",
@@ -206,7 +248,7 @@ def list_tasks_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCon
         tool="task",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Listed {len(payload_rows)} active-buddy task(s).",
+        effect_summary=f"Returned {len(payload_rows)} active-buddy task summary row(s) with task ids and artifact ids only.",
         state_changed=False,
         durability="none",
         read_scope="active-buddy task summaries",
@@ -245,10 +287,10 @@ def get_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceConte
         tool="task",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Read task '{task_id}' for active buddy.",
+        effect_summary=f"Read one active-buddy task record '{task_id}' with metadata and artifact ids (no full artifact bodies).",
         state_changed=False,
         durability="none",
-        read_scope="active-buddy task full record",
+        read_scope="one active-buddy task record with metadata and artifact ids",
         allowed_next_actions=[
             "Use artifact.create_revision with this task_id.",
             "Use task.update to change title/summary/status.",
@@ -313,10 +355,11 @@ def update_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCo
         tool="task",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Updated task '{task_id}'.",
+        effect_summary=f"Updated one active-buddy task '{task_id}' and persisted patched task fields.",
         state_changed=True,
         durability="durable",
         updated_ids=[task_id],
+        state_changes=[{"object_type": "task", "change": "updated_fields", "task_id": task_id}],
         allowed_next_actions=[
             "Use task.get to verify updated fields.",
             "Use artifact.create_revision to write task deliverables.",
@@ -356,6 +399,7 @@ def archive_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceC
             effect_summary=f"Task '{task_id}' is already archived.",
             state_changed=False,
             durability="none",
+            state_changes=[{"object_type": "task", "change": "already_archived", "task_id": task_id}],
             allowed_next_actions=["Use task.list to inspect remaining active tasks."],
             extra={"task_id": task_id, "task": _normalize_task_summary(task)},
         )
@@ -365,10 +409,11 @@ def archive_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceC
         tool="task",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Archived task '{task_id}'.",
+        effect_summary=f"Archived one active-buddy task '{task_id}' in durable product state.",
         state_changed=True,
         durability="durable",
         updated_ids=[task_id],
+        state_changes=[{"object_type": "task", "change": "archived", "task_id": task_id}],
         allowed_next_actions=["Use task.list to inspect remaining active tasks."],
         extra={"task_id": task_id, "task": _normalize_task_summary(updated)},
     )

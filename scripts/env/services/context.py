@@ -27,6 +27,16 @@ _LIST_SOURCES_FIELDS: set[str] = set()
 
 
 def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+    correctable_fields: list[str] | None = None
+    if "unsupported payload fields:" in message:
+        suffix = message.split("unsupported payload fields:", 1)[1].strip()
+        if suffix:
+            correctable_fields = [row.strip() for row in suffix.split(",") if row.strip()]
+    else:
+        for field in ("track_id", "task_id", "limit"):
+            if field in message:
+                correctable_fields = [field]
+                break
     return tool_responses.rejection(
         tool="context",
         action=action,
@@ -43,6 +53,14 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         allowed_next_actions=[
             "Use context.list_sources to inspect valid sections.",
             "Retry with supported context filter fields only.",
+        ],
+        correctable_fields=correctable_fields,
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="context",
+                action="list_sources",
+                condition="Use when you need source descriptor hints for valid context sections.",
+            )
         ],
     )
 
@@ -210,10 +228,10 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
         tool="context",
         action=action,
         active_buddy=active_buddy,
-        effect_summary="Returned runless context discovery sections without mutating state.",
+        effect_summary="Returned full runtime context sections plus full tool catalog and full operation semantics.",
         state_changed=False,
         durability="none",
-        read_scope="read-only product-state orientation",
+        read_scope="read-only runtime context sections and full catalog metadata",
         allowed_next_actions=[
             "Use task/track/artifact/handoff/buddybox tools with explicit ids.",
             "Use context.summarize for compact orientation.",
@@ -246,10 +264,10 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         tool="context",
         action=action,
         active_buddy=active_buddy,
-        effect_summary="Returned compact runless context summary with candidate ids.",
+        effect_summary="Returned compact context orientation with candidate ids, buddybox descriptor, and first-pass tool affordances.",
         state_changed=False,
         durability="none",
-        read_scope="read-only compact orientation",
+        read_scope="compact read-only orientation; not full catalog",
         allowed_next_actions=[
             "Use explicit ids from candidate tracks/tasks/artifacts in subsequent tool calls.",
             "Use context.get for full sections when needed.",
@@ -270,7 +288,7 @@ def list_sources(*, args: dict[str, Any], context: ContextServiceContext) -> dic
         tool="context",
         action=action,
         active_buddy=active_buddy,
-        effect_summary="Returned runless context source descriptors.",
+        effect_summary="Returned context source descriptors only.",
         state_changed=False,
         durability="none",
         read_scope="source descriptor metadata only",

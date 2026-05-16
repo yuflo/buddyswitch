@@ -244,7 +244,10 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("binding", env_tools)
         self.assertEqual(tool_contracts.semantic_contract_errors(), [])
         compact_affordances = tool_contracts.compact_tool_affordances()
-        self.assertEqual(set(compact_affordances), {"buddybox", "artifact", "handoff", "project_source"})
+        self.assertEqual(
+            set(compact_affordances),
+            {"task", "track", "artifact", "handoff", "buddybox", "context", "evidence", "search", "project_source"},
+        )
         runtime_env_tools = turn_runtime._build_env_tools_desc()
         self.assertIn("buddybox", runtime_env_tools)
         self.assertIn("artifact", runtime_env_tools)
@@ -253,8 +256,20 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertEqual(row.get("broker_method"), "env.tool")
                 self.assertIn("python3 scripts/env/client.py", str(row.get("command", "")))
         affordances = tool_contracts.compact_tool_affordances()
-        self.assertEqual(set(affordances), {"buddybox", "artifact", "handoff", "project_source"})
+        self.assertEqual(
+            set(affordances),
+            {"task", "track", "artifact", "handoff", "buddybox", "context", "evidence", "search", "project_source"},
+        )
         self.assertIn("action_semantics", env_tools["buddybox"])
+        for tool, row in affordances.items():
+            with self.subTest(compact=tool):
+                self.assertIn("capability", row)
+                self.assertIn("choose_when", row)
+                self.assertIn("id_inputs_from", row)
+                self.assertIn("returns", row)
+                self.assertIn("state_effect", row)
+                self.assertIn("durability", row)
+                self.assertIn("supports", row)
 
     def test_active_runtime_feedback_points_to_current_tool_discovery_surfaces(self) -> None:
         retired_hits = self._scan(r"prepare\.runtime_context\.env_tools")
@@ -439,6 +454,34 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("prepare.runtime_context", lowered)
                 self.assertNotIn("run-tool", lowered)
                 self.assertIn("env.tool", lowered)
+                self.assertNotIn("payload_fields", lowered)
+                self.assertNotIn("action_semantics", lowered)
+                self.assertNotIn("after writing a prd", lowered)
+                self.assertNotIn("market research should", lowered)
+                self.assertNotIn("if the user says", lowered)
+                self.assertTrue(
+                    "context.get.tool_catalog" in lowered
+                    or "context.summarize.tool_affordances" in lowered
+                    or "scripts/turn_runtime.py status" in lowered
+                )
+
+    def test_shared_tool_skills_teach_env_tool_not_prepare_persist(self) -> None:
+        shared = [
+            ROOT / "buddyswitch" / "skills" / "shared" / "task-tool" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "shared" / "track-tool" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "shared" / "artifact-tool" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "shared" / "handoff-tool" / "SKILL.md",
+            ROOT / "buddyswitch" / "skills" / "shared" / "buddybox-tool" / "SKILL.md",
+        ]
+        for path in shared:
+            lowered = path.read_text(encoding="utf-8").lower()
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertIn("env.tool", lowered)
+                self.assertNotIn("prepare", lowered)
+                self.assertNotIn("payload_fields", lowered)
+                self.assertNotIn("action_semantics", lowered)
+                self.assertNotIn("after writing a prd", lowered)
+                self.assertNotIn("if the user says", lowered)
 
     def test_role_contracts_keep_buddybox_guidance_short_and_role_specific(self) -> None:
         expectations = {
@@ -488,18 +531,18 @@ class RepoConsistencyTests(unittest.TestCase):
         guard = "Do not claim artifact content was read unless `artifact.get` returned the full body for that artifact id."
         for path in buddy_assets:
             text = path.read_text(encoding="utf-8")
+            lowered = text.lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("python3 scripts/env/client.py context summarize", text)
-                self.assertIn("If you see a `track_id`", text)
-                self.assertIn("If you see a `task_id`", text)
-                self.assertIn("If you see an `artifact_id`", text)
+                for tool in ("task", "track", "artifact", "handoff", "buddybox", "context", "evidence", "search"):
+                    self.assertIn(f"`{tool}`", text)
                 self.assertIn(guard, text)
                 self.assertTrue(
                     "python3 scripts/env/client.py context get" in text
                     or "python3 scripts/turn_runtime.py status" in text,
                     msg=text,
                 )
-                self.assertIn("do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly", text.lower())
+                self.assertIn("do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly", lowered)
                 self.assertNotIn("scripts/turn_runtime.py prepare", text)
                 self.assertNotIn("scripts/turn_runtime.py persist", text)
                 for forbidden in (
@@ -510,6 +553,9 @@ class RepoConsistencyTests(unittest.TestCase):
                     "quickly build means",
                     "route prototype to buddybox",
                     "always create artifact",
+                    "after writing a prd",
+                    "market research should",
+                    "if the user says",
                 ):
                     self.assertNotIn(forbidden, text.lower())
 
@@ -599,6 +645,8 @@ class RepoConsistencyTests(unittest.TestCase):
                 "!docs/memo/**",
                 "-g",
                 "!docs/spec/**",
+                "-g",
+                "!scripts/env/tools/responses.py",
             ],
             cwd=ROOT,
             text=True,

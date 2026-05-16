@@ -115,11 +115,23 @@ def _runtime_feedback_error(
                 tool="context",
                 action="summarize",
                 option_id="summarize_context_before_retry",
-                reason="Summarize current runless context before retrying the action.",
+                reason="Use when you need compact runtime context before retrying the action.",
+            )
+        ]
+    correctable_fields = details.get("correctable_fields")
+    if not isinstance(correctable_fields, list):
+        correctable_fields = ["args"]
+    alternative_capabilities = details.get("alternative_capabilities")
+    if not isinstance(alternative_capabilities, list):
+        alternative_capabilities = [
+            tool_responses.alternative_capability(
+                tool="context",
+                action="get",
+                condition="Use when you need full runtime catalog and semantics before retrying.",
             )
         ]
     extra = {key: value for key, value in details.items() if key not in {
-        "permission_boundary", "human_summary", "why_blocked", "impact", "state_changed", "retryable", "retry_guidance", "allowed_next_actions", "allowed_next_action_options"
+        "permission_boundary", "human_summary", "why_blocked", "impact", "state_changed", "retryable", "retry_guidance", "allowed_next_actions", "allowed_next_action_options", "correctable_fields", "alternative_capabilities"
     }}
     return tool_responses.rejection(
         tool=tool,
@@ -136,6 +148,8 @@ def _runtime_feedback_error(
         retry_guidance=retry_guidance,
         allowed_next_actions=list(allowed_next_actions),
         allowed_next_action_options=options,
+        correctable_fields=correctable_fields,
+        alternative_capabilities=alternative_capabilities,
         extra=extra if extra else None,
     )
 

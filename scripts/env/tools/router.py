@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from env.tools import contracts as tool_contracts
+from env.tools import responses as tool_responses
 from env.tools.dispatch import dispatch_registered_env_tool
 
 _TOOL_ACTIONS = {
@@ -45,6 +46,8 @@ def _reject(
     state_changed: bool = False,
     tool: str | None = None,
     action: str | None = None,
+    correctable_fields: list[str] | None = None,
+    alternative_capabilities: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "ok": False,
@@ -66,6 +69,10 @@ def _reject(
         payload["tool"] = tool.strip()
     if isinstance(action, str) and action.strip():
         payload["action"] = action.strip()
+    if isinstance(correctable_fields, list):
+        payload["correctable_fields"] = list(correctable_fields)
+    if isinstance(alternative_capabilities, list):
+        payload["alternative_capabilities"] = list(alternative_capabilities)
     return payload
 
 
@@ -95,6 +102,19 @@ def dispatch_env_tool_request(
                 "Send env.tool payload as {tool, action, args}.",
                 f"Use one supported tool: {_supported_tools_text()}.",
             ],
+            correctable_fields=["tool"],
+            alternative_capabilities=[
+                tool_responses.alternative_capability(
+                    tool="context",
+                    action="summarize",
+                    condition="Use when you need compact tool affordances before retrying routing payloads.",
+                ),
+                tool_responses.alternative_capability(
+                    tool="context",
+                    action="get",
+                    condition="Use when you need full tool_catalog and operation_semantics before retrying.",
+                ),
+            ],
         )
     tool = raw_tool.strip().lower()
     if tool not in _TOOL_ACTIONS:
@@ -117,6 +137,19 @@ def dispatch_env_tool_request(
                 "Use context.get for tool_catalog and operation_semantics.",
                 "Run python3 scripts/turn_runtime.py status for the full env tool catalog.",
             ],
+            correctable_fields=["tool"],
+            alternative_capabilities=[
+                tool_responses.alternative_capability(
+                    tool="context",
+                    action="summarize",
+                    condition="Use when you need compact first-pass tool affordances.",
+                ),
+                tool_responses.alternative_capability(
+                    tool="context",
+                    action="get",
+                    condition="Use when you need full tool_catalog and operation_semantics for supported tools.",
+                ),
+            ],
         )
 
     raw_action = payload.get("action")
@@ -137,6 +170,14 @@ def dispatch_env_tool_request(
             allowed_next_actions=[
                 f"Set payload.action to one supported {tool} action.",
                 f"Use one supported action: {_supported_actions_text(tool)}.",
+            ],
+            correctable_fields=["action"],
+            alternative_capabilities=[
+                tool_responses.alternative_capability(
+                    tool="context",
+                    action="get",
+                    condition="Use when you need full action semantics for this tool before retrying.",
+                )
             ],
         )
     action = raw_action.strip().replace("-", "_")
@@ -162,6 +203,19 @@ def dispatch_env_tool_request(
                 f"Use context.get.tool_catalog['{_TOOL_HINTS[tool]}'] for action and payload field hints.",
                 "Run python3 scripts/turn_runtime.py status for the full env tool catalog.",
             ],
+            correctable_fields=["action"],
+            alternative_capabilities=[
+                tool_responses.alternative_capability(
+                    tool="context",
+                    action="get",
+                    condition="Use when you need full action semantics for supported tool actions.",
+                ),
+                tool_responses.alternative_capability(
+                    tool="context",
+                    action="summarize",
+                    condition="Use when you only need compact affordances before selecting an action.",
+                ),
+            ],
         )
 
     args = payload.get("args", {})
@@ -181,6 +235,14 @@ def dispatch_env_tool_request(
             allowed_next_actions=[
                 "Set payload.args to an object and retry.",
                 f"Use context.get.tool_catalog['{_TOOL_HINTS[tool]}'].payload_fields to shape args.",
+            ],
+            correctable_fields=["args"],
+            alternative_capabilities=[
+                tool_responses.alternative_capability(
+                    tool="context",
+                    action="get",
+                    condition="Use when you need payload_fields and action semantics before retrying args.",
+                )
             ],
         )
 

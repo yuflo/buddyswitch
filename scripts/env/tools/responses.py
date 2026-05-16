@@ -47,6 +47,15 @@ _REJECTION_CANONICAL_FIELDS = {
     "mutates_product_state",
 }
 
+_FORBIDDEN_AFFORDANCE_FRAGMENTS = (
+    "must create artifact",
+    "always create artifact",
+    "only next action",
+    "after writing a prd",
+    "market research should",
+    "if the user says",
+)
+
 
 def _require_non_empty_text(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
@@ -71,6 +80,26 @@ def _merge_extra(payload: dict[str, Any], extra: dict[str, Any], canonical_field
     if overlap:
         raise ValueError(f"extra cannot override canonical fields: {', '.join(overlap)}")
     payload.update(extra)
+
+
+def _require_conditional_affordance_text(value: Any, field: str) -> str:
+    text = _require_non_empty_text(value, field)
+    lowered = text.lower()
+    for fragment in _FORBIDDEN_AFFORDANCE_FRAGMENTS:
+        if fragment in lowered:
+            raise ValueError(f"{field} must stay conditional and must not prescribe workflow steps")
+    return text
+
+
+def _validate_next_action_options(value: Any) -> list[dict[str, Any]]:
+    rows = _require_list(value, "allowed_next_action_options")
+    normalized: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ValueError(f"allowed_next_action_options[{index}] must be an object")
+        _require_conditional_affordance_text(row.get("reason"), f"allowed_next_action_options[{index}].reason")
+        normalized.append(dict(row))
+    return normalized
 
 
 def next_action_option(
@@ -105,7 +134,7 @@ def next_action_option(
         "action": action,
         "mutates": mutates,
         "preconditions": normalized_preconditions,
-        "reason": reason,
+        "reason": _require_conditional_affordance_text(reason, "reason"),
         "source_refs": normalized_source_refs,
     }
 
@@ -141,11 +170,28 @@ def tool_affordance(
         "tool": _require_non_empty_text(tool, "tool"),
         "action": _require_non_empty_text(action, "action"),
         "effect": _require_non_empty_text(effect, "effect"),
-        "condition": _require_non_empty_text(condition, "condition"),
+        "condition": _require_conditional_affordance_text(condition, "condition"),
         "mutates_product_state": bool(mutates_product_state),
     }
     if isinstance(risk, str) and risk.strip():
         row["risk"] = risk.strip()
+    return row
+
+
+def alternative_capability(
+    *,
+    tool: str,
+    action: str,
+    condition: str,
+    mutates_product_state: bool | None = None,
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "tool": _require_non_empty_text(tool, "tool"),
+        "action": _require_non_empty_text(action, "action"),
+        "condition": _require_conditional_affordance_text(condition, "condition"),
+    }
+    if isinstance(mutates_product_state, bool):
+        row["mutates_product_state"] = mutates_product_state
     return row
 
 
@@ -179,7 +225,7 @@ def success(
         "allowed_next_actions": list(allowed_next_actions or []),
     }
     if isinstance(allowed_next_action_options, list):
-        payload["allowed_next_action_options"] = allowed_next_action_options
+        payload["allowed_next_action_options"] = _validate_next_action_options(allowed_next_action_options)
     if state_changes is not None:
         payload["state_changes"] = _require_list(state_changes, "state_changes")
     if created_ids is not None:
@@ -251,7 +297,7 @@ def rejection(
     if mutates_product_state is not None:
         payload["mutates_product_state"] = _require_bool(mutates_product_state, "mutates_product_state")
     if isinstance(allowed_next_action_options, list):
-        payload["allowed_next_action_options"] = allowed_next_action_options
+        payload["allowed_next_action_options"] = _validate_next_action_options(allowed_next_action_options)
     if isinstance(extra, dict):
         _merge_extra(payload, extra, _REJECTION_CANONICAL_FIELDS)
     return payload

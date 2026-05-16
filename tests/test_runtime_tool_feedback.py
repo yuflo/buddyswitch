@@ -53,6 +53,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("retryable", payload)
         self.assertIn("retry_guidance", payload)
         self.assertIn("allowed_next_actions", payload)
+        self.assertFalse(payload.get("state_changed"), msg=payload)
 
     def test_buddybox_traversal_rejection_has_structured_feedback(self) -> None:
         payload = self._dispatch(
@@ -113,6 +114,80 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self._assert_rejection_contract(payload)
         self.assertEqual(payload["permission_boundary"], "request-payload")
         self.assertIn("backend", payload["why_blocked"].lower())
+
+    def test_rejections_expose_impact_retry_and_recovery_fields_across_boundaries(self) -> None:
+        payload_cases = [
+            self._dispatch(
+                buddy="pm",
+                tool="task",
+                action="create",
+                args={"summary": "missing title"},
+            ),
+            self._dispatch(
+                buddy="design",
+                tool="track",
+                action="create",
+                args={"track_id": "x", "title": "x"},
+            ),
+            self._dispatch(
+                buddy="pm",
+                tool="context",
+                action="get",
+                args={"unknown_filter": 1},
+            ),
+            self._dispatch(
+                buddy="pm",
+                tool="evidence",
+                action="issue_browser",
+                args={"target_type": "run", "target_id": "old"},
+            ),
+        ]
+        for payload in payload_cases:
+            with self.subTest(action=payload.get("action")):
+                self._assert_rejection_contract(payload)
+                self.assertTrue(
+                    isinstance(payload.get("correctable_fields"), list)
+                    or isinstance(payload.get("alternative_capabilities"), list),
+                    msg=payload,
+                )
+
+    def test_track_relation_scope_rejections_expose_recovery_contract(self) -> None:
+        env_store.create_track(
+            "track-feedback-foreign",
+            "Foreign scope track",
+            current_buddy="pm",
+            next_buddy="dev",
+            summary="scope",
+        )
+        env_store.create_task(
+            "task-pm-feedback-foreign",
+            "PM foreign task",
+            buddy="pm",
+            track_id=None,
+            summary="scope",
+        )
+        for action in ("join", "attach_task", "detach_task"):
+            payload = self._dispatch(
+                buddy="dev",
+                tool="track",
+                action=action,
+                args={"track_id": "track-feedback-foreign", "task_id": "task-pm-feedback-foreign"},
+            )
+            with self.subTest(action=action):
+                self._assert_rejection_contract(payload)
+                self.assertEqual(payload.get("permission_boundary"), "task.buddy_scope", msg=payload)
+                self.assertIn("task_id", payload.get("correctable_fields", []), msg=payload)
+                self.assertIn("ownership", str(payload.get("retry_guidance", "")).lower(), msg=payload)
+                alternatives = payload.get("alternative_capabilities")
+                self.assertIsInstance(alternatives, list, msg=payload)
+                assert isinstance(alternatives, list)
+                alt_pairs = {
+                    (row.get("tool"), row.get("action"))
+                    for row in alternatives
+                    if isinstance(row, dict)
+                }
+                self.assertIn(("task", "list"), alt_pairs)
+                self.assertIn(("track", "get"), alt_pairs)
 
 
 if __name__ == "__main__":

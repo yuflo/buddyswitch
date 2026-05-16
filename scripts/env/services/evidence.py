@@ -25,6 +25,15 @@ _APPROVE_FIELDS = {"target_type", "target_id", "reason"}
 
 
 def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+    correctable_fields: list[str] | None = None
+    for field in ("target_type", "target_id", "mode", "reason"):
+        if field in message:
+            correctable_fields = [field]
+            break
+    if "unsupported payload fields:" in message:
+        suffix = message.split("unsupported payload fields:", 1)[1].strip()
+        if suffix:
+            correctable_fields = [row.strip() for row in suffix.split(",") if row.strip()]
     return tool_responses.rejection(
         tool="evidence",
         action=action,
@@ -41,6 +50,19 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         allowed_next_actions=[
             "Use context.summarize to inspect target ids.",
             "Retry with explicit target_type and target_id.",
+        ],
+        correctable_fields=correctable_fields,
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="artifact",
+                action="list",
+                condition="Use when you need artifact target ids before retrying evidence actions.",
+            ),
+            tool_responses.alternative_capability(
+                tool="artifact",
+                action="get",
+                condition="Use when you need to confirm one artifact target before issuing token metadata.",
+            ),
         ],
     )
 
@@ -62,6 +84,14 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
         allowed_next_actions=[
             "Use artifact.list to inspect readable targets.",
             "Retry with a target owned by active buddy.",
+        ],
+        correctable_fields=["target_type", "target_id"],
+        alternative_capabilities=[
+            tool_responses.alternative_capability(
+                tool="artifact",
+                action="list",
+                condition="Use when you need readable/owned artifact target ids.",
+            )
         ],
     )
 
@@ -151,15 +181,23 @@ def issue_browser_for_active_instance(*, args: dict[str, Any], context: Evidence
         tool="evidence",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Issued browser evidence token for {target_type.strip()} '{target_id.strip()}'.",
+        effect_summary=f"Issued transient target-scoped evidence token metadata for {target_type.strip()} '{target_id.strip()}'.",
         state_changed=True,
         durability="transient token",
         created_ids=[token["token_id"]],
+        state_changes=[
+            {
+                "object_type": "evidence_token",
+                "change": "issued",
+                "token_id": token["token_id"],
+                "target_id": target_id.strip(),
+            }
+        ],
         allowed_next_actions=[
             "Attach evidence token metadata via artifact source_refs when persisting outputs.",
             "Issue another token for a different target when needed.",
         ],
-        extra={"tool_evidence": token},
+        extra={"tool_evidence": token, "mutates_product_state": False},
     )
 
 
@@ -202,13 +240,21 @@ def approve_downgrade_for_active_instance(*, args: dict[str, Any], context: Evid
         tool="evidence",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Recorded downgrade approval for {target_type.strip()} '{target_id.strip()}'.",
+        effect_summary=f"Issued transient downgrade-approval token metadata for {target_type.strip()} '{target_id.strip()}'.",
         state_changed=True,
         durability="transient token",
         created_ids=[token["token_id"]],
+        state_changes=[
+            {
+                "object_type": "evidence_token",
+                "change": "issued",
+                "token_id": token["token_id"],
+                "target_id": target_id.strip(),
+            }
+        ],
         allowed_next_actions=[
             "Persist downgrade reason in artifact source_refs when writing outputs.",
             "Use evidence.issue_browser when browser evidence can be produced later.",
         ],
-        extra={"tool_evidence": token},
+        extra={"tool_evidence": token, "mutates_product_state": False},
     )

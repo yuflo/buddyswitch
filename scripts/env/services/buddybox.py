@@ -375,10 +375,12 @@ def _available_affordances(action: str, *, include_artifact: bool) -> list[dict[
 
 def _alternative_capabilities() -> list[dict[str, Any]]:
     return [
-        {
-            "tool": "artifact",
-            "condition": "use when content must be product-readable",
-        }
+        tool_responses.alternative_capability(
+            tool="artifact",
+            action="create_revision",
+            condition="Use when private content should become product-readable.",
+            mutates_product_state=True,
+        )
     ]
 
 
@@ -658,7 +660,7 @@ def read_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
         tool="buddybox",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Read one private file '{logical_name}'.",
+        effect_summary=f"Read one private file '{logical_name}' and returned file body as content or content_base64.",
         state_changed=False,
         durability="none",
         read_scope="one active-buddy private file content",
@@ -771,6 +773,13 @@ def write_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSe
         durability="active_instance_local",
         created_ids=[logical_name] if not existed else None,
         updated_ids=[logical_name] if existed else None,
+        state_changes=[
+            {
+                "object_type": "private_file",
+                "change": "overwritten" if existed else "created",
+                "logical_name": logical_name,
+            }
+        ],
         allowed_next_actions=[],
         allowed_next_action_options=_write_options(),
         extra=payload,
@@ -829,6 +838,13 @@ def delete_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxS
         state_changed=deleted,
         durability="active_instance_local" if deleted else "none",
         updated_ids=[logical_name] if deleted else None,
+        state_changes=[
+            {
+                "object_type": "private_file",
+                "change": "deleted" if deleted else "already_absent",
+                "logical_name": logical_name,
+            }
+        ],
         allowed_next_actions=[],
         allowed_next_action_options=_delete_options(),
         extra=payload,
