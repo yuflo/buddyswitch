@@ -47,7 +47,7 @@ description: Use when the task is running smoke checks, regression verification,
 
 - Runtime execution uses env.tool through python3 scripts/env/client.py ... .
 - Product-readable durable state is written explicitly as task, artifact, or handoff objects.
-- Use buddyswitch/local/buddybox/<active-buddy>/** only for active buddy private local working files.
+- Use buddybox env tools with `logical_name` for active-buddy-private working files.
 - Return after required explicit durable writes are complete.
 
 ## BuddySwitch Commit Output
@@ -73,7 +73,7 @@ Use optional `handoff` when another manifest buddy should continue.
 - Do not perform broad refactors unless explicitly requested.
 - Do not make product decisions.
 - Do not provide unstructured "looks good" output.
-- Do not write runtime noise into `projects/app/` source folders; use the active buddy private local workspace under `buddyswitch/local/buddybox/<active-buddy>/`.
+- Do not write runtime noise into `projects/app/` source folders; write temporary private files through buddybox env tools using `logical_name`.
 
 ## Examples
 - `Run smoke checks for the onboarding CTA regression`

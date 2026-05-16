@@ -245,7 +245,7 @@ class HandoffEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "source_task_id": "task-design-handoff",
                 "target_buddy": "dev",
                 "artifact_ids": ["art-task-design-handoff-r1"],
-                "source_refs": [{"type": "buddybox", "path": "design/handoff/handoff.txt"}],
+                "source_refs": [{"type": "buddybox", "logical_name": "handoff/handoff.txt"}],
                 "reason": "handoff to dev",
                 "context": "implement UI",
             },

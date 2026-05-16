@@ -59,10 +59,10 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             tool="buddybox",
             action="write",
-            args={"path": "../escape.txt", "content": "x"},
+            args={"logical_name": "../escape.txt", "content": "x"},
         )
         self._assert_rejection_contract(payload)
-        self.assertIn(payload["permission_boundary"], {"buddybox.path", "buddybox.owner_scope"})
+        self.assertEqual(payload["permission_boundary"], "logical-name")
         self.assertFalse(payload["state_changed"])
 
     def test_artifact_owner_scope_rejection_has_structured_feedback(self) -> None:

@@ -86,7 +86,8 @@ Runtime state is projected under:
 - `buddyswitch/objects/tasks/*.json`
 - `buddyswitch/objects/artifacts/*.json`
 - `buddyswitch/objects/handoffs/*.json`
-- `buddyswitch/local/buddybox/<active-buddy>/**`
+
+Buddybox private files are active-buddy private and instance-local; address them only through buddybox env tools with `logical_name`.
 
 Use env tools for product-mode runtime state. Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
 Runtime contracts are owned by code, JSON contracts, role contracts, and tests; do not create prose mirrors for runtime behavior.

@@ -21,4 +21,4 @@ Shape product interaction and UX direction into durable design outputs.
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - `buddyswitch/objects/handoffs/<handoff-id>.json`
-- `buddyswitch/local/buddybox/design/**` (active buddy private local workspace)
+- Active-buddy-private files via `buddybox.*` logical names (instance-local, not product-readable).

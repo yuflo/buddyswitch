@@ -71,10 +71,9 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         sources = payload["sources"]
         self.assertNotIn("memories", sources)
         self.assertIn("buddybox", sources)
-        self.assertEqual(
-            (sources["buddybox"] or {}).get("source_of_truth"),
-            "buddyswitch/local/buddybox/<active_buddy>/**",
-        )
+        buddybox = sources["buddybox"] or {}
+        self.assertEqual(buddybox.get("capability"), "private_file_workspace")
+        self.assertNotIn("source_of_truth", buddybox)
         self.assertNotIn("runs", sources)
 
 

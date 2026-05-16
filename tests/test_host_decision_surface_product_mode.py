@@ -86,16 +86,29 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         assert isinstance(affordances, dict)
         buddybox = affordances.get("buddybox")
         artifact = affordances.get("artifact")
+        handoff = affordances.get("handoff")
+        project_source = affordances.get("project_source")
         self.assertIsInstance(buddybox, dict, msg=summary)
         self.assertIsInstance(artifact, dict, msg=summary)
+        self.assertIsInstance(handoff, dict, msg=summary)
+        self.assertIsInstance(project_source, dict, msg=summary)
         assert isinstance(buddybox, dict)
         assert isinstance(artifact, dict)
-        self.assertIn("lightweight prototypes", str(buddybox.get("use_for", "")).lower())
-        self.assertIn("private local files", str(buddybox.get("use_for", "")).lower())
-        self.assertIn("product objects", str(buddybox.get("not_for", "")).lower())
-        self.assertIn("cross-buddy readable deliverables", str(buddybox.get("not_for", "")).lower())
-        self.assertIn("artifact.create_revision", str(buddybox.get("promote_with", "")).lower())
-        self.assertIn("product-readable deliverables", str(artifact.get("use_for", "")).lower())
+        assert isinstance(handoff, dict)
+        assert isinstance(project_source, dict)
+        self.assertEqual(buddybox.get("capability"), "private_file_workspace")
+        self.assertFalse(buddybox.get("product_readable"))
+        self.assertFalse(buddybox.get("cross_buddy_readable"))
+        self.assertFalse(buddybox.get("mutates_product_state"))
+        self.assertEqual(artifact.get("capability"), "product_readable_deliverable")
+        self.assertTrue(artifact.get("cross_buddy_readable"))
+        self.assertTrue(artifact.get("mutates_product_state"))
+        self.assertEqual(handoff.get("capability"), "cross_buddy_collaboration_state")
+        self.assertEqual(handoff.get("cross_buddy_readable"), "targeted")
+        self.assertTrue(handoff.get("mutates_product_state"))
+        self.assertEqual(project_source.get("capability"), "shared_project_source_workspace")
+        self.assertEqual(project_source.get("owner_scope"), "profile_project_access")
+        self.assertFalse(project_source.get("mutates_product_state"))
 
         context_get = self._dispatch(buddy="pm", tool="context", action="get", args={})
         self.assertTrue(context_get["ok"], msg=context_get)
@@ -116,14 +129,15 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             tool="buddybox",
             action="write",
             args={
-                "path": "pm/prototypes/simple-page.html",
+                "logical_name": "prototypes/simple-page.html",
                 "content": "<!doctype html><html><body><h1>Prototype</h1></body></html>",
                 "content_type": "text/html",
             },
         )
         self.assertTrue(written["ok"], msg=written)
         self.assertTrue(self._runtime_path("buddyswitch/local/buddybox/pm/prototypes/simple-page.html").exists())
-        self.assertIn("no artifact/handoff/task/track/context/evidence state changed", str(written.get("effect_summary", "")).lower())
+        self.assertFalse(written.get("mutates_product_state"), msg=written)
+        self.assertEqual(written.get("mutated_product_objects"), [], msg=written)
 
         options = written.get("allowed_next_action_options")
         self.assertIsInstance(options, list, msg=written)

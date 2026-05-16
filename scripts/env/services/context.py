@@ -62,7 +62,7 @@ def _artifact_summary(artifact: dict[str, Any], active_buddy: str) -> dict[str, 
     return row
 
 
-def _current_context_sections(*, active_buddy: str, args: dict[str, Any]) -> dict[str, Any]:
+def _current_context_sections(*, active_buddy: str, args: dict[str, Any], instance_payload: dict[str, Any]) -> dict[str, Any]:
     tracks = env_store.list_tracks()
     tasks = env_store.list_tasks()
     artifacts = env_store.list_artifacts()
@@ -96,7 +96,7 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any]) -> dic
         if row.get("source_buddy") == active_buddy or row.get("target_buddy") == active_buddy or active_buddy == "pm"
     ][:limit_value]
 
-    buddybox_desc = buddybox_service.build_buddybox_desc(active_buddy)
+    buddybox_desc = buddybox_service.build_buddybox_desc(active_buddy, instance_payload=instance_payload)
 
     candidate_tracks = []
     for track in visible_tracks:
@@ -173,9 +173,23 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "buddyswitch/objects/handoffs/*.json",
         },
         "buddybox": {
-            "description": "Active buddy private local workspace description and tool-backed data plane.",
-            "scope": "active-buddy private local workspace state",
-            "source_of_truth": "buddyswitch/local/buddybox/<active_buddy>/**",
+            "description": "Active buddy private file capability metadata and tool-backed private data plane.",
+            "scope": "active-buddy private file capability",
+            "capability": "private_file_workspace",
+            "owner_scope": "active_buddy",
+            "lifetime_scope": "active_instance_workspace",
+            "visibility": "active_buddy_private",
+            "product_readable": False,
+            "cross_buddy_readable": False,
+            "mutates_product_state": False,
+            "supports": [
+                "describe_capability",
+                "list_private_file_summaries",
+                "read_private_file",
+                "write_private_text",
+                "write_private_binary",
+                "delete_private_file",
+            ],
         },
     }
 
@@ -187,7 +201,11 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
     if payload_error is not None:
         return payload_error
 
-    sections = _current_context_sections(active_buddy=active_buddy, args=args)
+    sections = _current_context_sections(
+        active_buddy=active_buddy,
+        args=args,
+        instance_payload=context["instance_payload"],
+    )
     return tool_responses.success(
         tool="context",
         action=action,
@@ -211,7 +229,11 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
     if payload_error is not None:
         return payload_error
 
-    sections = _current_context_sections(active_buddy=active_buddy, args=args)
+    sections = _current_context_sections(
+        active_buddy=active_buddy,
+        args=args,
+        instance_payload=context["instance_payload"],
+    )
     summary = {
         "current_context_summary": sections["current_context_summary"],
         "candidate_tracks": sections["candidate_tracks"],

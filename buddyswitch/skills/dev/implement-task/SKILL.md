@@ -47,7 +47,7 @@ description: Use when the task is implementing scoped product changes, bug fixes
 
 - Runtime execution uses env.tool through python3 scripts/env/client.py ... .
 - Product-readable durable state is written explicitly as task, artifact, or handoff objects.
-- Use buddyswitch/local/buddybox/<active-buddy>/** only for active buddy private local working files.
+- Use buddybox env tools with `logical_name` for active-buddy-private working files.
 - Return after required explicit durable writes are complete.
 
 ## BuddySwitch Commit Output
@@ -73,7 +73,7 @@ Use optional `handoff` when another manifest buddy should continue.
 - Do not change product scope silently.
 - Do not make architecture direction changes without explicit note.
 - Do not skip verification reporting.
-- Do not write runtime noise into `projects/app/` source folders; use the active buddy private local workspace under `buddyswitch/local/buddybox/<active-buddy>/`.
+- Do not write runtime noise into `projects/app/` source folders; write temporary private files through buddybox env tools using `logical_name`.
 
 ## Examples
 - `Implement the approved P0 creator profile flow in projects/app`

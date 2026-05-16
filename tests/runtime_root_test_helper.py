@@ -52,6 +52,18 @@ class RuntimeWorkspaceSandbox:
         objects_root = self.root / "buddyswitch" / "objects"
         content_root = self.root / "buddyswitch" / "content"
         local_root = self.root / "buddyswitch" / "local"
+        workspace_root = self.root
+
+        def _runtime_workspace_root(instance_payload=None):  # type: ignore[no-untyped-def]
+            if isinstance(instance_payload, dict):
+                candidate = instance_payload.get("workspace_dir")
+                if isinstance(candidate, str) and candidate.strip():
+                    return Path(candidate.strip()).expanduser().resolve(strict=False)
+            return workspace_root
+
+        def _buddybox_local_dir(instance_payload=None):  # type: ignore[no-untyped-def]
+            return _runtime_workspace_root(instance_payload) / "buddyswitch" / "local" / "buddybox"
+
         patches = [
             patch.object(env_store, "ROOT", self.root),
             patch.object(env_store, "STATE_ROOT", self.root),
@@ -63,6 +75,8 @@ class RuntimeWorkspaceSandbox:
             patch.object(env_store, "CONTENT_ROOT", content_root),
             patch.object(env_store, "LOCAL_ROOT", local_root),
             patch.object(env_store, "BUDDYBOX_LOCAL_DIR", local_root / "buddybox"),
+            patch.object(env_store, "runtime_workspace_root", _runtime_workspace_root),
+            patch.object(env_store, "buddybox_local_dir", _buddybox_local_dir),
             patch.object(turn_runtime, "ROOT", self.root),
             patch.object(workspace_data, "ROOT", self.root),
             patch.object(workspace_data, "rel", _relative_to_runtime_or_repo),

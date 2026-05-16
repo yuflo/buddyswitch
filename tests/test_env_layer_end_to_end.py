@@ -83,9 +83,10 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             tool="buddybox",
             action="write",
-            args={"path": "pm/e2e/notes.md", "content": "# runless\n"},
+            args={"logical_name": "e2e/notes.md", "content": "# runless\n"},
         )
         self.assertTrue(buddybox["ok"], msg=buddybox)
+        self.assertEqual(buddybox.get("logical_name"), "e2e/notes.md")
 
         handoff = self._dispatch(
             buddy="pm",
@@ -113,6 +114,98 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(self._runtime_path(f"{_OLD_BUDDYBOX_ROOT}/pm/e2e/notes.md").exists())
         self.assertFalse(self._runtime_path("runs/raw").exists())
         self.assertFalse(self._runtime_path("buddyswitch/content/runs").exists())
+
+    def test_private_buddybox_logical_file_can_be_promoted_by_artifact_content_only(self) -> None:
+        track = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="create",
+            args={
+                "track_id": "track-e2e-logical-promotion",
+                "title": "Logical Promotion",
+                "summary": "promote private file content",
+                "next_buddy": "dev",
+            },
+        )
+        self.assertTrue(track["ok"], msg=track)
+
+        task = self._dispatch(
+            buddy="pm",
+            tool="task",
+            action="create",
+            args={
+                "task_id": "task-pm-logical-promotion",
+                "title": "Draft private notes",
+                "summary": "pm private draft",
+                "track_id": "track-e2e-logical-promotion",
+            },
+        )
+        self.assertTrue(task["ok"], msg=task)
+
+        written = self._dispatch(
+            buddy="pm",
+            tool="buddybox",
+            action="write",
+            args={"logical_name": "drafts/prd.html", "content": "<h1>PRD draft</h1>\n"},
+        )
+        self.assertTrue(written["ok"], msg=written)
+
+        read_pm = self._dispatch(
+            buddy="pm",
+            tool="buddybox",
+            action="read",
+            args={"logical_name": "drafts/prd.html", "encoding": "utf-8"},
+        )
+        self.assertTrue(read_pm["ok"], msg=read_pm)
+        content = read_pm.get("content")
+        self.assertIsInstance(content, str, msg=read_pm)
+        assert isinstance(content, str)
+
+        created_artifact = self._dispatch(
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-pm-logical-promotion-r1",
+                "task_id": "task-pm-logical-promotion",
+                "kind": "prd",
+                "title": "Promoted PRD Content",
+                "summary": "from private draft",
+                "content": {"body": content},
+                "source_refs": [{"type": "buddybox", "logical_name": "drafts/prd.html"}],
+            },
+        )
+        self.assertTrue(created_artifact["ok"], msg=created_artifact)
+
+        read_as_dev = self._dispatch(
+            buddy="dev",
+            tool="artifact",
+            action="get",
+            args={"artifact_id": "art-pm-logical-promotion-r1"},
+        )
+        self.assertTrue(read_as_dev["ok"], msg=read_as_dev)
+        artifact = read_as_dev.get("artifact")
+        self.assertIsInstance(artifact, dict, msg=read_as_dev)
+        assert isinstance(artifact, dict)
+        self.assertEqual(((artifact.get("content") or {}).get("body")), content)
+
+        denied_dev_prefixed = self._dispatch(
+            buddy="dev",
+            tool="buddybox",
+            action="read",
+            args={"logical_name": "pm/drafts/prd.html"},
+        )
+        self.assertFalse(denied_dev_prefixed["ok"], msg=denied_dev_prefixed)
+        self.assertEqual((denied_dev_prefixed.get("error") or {}).get("code"), "E_BUDDYBOX_LOGICAL_NAME")
+
+        denied_dev_local = self._dispatch(
+            buddy="dev",
+            tool="buddybox",
+            action="read",
+            args={"logical_name": "drafts/prd.html"},
+        )
+        self.assertFalse(denied_dev_local["ok"], msg=denied_dev_local)
+        self.assertEqual((denied_dev_local.get("error") or {}).get("code"), "E_BUDDYBOX_NOT_FOUND")
 
     def test_cross_buddy_identity_scope_follows_service_permissions(self) -> None:
         env_store.create_task(

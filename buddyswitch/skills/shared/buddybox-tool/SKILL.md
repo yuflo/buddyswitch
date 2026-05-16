@@ -1,15 +1,15 @@
 ---
 name: buddybox-tool
-description: Use when the active buddy needs private local workspace files such as drafts, prototypes, exports, logs, reports, or binary outputs, and needs to operate buddybox through BuddySwitch env tools.
+description: Use when the active buddy needs private files such as drafts, prototypes, exports, logs, reports, or binary outputs, and needs to operate buddybox through BuddySwitch env tools.
 ---
 
 # buddybox-tool
 
 ## What Buddybox Is
 
-- Buddybox is the active buddy private local workspace and is operated through `env.tool`.
+- Buddybox is the active buddy private file capability and is operated through `env.tool`.
 - Other buddies cannot list/read/write/delete these files.
-- Buddybox paths are not cross-buddy payload authority.
+- Buddybox logical names are not cross-buddy payload authority.
 - Product-readable or cross-buddy-readable content must be carried by artifact or another explicit product object.
 
 ## Use It When
@@ -27,29 +27,29 @@ description: Use when the active buddy needs private local workspace files such 
 
 ```bash
 python3 scripts/env/client.py buddybox desc
-python3 scripts/env/client.py buddybox list --path pm/prototypes --recursive
-python3 scripts/env/client.py buddybox read --path pm/prototypes/landing.html
+python3 scripts/env/client.py buddybox list --logical-name prototypes --recursive
+python3 scripts/env/client.py buddybox read --logical-name prototypes/landing.html
 python3 scripts/env/client.py buddybox write --payload /tmp/buddybox-write.json
-python3 scripts/env/client.py buddybox delete --path pm/tmp/obsolete.txt
+python3 scripts/env/client.py buddybox delete --logical-name tmp/obsolete.txt
 ```
 
-## Path Rules
+## Logical Name Rules
 
-- Use relative paths under `<active_buddy>/...` (example: `pm/prototypes/landing.html`).
-- Do not use absolute paths, traversal (`../`), foreign buddy prefixes, or root-level direct edits.
+- Use `logical_name` relative to the active buddy private file capability (example: `prototypes/landing.html`).
+- Do not use absolute paths, traversal (`../`), or any buddy id as the first segment.
 
 ## Payload Rules
 
 - Text write payload:
 
 ```json
-{"path":"pm/prototypes/landing.html","content":"<!doctype html>","content_type":"text/html"}
+{"logical_name":"prototypes/landing.html","content":"<!doctype html>","content_type":"text/html"}
 ```
 
 - Binary write payload:
 
 ```json
-{"path":"pm/assets/snapshot.png","content_base64":"<base64>","content_type":"image/png"}
+{"logical_name":"assets/snapshot.png","content_base64":"<base64>","content_type":"image/png"}
 ```
 
 - `content` is UTF-8 text.
@@ -60,9 +60,9 @@ python3 scripts/env/client.py buddybox delete --path pm/tmp/obsolete.txt
 
 ## Response Checks
 
-- Inspect `ok`, `state_changed`, `durability`, and `read_scope`.
+- Inspect `ok`, `state_changed`, `durability`, and `logical_name`.
 - Inspect `allowed_next_actions` and `allowed_next_action_options` before selecting follow-ups.
-- Use created/updated/deleted path fields to verify target effects.
+- Use created/overwrote/deleted fields to verify target effects.
 - Trust structured rejection feedback for boundary-safe retries.
 
 ## Promotion Rule
@@ -78,8 +78,8 @@ python3 scripts/env/client.py buddybox delete --path pm/tmp/obsolete.txt
 ## Common Flows
 
 - Write/update: `write` then `read` for one exact file and inspect `allowed_next_actions`.
-- List/read: `list` for summaries, then `read` for one exact file path.
+- List/read: `list` for summaries, then `read` for one exact logical name.
 - Search-or-inspect: `buddybox.read` is exact-file read and `buddybox.list` returns summaries only. For keyword or regex search, inspect `context.get.tool_catalog['buddybox']` or `python3 scripts/turn_runtime.py status`; use `buddybox.search` only when available. In the current runless catalog, use `list` then exact `read`. Do not shell-search buddybox roots as the normal buddy workflow.
 - Delete cleanup: `delete` stale private files and verify `state_changed`.
 - Promotion: call `artifact.create_revision` only when readability must move beyond active-buddy-private scope.
-- Rejection recovery: read `allowed_next_action_options`, correct path/payload shape, and retry through `python3 scripts/env/client.py buddybox <operation>`.
+- Rejection recovery: read `allowed_next_action_options`, correct logical_name/payload shape, and retry through `python3 scripts/env/client.py buddybox <operation>`.

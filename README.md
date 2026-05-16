@@ -24,7 +24,7 @@ Product mode:
 ## Product Runtime Loop (Runless)
 
 1. Call context discovery (`context.get` or `context.summarize`).
-2. Pick explicit target ids (`track_id`, `task_id`, `artifact_id`, `handoff_id`, or active buddy private buddybox path).
+2. Pick explicit target ids (`track_id`, `task_id`, `artifact_id`, `handoff_id`) or buddybox `logical_name` values for private files.
 3. Write product objects or active buddy private local files with env tools:
    - `task.*`, `track.*`, `artifact.*`, `handoff.*`, `buddybox.*`
 4. Summarize what was written.
@@ -53,7 +53,8 @@ Canonical product state and private local paths:
 - `buddyswitch/objects/tasks/*.json`
 - `buddyswitch/objects/artifacts/*.json`
 - `buddyswitch/objects/handoffs/*.json`
-- `buddyswitch/local/buddybox/<active-buddy>/**` (private local workspace per active buddy)
+
+Buddybox private files are active-instance-local and tool-managed through `buddybox.*` with `logical_name`; they are not product-readable object state.
 
 ## Context Panel
 

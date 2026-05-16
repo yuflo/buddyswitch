@@ -137,7 +137,7 @@ def _append_buddyswitch_rules(skill_md: Path, *, buddy_id: str) -> None:
         f"- Target BuddySwitch buddy: `{buddy_id}`.\n"
         "- Runtime execution uses env.tool through python3 scripts/env/client.py ... .\n"
         "- Product-readable durable state is written explicitly as task, artifact, or handoff objects.\n"
-        "- Use buddyswitch/local/buddybox/<active-buddy>/** only for active buddy private local working files.\n"
+        "- Use buddybox env tools with `logical_name` for active-buddy-private working files.\n"
         "- Return after required explicit durable writes are complete.\n"
     )
     skill_md.write_text(original.rstrip() + addition, encoding="utf-8")

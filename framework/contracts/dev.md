@@ -21,4 +21,4 @@ Implement approved scope in source code and persist implementation evidence expl
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - `buddyswitch/objects/handoffs/<handoff-id>.json`
-- `buddyswitch/local/buddybox/dev/**` (active buddy private local workspace)
+- Active-buddy-private files via `buddybox.*` logical names (instance-local, not product-readable).

@@ -333,6 +333,20 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertIn("usage:", desc_help.stdout.lower())
 
+    def test_env_client_buddybox_file_subcommands_use_logical_name_flags(self) -> None:
+        for operation in ("list", "read", "delete"):
+            with self.subTest(operation=operation):
+                completed = subprocess.run(
+                    ["python3", "scripts/env/client.py", "buddybox", operation, "--help"],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                help_text = completed.stdout.lower()
+                self.assertIn("--logical-name", help_text)
+                self.assertNotIn("--path", help_text)
+
 
 if __name__ == "__main__":
     unittest.main()

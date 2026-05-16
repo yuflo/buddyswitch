@@ -135,11 +135,11 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             buddy="pm",
             tool="buddybox",
             action="write",
-            args={"path": "pm/prototypes/response.html", "content": "<html>ok</html>"},
+            args={"logical_name": "prototypes/response.html", "content": "<html>ok</html>"},
         )
         self.assertTrue(written_file.get("ok"), msg=written_file)
         self.assertTrue(written_file.get("state_changed"), msg=written_file)
-        self.assertEqual(written_file.get("durability"), "durable")
+        self.assertEqual(written_file.get("durability"), "active_instance_local")
         options = written_file.get("allowed_next_action_options")
         self.assertIsInstance(options, list, msg=written_file)
         assert isinstance(options, list)
@@ -171,7 +171,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "content": {"body": "prd"},
                 "source_refs": [
                     {"type": "note", "label": "response-seed"},
-                    {"type": "buddybox", "path": "pm/prototypes/response.html"},
+                    {"type": "buddybox", "logical_name": "prototypes/response.html"},
                 ],
             },
         )
@@ -218,10 +218,10 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             buddy="pm",
             tool="buddybox",
             action="write",
-            args={"path": "../escape.txt", "content": "x"},
+            args={"logical_name": "../escape.txt", "content": "x"},
         )
         self._assert_rejection_contract(traversal)
-        self.assertEqual((traversal.get("error") or {}).get("code"), "E_BUDDYBOX_SCOPE")
+        self.assertEqual((traversal.get("error") or {}).get("code"), "E_BUDDYBOX_LOGICAL_NAME")
 
         created_pm_task = self._dispatch(
             instance_json=pm_instance,

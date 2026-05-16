@@ -138,16 +138,16 @@ def _parse_args() -> argparse.Namespace:
     buddybox_sub = buddybox.add_subparsers(dest="operation", required=True)
     buddybox_sub.add_parser("desc", help="Describe active buddy private local workspace")
     buddybox_list = buddybox_sub.add_parser("list", help="List buddybox files")
-    buddybox_list.add_argument("--path")
+    buddybox_list.add_argument("--logical-name")
     buddybox_list.add_argument("--recursive", action="store_true")
     buddybox_list.add_argument("--limit", type=int)
     buddybox_read = buddybox_sub.add_parser("read", help="Read buddybox file")
-    buddybox_read.add_argument("--path", required=True)
+    buddybox_read.add_argument("--logical-name", required=True)
     buddybox_read.add_argument("--encoding")
     buddybox_write = buddybox_sub.add_parser("write", help="Write buddybox file")
     buddybox_write.add_argument("--payload", required=True, type=Path)
     buddybox_delete = buddybox_sub.add_parser("delete", help="Delete buddybox file")
-    buddybox_delete.add_argument("--path", required=True)
+    buddybox_delete.add_argument("--logical-name", required=True)
 
     evidence = sub.add_parser("evidence", help="Evidence env operations")
     evidence_sub = evidence.add_subparsers(dest="operation", required=True)
@@ -281,15 +281,15 @@ def _dispatch_buddybox(args: argparse.Namespace) -> dict[str, Any]:
     if args.operation == "write":
         return _dispatch_env_tool("buddybox", action, _load_json_object(args.payload))
     if args.operation == "read":
-        payload: dict[str, Any] = {"path": args.path}
+        payload: dict[str, Any] = {"logical_name": args.logical_name}
         if isinstance(args.encoding, str) and args.encoding.strip():
             payload["encoding"] = args.encoding.strip()
         return _dispatch_env_tool("buddybox", action, payload)
     if args.operation == "delete":
-        return _dispatch_env_tool("buddybox", action, {"path": args.path})
+        return _dispatch_env_tool("buddybox", action, {"logical_name": args.logical_name})
     payload = {}
-    if isinstance(args.path, str) and args.path.strip():
-        payload["path"] = args.path.strip()
+    if isinstance(args.logical_name, str) and args.logical_name.strip():
+        payload["logical_name"] = args.logical_name.strip()
     if args.recursive:
         payload["recursive"] = True
     if isinstance(args.limit, int):

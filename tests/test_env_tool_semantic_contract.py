@@ -228,16 +228,13 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         for token in (
             "active buddy",
             "private",
-            "local workspace",
-            "not collaborative",
-            "not visible to other buddies",
+            "private file capability",
+            "logical_name",
+            "active-instance-local",
             "artifact",
         ):
             self.assertIn(token, capability_text)
-        self.assertTrue(
-            "not product object" in capability_text or "not a product object" in capability_text,
-            msg=capability_text,
-        )
+        self.assertIn("not product object", capability_text)
 
         actions = buddybox["action_semantics"]
         self.assertIn("desc", actions)
@@ -261,7 +258,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         for token in (
             "active buddy",
             "private",
-            "local workspace",
+            "private file capability",
             "drafts",
             "lightweight prototypes",
             "exports",
@@ -269,8 +266,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             "logs",
             "generated files",
             "binary outputs",
-            "not collaborative",
-            "not visible to other buddies",
+            "active-instance-local",
             "not product object",
             "artifact",
             "product-readable",
@@ -280,11 +276,11 @@ class EnvToolSemanticContractTests(unittest.TestCase):
 
         actions = buddybox["action_semantics"]
         expected_success_tokens = {
-            "desc": ("semantic description", "compact local summary only"),
+            "desc": ("capability metadata", "compact private summary only"),
             "list": ("summaries only", "no file content"),
-            "read": ("one active buddy private local file", "content", "content_base64"),
+            "read": ("one active buddy private file", "content", "content_base64"),
             "write": (
-                "created or overwrote one active buddy private local file",
+                "created or overwrote one active buddy private file",
                 "did not create artifact/handoff/task/track/context/evidence",
             ),
             "delete": ("absent", "no product/collaboration object changed"),
@@ -300,9 +296,10 @@ class EnvToolSemanticContractTests(unittest.TestCase):
 
         for action in ("list", "read", "write", "delete"):
             fields = actions[action]["inputs_explained"]
-            self.assertIn("path", fields, msg=action)
-            self.assertIn("active buddy", str(fields["path"]).lower(), msg=action)
-            self.assertIn("prefix", str(fields["path"]).lower(), msg=action)
+            self.assertIn("logical_name", fields, msg=action)
+            self.assertNotIn("path", fields, msg=action)
+            self.assertIn("logical", str(fields["logical_name"]).lower(), msg=action)
+            self.assertIn("active buddy", str(fields["logical_name"]).lower(), msg=action)
 
         write_fields = actions["write"]["inputs_explained"]
         self.assertIn("utf-8 text", str(write_fields["content"]).lower())
@@ -343,7 +340,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         for action_name, row in sorted(actions.items()):
             with self.subTest(action=action_name):
                 use_when_text = " ".join(str(item) for item in row.get("use_when", [])).lower()
-                if "private local" in use_when_text:
+                if "private file" in use_when_text:
                     local_affordance_actions += 1
                 if "artifact" in use_when_text and "host decides" in use_when_text:
                     conditional_readable_actions += 1
@@ -367,7 +364,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ensure_ascii=True,
         ).lower()
         self.assertIn("one", read_text)
-        self.assertTrue("exact" in read_text or "path" in read_text, msg=read_text)
+        self.assertTrue("exact" in read_text or "logical_name" in read_text, msg=read_text)
 
         list_text = json.dumps(
             {
@@ -378,6 +375,21 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         ).lower()
         self.assertIn("summary", list_text)
         self.assertIn("no file content", list_text)
+
+    def test_buddybox_semantics_do_not_expose_filesystem_roots(self) -> None:
+        catalog_blob = json.dumps(contracts.env_tools_description()["buddybox"], ensure_ascii=True).lower()
+        write_blob = json.dumps(contracts.operation_semantics()["buddybox.write"], ensure_ascii=True).lower()
+        for token in (
+            "buddyswitch/local/buddybox",
+            "<active_buddy>",
+            "logical_root",
+            "source_of_truth",
+            "shared root",
+            "workspace root",
+        ):
+            with self.subTest(token=token):
+                self.assertNotIn(token, catalog_blob)
+                self.assertNotIn(token, write_blob)
 
 
 if __name__ == "__main__":

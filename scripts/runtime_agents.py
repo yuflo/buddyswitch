@@ -73,26 +73,28 @@ def validate_runtime_agents_template(
         message="missing runless context discovery command reference",
     )
     project_access = profile["project"]["access"]
-    buddybox_root = profile["buddybox"]["root"]
 
     _require_contains(
         text=lowered,
         needle=f"project.access={project_access}".lower(),
         message=f"missing profile project access wording: project.access={project_access}",
     )
-    _require_contains(
-        text=text,
-        needle=buddybox_root,
-        message=f"missing buddy buddybox root wording: {buddybox_root}",
+    _require_contains_any(
+        text=lowered,
+        needles=[
+            "private file capability",
+            "active-buddy private",
+            "active buddy private",
+        ],
+        message="missing buddybox private capability wording",
     )
     _require_contains_any(
         text=lowered,
         needles=[
-            "private local workspace",
-            "private local working directory",
-            "active-buddy private local",
+            "logical_name",
+            "logical name",
         ],
-        message="missing buddybox private-local workspace wording",
+        message="missing buddybox logical-name wording",
     )
     _require_contains_any(
         text=lowered,
@@ -182,6 +184,9 @@ def validate_runtime_agents_template(
         "action_semantics",
         "prototype" + " means",
         "always create " + "artifact",
+        f"buddyswitch/local/buddybox/{buddy_id}",
+        "<active_" + "buddy>/",
+        "--path",
     ):
         if forbidden in lowered:
             raise RuntimeAgentsError(f"template contains forbidden verbose or trigger wording: {forbidden}")

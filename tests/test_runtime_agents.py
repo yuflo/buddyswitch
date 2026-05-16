@@ -77,8 +77,9 @@ class RuntimeAgentsValidationTests(unittest.TestCase):
                 )
                 self.assertTrue("tool catalog" in text.lower() or "payload semantics" in text.lower(), msg=text)
                 self.assertIn("structured tool feedback", text.lower())
-                self.assertIn(f"buddyswitch/local/buddybox/{buddy_id}", text)
-                self.assertIn("private local", text.lower())
+                self.assertIn("logical_name", text.lower())
+                self.assertIn("private file capability", text.lower())
+                self.assertNotIn(f"buddyswitch/local/buddybox/{buddy_id}", text)
                 self.assertNotIn("scripts/turn_runtime.py prepare", text)
                 self.assertNotIn("scripts/turn_runtime.py persist", text)
                 for forbidden in ("payload_fields", "action_semantics", "prototype means", "always create artifact"):

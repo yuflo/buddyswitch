@@ -107,7 +107,7 @@ For each round, run this fixed loop:
 
 - Runtime execution uses env.tool through python3 scripts/env/client.py ... .
 - Product-readable durable state is written explicitly as task, artifact, or handoff objects.
-- Use buddyswitch/local/buddybox/<active-buddy>/** only for active buddy private local working files.
+- Use buddybox env tools with `logical_name` for active-buddy-private working files.
 - Return after required explicit durable writes are complete.
 - Do not rely on deprecated prepare/persist flows.
 

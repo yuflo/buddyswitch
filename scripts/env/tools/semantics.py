@@ -63,19 +63,21 @@ _CAPABILITIES: dict[str, dict[str, Any]] = {
     "buddybox": {
         "title": "Buddybox Files",
         "plain_description": (
-            "Describe and operate the active buddy private local workspace for private drafts, lightweight prototypes, "
-            "exports, reports, logs, generated files, and binary outputs; buddybox is not collaborative, "
-            "not visible to other buddies, and not product object state."
+            "Describe and operate the active buddy private file capability using logical_name values resolved by the tool; "
+            "buddybox files are private to the active buddy, active-instance-local, and not product object state."
         ),
         "use_when": [
-            "You need active buddy private local files such as drafts, lightweight prototypes, exports, reports, logs, generated files, or binary outputs.",
+            "You need active buddy private files such as drafts, lightweight prototypes, exports, reports, logs, generated files, or binary outputs.",
             "Use artifact.create_revision when the host decides content must become product-readable across buddies.",
         ],
         "do_not_use_when": [
             "You need cross-buddy readable deliverables, product objects, shared source edits, or handoff-readable payloads.",
-            "You need collaboration-readable transport authority; buddybox paths do not grant cross-buddy read authority.",
+            "You need collaboration-readable transport authority; buddybox logical names do not grant cross-buddy read authority.",
         ],
-        "capability_boundary": "Only active buddy private local root paths are allowed; buddybox paths do not grant cross-buddy read authority.",
+        "capability_boundary": (
+            "Only logical_name values inside the active buddy private file capability are allowed; "
+            "buddybox logical names do not grant cross-buddy read authority."
+        ),
     },
     "context": {
         "title": "Context Discovery",
@@ -382,16 +384,16 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
         "desc": {
             "mutates": "none",
             "inputs_explained": {},
-            "plain_description": "Return active buddy private local workspace semantics and compact state summary only.",
+            "plain_description": "Return active buddy private file capability semantics and compact state summary only.",
             "use_when": [
-                "You need the private-local boundary, available operations, and compact workspace state before file operations.",
+                "You need the private-file boundary, available operations, and compact private state before file operations.",
                 "You need a semantic orientation entrypoint without reading file bodies.",
             ],
             "do_not_use_when": [
                 "You need file summary rows; use buddybox.list.",
                 "You need a file body or binary payload; use buddybox.read.",
             ],
-            "success_means": "desc returned semantic description and compact local summary only; no file content or full file list was returned.",
+            "success_means": "desc returned capability metadata and compact private summary only; no file content or full file list was returned.",
             "common_failures": [
                 "unsupported payload fields",
                 "active buddy is not bound to a valid runtime instance",
@@ -400,14 +402,14 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
         "list": {
             "mutates": "none",
             "inputs_explained": {
-                "path": "Optional active buddy prefix filter under <active_buddy>/...; rows stay in active buddy private local workspace.",
-                "recursive": "Whether to include nested files under the active buddy local root.",
+                "logical_name": "Optional logical-name prefix filter inside the active buddy private file capability.",
+                "recursive": "Whether to include nested files under the active buddy private file capability.",
                 "limit": "Optional positive maximum number of summary rows.",
             },
-            "plain_description": "List active-buddy private local file summary rows only (no file content).",
+            "plain_description": "List active-buddy private file summary rows only (no file content).",
             "use_when": [
-                "You need per-file summary rows (path, size_bytes, updated_at, content_type, private_to_buddy).",
-                "You need to pick a private local file before read/write/delete.",
+                "You need per-file summary rows (logical_name, size_bytes, updated_at, content_type, private_to_buddy).",
+                "You need to pick a private file before read/write/delete.",
             ],
             "do_not_use_when": [
                 "You need file bodies (`content` or `content_base64`); use buddybox.read.",
@@ -416,20 +418,23 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             "success_means": "list returned summaries only with no file content and no product/collaboration object changed.",
             "common_failures": [
                 "unsupported payload fields",
-                "path traversal or absolute path",
-                "foreign buddy prefix outside active root",
+                "empty logical_name prefix",
+                "absolute logical_name",
+                "logical_name traversal",
+                "logical_name buddy prefix",
+                "symlink escape target was skipped",
                 "invalid limit value",
             ],
         },
         "read": {
             "mutates": "none",
             "inputs_explained": {
-                "path": "Required active buddy prefix path under <active_buddy>/... for one private local file read.",
+                "logical_name": "Required logical name for one exact private file inside the active buddy capability.",
                 "encoding": "Output preference: auto, utf-8, or base64.",
             },
-            "plain_description": "Read one exact active-buddy private local file path without mutating product/collaboration objects.",
+            "plain_description": "Read one exact active-buddy private file logical_name without mutating product/collaboration objects.",
             "use_when": [
-                "You need one private local file body for local iteration.",
+                "You need one private file body for local iteration.",
                 "You need to inspect output from a prior buddybox.write before deciding next action.",
             ],
             "do_not_use_when": [
@@ -437,42 +442,48 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
                 "You need product-readable delivery; use artifact.create_revision when host decides content must become product-readable.",
             ],
             "success_means": (
-                "read returned one active buddy private local file at one exact path and either content "
+                "read returned one active buddy private file at one exact logical_name and either content "
                 "or content_base64 with encoding explaining interpretation."
             ),
             "common_failures": [
                 "unsupported payload fields",
-                "missing file",
-                "path traversal or absolute path",
-                "foreign buddy prefix outside active root",
                 "invalid encoding",
+                "missing file",
+                "empty logical_name",
+                "absolute logical_name",
+                "logical_name traversal",
+                "logical_name buddy prefix",
+                "symlink escape blocked by private boundary",
             ],
         },
         "write": {
             "mutates": "runtime_files",
             "inputs_explained": {
-                "path": "Required active buddy prefix write path under <active_buddy>/...; creates or overwrites one file.",
+                "logical_name": "Required logical name inside the active buddy private file capability; creates or overwrites one file.",
                 "content": "UTF-8 text payload. Mutually exclusive with content_base64.",
                 "content_base64": "Base64 payload for binary or non-UTF-8 content. Mutually exclusive with content.",
                 "content_type": "MIME hint only, not a product contract.",
             },
-            "plain_description": "Create or replace one active-buddy private local file.",
+            "plain_description": "Create or replace one active-buddy private file.",
             "use_when": [
-                "You need to create or overwrite one active buddy private local draft/prototype/export/report/log/generated/binary file.",
+                "You need to create or overwrite one active buddy private draft/prototype/export/report/log/generated/binary file.",
                 "You may promote readable content with artifact.create_revision when the host decides product-readable sharing is needed.",
             ],
             "do_not_use_when": [
                 "You need to mutate product objects directly; use task/track/artifact/handoff tools.",
-                "You need cross-buddy readable authority from a local path; buddybox paths are private provenance only.",
+                "You need cross-buddy readable authority from a local file; buddybox logical names are private provenance only.",
             ],
             "success_means": (
-                "write created or overwrote one active buddy private local file and did not create "
+                "write created or overwrote one active buddy private file and did not create "
                 "artifact/handoff/task/track/context/evidence objects."
             ),
             "common_failures": [
                 "unsupported payload fields",
-                "path traversal or absolute path",
-                "foreign buddy prefix outside active root",
+                "empty logical_name",
+                "absolute logical_name",
+                "logical_name traversal",
+                "logical_name buddy prefix",
+                "symlink escape blocked by private boundary",
                 "provide exactly one of content or content_base64",
                 "invalid base64",
             ],
@@ -480,23 +491,26 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
         "delete": {
             "mutates": "runtime_files",
             "inputs_explained": {
-                "path": "Required active buddy prefix path under <active_buddy>/... for one private local file delete.",
+                "logical_name": "Required logical name for one exact private file inside the active buddy capability.",
             },
-            "plain_description": "Delete one active-buddy private local file if present.",
+            "plain_description": "Delete one active-buddy private file if present.",
             "use_when": [
-                "You need to remove one active buddy private local file from private iteration workspace.",
-                "You need to clean private local outputs without changing product/collaboration objects.",
+                "You need to remove one active buddy private file from private iteration workspace.",
+                "You need to clean private outputs without changing product/collaboration objects.",
             ],
             "do_not_use_when": [
                 "You need to delete product objects; use artifact/task/track/handoff tools.",
                 "You need cross-buddy readable cleanup; buddybox delete is private-local only.",
             ],
-            "success_means": "delete removed one active buddy private local file or confirmed it was absent; no product/collaboration object changed.",
+            "success_means": "delete removed one active buddy private file or confirmed it was absent; no product/collaboration object changed.",
             "common_failures": [
                 "unsupported payload fields",
-                "path traversal or absolute path",
-                "foreign buddy prefix outside active root",
-                "path points to a directory instead of a file",
+                "empty logical_name",
+                "absolute logical_name",
+                "logical_name traversal",
+                "logical_name buddy prefix",
+                "symlink escape blocked by private boundary",
+                "logical_name points to a directory instead of a file",
             ],
         },
     }
@@ -512,15 +526,16 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             inputs_explained=dict(row["inputs_explained"]),
             side_effects=_side_effects(
                 mutates=mut,
-                writes=[] if mut == "none" else ["buddyswitch/local/buddybox/<active_buddy>/**"],
+                writes=[] if mut == "none" else ["active_buddy_private_file_workspace"],
                 does_not_write=[
                     "buddyswitch/objects/tracks/*.json",
                     "buddyswitch/objects/tasks/*.json",
                     "buddyswitch/objects/artifacts/*.json",
                     "buddyswitch/objects/handoffs/*.json",
+                    "cross-buddy collaboration state",
                     "instance current binding",
                 ],
-                durability="none" if mut == "none" else "durable",
+                durability="none" if mut == "none" else "active_instance_local",
                 idempotency="idempotent for desc/list/read" if mut == "none" else "write non-idempotent, delete conditionally idempotent",
             ),
             risk_hints=_risk_hints(mutates=mut, open_world=False, destructive=(action == "delete")),
@@ -614,24 +629,65 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
 _ACTIONS = _action_rows()
 
 
-def compact_tool_affordances() -> dict[str, dict[str, str]]:
+def compact_tool_affordances() -> dict[str, dict[str, Any]]:
     return {
         "buddybox": {
-            "use_for": (
-                "active buddy private local files: drafts, lightweight prototypes, exports, reports, "
-                "logs, generated files, binary outputs"
-            ),
-            "not_for": (
-                "cross-buddy readable deliverables, product objects, shared source edits, or "
-                "handoff-readable payloads"
-            ),
-            "promote_with": "artifact.create_revision when readable content must become product-readable",
-            "inspect_with": "context.get.tool_catalog['buddybox'] or python3 scripts/turn_runtime.py status",
+            "capability": "private_file_workspace",
+            "owner_scope": "active_buddy",
+            "lifetime_scope": "active_instance_workspace",
+            "visibility": "active_buddy_private",
+            "product_readable": False,
+            "cross_buddy_readable": False,
+            "mutates_product_state": False,
+            "supports": [
+                "describe_capability",
+                "list_private_file_summaries",
+                "read_private_file",
+                "write_private_text",
+                "write_private_binary",
+                "delete_private_file",
+            ],
         },
         "artifact": {
-            "use_for": "task-scoped product-readable deliverables and revisions",
-            "not_for": "private local files, generated binary outputs, or active-buddy scratch work",
-            "inspect_with": "context.get.tool_catalog['artifact'] or python3 scripts/turn_runtime.py status",
+            "capability": "product_readable_deliverable",
+            "owner_scope": "task_buddy_scope",
+            "lifetime_scope": "shared_runtime_objects",
+            "visibility": "product_readable",
+            "cross_buddy_readable": True,
+            "mutates_product_state": True,
+            "supports": [
+                "list_artifacts",
+                "read_artifact",
+                "create_revision",
+                "update_metadata",
+            ],
+        },
+        "handoff": {
+            "capability": "cross_buddy_collaboration_state",
+            "owner_scope": "source_buddy_with_target_constraint",
+            "lifetime_scope": "shared_runtime_objects",
+            "visibility": "source_target_pm_readable",
+            "product_readable": True,
+            "cross_buddy_readable": "targeted",
+            "mutates_product_state": True,
+            "supports": [
+                "list_handoffs",
+                "validate_handoff_payload",
+                "create_handoff_record",
+            ],
+        },
+        "project_source": {
+            "capability": "shared_project_source_workspace",
+            "owner_scope": "profile_project_access",
+            "lifetime_scope": "shared_project_workspace",
+            "visibility": "shared_source_tree",
+            "product_readable": True,
+            "cross_buddy_readable": True,
+            "mutates_product_state": False,
+            "supports": [
+                "read_shared_source",
+                "write_shared_source_when_project_access_write",
+            ],
         },
     }
 

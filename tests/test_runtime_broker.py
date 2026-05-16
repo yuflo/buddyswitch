@@ -178,6 +178,49 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(self._runtime_path("buddyswitch/content/runs").exists())
         self.assertFalse(self._runtime_path("runs/raw").exists())
 
+    def test_env_tool_buddybox_write_uses_instance_workspace_local_root(self) -> None:
+        workspace_dir = self._runtime_path("alt-workspace")
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        (workspace_dir / "AGENTS.md").write_text("# BuddySwitch Runtime Workspace\n", encoding="utf-8")
+        instance_json = self._runtime_path("instance-alt-workspace.json")
+        instance_json.write_text(
+            json.dumps(
+                {
+                    "instance_id": "inst-pm-alt-workspace",
+                    "buddy": "pm",
+                    "status": "active",
+                    "current_task_id": None,
+                    "current_track_id": None,
+                    "workspace_dir": str(workspace_dir),
+                    "browser_port": None,
+                    "created_at": "2026-05-06T00:00:00Z",
+                    "updated_at": "2026-05-06T00:00:00Z",
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        written = self._dispatch(
+            method="env.tool",
+            params={
+                "tool": "buddybox",
+                "action": "write",
+                "args": {"logical_name": "broker/out.txt", "content": "broker\n"},
+            },
+            instance_id="inst-pm-alt-workspace",
+            buddy="pm",
+            instance_json=instance_json,
+        )
+        self.assertTrue(written.get("ok"), msg=written)
+        target = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm" / "broker" / "out.txt"
+        self.assertTrue(target.exists(), msg=target)
+        self.assertEqual(target.read_text(encoding="utf-8"), "broker\n")
+        self.assertFalse(self._runtime_path("buddyswitch/local/buddybox/pm/broker/out.txt").exists())
+        self.assertFalse(self._runtime_path("state/buddyswitch/local/buddybox/pm/broker/out.txt").exists())
+
     def test_env_tool_requests_enter_shared_runtime_lock(self) -> None:
         instance_json = self._instance_json()
         lock_sessions: list[dict[str, object]] = []
@@ -1306,6 +1349,56 @@ class RuntimeBrokerPersistIdempotencyTests(RuntimeWorkspaceTestMixin, unittest.T
 
 
 class RuntimeBrokerV2AcceptanceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_error_envelope_preserves_extended_error_fields_from_dispatch_payload(self) -> None:
+        instance_json = self._runtime_path("instance.json")
+        instance_json.write_text(
+            json.dumps(
+                {
+                    "instance_id": "inst-pm-example",
+                    "buddy": "pm",
+                    "status": "active",
+                    "workspace_dir": str(self.runtime_root),
+                },
+                ensure_ascii=True,
+            ),
+            encoding="utf-8",
+        )
+
+        request = {
+            "protocol": BROKER_V2_PROTOCOL,
+            "request_id": "req-error-extensions",
+            "method": "env.tool",
+            "params": {"instance_id": "inst-pm-example", "active_buddy": "pm"},
+            "deadline_ms": 35000,
+        }
+        dispatched_payload = {
+            "ok": False,
+            "error": {
+                "code": "E_BUDDYBOX_LOGICAL_NAME",
+                "message": "logical_name must be relative",
+                "retriable": True,
+                "class": "invalid_input",
+                "boundary": "active_buddy_private_file_capability",
+            },
+            "state_changed": False,
+            "correctable_fields": ["logical_name"],
+        }
+        with patch("runtime_kernel.broker.coordinator.dispatch_with_coordination", return_value=dispatched_payload):
+            envelope = runtime_broker.dispatch_runtime_request(
+                request=request,
+                instance_json_path=instance_json,
+                manifest_path=MANIFEST,
+            )
+
+        self.assertFalse(envelope.get("ok"), msg=envelope)
+        error = envelope.get("error")
+        self.assertIsInstance(error, dict, msg=envelope)
+        assert isinstance(error, dict)
+        self.assertEqual(error.get("code"), "E_BUDDYBOX_LOGICAL_NAME")
+        self.assertEqual(error.get("class"), "invalid_input")
+        self.assertEqual(error.get("boundary"), "active_buddy_private_file_capability")
+        self.assertEqual(envelope.get("correctable_fields"), ["logical_name"])
+
     def test_active_identity_mismatch_errors_are_structured_non_retriable(self) -> None:
         dispatcher = _require_module("runtime_kernel.dispatcher")
         instance_json = self._runtime_path("instance.json")

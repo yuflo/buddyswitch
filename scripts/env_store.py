@@ -40,10 +40,27 @@ _LEGACY_TASK_RUN_IDS = "run" + "_ids"
 _LEGACY_TASK_LATEST_RUN = "latest" + "_run_id"
 _LEGACY_SOURCE_RUN = "source" + "_run_id"
 _LEGACY_HANDOFF_PRIVATE_PATHS_KEY = "buddybox_" + "paths"
+_KNOWN_BUDDY_IDS = {"pm", "design", "dev", "market", "test"}
 
 
 def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def runtime_workspace_root(instance_payload: dict[str, Any] | None = None) -> Path:
+    if isinstance(instance_payload, dict):
+        candidate = instance_payload.get("workspace_dir")
+        if isinstance(candidate, str) and candidate.strip():
+            return Path(candidate.strip()).expanduser().resolve(strict=False)
+    for env_key in ("BUDDYSWITCH_WORKSPACE_DIR", "BUDDYSWITCH_RUNTIME_WORKSPACE_ROOT"):
+        raw = os.environ.get(env_key)
+        if isinstance(raw, str) and raw.strip():
+            return Path(raw.strip()).expanduser().resolve(strict=False)
+    return ROOT
+
+
+def buddybox_local_dir(instance_payload: dict[str, Any] | None = None) -> Path:
+    return runtime_workspace_root(instance_payload) / "buddyswitch" / "local" / "buddybox"
 
 
 def rel(path: Path) -> str:
@@ -132,15 +149,36 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     os.replace(temp_name, path)
 
 
-def _validate_buddybox_ref_path(path: Any) -> str:
-    if not isinstance(path, str) or not path.strip():
-        raise ValueError("source_refs.buddybox path must be a non-empty string")
-    normalized = path.replace("\\", "/").strip()
-    if normalized.startswith("/") or normalized.startswith("../") or "/../" in normalized:
-        raise ValueError("source_refs.buddybox path must be relative and stay inside buddybox")
+def _validate_buddybox_ref_logical_name(logical_name: Any, *, active_buddy: str | None = None) -> str:
+    if not isinstance(logical_name, str) or not logical_name.strip():
+        raise ValueError("source_refs.buddybox.logical_name must be a non-empty string")
+    normalized = logical_name.replace("\\", "/").strip()
+    if normalized.startswith("/"):
+        raise ValueError("source_refs.buddybox.logical_name must be relative")
     parts = [part for part in normalized.split("/") if part not in {"", "."}]
     if not parts:
-        raise ValueError("source_refs.buddybox path must be non-empty")
+        raise ValueError("source_refs.buddybox.logical_name must be non-empty")
+    if any(part == ".." for part in parts):
+        raise ValueError("source_refs.buddybox.logical_name must not include '..' traversal")
+    blocked_prefixes = set(_KNOWN_BUDDY_IDS)
+    if isinstance(active_buddy, str) and active_buddy:
+        blocked_prefixes.add(active_buddy)
+    if parts[0] in blocked_prefixes:
+        raise ValueError("source_refs.buddybox.logical_name must not include a buddy prefix")
+    return "/".join(parts)
+
+
+def _validate_retired_handoff_private_path(path_value: Any) -> str:
+    if not isinstance(path_value, str) or not path_value.strip():
+        raise ValueError("legacy handoff private path rows must be non-empty strings")
+    normalized = path_value.replace("\\", "/").strip()
+    if normalized.startswith("/"):
+        raise ValueError("legacy handoff private path rows must be relative")
+    parts = [part for part in normalized.split("/") if part not in {"", "."}]
+    if not parts:
+        raise ValueError("legacy handoff private path rows must be non-empty")
+    if any(part == ".." for part in parts):
+        raise ValueError("legacy handoff private path rows must not include '..' traversal")
     return "/".join(parts)
 
 
@@ -170,14 +208,10 @@ def _normalize_source_refs(
         elif ref_type == "buddybox":
             if not allow_buddybox:
                 raise ValueError("source_ref.buddybox is private provenance and cannot be used in this payload")
-            normalized_path = _validate_buddybox_ref_path(raw.get("path"))
-            if isinstance(active_buddy, str) and active_buddy:
-                owner = normalized_path.split("/", 1)[0]
-                if owner != active_buddy:
-                    raise ValueError(
-                        f"source_ref.buddybox path must stay under active buddy root '{active_buddy}/'"
-                    )
-            row["path"] = normalized_path
+            if "path" in raw:
+                raise ValueError("source_refs.buddybox.logical_name is required; path is retired")
+            normalized_name = _validate_buddybox_ref_logical_name(raw.get("logical_name"), active_buddy=active_buddy)
+            row["logical_name"] = normalized_name
             if isinstance(active_buddy, str) and active_buddy:
                 row["private_to_buddy"] = active_buddy
             row["read_grant"] = False
@@ -421,7 +455,7 @@ def validate_handoff_record(record: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(legacy_private_paths, list):
             raise ValueError("legacy handoff private path list must be a list when present")
         for path in legacy_private_paths:
-            _validate_buddybox_ref_path(path)
+            _validate_retired_handoff_private_path(path)
 
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("handoff.reason must be a non-empty string")

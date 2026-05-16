@@ -132,37 +132,44 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         affordances = summary.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=summary)
         assert isinstance(affordances, dict)
-        self.assertEqual(set(affordances), {"buddybox", "artifact"})
+        self.assertEqual(set(affordances), {"buddybox", "artifact", "handoff", "project_source"})
 
         buddybox = affordances.get("buddybox")
         self.assertIsInstance(buddybox, dict, msg=affordances)
         assert isinstance(buddybox, dict)
-        buddybox_use_for = str(buddybox.get("use_for", "")).lower()
-        for token in (
-            "private local",
-            "drafts",
-            "lightweight prototypes",
-            "exports",
-            "reports",
-            "logs",
-            "generated files",
-            "binary outputs",
-        ):
-            self.assertIn(token, buddybox_use_for)
-        self.assertIn("cross-buddy readable", str(buddybox.get("not_for", "")).lower())
-        self.assertIn("product objects", str(buddybox.get("not_for", "")).lower())
-        self.assertIn("artifact.create_revision", str(buddybox.get("promote_with", "")).lower())
+        self.assertEqual(buddybox.get("capability"), "private_file_workspace")
+        self.assertEqual(buddybox.get("owner_scope"), "active_buddy")
+        self.assertEqual(buddybox.get("lifetime_scope"), "active_instance_workspace")
+        self.assertEqual(buddybox.get("visibility"), "active_buddy_private")
+        self.assertFalse(buddybox.get("product_readable"))
+        self.assertFalse(buddybox.get("cross_buddy_readable"))
+        self.assertFalse(buddybox.get("mutates_product_state"))
+        supports = buddybox.get("supports")
+        self.assertIsInstance(supports, list, msg=buddybox)
+        assert isinstance(supports, list)
+        self.assertIn("list_private_file_summaries", supports)
+        self.assertIn("write_private_text", supports)
 
         artifact = affordances.get("artifact")
         self.assertIsInstance(artifact, dict, msg=affordances)
         assert isinstance(artifact, dict)
-        self.assertIn("product-readable deliverables", str(artifact.get("use_for", "")).lower())
+        self.assertEqual(artifact.get("capability"), "product_readable_deliverable")
+        self.assertTrue(artifact.get("cross_buddy_readable"))
+        self.assertTrue(artifact.get("mutates_product_state"))
 
-        self.assertEqual(set(buddybox), {"use_for", "not_for", "promote_with", "inspect_with"})
-        self.assertEqual(set(artifact), {"use_for", "not_for", "inspect_with"})
-        for row in (buddybox, artifact):
-            for value in row.values():
-                self.assertIsInstance(value, str)
+        handoff = affordances.get("handoff")
+        self.assertIsInstance(handoff, dict, msg=affordances)
+        assert isinstance(handoff, dict)
+        self.assertEqual(handoff.get("capability"), "cross_buddy_collaboration_state")
+        self.assertEqual(handoff.get("cross_buddy_readable"), "targeted")
+        self.assertTrue(handoff.get("mutates_product_state"))
+
+        project_source = affordances.get("project_source")
+        self.assertIsInstance(project_source, dict, msg=affordances)
+        assert isinstance(project_source, dict)
+        self.assertEqual(project_source.get("capability"), "shared_project_source_workspace")
+        self.assertEqual(project_source.get("owner_scope"), "profile_project_access")
+        self.assertFalse(project_source.get("mutates_product_state"))
 
     def test_context_uses_buddybox_desc_not_file_projection(self) -> None:
         self._seed_context_state()
@@ -174,8 +181,15 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         desc = payload.get("buddybox_desc")
         self.assertIsInstance(desc, dict, msg=payload)
         assert isinstance(desc, dict)
-        self.assertEqual(desc.get("active_buddy"), "dev")
-        self.assertEqual(desc.get("logical_root"), "buddyswitch/local/buddybox/dev")
+        self.assertEqual(desc.get("capability"), "private_file_workspace")
+        self.assertEqual(desc.get("owner_scope"), "active_buddy")
+        self.assertEqual(desc.get("lifetime_scope"), "active_instance_workspace")
+        self.assertEqual(desc.get("visibility"), "active_buddy_private")
+        self.assertFalse(desc.get("product_readable"))
+        self.assertFalse(desc.get("cross_buddy_readable"))
+        self.assertFalse(desc.get("mutates_product_state"))
+        self.assertIn("supports", desc)
+        self.assertNotIn("logical_root", desc)
         self.assertIn("private", str(desc.get("message", "")).lower())
 
     def test_context_summarize_tool_affordances_stay_compact(self) -> None:
@@ -222,7 +236,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         write_fields = payload_fields.get("write")
         self.assertIsInstance(write_fields, list, msg=payload)
         assert isinstance(write_fields, list)
-        self.assertTrue({"path", "content", "content_base64", "content_type"}.issubset(set(write_fields)), msg=write_fields)
+        self.assertTrue({"logical_name", "content", "content_base64", "content_type"}.issubset(set(write_fields)), msg=write_fields)
+        self.assertNotIn("path", write_fields)
         self.assertIn("buddybox.write", operation_semantics)
 
     def test_context_list_sources_excludes_memory_and_includes_buddybox(self) -> None:
@@ -237,8 +252,12 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         buddybox = sources["buddybox"]
         self.assertIsInstance(buddybox, dict, msg=listed)
         assert isinstance(buddybox, dict)
-        self.assertIn("private local workspace", str(buddybox.get("description", "")).lower())
-        self.assertEqual(buddybox.get("source_of_truth"), "buddyswitch/local/buddybox/<active_buddy>/**")
+        self.assertEqual(buddybox.get("capability"), "private_file_workspace")
+        self.assertNotIn("source_of_truth", buddybox)
+        self.assertNotIn("logical_root", buddybox)
+        source_blob = json.dumps(buddybox, ensure_ascii=True).lower()
+        self.assertNotIn("buddyswitch/local/buddybox", source_blob)
+        self.assertNotIn("shared", source_blob)
 
     def test_context_get_applies_filters(self) -> None:
         self._seed_context_state()

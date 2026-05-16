@@ -108,7 +108,13 @@ def _instance_shared_root(instance_json_path: Path) -> Path:
 
 
 @contextlib.contextmanager
-def _runtime_server_env(*, instance_id: str, buddy_id: str, instance_json_path: Path) -> Iterator[None]:
+def _runtime_server_env(
+    *,
+    instance_id: str,
+    buddy_id: str,
+    instance_json_path: Path,
+    instance_record: dict[str, Any],
+) -> Iterator[None]:
     shared_root = _instance_shared_root(instance_json_path)
     updates = {
         "BUDDYSWITCH_RUNTIME_BROKER_MODE": "server",
@@ -118,6 +124,11 @@ def _runtime_server_env(*, instance_id: str, buddy_id: str, instance_json_path: 
         "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
         "BUDDYSWITCH_STATE_ROOT": str(shared_root / "state"),
     }
+    workspace_dir = instance_record.get("workspace_dir")
+    if isinstance(workspace_dir, str) and workspace_dir.strip():
+        updates["BUDDYSWITCH_WORKSPACE_DIR"] = str(
+            Path(workspace_dir.strip()).expanduser().resolve(strict=False)
+        )
     previous = {key: os.environ.get(key) for key in updates}
     os.environ.update(updates)
     try:
@@ -229,7 +240,12 @@ def dispatch_runtime_request(request: dict[str, Any], session: RuntimeBrokerSess
                     actions=_allowed("Open an active launcher-managed instance before calling runtime tools."),
                 )
 
-        with _runtime_server_env(instance_id=instance_id, buddy_id=active_buddy, instance_json_path=session.instance_json_path):
+        with _runtime_server_env(
+            instance_id=instance_id,
+            buddy_id=active_buddy,
+            instance_json_path=session.instance_json_path,
+            instance_record=instance_record,
+        ):
             if method == "env.tool":
                 return _env_tool_dispatch(
                     params=params,

@@ -65,6 +65,11 @@ def _to_error_envelope(request_id: str | None, payload: dict[str, Any]) -> dict[
     message = error.get("message") if isinstance(error.get("message"), str) else "runtime broker request failed"
     retriable = bool(error.get("retriable", False))
     retry_after_ms = error.get("retry_after_ms") if isinstance(error.get("retry_after_ms"), int) else None
+    error_extra = {
+        key: value
+        for key, value in error.items()
+        if key not in {"code", "message", "retriable"} and value is not None
+    }
     extra = {key: value for key, value in payload.items() if key not in {"ok", "error"}}
     envelope = protocol.error_response(
         request_id,
@@ -72,6 +77,7 @@ def _to_error_envelope(request_id: str | None, payload: dict[str, Any]) -> dict[
         message=message,
         retriable=retriable,
         retry_after_ms=retry_after_ms,
+        **error_extra,
     )
     for key, value in extra.items():
         envelope[key] = value

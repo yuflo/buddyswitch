@@ -224,7 +224,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "title": "Runless PRD",
                 "summary": "seed",
                 "content": {"body": "v1"},
-                "source_refs": [{"type": "buddybox", "path": "pm/provenance/notes.md"}],
+                "source_refs": [{"type": "buddybox", "logical_name": "provenance/notes.md"}],
             },
         )
         self.assertTrue(created.get("ok"), msg=created)
@@ -236,7 +236,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(refs, list)
         row = refs[0]
         self.assertEqual(row.get("type"), "buddybox")
-        self.assertEqual(row.get("path"), "pm/provenance/notes.md")
+        self.assertEqual(row.get("logical_name"), "provenance/notes.md")
         self.assertEqual(row.get("private_to_buddy"), "pm")
         self.assertFalse(row.get("read_grant"))
 
@@ -252,7 +252,29 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "title": "Runless PRD 2",
                 "summary": "seed",
                 "content": {"body": "v2"},
-                "source_refs": [{"type": "buddybox", "path": "dev/provenance/notes.md"}],
+                "source_refs": [{"type": "buddybox", "logical_name": "dev/provenance/notes.md"}],
+            },
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_SOURCE_REFS")
+
+    def test_artifact_rejects_legacy_buddybox_path_source_ref(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-pm-art-legacy", buddy="pm")
+        self._seed_pm_track_and_task()
+
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-art-legacy",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "task_id": "task-pm-artifact",
+                "kind": "prd",
+                "title": "Legacy Path Ref",
+                "summary": "seed",
+                "content": {"body": "v1"},
+                "source_refs": [{"type": "buddybox", "path": "pm/provenance/notes.md"}],
             },
         )
         self.assertFalse(rejected.get("ok"), msg=rejected)

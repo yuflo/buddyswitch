@@ -15,6 +15,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+import env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -25,7 +26,7 @@ _OLD_BUDDYBOX_ROOT = "buddyswitch/content/" + "buddybox"
 
 class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     _PRIVACY_MESSAGE = (
-        "This is the active buddy's private local working directory. "
+        "This is the active buddy's private file capability. "
         "Other buddies cannot list, read, write, or delete these files. "
         "Use artifact when content must become product-readable."
     )
@@ -84,14 +85,7 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             assert isinstance(result, dict)
             return result
         error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
-        payload: dict[str, object] = {
-            "ok": False,
-            "error": {
-                "code": error.get("code"),
-                "message": error.get("message"),
-                "retriable": error.get("retriable"),
-            },
-        }
+        payload: dict[str, object] = {"ok": False, "error": dict(error)}
         for key, value in envelope.items():
             if key in {"protocol", "request_id", "ok", "error"}:
                 continue
@@ -128,13 +122,20 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(desc.get("ok"), msg=desc)
         self.assertEqual(desc.get("action"), "buddybox.desc")
         self.assertEqual(desc.get("active_buddy"), "pm")
-        self.assertEqual(desc.get("logical_root"), "buddyswitch/local/buddybox/pm")
-        self.assertEqual(desc.get("privacy_boundary"), "active-buddy-private-local-workspace")
+        self.assertEqual(desc.get("capability"), "private_file_workspace")
+        self.assertEqual(desc.get("owner_scope"), "active_buddy")
+        self.assertEqual(desc.get("lifetime_scope"), "active_instance_workspace")
+        self.assertEqual(desc.get("visibility"), "active_buddy_private")
+        self.assertFalse(desc.get("product_readable"))
+        self.assertFalse(desc.get("cross_buddy_readable"))
+        self.assertFalse(desc.get("mutates_product_state"))
         self.assertEqual(desc.get("message"), self._PRIVACY_MESSAGE)
-        self.assertEqual(
-            desc.get("available_operations"),
-            ["buddybox.desc", "buddybox.list", "buddybox.read", "buddybox.write", "buddybox.delete"],
-        )
+        supports = desc.get("supports")
+        self.assertIsInstance(supports, list, msg=desc)
+        assert isinstance(supports, list)
+        self.assertIn("list_private_file_summaries", supports)
+        self.assertIn("read_private_file", supports)
+        self.assertNotIn("logical_root", desc)
         state_summary = desc.get("state_summary")
         self.assertIsInstance(state_summary, dict, msg=desc)
         assert isinstance(state_summary, dict)
@@ -144,20 +145,19 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("files", desc)
         self.assertNotIn("content", desc)
         self.assertNotIn("content_base64", desc)
+        affordances = desc.get("available_affordances")
+        self.assertIsInstance(affordances, list, msg=desc)
         next_actions = desc.get("allowed_next_actions")
         self.assertIsInstance(next_actions, list, msg=desc)
         assert isinstance(next_actions, list)
-        self.assertGreaterEqual(len(next_actions), 3)
+        self.assertEqual(next_actions, [])
         next_actions_text = " ".join(str(item) for item in next_actions).lower()
-        self.assertIn("buddybox.list", next_actions_text)
-        self.assertIn("buddybox.write", next_actions_text)
-        self.assertIn("host decides", next_actions_text)
         self.assertNotIn("only next action", next_actions_text)
         self.assertNotIn("always create artifact", next_actions_text)
         self._assert_option(desc, "inspect_private_buddybox_summaries", tool="buddybox", action="list")
         self._assert_option(desc, "write_private_buddybox_file", tool="buddybox", action="write")
 
-    def test_buddybox_text_and_binary_lifecycle_uses_local_root(self) -> None:
+    def test_buddybox_logical_name_text_binary_lifecycle(self) -> None:
         instance_id = "inst-pm-box"
         instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
 
@@ -166,12 +166,12 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=instance_id,
             buddy="pm",
             action="write",
-            args={"path": "pm/prototypes/hero.html", "content": "<html>hero</html>"},
+            args={"logical_name": "prototypes/hero.html", "content": "<html>hero</html>"},
         )
         self.assertTrue(text_write.get("ok"), msg=text_write)
         self.assertTrue(text_write.get("state_changed"), msg=text_write)
-        self.assertEqual(text_write.get("durability"), "durable")
-        self.assertEqual(text_write.get("path"), "pm/prototypes/hero.html")
+        self.assertEqual(text_write.get("durability"), "active_instance_local")
+        self.assertEqual(text_write.get("logical_name"), "prototypes/hero.html")
         self.assertTrue(self._runtime_path("buddyswitch/local/buddybox/pm/prototypes/hero.html").exists())
         self.assertFalse(self._runtime_path(f"{_OLD_BUDDYBOX_ROOT}/pm/prototypes/hero.html").exists())
         self._assert_option(text_write, "confirm_private_buddybox_file", tool="buddybox", action="read")
@@ -190,7 +190,7 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=instance_id,
             buddy="pm",
             action="read",
-            args={"path": "pm/prototypes/hero.html"},
+            args={"logical_name": "prototypes/hero.html"},
         )
         self.assertTrue(text_read.get("ok"), msg=text_read)
         self.assertEqual(text_read.get("encoding"), "utf-8")
@@ -205,12 +205,12 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             action="write",
             args={
-                "path": "pm/assets/snapshot.bin",
+                "logical_name": "assets/snapshot.bin",
                 "content_base64": base64.b64encode(raw_bytes).decode("ascii"),
             },
         )
         self.assertTrue(binary_write.get("ok"), msg=binary_write)
-        self.assertEqual(binary_write.get("path"), "pm/assets/snapshot.bin")
+        self.assertEqual(binary_write.get("logical_name"), "assets/snapshot.bin")
         self.assertTrue(self._runtime_path("buddyswitch/local/buddybox/pm/assets/snapshot.bin").exists())
 
         binary_read = self._dispatch(
@@ -218,7 +218,7 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=instance_id,
             buddy="pm",
             action="read",
-            args={"path": "pm/assets/snapshot.bin"},
+            args={"logical_name": "assets/snapshot.bin"},
         )
         self.assertTrue(binary_read.get("ok"), msg=binary_read)
         self.assertEqual(binary_read.get("encoding"), "base64")
@@ -238,8 +238,8 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         files = listed.get("files")
         self.assertIsInstance(files, list, msg=listed)
         assert isinstance(files, list)
-        self.assertIn("pm/prototypes/hero.html", {row.get("path") for row in files if isinstance(row, dict)})
-        self.assertIn("pm/assets/snapshot.bin", {row.get("path") for row in files if isinstance(row, dict)})
+        self.assertIn("prototypes/hero.html", {row.get("logical_name") for row in files if isinstance(row, dict)})
+        self.assertIn("assets/snapshot.bin", {row.get("logical_name") for row in files if isinstance(row, dict)})
         for row in files:
             if not isinstance(row, dict):
                 continue
@@ -247,6 +247,7 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.assertNotIn("content", row)
             self.assertNotIn("content_base64", row)
             self.assertNotIn("source_ref", row)
+            self.assertNotIn("path", row)
         self._assert_option(listed, "read_private_buddybox_file", tool="buddybox", action="read")
         self._assert_option(listed, "write_private_buddybox_file", tool="buddybox", action="write")
 
@@ -255,43 +256,46 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=instance_id,
             buddy="pm",
             action="delete",
-            args={"path": "pm/prototypes/hero.html"},
+            args={"logical_name": "prototypes/hero.html"},
         )
         self.assertTrue(deleted.get("ok"), msg=deleted)
         self.assertTrue(deleted.get("deleted"), msg=deleted)
 
-    def test_pm_cannot_read_list_write_or_delete_foreign_private_paths(self) -> None:
-        dev_file = self._runtime_path("buddyswitch/local/buddybox/dev/reports/report.txt")
-        dev_file.parent.mkdir(parents=True, exist_ok=True)
-        dev_file.write_text("private\n", encoding="utf-8")
-
-        instance_id = "inst-pm-box-scope"
+    def test_buddybox_rejects_legacy_path_payload_field(self) -> None:
+        instance_id = "inst-pm-box-path-retired"
         instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
-        checks = [
-            ("list", {"path": "dev", "recursive": True}),
-            ("read", {"path": "dev/reports/report.txt"}),
-            ("write", {"path": "dev/reports/new.txt", "content": "x"}),
-            ("delete", {"path": "dev/reports/report.txt"}),
-        ]
-        for action, args in checks:
-            with self.subTest(action=action):
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            action="write",
+            args={"path": "pm/prototypes/hero.html", "content": "x"},
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_BUDDYBOX_PAYLOAD")
+
+    def test_buddybox_rejects_buddy_prefixed_logical_names(self) -> None:
+        instance_id = "inst-pm-box-prefix"
+        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        for action, payload in (
+            ("write", {"logical_name": "pm/prototypes/hero.html", "content": "x"}),
+            ("write", {"logical_name": "dev/reports/report.txt", "content": "x"}),
+            ("read", {"logical_name": "pm/prototypes/hero.html"}),
+            ("delete", {"logical_name": "dev/reports/report.txt"}),
+        ):
+            with self.subTest(action=action, payload=payload):
                 rejected = self._dispatch(
                     instance_json=instance_json,
                     instance_id=instance_id,
                     buddy="pm",
                     action=action,
-                    args=args,
+                    args=payload,
                 )
                 self.assertFalse(rejected.get("ok"), msg=rejected)
-                self.assertEqual((rejected.get("error") or {}).get("code"), "E_BUDDYBOX_SCOPE")
-                self.assertIn("private", str(rejected.get("why_blocked", "")).lower())
-                self.assertIn("permission_boundary", rejected)
-                self.assertIn("retryable", rejected)
-                self.assertIn("allowed_next_actions", rejected)
+                self.assertEqual((rejected.get("error") or {}).get("code"), "E_BUDDYBOX_LOGICAL_NAME")
                 self.assertIs(rejected.get("state_changed"), False, msg=rejected)
-                self._assert_option(rejected, "review_buddybox_private_boundary", tool="buddybox", action="desc")
-                self._assert_option(rejected, "retry_active_buddy_private_path", tool="buddybox", action=action)
-                self.assertEqual(dev_file.read_text(encoding="utf-8"), "private\n")
+        self.assertFalse(self._runtime_path("buddyswitch/local/buddybox/pm/prototypes/hero.html").exists())
+        self.assertFalse(self._runtime_path("buddyswitch/local/buddybox/pm/dev/reports/report.txt").exists())
 
     def test_buddybox_rejects_symlink_escape_from_active_root(self) -> None:
         dev_file = self._runtime_path("buddyswitch/local/buddybox/dev/reports/secret.txt")
@@ -310,10 +314,10 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=instance_id,
             buddy="pm",
             action="read",
-            args={"path": "pm/links/dev-secret.txt"},
+            args={"logical_name": "links/dev-secret.txt"},
         )
         self.assertFalse(rejected_read.get("ok"), msg=rejected_read)
-        self.assertEqual((rejected_read.get("error") or {}).get("code"), "E_BUDDYBOX_SCOPE")
+        self.assertEqual((rejected_read.get("error") or {}).get("code"), "E_BUDDYBOX_BOUNDARY")
         self.assertNotIn("dev secret", str(rejected_read))
 
         listed = self._dispatch(
@@ -327,7 +331,7 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         files = listed.get("files")
         self.assertIsInstance(files, list, msg=listed)
         assert isinstance(files, list)
-        self.assertNotIn("pm/links/dev-secret.txt", {row.get("path") for row in files if isinstance(row, dict)})
+        self.assertNotIn("links/dev-secret.txt", {row.get("logical_name") for row in files if isinstance(row, dict)})
 
         dev_escape_dir = self._runtime_path("buddyswitch/local/buddybox/dev/escape-target")
         dev_escape_dir.mkdir(parents=True, exist_ok=True)
@@ -339,10 +343,10 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=instance_id,
             buddy="pm",
             action="write",
-            args={"path": "pm/escape/new.txt", "content": "leak"},
+            args={"logical_name": "escape/new.txt", "content": "leak"},
         )
         self.assertFalse(rejected_write.get("ok"), msg=rejected_write)
-        self.assertEqual((rejected_write.get("error") or {}).get("code"), "E_BUDDYBOX_SCOPE")
+        self.assertEqual((rejected_write.get("error") or {}).get("code"), "E_BUDDYBOX_BOUNDARY")
         self.assertFalse((dev_escape_dir / "new.txt").exists())
 
     def test_old_content_buddybox_root_is_not_active_storage(self) -> None:
@@ -370,10 +374,45 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=instance_id,
             buddy="pm",
             action="read",
-            args={"path": "pm/legacy.txt"},
+            args={"logical_name": "legacy.txt"},
         )
         self.assertFalse(rejected_read.get("ok"), msg=rejected_read)
-        self.assertEqual((rejected_read.get("error") or {}).get("code"), "E_BUDDYBOX_PAYLOAD")
+        self.assertEqual((rejected_read.get("error") or {}).get("code"), "E_BUDDYBOX_NOT_FOUND")
+
+    def test_legacy_shared_buddybox_roots_are_unmanaged(self) -> None:
+        legacy_shared = self._runtime_path("state/buddyswitch/local/buddybox/pm/legacy.txt")
+        legacy_shared.parent.mkdir(parents=True, exist_ok=True)
+        legacy_shared.write_text("legacy-shared\n", encoding="utf-8")
+        legacy_content = self._runtime_path(f"{_OLD_BUDDYBOX_ROOT}/pm/legacy-content.txt")
+        legacy_content.parent.mkdir(parents=True, exist_ok=True)
+        legacy_content.write_text("legacy-content\n", encoding="utf-8")
+
+        instance_id = "inst-pm-box-legacy-shared"
+        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        listed = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            action="list",
+            args={"recursive": True},
+        )
+        self.assertTrue(listed.get("ok"), msg=listed)
+        files = listed.get("files")
+        self.assertIsInstance(files, list, msg=listed)
+        assert isinstance(files, list)
+        self.assertEqual(files, [])
+
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            action="read",
+            args={"logical_name": "legacy.txt"},
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_BUDDYBOX_NOT_FOUND")
+        self.assertEqual(legacy_shared.read_text(encoding="utf-8"), "legacy-shared\n")
+        self.assertEqual(legacy_content.read_text(encoding="utf-8"), "legacy-content\n")
 
     def test_buddybox_overwrite_and_repeat_delete_are_explicit(self) -> None:
         instance_id = "inst-pm-box-repeat"
@@ -384,7 +423,7 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=instance_id,
             buddy="pm",
             action="write",
-            args={"path": "pm/logs/out.txt", "content": "v1"},
+            args={"logical_name": "logs/out.txt", "content": "v1"},
         )
         self.assertTrue(first.get("ok"), msg=first)
         self.assertFalse(first.get("overwrote"), msg=first)
@@ -394,7 +433,7 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=instance_id,
             buddy="pm",
             action="write",
-            args={"path": "pm/logs/out.txt", "content": "v2"},
+            args={"logical_name": "logs/out.txt", "content": "v2"},
         )
         self.assertTrue(second.get("ok"), msg=second)
         self.assertTrue(second.get("overwrote"), msg=second)
@@ -404,7 +443,7 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=instance_id,
             buddy="pm",
             action="delete",
-            args={"path": "pm/logs/out.txt"},
+            args={"logical_name": "logs/out.txt"},
         )
         self.assertTrue(delete_once.get("ok"), msg=delete_once)
         self.assertTrue(delete_once.get("deleted"), msg=delete_once)
@@ -414,22 +453,22 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_id=instance_id,
             buddy="pm",
             action="delete",
-            args={"path": "pm/logs/out.txt"},
+            args={"logical_name": "logs/out.txt"},
         )
         self.assertTrue(delete_twice.get("ok"), msg=delete_twice)
         self.assertFalse(delete_twice.get("deleted"), msg=delete_twice)
         self.assertFalse(delete_twice.get("state_changed"), msg=delete_twice)
 
-    def test_buddybox_rejects_invalid_paths_and_payloads(self) -> None:
+    def test_buddybox_logical_name_boundaries_and_payloads(self) -> None:
         instance_id = "inst-pm-box-invalid"
         instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
         invalid_writes = [
-            ({"path": "", "content": "x"}, {"E_BUDDYBOX_SCOPE", "E_BUDDYBOX_PAYLOAD"}),
-            ({"path": "/tmp/x", "content": "x"}, {"E_BUDDYBOX_SCOPE"}),
-            ({"path": "../x", "content": "x"}, {"E_BUDDYBOX_SCOPE"}),
-            ({"path": "pm/../x", "content": "x"}, {"E_BUDDYBOX_SCOPE"}),
-            ({"path": "pm/notes.md"}, {"E_BUDDYBOX_PAYLOAD"}),
-            ({"path": "pm/notes.md", "content": "x", "content_base64": "eA=="}, {"E_BUDDYBOX_PAYLOAD"}),
+            ({"logical_name": "", "content": "x"}, {"E_BUDDYBOX_LOGICAL_NAME"}),
+            ({"logical_name": "/tmp/x", "content": "x"}, {"E_BUDDYBOX_LOGICAL_NAME"}),
+            ({"logical_name": "../x", "content": "x"}, {"E_BUDDYBOX_LOGICAL_NAME"}),
+            ({"logical_name": "notes/../../x", "content": "x"}, {"E_BUDDYBOX_LOGICAL_NAME"}),
+            ({"logical_name": "notes.md"}, {"E_BUDDYBOX_PAYLOAD"}),
+            ({"logical_name": "notes.md", "content": "x", "content_base64": "eA=="}, {"E_BUDDYBOX_PAYLOAD"}),
         ]
         for payload, expected_codes in invalid_writes:
             with self.subTest(payload=payload, expected_codes=sorted(expected_codes)):
@@ -443,19 +482,239 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertFalse(rejected.get("ok"), msg=rejected)
                 self.assertIn((rejected.get("error") or {}).get("code"), expected_codes, msg=rejected)
                 self.assertIs(rejected.get("state_changed"), False, msg=rejected)
-                attempted_path = payload.get("path")
-                if isinstance(attempted_path, str) and attempted_path.startswith("pm/") and ".." not in attempted_path:
-                    self.assertFalse(self._runtime_path(f"buddyswitch/local/buddybox/{attempted_path}").exists())
+                attempted_name = payload.get("logical_name")
+                if isinstance(attempted_name, str) and attempted_name and ".." not in attempted_name and not attempted_name.startswith("/"):
+                    self.assertFalse(self._runtime_path(f"buddyswitch/local/buddybox/pm/{attempted_name}").exists())
 
         invalid_read = self._dispatch(
             instance_json=instance_json,
             instance_id=instance_id,
             buddy="pm",
             action="read",
-            args={"path": "pm/missing.txt", "encoding": "utf16"},
+            args={"logical_name": "missing.txt", "encoding": "utf16"},
         )
         self.assertFalse(invalid_read.get("ok"), msg=invalid_read)
         self.assertEqual((invalid_read.get("error") or {}).get("code"), "E_BUDDYBOX_PAYLOAD")
+
+    def test_buddybox_success_responses_expose_private_file_state_model(self) -> None:
+        instance_id = "inst-pm-box-state-model"
+        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+
+        write_payload = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            action="write",
+            args={"logical_name": "state/model.txt", "content": "model"},
+        )
+        self.assertTrue(write_payload.get("ok"), msg=write_payload)
+        self.assertEqual(write_payload.get("visibility"), "active_buddy_private")
+        self.assertEqual(write_payload.get("owner_scope"), "active_buddy")
+        self.assertEqual(write_payload.get("lifetime_scope"), "active_instance_workspace")
+        self.assertFalse(write_payload.get("product_readable"))
+        self.assertFalse(write_payload.get("cross_buddy_readable"))
+        self.assertFalse(write_payload.get("mutates_product_state"))
+        self.assertEqual(write_payload.get("mutated_product_objects"), [])
+        self.assertEqual(write_payload.get("durability"), "active_instance_local")
+
+        read_payload = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            action="read",
+            args={"logical_name": "state/model.txt"},
+        )
+        self.assertTrue(read_payload.get("ok"), msg=read_payload)
+        self.assertEqual(read_payload.get("visibility"), "active_buddy_private")
+        self.assertEqual(read_payload.get("owner_scope"), "active_buddy")
+        self.assertEqual(read_payload.get("lifetime_scope"), "active_instance_workspace")
+        self.assertFalse(read_payload.get("product_readable"))
+        self.assertFalse(read_payload.get("cross_buddy_readable"))
+        self.assertFalse(read_payload.get("mutates_product_state"))
+        self.assertEqual(read_payload.get("mutated_product_objects"), [])
+
+        list_payload = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            action="list",
+            args={"recursive": True},
+        )
+        self.assertTrue(list_payload.get("ok"), msg=list_payload)
+        self.assertEqual(list_payload.get("visibility"), "active_buddy_private")
+        self.assertEqual(list_payload.get("owner_scope"), "active_buddy")
+        self.assertEqual(list_payload.get("lifetime_scope"), "active_instance_workspace")
+        self.assertFalse(list_payload.get("product_readable"))
+        self.assertFalse(list_payload.get("cross_buddy_readable"))
+        self.assertFalse(list_payload.get("mutates_product_state"))
+        self.assertEqual(list_payload.get("mutated_product_objects"), [])
+
+        delete_payload = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            action="delete",
+            args={"logical_name": "state/model.txt"},
+        )
+        self.assertTrue(delete_payload.get("ok"), msg=delete_payload)
+        self.assertEqual(delete_payload.get("visibility"), "active_buddy_private")
+        self.assertEqual(delete_payload.get("owner_scope"), "active_buddy")
+        self.assertEqual(delete_payload.get("lifetime_scope"), "active_instance_workspace")
+        self.assertFalse(delete_payload.get("product_readable"))
+        self.assertFalse(delete_payload.get("cross_buddy_readable"))
+        self.assertFalse(delete_payload.get("mutates_product_state"))
+        self.assertEqual(delete_payload.get("mutated_product_objects"), [])
+
+    def test_buddybox_operations_do_not_mutate_product_objects(self) -> None:
+        track = env_store.create_track(
+            "track-pm-buddybox-product-state",
+            "Buddybox Product Boundary",
+            current_buddy="pm",
+        )
+        task = env_store.create_task(
+            "task-pm-buddybox-product-state",
+            "Buddybox Product Boundary Task",
+            buddy="pm",
+            track_id=track["id"],
+        )
+        artifact = env_store.create_artifact(
+            artifact_id="art-pm-buddybox-product-state-r1",
+            title="Buddybox Product Boundary Artifact",
+            buddy="pm",
+            kind="prd",
+            task_id=task["id"],
+            summary="seed",
+            content={"body": "seed"},
+            created_by="pm",
+            source_refs=[{"type": "note", "label": "seed"}],
+        )
+        handoff = env_store.create_handoff(
+            handoff_id="handoff-pm-dev-buddybox-product-state",
+            track_id=track["id"],
+            source_buddy="pm",
+            target_buddy="dev",
+            source_task_id=task["id"],
+            artifact_ids=[artifact["id"]],
+            source_refs=[{"type": "artifact", "id": artifact["id"]}],
+            reason="seed",
+            context="seed",
+        )
+        object_paths = (
+            env_store.track_file(track["id"]),
+            env_store.task_file(task["id"]),
+            env_store.artifact_file(artifact["id"]),
+            env_store.handoff_file(handoff["id"]),
+        )
+        before = {path: path.read_text(encoding="utf-8") for path in object_paths}
+
+        instance_id = "inst-pm-box-no-product-mutation"
+        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        writes = [
+            self._dispatch(
+                instance_json=instance_json,
+                instance_id=instance_id,
+                buddy="pm",
+                action="write",
+                args={"logical_name": "product-boundary/sample.txt", "content": "ok"},
+            ),
+            self._dispatch(
+                instance_json=instance_json,
+                instance_id=instance_id,
+                buddy="pm",
+                action="read",
+                args={"logical_name": "product-boundary/sample.txt"},
+            ),
+            self._dispatch(
+                instance_json=instance_json,
+                instance_id=instance_id,
+                buddy="pm",
+                action="list",
+                args={"recursive": True},
+            ),
+            self._dispatch(
+                instance_json=instance_json,
+                instance_id=instance_id,
+                buddy="pm",
+                action="delete",
+                args={"logical_name": "product-boundary/sample.txt"},
+            ),
+        ]
+        for payload in writes:
+            self.assertTrue(payload.get("ok"), msg=payload)
+            self.assertFalse(payload.get("mutates_product_state"), msg=payload)
+            self.assertEqual(payload.get("mutated_product_objects"), [], msg=payload)
+
+        after = {path: path.read_text(encoding="utf-8") for path in object_paths}
+        self.assertEqual(after, before)
+
+    def test_buddybox_success_affordances_are_structured_and_conditional(self) -> None:
+        instance_id = "inst-pm-box-affordance"
+        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        payload = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            action="write",
+            args={"logical_name": "affordances/sample.txt", "content": "ok"},
+        )
+        self.assertTrue(payload.get("ok"), msg=payload)
+
+        affordances = payload.get("available_affordances")
+        self.assertIsInstance(affordances, list, msg=payload)
+        assert isinstance(affordances, list)
+        self.assertGreaterEqual(len(affordances), 2)
+        for row in affordances:
+            self.assertIsInstance(row, dict, msg=row)
+            assert isinstance(row, dict)
+            self.assertIn("tool", row)
+            self.assertIn("action", row)
+            self.assertIn("effect", row)
+            self.assertIn("condition", row)
+            self.assertIn("mutates_product_state", row)
+
+        artifact_rows = [row for row in affordances if isinstance(row, dict) and row.get("tool") == "artifact"]
+        self.assertEqual(len(artifact_rows), 1, msg=affordances)
+        self.assertEqual(artifact_rows[0].get("action"), "create_revision")
+        self.assertIn("product-readable", str(artifact_rows[0].get("condition", "")).lower())
+
+        for hint in payload.get("allowed_next_actions", []):
+            lowered = str(hint).lower()
+            self.assertNotIn("retry with", lowered)
+            self.assertNotIn("<active_buddy>", lowered)
+            self.assertNotIn("shared state", lowered)
+            self.assertNotIn("must create artifact", lowered)
+
+    def test_buddybox_rejections_are_self_correcting_without_path_guidance(self) -> None:
+        instance_id = "inst-pm-box-reject-guidance"
+        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        payload = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            action="write",
+            args={"logical_name": "pm/prototypes/hero.html", "content": "x"},
+        )
+        self.assertFalse(payload.get("ok"), msg=payload)
+        error = payload.get("error")
+        self.assertIsInstance(error, dict, msg=payload)
+        assert isinstance(error, dict)
+        self.assertEqual(error.get("code"), "E_BUDDYBOX_LOGICAL_NAME")
+        self.assertEqual(error.get("class"), "invalid_input")
+        self.assertEqual(payload.get("boundary"), "active_buddy_private_file_capability")
+        self.assertFalse(payload.get("state_changed"))
+        self.assertFalse(payload.get("mutates_product_state"))
+        self.assertTrue(payload.get("retryable"))
+        self.assertEqual(payload.get("correctable_fields"), ["logical_name"])
+        alternatives = payload.get("alternative_capabilities")
+        self.assertIsInstance(alternatives, list, msg=payload)
+        assert isinstance(alternatives, list)
+        self.assertTrue(any(isinstance(row, dict) and row.get("tool") == "artifact" for row in alternatives))
+
+        packed = json.dumps(payload, ensure_ascii=True).lower()
+        self.assertNotIn("<active_buddy>/", packed)
+        self.assertNotIn("buddyswitch/local/buddybox", packed)
+        self.assertNotIn("shared state", packed)
+        self.assertNotIn("directly edit", packed)
 
 
 if __name__ == "__main__":

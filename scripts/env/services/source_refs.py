@@ -16,19 +16,22 @@ _ALLOWED_TYPES = {
     "external",
     "note",
 }
+_KNOWN_BUDDY_IDS = {"pm", "design", "dev", "market", "test"}
 
 
-def validate_buddybox_ref_path(path: Any) -> str:
-    if not isinstance(path, str) or not path.strip():
-        raise ValueError("source_refs.buddybox.path must be a non-empty string")
-    normalized = path.replace("\\", "/").strip()
+def validate_buddybox_ref_logical_name(logical_name: Any, *, active_buddy: str) -> str:
+    if not isinstance(logical_name, str) or not logical_name.strip():
+        raise ValueError("source_refs.buddybox.logical_name must be a non-empty string")
+    normalized = logical_name.replace("\\", "/").strip()
     if normalized.startswith("/"):
-        raise ValueError("source_refs.buddybox.path must be relative")
-    if normalized.startswith("../") or "/../" in normalized:
-        raise ValueError("source_refs.buddybox.path must not escape buddybox root")
+        raise ValueError("source_refs.buddybox.logical_name must be relative")
     pieces = [piece for piece in normalized.split("/") if piece not in {"", "."}]
     if not pieces:
-        raise ValueError("source_refs.buddybox.path must be non-empty")
+        raise ValueError("source_refs.buddybox.logical_name must be non-empty")
+    if any(piece == ".." for piece in pieces):
+        raise ValueError("source_refs.buddybox.logical_name must not include '..' traversal")
+    if pieces[0] in (_KNOWN_BUDDY_IDS | {active_buddy}):
+        raise ValueError("source_refs.buddybox.logical_name must not include a buddy prefix")
     return "/".join(pieces)
 
 
@@ -60,12 +63,11 @@ def normalize_source_refs(
             item["id"] = env_store.require_id(raw.get("id"), f"source_refs.{ref_type}.id")
         elif ref_type == "buddybox":
             if not allow_buddybox:
-                raise ValueError("source_refs.buddybox is private provenance and not allowed in handoff payloads")
-            normalized_path = validate_buddybox_ref_path(raw.get("path"))
-            owner = normalized_path.split("/", 1)[0]
-            if owner != active_buddy:
-                raise ValueError(f"source_refs.buddybox.path must stay under active buddy root '{active_buddy}/'")
-            item["path"] = normalized_path
+                raise ValueError("source_refs.buddybox logical names are private provenance and not allowed in handoff payloads")
+            if "path" in raw:
+                raise ValueError("source_refs.buddybox.logical_name is required; path is retired")
+            normalized_name = validate_buddybox_ref_logical_name(raw.get("logical_name"), active_buddy=active_buddy)
+            item["logical_name"] = normalized_name
             item["private_to_buddy"] = active_buddy
             item["read_grant"] = False
         elif ref_type == "external":
@@ -115,8 +117,8 @@ def source_ref_summary(refs: list[dict[str, Any]] | None) -> list[dict[str, Any]
             continue
         if "id" in row:
             summary.append({"type": ref_type, "id": row.get("id")})
-        elif "path" in row:
-            entry = {"type": ref_type, "path": row.get("path")}
+        elif "logical_name" in row:
+            entry = {"type": ref_type, "logical_name": row.get("logical_name")}
             if "private_to_buddy" in row:
                 entry["private_to_buddy"] = row.get("private_to_buddy")
             if "read_grant" in row:

@@ -1692,7 +1692,6 @@ exec "$real_git" "$@"
                 "buddyswitch/objects/tracks": shared_root / "state" / "buddyswitch" / "objects" / "tracks",
                 "buddyswitch/objects/artifacts": shared_root / "state" / "buddyswitch" / "objects" / "artifacts",
                 "buddyswitch/objects/handoffs": shared_root / "state" / "buddyswitch" / "objects" / "handoffs",
-                "buddyswitch/local/buddybox/pm": shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm",
             }
             for relative_path, state_path in projection_pairs.items():
                 projected_path = workspace_dir / relative_path
@@ -1702,6 +1701,19 @@ exec "$real_git" "$@"
                 live_probe = state_path / "live-projection-probe.json"
                 live_probe.write_text('{"ok":true}\n', encoding="utf-8")
                 self.assertEqual((projected_path / live_probe.name).read_text(encoding="utf-8"), '{"ok":true}\n')
+
+            buddybox_root = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm"
+            shared_buddybox_root = shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm"
+            self.assertTrue(buddybox_root.exists(), "active buddybox root should be created in workspace")
+            self.assertTrue(buddybox_root.is_dir(), "active buddybox root should be a directory")
+            self.assertFalse(buddybox_root.is_symlink(), "active buddybox root should not be a symlink")
+            self.assertFalse(shared_buddybox_root.exists(), "shared state should not host active buddybox storage")
+            workspace_probe = buddybox_root / "workspace-private-probe.txt"
+            workspace_probe.write_text("private\n", encoding="utf-8")
+            self.assertFalse(
+                (shared_buddybox_root / workspace_probe.name).exists(),
+                "workspace-local buddybox files must not appear under shared state",
+            )
 
             self.assertFalse((workspace_dir / "buddyswitch/local/buddybox/dev").exists())
             self.assertFalse((workspace_dir / "buddyswitch/content/" / "buddybox").exists())
@@ -3657,6 +3669,85 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             self.assertEqual(len(list((shared_root / "instances").glob("inst-*"))), 1)
             stored = json.loads(Path(second_payload["instance_json"]).read_text(encoding="utf-8"))
             self.assertEqual(stored["status"], "inactive")
+
+    def test_instance_workspace_rebuild_preserves_active_buddybox_inside_instance_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            ready_file = temp_root_path / "browser-ready.flag"
+            first_capture = temp_root_path / "capture-start.json"
+            second_capture = temp_root_path / "capture-open.json"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+
+            start_env = env.copy()
+            start_env["BUDDYSWITCH_TEST_CAPTURE"] = str(first_capture)
+            start_result = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "debug", "prompt-input", "Draft the onboarding PRD"],
+                cwd=ROOT,
+                env=start_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(start_result.returncode, 0, msg=start_result.stderr)
+
+            first_payload = json.loads(first_capture.read_text(encoding="utf-8"))
+            instance_id = first_payload["instance_id"]
+            workspace_dir = Path(first_payload["cwd"])
+            shared_root = source_home_path / ".codex-buddyswitch"
+
+            probe = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm" / "rebuild" / "probe.txt"
+            probe.parent.mkdir(parents=True, exist_ok=True)
+            probe.write_text("survives-reopen\n", encoding="utf-8")
+            self.assertFalse((shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm").exists())
+
+            open_env = env.copy()
+            open_env["BUDDYSWITCH_TEST_CAPTURE"] = str(second_capture)
+            open_result = subprocess.run(
+                [str(LAUNCHER), "instance", "open", instance_id, "debug", "prompt-input", "continue"],
+                cwd=ROOT,
+                env=open_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(open_result.returncode, 0, msg=open_result.stderr)
+
+            self.assertTrue(probe.exists())
+            self.assertEqual(probe.read_text(encoding="utf-8"), "survives-reopen\n")
+            self.assertTrue((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").is_dir())
+            self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").is_symlink())
+            self.assertFalse((shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm").exists())
 
     def test_instance_open_repairs_stale_broker_before_first_prepare(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

@@ -22,4 +22,4 @@ All buddy definitions come from `buddyswitch/manifest.toml`:
 
 - `pm` owns track lifecycle coordination.
 - Other buddies operate on task/artifact outputs within their manifest scope.
-- Track, task, artifact, and handoff objects are persisted under `buddyswitch/objects/`; private local buddy files are under `buddyswitch/local/buddybox/<active-buddy>/`.
+- Track, task, artifact, and handoff objects are persisted under `buddyswitch/objects/`; buddybox private files are instance-local and addressed via `buddybox.*` `logical_name`.

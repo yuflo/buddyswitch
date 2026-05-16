@@ -215,7 +215,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
             "Product-readable durable state is written explicitly as task, artifact, or handoff objects.",
             skill_text,
         )
-        self.assertIn("active buddy private local working files", skill_text)
+        self.assertIn("Use buddybox env tools with `logical_name` for active-buddy-private working files.", skill_text)
         self.assertNotIn(retired_current_buddy_run, skill_text)
         self.assertNotIn("Do not call " + "persist", skill_text)
         self.assertNotIn(retired_persist_one_buddy_run, skill_text)

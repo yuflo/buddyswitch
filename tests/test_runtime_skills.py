@@ -42,7 +42,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertIn("name: buddybox-tool", lowered)
         for token in (
             "active buddy",
-            "private local workspace",
+            "private file capability",
             "drafts",
             "prototypes",
             "exports",
@@ -58,7 +58,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             "when to use",
             "when not to use",
             "commands",
-            "path",
+            "logical name",
             "payload",
             "response",
             "promotion",
@@ -79,7 +79,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             "read",
             "write",
             "delete",
-            "<active_buddy>/",
+            "logical_name",
             "content",
             "content_base64",
             "content_type",
@@ -96,6 +96,8 @@ class RuntimeSkillsTests(unittest.TestCase):
             'tee buddyswitch/local/buddybox',
             'open("buddyswitch/local/buddybox',
             'path("buddyswitch/local/buddybox',
+            "--path",
+            "<active_buddy>/",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, lowered)

@@ -399,7 +399,11 @@ def _build_profile_mode_roots(args: argparse.Namespace) -> list[Path]:
     home = canonical(str(args.home))
     codex_home = canonical(str(args.codex_home))
     xdg_config_home = canonical(str(args.xdg_config_home))
-    buddybox_root = workspace_dir / str(profile["buddybox"]["root"])
+    buddybox_root_relative = env_profiles.resolve_buddybox_root(
+        str(profile["buddybox"]["root"]),
+        buddy_id=buddy_id,
+    )
+    buddybox_root = workspace_dir / buddybox_root_relative
 
     roots: list[Path] = [home, codex_home, xdg_config_home, buddybox_root]
     if profile.get("project", {}).get("access") == "write":

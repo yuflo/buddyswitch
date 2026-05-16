@@ -41,6 +41,10 @@ _REJECTION_CANONICAL_FIELDS = {
     "retry_guidance",
     "allowed_next_actions",
     "allowed_next_action_options",
+    "boundary",
+    "correctable_fields",
+    "alternative_capabilities",
+    "mutates_product_state",
 }
 
 
@@ -125,6 +129,26 @@ def follow_up_affordance(
     )
 
 
+def tool_affordance(
+    tool: str,
+    action: str,
+    effect: str,
+    condition: str,
+    risk: str | None = None,
+    mutates_product_state: bool = False,
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "tool": _require_non_empty_text(tool, "tool"),
+        "action": _require_non_empty_text(action, "action"),
+        "effect": _require_non_empty_text(effect, "effect"),
+        "condition": _require_non_empty_text(condition, "condition"),
+        "mutates_product_state": bool(mutates_product_state),
+    }
+    if isinstance(risk, str) and risk.strip():
+        row["risk"] = risk.strip()
+    return row
+
+
 def success(
     *,
     tool: str,
@@ -189,8 +213,13 @@ def rejection(
     state_changed: bool,
     retryable: bool,
     retry_guidance: str,
-    allowed_next_actions: list[str],
+    allowed_next_actions: list[str] | None = None,
     allowed_next_action_options: list[dict[str, Any]] | None = None,
+    error_class: str | None = None,
+    boundary: str | None = None,
+    correctable_fields: list[str] | None = None,
+    alternative_capabilities: list[dict[str, Any]] | None = None,
+    mutates_product_state: bool | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -209,8 +238,18 @@ def rejection(
         "state_changed": _require_bool(state_changed, "state_changed"),
         "retryable": _require_bool(retryable, "retryable"),
         "retry_guidance": _require_non_empty_text(retry_guidance, "retry_guidance"),
-        "allowed_next_actions": list(allowed_next_actions),
+        "allowed_next_actions": list(allowed_next_actions or []),
     }
+    if isinstance(error_class, str) and error_class.strip():
+        payload["error"]["class"] = error_class.strip()
+    if isinstance(boundary, str) and boundary.strip():
+        payload["boundary"] = boundary.strip()
+    if isinstance(correctable_fields, list):
+        payload["correctable_fields"] = list(correctable_fields)
+    if isinstance(alternative_capabilities, list):
+        payload["alternative_capabilities"] = list(alternative_capabilities)
+    if mutates_product_state is not None:
+        payload["mutates_product_state"] = _require_bool(mutates_product_state, "mutates_product_state")
     if isinstance(allowed_next_action_options, list):
         payload["allowed_next_action_options"] = allowed_next_action_options
     if isinstance(extra, dict):

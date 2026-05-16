@@ -243,7 +243,7 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertNotIn("binding", env_tools)
         self.assertEqual(tool_contracts.semantic_contract_errors(), [])
         compact_affordances = tool_contracts.compact_tool_affordances()
-        self.assertEqual(set(compact_affordances), {"buddybox", "artifact"})
+        self.assertEqual(set(compact_affordances), {"buddybox", "artifact", "handoff", "project_source"})
         runtime_env_tools = turn_runtime._build_env_tools_desc()
         self.assertIn("buddybox", runtime_env_tools)
         self.assertIn("artifact", runtime_env_tools)
@@ -252,7 +252,7 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertEqual(row.get("broker_method"), "env.tool")
                 self.assertIn("python3 scripts/env/client.py", str(row.get("command", "")))
         affordances = tool_contracts.compact_tool_affordances()
-        self.assertEqual(set(affordances), {"buddybox", "artifact"})
+        self.assertEqual(set(affordances), {"buddybox", "artifact", "handoff", "project_source"})
         self.assertIn("action_semantics", env_tools["buddybox"])
 
     def test_active_runtime_feedback_points_to_current_tool_discovery_surfaces(self) -> None:
@@ -594,6 +594,42 @@ class RepoConsistencyTests(unittest.TestCase):
                 "framework",
                 "buddyswitch",
                 "tools",
+                "-g",
+                "!docs/memo/**",
+                "-g",
+                "!docs/spec/**",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_route_map_surfaces_use_logical_names_not_private_roots(self) -> None:
+        pattern = "|".join(
+            (
+                r"buddybox.*--path",
+                r"<active_buddy>/",
+                r"buddyswitch/local/buddybox/<active-buddy>",
+                r"buddyswitch/local/buddybox/(pm|design|dev|market|test)/",
+                r"## Path Rules",
+            )
+        )
+        completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                pattern,
+                "README.md",
+                "AGENTS.md",
+                "tools/launcher/assets/buddies",
+                "buddyswitch/skills",
+                "framework/contracts",
+                "scripts/runtime_agents.py",
+                "scripts/skill_creator_importer.py",
                 "-g",
                 "!docs/memo/**",
                 "-g",

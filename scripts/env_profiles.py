@@ -15,6 +15,7 @@ from env_manifest import DEFAULT_MANIFEST, ManifestError, load_manifest, require
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONTRACT = ROOT / "framework" / "contracts" / "buddy-env-profile.json"
 _SAFE_BUDDY_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+BUDDYBOX_ROOT_TEMPLATE = "buddyswitch/local/buddybox/{buddy_id}"
 
 
 class EnvProfileError(ValueError):
@@ -154,6 +155,15 @@ def _require_search_capability(
     }
 
 
+def resolve_buddybox_root(root_template: str, *, buddy_id: str) -> str:
+    if root_template != BUDDYBOX_ROOT_TEMPLATE:
+        raise EnvProfileError(
+            "buddybox.root must be template "
+            f"{BUDDYBOX_ROOT_TEMPLATE!r}; got {root_template!r}"
+        )
+    return root_template.format(buddy_id=buddy_id)
+
+
 def validate_env_profile(
     profile: dict[str, Any],
     *,
@@ -221,11 +231,7 @@ def validate_env_profile(
 
     buddybox = _require_dict(profile.get("buddybox"), "buddybox")
     buddybox_root = _require_string(buddybox.get("root"), "buddybox.root")
-    expected_buddybox_root = f"buddyswitch/local/buddybox/{buddy_id}"
-    if buddybox_root != expected_buddybox_root:
-        raise EnvProfileError(
-            f"buddybox.root mismatch for '{buddy_id}': expected {expected_buddybox_root!r}, got {buddybox_root!r}"
-        )
+    resolve_buddybox_root(buddybox_root, buddy_id=buddy_id)
 
     fs_capability = _require_dict(profile.get("filesystem_capability"), "filesystem_capability")
     host_writable = _require_string_list(fs_capability.get("host_writable"), "filesystem_capability.host_writable")
