@@ -105,7 +105,7 @@ def _normalize_track_summary(track: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _track_context(track: dict[str, Any]) -> dict[str, Any]:
+def _track_context(track: dict[str, Any], active_buddy: str) -> dict[str, Any]:
     task_ids = [task_id for task_id in track.get("task_ids", []) if isinstance(task_id, str)]
     tasks: list[dict[str, Any]] = []
     artifacts: list[dict[str, Any]] = []
@@ -126,7 +126,7 @@ def _track_context(track: dict[str, Any]) -> dict[str, Any]:
             }
         )
         for artifact in track_relations.artifacts_for_task(task_id):
-            artifacts.append(track_relations.artifact_summary_row(artifact))
+            artifacts.append(track_relations.artifact_summary_row(artifact, active_buddy, track=track, task=task))
 
     return {
         "track": _normalize_track_summary(track),
@@ -214,7 +214,7 @@ def get_track_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCon
     if track is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"track not found: {track_id}")
 
-    context_payload = _track_context(track)
+    context_payload = _track_context(track, active_buddy)
     return tool_responses.success(
         tool="track",
         action=action,

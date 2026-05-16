@@ -85,6 +85,173 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
+    def _seed_pm_track_with_current_artifact(
+        self,
+        *,
+        track_id: str,
+        current_buddy: str = "pm",
+        next_buddy: str | None = None,
+    ) -> str:
+        env_store.create_track(
+            track_id,
+            "Source Intake Track",
+            current_buddy=current_buddy,
+            next_buddy=next_buddy,
+            summary="track with PM source",
+        )
+        env_store.create_task(
+            f"task-pm-{track_id}",
+            "PM Source Task",
+            buddy="pm",
+            track_id=track_id,
+            summary="PM produced source material",
+        )
+        artifact = env_store.create_artifact(
+            artifact_id=f"art-pm-{track_id}",
+            title="PM PRD",
+            buddy="pm",
+            kind="prd",
+            task_id=f"task-pm-{track_id}",
+            summary="PM PRD summary",
+            content={"body": "Full PM PRD body must not appear in track.get."},
+            created_by="pm",
+            source_refs=[{"type": "note", "label": "seed"}],
+        )
+        return str(artifact["id"])
+
+    def test_track_get_returns_artifact_summaries_for_track_with_pm_artifact(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-design-track-artifacts", buddy="design")
+        artifact_id = self._seed_pm_track_with_current_artifact(
+            track_id="track-get-artifact-summary",
+            current_buddy="pm",
+            next_buddy="design",
+        )
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-design-track-artifacts",
+            buddy="design",
+            tool="track",
+            action="get",
+            args={"track_id": "track-get-artifact-summary"},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        summary = response.get("track_context_summary")
+        self.assertIsInstance(summary, dict, msg=response)
+        assert isinstance(summary, dict)
+        artifacts = summary.get("artifacts")
+        self.assertIsInstance(artifacts, list, msg=response)
+        assert isinstance(artifacts, list)
+        self.assertEqual(len(artifacts), 1, msg=response)
+        row = artifacts[0]
+        self.assertEqual(row.get("artifact_id"), artifact_id)
+        self.assertEqual(row.get("id"), artifact_id)
+        self.assertEqual(row.get("track_id"), "track-get-artifact-summary")
+        self.assertEqual(row.get("kind"), "prd")
+        self.assertEqual(row.get("title"), "PM PRD")
+        self.assertEqual(row.get("summary"), "PM PRD summary")
+        self.assertEqual(row.get("source_buddy"), "pm")
+        self.assertEqual(row.get("source_task_id"), "task-pm-track-get-artifact-summary")
+        self.assertEqual(row.get("currentness"), "current")
+        self.assertEqual(row.get("relation"), "next_buddy")
+        self.assertTrue(row.get("readable_by_current_buddy"), msg=row)
+        self.assertNotIn("content", row)
+        self.assertNotIn("Full PM PRD body", json.dumps(response, ensure_ascii=False))
+
+    def test_track_get_marks_unrelated_foreign_artifact_unreadable_without_content(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-track-artifacts", buddy="dev")
+        artifact_id = self._seed_pm_track_with_current_artifact(
+            track_id="track-get-unreadable-artifact-summary",
+            current_buddy="pm",
+            next_buddy="design",
+        )
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-track-artifacts",
+            buddy="dev",
+            tool="track",
+            action="get",
+            args={"track_id": "track-get-unreadable-artifact-summary"},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        summary = response.get("track_context_summary")
+        self.assertIsInstance(summary, dict, msg=response)
+        assert isinstance(summary, dict)
+        artifacts = summary.get("artifacts")
+        self.assertIsInstance(artifacts, list, msg=response)
+        assert isinstance(artifacts, list)
+        self.assertEqual(len(artifacts), 1, msg=response)
+        row = artifacts[0]
+        self.assertEqual(row.get("artifact_id"), artifact_id)
+        self.assertEqual(row.get("relation"), "observer")
+        self.assertFalse(row.get("readable_by_current_buddy"), msg=row)
+        self.assertNotIn("content", row)
+        self.assertNotIn("Full PM PRD body", json.dumps(response, ensure_ascii=False))
+
+    def test_track_get_artifact_rows_match_artifact_list_for_same_track(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-design-track-artifact-list", buddy="design")
+        artifact_id = self._seed_pm_track_with_current_artifact(
+            track_id="track-get-list-consistency",
+            current_buddy="pm",
+            next_buddy="design",
+        )
+
+        track_response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-design-track-artifact-list",
+            buddy="design",
+            tool="track",
+            action="get",
+            args={"track_id": "track-get-list-consistency"},
+        )
+        list_response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-design-track-artifact-list",
+            buddy="design",
+            tool="artifact",
+            action="list",
+            args={"track_id": "track-get-list-consistency"},
+        )
+
+        self.assertTrue(track_response.get("ok"), msg=track_response)
+        self.assertTrue(list_response.get("ok"), msg=list_response)
+        track_summary = track_response.get("track_context_summary")
+        self.assertIsInstance(track_summary, dict, msg=track_response)
+        assert isinstance(track_summary, dict)
+        track_rows = track_summary.get("artifacts")
+        list_rows = list_response.get("artifacts")
+        self.assertIsInstance(track_rows, list, msg=track_response)
+        self.assertIsInstance(list_rows, list, msg=list_response)
+        assert isinstance(track_rows, list)
+        assert isinstance(list_rows, list)
+
+        self.assertEqual(
+            [
+                {
+                    "artifact_id": row.get("artifact_id"),
+                    "source_buddy": row.get("source_buddy"),
+                    "source_task_id": row.get("source_task_id"),
+                    "currentness": row.get("currentness"),
+                    "readable_by_current_buddy": row.get("readable_by_current_buddy"),
+                }
+                for row in track_rows
+            ],
+            [
+                {
+                    "artifact_id": row.get("artifact_id"),
+                    "source_buddy": row.get("source_buddy"),
+                    "source_task_id": row.get("source_task_id"),
+                    "currentness": row.get("currentness"),
+                    "readable_by_current_buddy": row.get("readable_by_current_buddy"),
+                }
+                for row in list_rows
+            ],
+        )
+        self.assertEqual(track_rows[0].get("artifact_id"), artifact_id)
+
     def test_pm_track_lifecycle_mutations(self) -> None:
         instance_json = self._instance_json(instance_id="inst-pm-track", buddy="pm")
 
