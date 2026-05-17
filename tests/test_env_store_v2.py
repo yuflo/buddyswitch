@@ -10,16 +10,14 @@ if str(SCRIPTS) not in sys.path:
 
 from env_store import (  # noqa: E402
     create_artifact,
-    create_handoff,
     create_task,
     create_track,
     delete_artifact,
     get_artifact,
     get_track,
     get_task,
-    list_handoffs,
     update_artifact,
-    validate_handoff_record,
+    validate_track,
     validate_task,
 )
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
@@ -443,41 +441,33 @@ class ArtifactSlotLifecycleTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(len(current_artifacts), 1)
 
 
-class HandoffRecordCompatibilityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def test_validate_handoff_record_omits_retired_private_path_list(self) -> None:
+class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_validate_track_rejects_current_and_next_buddy(self) -> None:
         payload = {
-            "id": "handoff-dev-test-v2",
-            "track_id": "track-v2",
-            "source_buddy": "dev",
-            "target_buddy": "test",
-            "source_task_id": None,
-            "artifact_ids": [],
-            _LEGACY_HANDOFF_PRIVATE_PATHS_FIELD: ["dev/tmp/note.md"],
-            "source_refs": [{"type": "note", "label": "seed"}],
-            "reason": "seed",
-            "context": "seed",
+            "id": "track-legacy-fields",
+            "title": "Legacy",
             "status": "active",
-            "created_at": "2026-05-15T00:00:00Z",
+            "owner_buddy": "pm",
+            "task_ids": [],
+            "summary": "",
             "updated_at": "2026-05-15T00:00:00Z",
+            "current_buddy": "pm",
+            "next_buddy": "dev",
         }
-        normalized = validate_handoff_record(payload)
-        self.assertNotIn(_LEGACY_HANDOFF_PRIVATE_PATHS_FIELD, normalized)
+        with self.assertRaises(ValueError):
+            validate_track(payload)
 
-    def test_create_handoff_and_list_handoffs_do_not_emit_retired_private_path_field(self) -> None:
-        create_track("track-v2-handoff", "V2 Handoff", current_buddy="dev", next_buddy="test")
-        created = create_handoff(
-            handoff_id="handoff-dev-test-v2-list",
-            track_id="track-v2-handoff",
-            source_buddy="dev",
-            target_buddy="test",
-            source_task_id=None,
-            artifact_ids=[],
-            source_refs=[{"type": "note", "label": "seed"}],
-            reason="seed",
-            context="seed",
-            status="active",
-        )
-        self.assertNotIn(_LEGACY_HANDOFF_PRIVATE_PATHS_FIELD, created)
-        rows = list_handoffs()
-        row = next(item for item in rows if item["id"] == "handoff-dev-test-v2-list")
-        self.assertNotIn(_LEGACY_HANDOFF_PRIVATE_PATHS_FIELD, row)
+    def test_store_rejects_handoff_source_ref_type(self) -> None:
+        task = create_task("task-src-ref-reject", "Task", buddy="pm")
+        with self.assertRaises(ValueError):
+            create_artifact(
+                artifact_id="art-src-ref-reject",
+                title="Reject handoff source ref",
+                buddy="pm",
+                kind="prd",
+                task_id=task["id"],
+                created_by="pm",
+                summary="",
+                content={"body": "x"},
+                source_refs=[{"type": "handoff", "id": "handoff-old"}],
+            )

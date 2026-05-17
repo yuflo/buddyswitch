@@ -6,7 +6,7 @@ description: Use when you need to create, list, read, update, or archive explici
 # task-tool
 
 ## Purpose
-- Manage active-buddy task work items and task ids used by artifacts and handoffs.
+- Manage active-buddy task work items and task ids used by artifacts.
 
 ## Runtime Route
 - CLI: `python3 scripts/env/client.py task <operation>`

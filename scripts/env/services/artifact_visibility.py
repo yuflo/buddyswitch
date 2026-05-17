@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Relation helpers for runless track/task/artifact read surfaces."""
+"""Shared artifact visibility and track readability helpers."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ def artifacts_for_task(task_id: str) -> list[dict[str, Any]]:
         return []
     rows: list[dict[str, Any]] = []
     for artifact_id in task.get("artifact_ids", []):
-        if not isinstance(artifact_id, str):
+        if not isinstance(artifact_id, str) or not artifact_id:
             continue
         artifact = env_store.get_artifact(artifact_id)
         if isinstance(artifact, dict):
@@ -39,27 +39,24 @@ def artifact_track_association(artifact: dict[str, Any]) -> dict[str, Any] | Non
             "track": None,
         }
     track = env_store.get_track(track_id)
-    if not isinstance(track, dict):
-        return {
-            "task_id": task_id,
-            "task": task,
-            "track_id": track_id,
-            "track": None,
-        }
     return {
         "task_id": task_id,
         "task": task,
         "track_id": track_id,
-        "track": track,
+        "track": track if isinstance(track, dict) else None,
     }
 
 
-def _active_buddy_participates(track: dict[str, Any], active_buddy: str) -> bool:
+def _has_active_task_relation(track: dict[str, Any], active_buddy: str) -> bool:
     for task_id in track.get("task_ids", []):
-        if not isinstance(task_id, str):
+        if not isinstance(task_id, str) or not task_id:
             continue
         task = env_store.get_task(task_id)
-        if isinstance(task, dict) and task.get("buddy") == active_buddy and task.get("status") != "archived":
+        if not isinstance(task, dict):
+            continue
+        if task.get("buddy") != active_buddy:
+            continue
+        if task.get("status") == "active":
             return True
     return False
 
@@ -67,21 +64,7 @@ def _active_buddy_participates(track: dict[str, Any], active_buddy: str) -> bool
 def artifact_read_decision(artifact: dict[str, Any], active_buddy: str) -> dict[str, Any]:
     artifact_id = artifact.get("id") if isinstance(artifact.get("id"), str) else None
     association = artifact_track_association(artifact)
-    track_id = association.get("track_id") if isinstance(association, dict) else None
-    source_task_id = association.get("task_id") if isinstance(association, dict) else None
-
     owner = artifact.get("buddy")
-    if isinstance(owner, str) and owner == active_buddy:
-        return {
-            "allowed": True,
-            "artifact_id": artifact_id,
-            "track_id": track_id,
-            "source_task_id": source_task_id,
-            "relation": "owner",
-            "permission_boundary": "none",
-            "why": "active buddy owns source artifact",
-            "missing_preconditions": [],
-        }
 
     if not isinstance(association, dict):
         return {
@@ -92,10 +75,34 @@ def artifact_read_decision(artifact: dict[str, Any], active_buddy: str) -> dict[
             "relation": "none",
             "permission_boundary": "artifact.task_association",
             "why": "artifact is missing a readable task association",
-            "missing_preconditions": ["artifact must reference a task"],
         }
 
+    track_id = association.get("track_id")
+    source_task_id = association.get("task_id")
     track = association.get("track")
+
+    if isinstance(track, dict) and track.get("status") == "archived":
+        return {
+            "allowed": False,
+            "artifact_id": artifact_id,
+            "track_id": track_id,
+            "source_task_id": source_task_id,
+            "relation": "none",
+            "permission_boundary": "track.lifecycle_status",
+            "why": "archived tracks are explicit read boundaries for related artifacts",
+        }
+
+    if isinstance(owner, str) and owner == active_buddy:
+        return {
+            "allowed": True,
+            "artifact_id": artifact_id,
+            "track_id": track_id,
+            "source_task_id": source_task_id,
+            "relation": "owner",
+            "permission_boundary": "none",
+            "why": "active buddy owns source artifact",
+        }
+
     if not isinstance(track, dict):
         return {
             "allowed": False,
@@ -104,63 +111,39 @@ def artifact_read_decision(artifact: dict[str, Any], active_buddy: str) -> dict[
             "source_task_id": source_task_id,
             "relation": "none",
             "permission_boundary": "artifact.track_association",
-            "why": "artifact task is not attached to a readable track",
-            "missing_preconditions": ["artifact task must reference an existing track"],
+            "why": "foreign artifact task is not attached to a readable track",
         }
 
-    if track.get("status") == "archived":
+    if not bool(artifact.get("is_current")):
         return {
             "allowed": False,
             "artifact_id": artifact_id,
             "track_id": track_id,
             "source_task_id": source_task_id,
-            "relation": "observer",
-            "permission_boundary": "track.lifecycle_status",
-            "why": "archived tracks do not grant cross-buddy reads",
-            "missing_preconditions": ["track must not be archived"],
-        }
-
-    if not artifact.get("is_current"):
-        return {
-            "allowed": False,
-            "artifact_id": artifact_id,
-            "track_id": track_id,
-            "source_task_id": source_task_id,
-            "relation": "observer",
+            "relation": "none",
             "permission_boundary": "artifact.currentness",
-            "why": "only current foreign artifacts are readable by relation",
-            "missing_preconditions": ["artifact must be current"],
+            "why": "only current foreign artifacts are readable through track collaboration",
         }
 
-    relation = "observer"
-    if track.get("current_buddy") == active_buddy:
-        relation = "current_buddy"
-    elif track.get("next_buddy") == active_buddy:
-        relation = "next_buddy"
-    elif _active_buddy_participates(track, active_buddy):
-        relation = "participant"
-
-    if relation == "observer":
+    if _has_active_task_relation(track, active_buddy):
         return {
-            "allowed": False,
+            "allowed": True,
             "artifact_id": artifact_id,
             "track_id": track_id,
             "source_task_id": source_task_id,
-            "relation": relation,
-            "permission_boundary": "artifact.track_relation",
-            "why": "active buddy has no readable relation on source track",
-            "missing_preconditions": ["active buddy must be participant/current/next on track"],
+            "relation": "track_task",
+            "permission_boundary": "none",
+            "why": "active buddy has an active task relation on the same track",
         }
 
     return {
-        "allowed": True,
+        "allowed": False,
         "artifact_id": artifact_id,
         "track_id": track_id,
         "source_task_id": source_task_id,
-        "relation": relation,
-        "permission_boundary": "none",
-        "why": "active buddy relation allows reading current source artifact",
-        "missing_preconditions": [],
+        "relation": "none",
+        "permission_boundary": "artifact.track_relation",
+        "why": "active buddy has no active task relation on source track",
     }
 
 
@@ -172,21 +155,27 @@ def artifact_summary_row(
     task: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     decision = artifact_read_decision(artifact, active_buddy)
+
     source_task = task
     if not isinstance(source_task, dict):
         task_id = artifact.get("task_id")
         source_task = env_store.get_task(task_id) if isinstance(task_id, str) else None
+
     source_track = track
     if not isinstance(source_track, dict) and isinstance(source_task, dict):
         track_id = source_task.get("track_id")
         source_track = env_store.get_track(track_id) if isinstance(track_id, str) else None
+
+    relation = decision.get("relation")
+    if relation not in {"owner", "track_task"}:
+        relation = "none"
 
     is_current = bool(artifact.get("is_current"))
     return {
         "id": artifact.get("id"),
         "artifact_id": artifact.get("id"),
         "track_id": source_track.get("id") if isinstance(source_track, dict) else decision.get("track_id"),
-        "relation": decision.get("relation"),
+        "relation": relation,
         "kind": artifact.get("kind"),
         "title": artifact.get("title"),
         "summary": artifact.get("summary", ""),
@@ -196,7 +185,7 @@ def artifact_summary_row(
         "source_refs": artifact.get("source_refs"),
         "revision": artifact.get("revision"),
         "currentness": "current" if is_current else "superseded",
-        "readable_by_current_buddy": bool(decision.get("allowed")),
+        "readable_by_active_buddy": bool(decision.get("allowed")),
     }
 
 
@@ -232,3 +221,26 @@ def current_artifact_rows_for_track(track_id: str, active_buddy: str) -> list[di
         )
     )
     return rows
+
+
+def assert_track_readable(track_id: str, *, active_buddy: str, action: str) -> dict[str, Any]:
+    track = env_store.get_track(track_id)
+    if not isinstance(track, dict):
+        return {
+            "ok": False,
+            "code": "E_TRACK_PAYLOAD",
+            "message": f"track not found: {track_id}",
+            "permission_boundary": "request-payload",
+        }
+    if track.get("status") == "archived":
+        return {
+            "ok": False,
+            "code": "E_TRACK_ARCHIVED",
+            "message": f"track '{track_id}' is archived and cannot be read via {action}",
+            "permission_boundary": "track.lifecycle_status",
+        }
+    return {
+        "ok": True,
+        "track": track,
+        "active_buddy": active_buddy,
+    }

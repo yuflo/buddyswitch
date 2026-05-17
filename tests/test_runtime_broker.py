@@ -32,17 +32,6 @@ MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 BROKER_V2_PROTOCOL = "buddyswitch-runtime-broker/v2"
 PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
 
-PM_COMMIT = {
-    "execution_summary": "PM wrote the AI schedule tool landing page PRD and created the delivery track.",
-    "working_notes": ["The user requested PRD creation and track binding in one PM run."],
-    "handoff": {
-        "next_buddy": "market",
-        "reason": "Market should validate competitor landing page positioning before design.",
-        "context": "Use the PRD artifact and track summary as source context.",
-    },
-    "contributors": {"skills": ["write-prd", "track-tool"], "agents": []},
-}
-
 
 def _require_module(name: str):
     try:
@@ -177,6 +166,17 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(after_instance, before_instance)
         self.assertFalse(self._runtime_path("buddyswitch/content/runs").exists())
         self.assertFalse(self._runtime_path("runs/raw").exists())
+
+    def test_env_tool_rejects_legacy_handoff_tool_payload(self) -> None:
+        instance_json = self._instance_json()
+        response = self._dispatch(
+            method="env.tool",
+            params={"tool": "handoff", "action": "list", "args": {}},
+            instance_json=instance_json,
+        )
+        self.assertFalse(response["ok"], msg=response)
+        self.assertEqual(response["error"]["code"], "E_ENV_TOOL", msg=response)
+        self.assertEqual(response.get("permission_boundary"), "env.tool", msg=response)
 
     def test_env_tool_buddybox_write_uses_instance_workspace_local_root(self) -> None:
         workspace_dir = self._runtime_path("alt-workspace")

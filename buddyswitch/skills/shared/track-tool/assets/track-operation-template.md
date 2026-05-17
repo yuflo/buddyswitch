@@ -1,25 +1,29 @@
-Track payload examples for `python3 scripts/env/client.py track <operation> --payload <json>`.
-
-Create:
+## `track.create` payload
 
 ```json
 {
-  "track_id": "track-example",
-  "title": "Example Track",
+  "track_id": "track-onboarding",
+  "title": "Onboarding polish",
   "status": "active",
-  "current_buddy": "pm",
-  "next_buddy": "dev",
-  "summary": "Why this track exists."
+  "summary": "Focus on reducing setup friction."
 }
 ```
 
-Advance:
+## `track.update` payload
 
 ```json
 {
-  "track_id": "track-example",
-  "current_buddy": "dev",
-  "next_buddy": "test",
-  "summary": "Why the next buddy should continue."
+  "track_id": "track-onboarding",
+  "title": "Onboarding polish v2",
+  "status": "active",
+  "summary": "Updated after design review."
+}
+```
+
+## `track.archive` payload
+
+```json
+{
+  "track_id": "track-onboarding"
 }
 ```

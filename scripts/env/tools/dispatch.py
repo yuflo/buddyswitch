@@ -10,7 +10,6 @@ from env.services import artifacts as artifact_service
 from env.services import buddybox as buddybox_service
 from env.services import context as context_service
 from env.services import evidence as evidence_service
-from env.services import handoffs as handoff_service
 from env.services import search as search_service
 from env.services import tasks as task_service
 from env.services import tracks as track_service
@@ -30,7 +29,6 @@ HANDLERS_BY_TOOL = {
         "join": track_service.join_track_for_active_buddy,
         "create": track_service.create_track_for_pm,
         "update": track_service.update_track_for_pm,
-        "advance": track_service.advance_track_for_pm,
         "archive": track_service.archive_track_for_pm,
         "attach_task": track_service.attach_task_to_track,
         "detach_task": track_service.detach_task_from_track,
@@ -41,11 +39,6 @@ HANDLERS_BY_TOOL = {
         "validate_payload": artifact_service.validate_artifact_payload,
         "create_revision": artifact_service.create_artifact_revision,
         "update_metadata": artifact_service.update_artifact_metadata,
-    },
-    "handoff": {
-        "list": handoff_service.list_handoffs_for_active_buddy,
-        "validate": handoff_service.validate_handoff,
-        "create": handoff_service.create_handoff_for_active_buddy,
     },
     "buddybox": {
         "desc": buddybox_service.describe_buddybox_for_active_buddy,

@@ -212,7 +212,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
         self.assertIn("Target BuddySwitch buddy: `dev`.", skill_text)
         self.assertIn("Runtime execution uses env.tool through python3 scripts/env/client.py", skill_text)
         self.assertIn(
-            "Product-readable durable state is written explicitly as task, artifact, or handoff objects.",
+            "Product-readable durable state is written explicitly as task or artifact objects.",
             skill_text,
         )
         self.assertIn("Use buddybox env tools with `logical_name` for active-buddy-private working files.", skill_text)

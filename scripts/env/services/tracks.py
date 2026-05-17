@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import env_store
-from env.services import track_relations
+from env.services import artifact_visibility
 from env.tools import responses as tool_responses
 
 
@@ -23,9 +23,8 @@ class TrackServiceContext(TypedDict):
 _LIST_FIELDS = {"status", "buddy", "limit"}
 _GET_FIELDS = {"track_id"}
 _JOIN_FIELDS = {"track_id", "task_id", "title", "summary"}
-_CREATE_FIELDS = {"track_id", "title", "status", "current_buddy", "next_buddy", "summary"}
-_UPDATE_FIELDS = {"track_id", "title", "status", "current_buddy", "next_buddy", "summary"}
-_ADVANCE_FIELDS = {"track_id", "status", "current_buddy", "next_buddy", "summary"}
+_CREATE_FIELDS = {"track_id", "title", "status", "summary"}
+_UPDATE_FIELDS = {"track_id", "title", "status", "summary"}
 _ARCHIVE_FIELDS = {"track_id"}
 _ATTACH_FIELDS = {"track_id", "task_id"}
 
@@ -41,8 +40,6 @@ def _allowed(action: str) -> set[str]:
         return _CREATE_FIELDS
     if action == "track.update":
         return _UPDATE_FIELDS
-    if action == "track.advance":
-        return _ADVANCE_FIELDS
     if action == "track.archive":
         return _ARCHIVE_FIELDS
     if action in {"track.attach_task", "track.detach_task"}:
@@ -60,10 +57,8 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         correctable_fields = ["title"]
     elif "status" in message:
         correctable_fields = ["status"]
-    elif "current_buddy" in message:
-        correctable_fields = ["current_buddy"]
-    elif "next_buddy" in message:
-        correctable_fields = ["next_buddy"]
+    elif "owner_buddy" in message:
+        correctable_fields = ["owner_buddy"]
     elif "unsupported payload fields:" in message:
         suffix = message.split("unsupported payload fields:", 1)[1].strip()
         if suffix:
@@ -86,18 +81,26 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
             "Retry with only documented track payload fields.",
         ],
         correctable_fields=correctable_fields,
-        alternative_capabilities=[
-            tool_responses.alternative_capability(
-                tool="context",
-                action="summarize",
-                condition="Use when you need candidate track/task ids before retrying.",
-            ),
-            tool_responses.alternative_capability(
-                tool="context",
-                action="get",
-                condition="Use when you need full catalog and operation semantics before retrying.",
-            ),
-        ],
+    )
+
+
+def _reject_archived(*, action: str, active_buddy: str, track_id: str) -> dict[str, Any]:
+    message = f"track '{track_id}' is archived and cannot be read via {action}"
+    return tool_responses.rejection(
+        tool="track",
+        action=action,
+        active_buddy=active_buddy,
+        code="E_TRACK_ARCHIVED",
+        message=message,
+        permission_boundary="track.lifecycle_status",
+        human_summary="Archived tracks are explicit read boundaries.",
+        why_blocked=message,
+        impact="No track, task, or artifact state changed.",
+        state_changed=False,
+        retryable=False,
+        retry_guidance="Use track.list without archived rows or choose an active track id.",
+        allowed_next_actions=["Use track.list for active track discovery."],
+        correctable_fields=["track_id"],
     )
 
 
@@ -117,21 +120,8 @@ def _reject_authority(*, action: str, active_buddy: str, message: str) -> dict[s
         retry_guidance="Use buddy 'pm' for track lifecycle updates.",
         allowed_next_actions=[
             "Use track.list to inspect current lifecycle state.",
-            "Hand off to PM when lifecycle mutation is required.",
         ],
         correctable_fields=["active_buddy"],
-        alternative_capabilities=[
-            tool_responses.alternative_capability(
-                tool="track",
-                action="list",
-                condition="Use when you need read-only lifecycle inspection as a non-PM buddy.",
-            ),
-            tool_responses.alternative_capability(
-                tool="track",
-                action="get",
-                condition="Use when you need one track context without lifecycle mutation.",
-            ),
-        ],
     )
 
 
@@ -156,31 +146,12 @@ def _reject_task_scope(
         impact="No track, task, or artifact state changed.",
         state_changed=False,
         retryable=True,
-        retry_guidance="Resolve task ownership scope (use a task_id owned by the active buddy) before mutating track relations.",
+        retry_guidance="Use a task_id owned by the active buddy.",
         allowed_next_actions=[
             "Use task.list to find active-buddy task ids.",
-            "Use track.get to inspect the current track context before relation updates.",
-            "Use track.join to create or reuse an active-buddy task relation.",
+            "Use track.get to inspect current track context.",
         ],
         correctable_fields=["task_id"],
-        alternative_capabilities=[
-            tool_responses.alternative_capability(
-                tool="task",
-                action="list",
-                condition="Use when you need owned task ids before retrying relation mutation.",
-            ),
-            tool_responses.alternative_capability(
-                tool="track",
-                action="get",
-                condition="Use when you need one track context before choosing a task id.",
-            ),
-            tool_responses.alternative_capability(
-                tool="track",
-                action="join",
-                condition="Use when you need to create or reuse an active-buddy task relation first.",
-                mutates_product_state=True,
-            ),
-        ],
     )
 
 
@@ -190,8 +161,7 @@ def _normalize_track_summary(track: dict[str, Any]) -> dict[str, Any]:
         "title": track.get("title"),
         "summary": track.get("summary", ""),
         "status": track.get("status"),
-        "current_buddy": track.get("current_buddy"),
-        "next_buddy": track.get("next_buddy"),
+        "owner_buddy": track.get("owner_buddy"),
         "task_ids": list(track.get("task_ids", [])),
         "updated_at": track.get("updated_at"),
     }
@@ -200,7 +170,6 @@ def _normalize_track_summary(track: dict[str, Any]) -> dict[str, Any]:
 def _track_context(track: dict[str, Any], active_buddy: str) -> dict[str, Any]:
     task_ids = [task_id for task_id in track.get("task_ids", []) if isinstance(task_id, str)]
     tasks: list[dict[str, Any]] = []
-    artifacts: list[dict[str, Any]] = []
     for task_id in task_ids:
         task = env_store.get_task(task_id)
         if task is None:
@@ -217,9 +186,8 @@ def _track_context(track: dict[str, Any], active_buddy: str) -> dict[str, Any]:
                 "updated_at": task.get("updated_at"),
             }
         )
-        for artifact in track_relations.artifacts_for_task(task_id):
-            artifacts.append(track_relations.artifact_summary_row(artifact, active_buddy, track=track, task=task))
 
+    artifacts = artifact_visibility.current_artifact_rows_for_track(str(track.get("id") or ""), active_buddy)
     return {
         "track": _normalize_track_summary(track),
         "tasks": tasks,
@@ -238,6 +206,17 @@ def _is_pm(active_buddy: str) -> bool:
     return active_buddy == "pm"
 
 
+def _task_buddies(track: dict[str, Any]) -> set[str]:
+    buddies: set[str] = set()
+    for task_id in track.get("task_ids", []):
+        if not isinstance(task_id, str):
+            continue
+        task = env_store.get_task(task_id)
+        if isinstance(task, dict) and isinstance(task.get("buddy"), str):
+            buddies.add(task["buddy"])
+    return buddies
+
+
 def list_tracks_for_active_buddy(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.list"
     active_buddy = context["active_buddy"]
@@ -246,16 +225,19 @@ def list_tracks_for_active_buddy(*, args: dict[str, Any], context: TrackServiceC
         return payload_error
 
     rows = env_store.list_tracks()
+
     status = args.get("status")
     if isinstance(status, str) and status:
         rows = [row for row in rows if row.get("status") == status]
+    else:
+        rows = [row for row in rows if row.get("status") != "archived"]
 
     buddy = args.get("buddy")
     if isinstance(buddy, str) and buddy:
         rows = [
             row
             for row in rows
-            if row.get("current_buddy") == buddy or row.get("next_buddy") == buddy or buddy in _task_buddies(row)
+            if row.get("owner_buddy") == buddy or buddy in _task_buddies(row)
         ]
 
     limit = args.get("limit")
@@ -279,17 +261,6 @@ def list_tracks_for_active_buddy(*, args: dict[str, Any], context: TrackServiceC
     )
 
 
-def _task_buddies(track: dict[str, Any]) -> set[str]:
-    buddies: set[str] = set()
-    for task_id in track.get("task_ids", []):
-        if not isinstance(task_id, str):
-            continue
-        task = env_store.get_task(task_id)
-        if isinstance(task, dict) and isinstance(task.get("buddy"), str):
-            buddies.add(task["buddy"])
-    return buddies
-
-
 def get_track_for_active_buddy(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     action = "track.get"
     active_buddy = context["active_buddy"]
@@ -305,6 +276,8 @@ def get_track_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCon
     track = env_store.get_track(track_id)
     if track is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"track not found: {track_id}")
+    if track.get("status") == "archived":
+        return _reject_archived(action=action, active_buddy=active_buddy, track_id=track_id)
 
     context_payload = _track_context(track, active_buddy)
     return tool_responses.success(
@@ -338,12 +311,14 @@ def join_track_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCo
     track = env_store.get_track(track_id)
     if track is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"track not found: {track_id}")
+    if track.get("status") == "archived":
+        return _reject_archived(action=action, active_buddy=active_buddy, track_id=track_id)
 
     task_id = args.get("task_id")
     if task_id is not None and (not isinstance(task_id, str) or not task_id.strip()):
         return _reject_payload(action=action, active_buddy=active_buddy, message="task_id must be a non-empty string")
 
-    task = None
+    task: dict[str, Any] | None = None
     if isinstance(task_id, str) and task_id.strip():
         task = env_store.get_task(task_id.strip())
         if task is None:
@@ -381,23 +356,17 @@ def join_track_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCo
             summary=summary,
             initial_run_id=None,
         )
-        state_changes.append(
-            {"object_type": "task_relation", "change": "task_created", "task_id": task["id"], "track_id": track_id}
-        )
+        state_changes.append({"object_type": "task_relation", "change": "task_created", "task_id": task["id"], "track_id": track_id})
     elif task.get("track_id") != track_id:
         task = env_store.register_task_to_track(track_id, task["id"])
-        state_changes.append(
-            {"object_type": "task_relation", "change": "task_attached", "task_id": task["id"], "track_id": track_id}
-        )
+        state_changes.append({"object_type": "task_relation", "change": "task_attached", "task_id": task["id"], "track_id": track_id})
     else:
         env_store.register_task_to_track(track_id, task["id"])
 
     updated_track = env_store.get_track(track_id)
     if updated_track is not None and task["id"] in updated_track.get("task_ids", []):
         if not state_changes:
-            state_changes.append(
-                {"object_type": "task_relation", "change": "relation_reused", "task_id": task["id"], "track_id": track_id}
-            )
+            state_changes.append({"object_type": "task_relation", "change": "relation_reused", "task_id": task["id"], "track_id": track_id})
 
     return tool_responses.success(
         tool="track",
@@ -422,7 +391,7 @@ def join_track_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCo
                 "status": task.get("status"),
                 "track_id": task.get("track_id"),
             },
-            "relation": "participant",
+            "relation": "track_task",
         },
     )
 
@@ -449,8 +418,6 @@ def _pm_write(
     title = args.get("title")
     summary = args.get("summary")
     status = args.get("status")
-    current_buddy = args.get("current_buddy")
-    next_buddy = args.get("next_buddy")
 
     if action == "track.create":
         if not isinstance(title, str) or not title.strip():
@@ -467,19 +434,12 @@ def _pm_write(
                 active_buddy=active_buddy,
                 message=f"status must be one of {', '.join(env_store.VALID_TRACK_STATUS)}",
             )
-        if current_buddy is None:
-            current_buddy = active_buddy
-        if not isinstance(current_buddy, str) or not current_buddy.strip():
-            return _reject_payload(action=action, active_buddy=active_buddy, message="current_buddy must be a non-empty string")
-        if next_buddy is not None and (not isinstance(next_buddy, str) or not next_buddy.strip()):
-            return _reject_payload(action=action, active_buddy=active_buddy, message="next_buddy must be a non-empty string")
         try:
             created = env_store.create_track(
                 track_id,
                 title.strip(),
                 status=status,
-                current_buddy=current_buddy.strip(),
-                next_buddy=next_buddy.strip() if isinstance(next_buddy, str) and next_buddy.strip() else None,
+                owner_buddy=active_buddy,
                 summary=summary,
             )
         except ValueError as exc:
@@ -502,7 +462,7 @@ def _pm_write(
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"track not found: {track_id}")
 
     patch: dict[str, Any] = {}
-    for field in ("title", "summary", "status", "current_buddy", "next_buddy"):
+    for field in ("title", "summary", "status"):
         if field in args:
             patch[field] = args[field]
 
@@ -522,11 +482,6 @@ def _pm_write(
             active_buddy=active_buddy,
             message=f"status must be one of {', '.join(env_store.VALID_TRACK_STATUS)}",
         )
-    if "current_buddy" in patch and (not isinstance(patch["current_buddy"], str) or not patch["current_buddy"].strip()):
-        return _reject_payload(action=action, active_buddy=active_buddy, message="current_buddy must be a non-empty string")
-    if "next_buddy" in patch and patch["next_buddy"] is not None:
-        if not isinstance(patch["next_buddy"], str) or not patch["next_buddy"].strip():
-            return _reject_payload(action=action, active_buddy=active_buddy, message="next_buddy must be a non-empty string")
 
     try:
         updated = env_store.update_track(track_id, patch)
@@ -535,7 +490,6 @@ def _pm_write(
 
     lifecycle_change = {
         "track.update": "updated",
-        "track.advance": "advanced",
         "track.archive": "archived",
     }.get(action, "updated")
     return tool_responses.success(
@@ -560,10 +514,6 @@ def update_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -
     return _pm_write(action="track.update", args=args, context=context)
 
 
-def advance_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
-    return _pm_write(action="track.advance", args=args, context=context)
-
-
 def archive_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
     return _pm_write(action="track.archive", args=args, context=context)
 
@@ -574,10 +524,17 @@ def attach_task_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
     payload_error = _require_fields(action, args, active_buddy)
     if payload_error is not None:
         return payload_error
+
     track_id = args.get("track_id")
     task_id = args.get("task_id")
     if not isinstance(track_id, str) or not track_id.strip() or not isinstance(task_id, str) or not task_id.strip():
         return _reject_payload(action=action, active_buddy=active_buddy, message="track_id and task_id are required")
+
+    track = env_store.get_track(track_id.strip())
+    if track is None:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=f"track not found: {track_id}")
+    if track.get("status") == "archived":
+        return _reject_archived(action=action, active_buddy=active_buddy, track_id=track_id.strip())
 
     task = env_store.get_task(task_id.strip())
     if task is None:
@@ -595,7 +552,7 @@ def attach_task_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
     except ValueError as exc:
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
-    track = env_store.get_track(track_id.strip())
+    updated_track = env_store.get_track(track_id.strip())
     return tool_responses.success(
         tool="track",
         action=action,
@@ -604,19 +561,12 @@ def attach_task_to_track(*, args: dict[str, Any], context: TrackServiceContext) 
         state_changed=True,
         durability="durable",
         updated_ids=[task_id.strip(), track_id.strip()],
-        state_changes=[
-            {
-                "object_type": "task_track_relation",
-                "change": "attached",
-                "task_id": task_id.strip(),
-                "track_id": track_id.strip(),
-            }
-        ],
+        state_changes=[{"object_type": "task_track_relation", "change": "attached", "task_id": task_id.strip(), "track_id": track_id.strip()}],
         allowed_next_actions=["Use track.get to inspect updated relationship."],
         extra={
             "track_id": track_id.strip(),
             "task_id": task_id.strip(),
-            "track": _normalize_track_summary(track) if isinstance(track, dict) else None,
+            "track": _normalize_track_summary(updated_track) if isinstance(updated_track, dict) else None,
             "task": {
                 "id": updated_task.get("id"),
                 "buddy": updated_task.get("buddy"),
@@ -666,14 +616,7 @@ def detach_task_from_track(*, args: dict[str, Any], context: TrackServiceContext
         state_changed=True,
         durability="durable",
         updated_ids=[task_id.strip(), track_id.strip()],
-        state_changes=[
-            {
-                "object_type": "task_track_relation",
-                "change": "detached",
-                "task_id": task_id.strip(),
-                "track_id": track_id.strip(),
-            }
-        ],
+        state_changes=[{"object_type": "task_track_relation", "change": "detached", "task_id": task_id.strip(), "track_id": track_id.strip()}],
         allowed_next_actions=["Use track.get to inspect updated relationship."],
         extra={
             "track_id": track_id.strip(),

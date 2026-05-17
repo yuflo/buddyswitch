@@ -88,28 +88,31 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(buddybox["ok"], msg=buddybox)
         self.assertEqual(buddybox.get("logical_name"), "e2e/notes.md")
 
-        handoff = self._dispatch(
-            buddy="pm",
-            tool="handoff",
+        dev_task = self._dispatch(
+            buddy="dev",
+            tool="task",
             action="create",
             args={
-                "handoff_id": "handoff-pm-dev-e2e",
+                "task_id": "task-dev-e2e-runless",
+                "title": "Implement",
+                "summary": "consume PM artifact",
                 "track_id": "track-e2e-runless",
-                "source_task_id": "task-pm-e2e-runless",
-                "target_buddy": "dev",
-                "artifact_ids": ["art-pm-e2e-prd-r1"],
-                "source_refs": [{"type": "artifact", "id": "art-pm-e2e-prd-r1"}],
-                "reason": "implement",
-                "context": "handoff context",
-                "status": "active",
             },
         )
-        self.assertTrue(handoff["ok"], msg=handoff)
+        self.assertTrue(dev_task["ok"], msg=dev_task)
+
+        cross_read = self._dispatch(
+            buddy="dev",
+            tool="artifact",
+            action="get",
+            args={"artifact_id": "art-pm-e2e-prd-r1"},
+        )
+        self.assertTrue(cross_read["ok"], msg=cross_read)
 
         self.assertIsNotNone(env_store.get_track("track-e2e-runless"))
         self.assertIsNotNone(env_store.get_task("task-pm-e2e-runless"))
+        self.assertIsNotNone(env_store.get_task("task-dev-e2e-runless"))
         self.assertIsNotNone(env_store.get_artifact("art-pm-e2e-prd-r1"))
-        self.assertIsNotNone(env_store.get_handoff("handoff-pm-dev-e2e"))
         self.assertTrue(self._runtime_path("buddyswitch/local/buddybox/pm/e2e/notes.md").exists())
         self.assertFalse(self._runtime_path(f"{_OLD_BUDDYBOX_ROOT}/pm/e2e/notes.md").exists())
         self.assertFalse(self._runtime_path("runs/raw").exists())
@@ -124,7 +127,6 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track_id": "track-e2e-logical-promotion",
                 "title": "Logical Promotion",
                 "summary": "promote private file content",
-                "next_buddy": "dev",
             },
         )
         self.assertTrue(track["ok"], msg=track)
@@ -176,6 +178,19 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         self.assertTrue(created_artifact["ok"], msg=created_artifact)
+
+        dev_task = self._dispatch(
+            buddy="dev",
+            tool="task",
+            action="create",
+            args={
+                "task_id": "task-dev-logical-promotion",
+                "title": "Read promoted PRD",
+                "summary": "linked for cross-buddy read",
+                "track_id": "track-e2e-logical-promotion",
+            },
+        )
+        self.assertTrue(dev_task["ok"], msg=dev_task)
 
         read_as_dev = self._dispatch(
             buddy="dev",

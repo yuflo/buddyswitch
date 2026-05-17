@@ -12,7 +12,7 @@ description: Use when you need explicit track context, PM lifecycle actions, or 
 ## Runtime Route
 - CLI: `python3 scripts/env/client.py track <operation>`
 - Broker method: `env.tool`
-- Operations: `list`, `get`, `join`, `create`, `update`, `advance`, `archive`, `attach-task`, `detach-task`
+- Operations: `list`, `get`, `join`, `create`, `update`, `archive`, `attach-task`, `detach-task`
 
 ## Workflow Notes
 - `join` creates, attaches, or reuses task relations without hidden binding state.

@@ -24,7 +24,6 @@ CATEGORY_ORDER = (
     "artifact_objects",
     "task_objects",
     "track_objects",
-    "handoff_objects",
 )
 
 
@@ -242,12 +241,10 @@ def new_plan(scope: str, *, buddy: str | None = None) -> dict[str, Any]:
         "delete_paths": [],
         "artifact_object_ids": [],
         "task_object_ids": [],
-        "handoff_object_ids": [],
         "warnings": [],
         "counts_by_category": counts,
         "artifact_records": [],
         "task_records": [],
-        "handoff_records": [],
         "direct_delete_paths": [],
         "external_delete_paths": {},
     }
@@ -334,29 +331,6 @@ def discover_task_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[s
                 "object_path": relative,
             }
         )
-    return valid, invalid
-
-
-def discover_handoff_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    valid: list[dict[str, Any]] = []
-    invalid: list[dict[str, Any]] = []
-    for path in iter_files(root, "buddyswitch/objects/handoffs"):
-        relative = rel(root, path)
-        try:
-            payload = read_json(path)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            invalid.append({"path": relative, "reason": f"invalid handoff object JSON: {exc}"})
-            continue
-
-        handoff_id = payload.get("id")
-        source_buddy = payload.get("source_buddy")
-        if not isinstance(handoff_id, str) or not handoff_id:
-            invalid.append({"path": relative, "reason": "handoff object is missing id"})
-            continue
-        if not isinstance(source_buddy, str) or not source_buddy:
-            invalid.append({"path": relative, "reason": f"handoff '{handoff_id}' is missing source_buddy"})
-            continue
-        valid.append({"id": handoff_id, "source_buddy": source_buddy, "object_path": relative})
     return valid, invalid
 
 
@@ -533,16 +507,6 @@ def add_indexed_task(plan: dict[str, Any], record: dict[str, Any]) -> None:
 
     object_path = root / record["object_path"]
     add_path(plan, object_path, "task_objects")
-
-
-def add_indexed_handoff(plan: dict[str, Any], record: dict[str, Any]) -> None:
-    root = Path(plan["repo_root"])
-    if record["id"] not in plan["handoff_object_ids"]:
-        plan["handoff_object_ids"].append(record["id"])
-        plan["handoff_records"].append(record)
-
-    object_path = root / record["object_path"]
-    add_path(plan, object_path, "handoff_objects")
 
 
 def delete_relative_path(root: Path, relative_path: str) -> None:
@@ -723,7 +687,6 @@ def ensure_required_skeleton(root: Path, *, warnings: list[str] | None = None) -
         "buddyswitch/objects/tracks",
         "buddyswitch/objects/tasks",
         "buddyswitch/objects/artifacts",
-        "buddyswitch/objects/handoffs",
     ):
         directory, blocked_reason = resolve_guarded_relative_dir(root, relative_dir, allow_missing=True)
         if directory is None:
@@ -774,8 +737,6 @@ def build_cleanup_plan(
 
     artifact_objects, invalid_artifact_objects = discover_artifact_objects(repo_root)
     task_objects, invalid_task_objects = discover_task_objects(repo_root)
-    handoff_objects, invalid_handoff_objects = discover_handoff_objects(repo_root)
-
     if scope == "buddy":
         for record in artifact_objects:
             if record["producer_buddy"] == buddy:
@@ -783,20 +744,12 @@ def build_cleanup_plan(
         for record in task_objects:
             if record["buddy"] == buddy:
                 add_indexed_task(plan, record)
-        for record in handoff_objects:
-            if record["source_buddy"] == buddy:
-                add_indexed_handoff(plan, record)
         for item in invalid_artifact_objects:
             add_warning(
                 plan,
                 f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
             )
         for item in invalid_task_objects:
-            add_warning(
-                plan,
-                f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
-            )
-        for item in invalid_handoff_objects:
             add_warning(
                 plan,
                 f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
@@ -806,7 +759,6 @@ def build_cleanup_plan(
         add_dir_files(plan, "buddyswitch/objects/tracks", "track_objects")
         add_dir_files(plan, "buddyswitch/objects/tasks", "task_objects")
         add_dir_files(plan, "buddyswitch/objects/artifacts", "artifact_objects")
-        add_dir_files(plan, "buddyswitch/objects/handoffs", "handoff_objects")
         for record in artifact_objects:
             if record["id"] not in plan["artifact_object_ids"]:
                 plan["artifact_object_ids"].append(record["id"])
@@ -815,23 +767,16 @@ def build_cleanup_plan(
             if record["id"] not in plan["task_object_ids"]:
                 plan["task_object_ids"].append(record["id"])
                 plan["task_records"].append(record)
-        for record in handoff_objects:
-            if record["id"] not in plan["handoff_object_ids"]:
-                plan["handoff_object_ids"].append(record["id"])
-                plan["handoff_records"].append(record)
         for item in invalid_artifact_objects:
             add_warning(plan, f"All-data cleanup will delete malformed artifact object: {item['path']} ({item['reason']}).")
         for item in invalid_task_objects:
             add_warning(plan, f"All-data cleanup will delete malformed task object: {item['path']} ({item['reason']}).")
-        for item in invalid_handoff_objects:
-            add_warning(plan, f"All-data cleanup will delete malformed handoff object: {item['path']} ({item['reason']}).")
     else:
         raise ValueError(f"Unsupported cleanup scope: {scope}")
 
     plan["delete_paths"].sort()
     plan["artifact_object_ids"].sort()
     plan["task_object_ids"].sort()
-    plan["handoff_object_ids"].sort()
     plan["direct_delete_paths"] = sorted(set(plan["direct_delete_paths"]))
     plan["external_delete_paths"] = {
         key: plan["external_delete_paths"][key] for key in sorted(plan["external_delete_paths"])
@@ -891,7 +836,6 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "deleted_count": len(deleted_paths),
         "artifact_object_ids": plan["artifact_object_ids"],
         "task_object_ids": plan["task_object_ids"],
-        "handoff_object_ids": plan["handoff_object_ids"],
         "warnings": plan["warnings"],
     }
 

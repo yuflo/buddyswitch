@@ -4,10 +4,14 @@
     "execution_summary"
   ],
   "properties": {
-    "execution_summary": {"type": "string"},
+    "execution_summary": {
+      "type": "string"
+    },
     "working_notes": {
       "type": "array",
-      "items": {"type": "string"}
+      "items": {
+        "type": "string"
+      }
     },
     "artifacts": {
       "type": "array",
@@ -19,10 +23,18 @@
           "content"
         ],
         "properties": {
-          "kind": {"type": "string"},
-          "title": {"type": "string"},
-          "summary": {"type": "string"},
-          "content": {"type": "object"}
+          "kind": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "content": {
+            "type": "object"
+          }
         },
         "additionalProperties": false
       }
@@ -35,22 +47,19 @@
           "properties": {
             "status": {
               "type": "string",
-              "enum": ["active", "blocked", "done", "archived"]
+              "enum": [
+                "active",
+                "blocked",
+                "done",
+                "archived"
+              ]
             },
-            "summary": {"type": "string"}
+            "summary": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         }
-      },
-      "additionalProperties": false
-    },
-    "handoff": {
-      "type": "object",
-      "required": ["next_buddy", "reason", "context"],
-      "properties": {
-        "next_buddy": {"type": "string"},
-        "reason": {"type": "string"},
-        "context": {"type": "string"}
       },
       "additionalProperties": false
     },
@@ -59,11 +68,15 @@
       "properties": {
         "skills": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         },
         "agents": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -71,8 +84,12 @@
     "tool_evidence": {
       "type": "object",
       "properties": {
-        "browser_cockpit_token": {"type": "string"},
-        "approved_downgrade_token": {"type": "string"}
+        "browser_cockpit_token": {
+          "type": "string"
+        },
+        "approved_downgrade_token": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     }

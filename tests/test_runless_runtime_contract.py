@@ -240,24 +240,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "updated_at": "2026-05-14T00:00:00Z",
                 }
             )
-        with self.assertRaises(ValueError):
-            env_store.validate_handoff_record(
-                {
-                    "id": "handoff-pm-design-old",
-                    "source_buddy": "pm",
-                    "target_buddy": "design",
-                    "track_id": "track-demo",
-                    "source_task_id": "task-pm-runless",
-                    "source_run_id": "run-pm-old",
-                    "artifact_ids": [],
-                    "historical_artifact_ids": [],
-                    "reason": "seed",
-                    "context": "seed",
-                    "status": "active",
-                    "created_at": "2026-05-14T00:00:00Z",
-                    "updated_at": "2026-05-14T00:00:00Z",
-                }
-            )
+        self.assertFalse(hasattr(env_store, "validate_handoff_record"))
 
     def test_artifact_create_revision_requires_explicit_task_id_without_source_run(self) -> None:
         instance_json = self._instance_json()

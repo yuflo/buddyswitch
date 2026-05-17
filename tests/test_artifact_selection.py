@@ -51,7 +51,7 @@ class ArtifactSelectionTests(unittest.TestCase):
 
     def test_selection_uses_required_kinds_and_current_artifacts(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
-            current_buddy="dev",
+            active_buddy="dev",
             demand="Implement onboarding",
             required_kinds=["prd", "implementation-report"],
             track_artifact_index=self.track_artifact_index,
@@ -62,7 +62,7 @@ class ArtifactSelectionTests(unittest.TestCase):
 
     def test_selection_dedupes_repeated_required_kinds(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
-            current_buddy="dev",
+            active_buddy="dev",
             demand="Implement onboarding",
             required_kinds=["prd", "prd"],
             track_artifact_index=self.track_artifact_index,
@@ -71,7 +71,7 @@ class ArtifactSelectionTests(unittest.TestCase):
 
     def test_selection_ignores_unknown_required_kinds(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
-            current_buddy="dev",
+            active_buddy="dev",
             demand="Implement onboarding",
             required_kinds=["task", "track", "prd"],
             track_artifact_index=self.track_artifact_index,
@@ -80,7 +80,7 @@ class ArtifactSelectionTests(unittest.TestCase):
 
     def test_selection_respects_max_default_items_trim(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
-            current_buddy="dev",
+            active_buddy="dev",
             demand="Implement onboarding",
             required_kinds=["prd", "implementation-report"],
             track_artifact_index=self.track_artifact_index,

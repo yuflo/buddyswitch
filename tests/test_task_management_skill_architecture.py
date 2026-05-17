@@ -45,7 +45,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         )
 
     def test_explicit_task_creates_only_task_objects_without_binding_fields(self) -> None:
-        track = env_store.create_track("track-task-arch", "Task Arch", current_buddy="pm", next_buddy="dev")
+        track = env_store.create_track("track-task-arch", "Task Arch", owner_buddy="pm")
         for idx in range(1, 4):
             payload = self._dispatch(
                 buddy="pm",

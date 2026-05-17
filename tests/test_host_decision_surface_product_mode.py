@@ -46,7 +46,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
 
     def test_context_summarize_projects_runless_decision_surface(self) -> None:
-        track = env_store.create_track("track-market-decision", "Market Decision", current_buddy="market", next_buddy="design")
+        track = env_store.create_track("track-market-decision", "Market Decision", owner_buddy="market")
         env_store.create_task("task-market-decision", "Scan market", buddy="market", track_id=track["id"])
 
         response = self._dispatch(buddy="market", tool="context", action="summarize", args={})
@@ -59,7 +59,9 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         affordances = response.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=response)
         assert isinstance(affordances, dict)
-        self.assertTrue({"task", "track", "artifact", "handoff", "buddybox", "context", "evidence", "search", "project_source"}.issubset(set(affordances)))
+        self.assertTrue({"task", "track", "artifact", "buddybox", "context", "evidence", "search"}.issubset(set(affordances)))
+        self.assertNotIn("handoff", affordances)
+        self.assertNotIn("project_source", affordances)
 
     def test_market_evidence_requires_target_scoped_args(self) -> None:
         response = self._dispatch(buddy="market", tool="evidence", action="issue_browser", args={"reason": "no target"})
@@ -90,42 +92,35 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         assert isinstance(affordances, dict)
         buddybox = affordances.get("buddybox")
         artifact = affordances.get("artifact")
-        handoff = affordances.get("handoff")
         task = affordances.get("task")
         track = affordances.get("track")
         context_tool = affordances.get("context")
         evidence = affordances.get("evidence")
         search = affordances.get("search")
-        project_source = affordances.get("project_source")
         self.assertIsInstance(buddybox, dict, msg=summary)
         self.assertIsInstance(artifact, dict, msg=summary)
-        self.assertIsInstance(handoff, dict, msg=summary)
         self.assertIsInstance(task, dict, msg=summary)
         self.assertIsInstance(track, dict, msg=summary)
         self.assertIsInstance(context_tool, dict, msg=summary)
         self.assertIsInstance(evidence, dict, msg=summary)
         self.assertIsInstance(search, dict, msg=summary)
-        self.assertIsInstance(project_source, dict, msg=summary)
         assert isinstance(buddybox, dict)
         assert isinstance(artifact, dict)
-        assert isinstance(handoff, dict)
         assert isinstance(task, dict)
         assert isinstance(track, dict)
         assert isinstance(context_tool, dict)
         assert isinstance(evidence, dict)
         assert isinstance(search, dict)
-        assert isinstance(project_source, dict)
-        for compact in (buddybox, artifact, handoff, task, track, context_tool, evidence, search, project_source):
-            for key in ("capability", "choose_when", "id_inputs_from", "returns", "state_effect", "durability", "supports"):
+        for compact in (buddybox, artifact, task, track, context_tool, evidence, search):
+            for key in ("capability", "when_to_use", "when_not_to_use", "returns", "state_effect"):
                 self.assertIn(key, compact, msg=compact)
 
         context_get = self._dispatch(buddy="pm", tool="context", action="get", args={})
         self.assertTrue(context_get["ok"], msg=context_get)
         buddybox_catalog = context_get["tool_catalog"]["buddybox"]
         write_semantics = buddybox_catalog["action_semantics"]["write"]
-        inputs = write_semantics["inputs_explained"]
-        self.assertIn("content", inputs)
-        self.assertIn("content_base64", inputs)
+        self.assertEqual(write_semantics.get("title"), "buddybox.write")
+        self.assertIn("side_effects", write_semantics)
         semantic_payload = json.dumps(
             {"summary": affordances, "buddybox_write": write_semantics},
             ensure_ascii=True,

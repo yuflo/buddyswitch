@@ -85,7 +85,6 @@ Runtime state is projected under:
 - `buddyswitch/objects/tracks/*.json`
 - `buddyswitch/objects/tasks/*.json`
 - `buddyswitch/objects/artifacts/*.json`
-- `buddyswitch/objects/handoffs/*.json`
 
 Buddybox private files are active-buddy private and instance-local; address them only through buddybox env tools with `logical_name`.
 

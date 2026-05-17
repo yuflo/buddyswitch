@@ -74,7 +74,6 @@ def _workspace_uses_projected_state(workspace_root: Path) -> bool:
         workspace_root / "buddyswitch" / "objects" / "tracks",
         workspace_root / "buddyswitch" / "objects" / "tasks",
         workspace_root / "buddyswitch" / "objects" / "artifacts",
-        workspace_root / "buddyswitch" / "objects" / "handoffs",
     )
     return any(path.is_symlink() for path in projected_paths)
 
@@ -146,10 +145,6 @@ def task_object_path(task_id: str) -> str:
     return f"buddyswitch/objects/tasks/{task_id}.json"
 
 
-def handoff_object_path(handoff_id: str) -> str:
-    return f"buddyswitch/objects/handoffs/{handoff_id}.json"
-
-
 def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
     return {
         **artifact,
@@ -184,7 +179,6 @@ def build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]
 def build_track_views(
     tracks: list[dict[str, Any]],
     task_map: dict[str, dict[str, Any]],
-    artifact_map: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for track in tracks:
@@ -212,8 +206,7 @@ def build_track_views(
                 "id": track["id"],
                 "title": track["title"],
                 "status": track["status"],
-                "current_buddy": track["current_buddy"],
-                "next_buddy": track["next_buddy"],
+                "owner_buddy": track["owner_buddy"],
                 "task_ids": track.get("task_ids", []),
                 "summary": track.get("summary", ""),
                 "updated_at": latest,
@@ -225,25 +218,6 @@ def build_track_views(
     return rows
 
 
-def build_handoff_view(handoff: dict[str, Any]) -> dict[str, Any]:
-    object_path = handoff_object_path(handoff["id"])
-    return {
-        "id": handoff["id"],
-        "source_buddy": handoff["source_buddy"],
-        "target_buddy": handoff["target_buddy"],
-        "track_id": handoff["track_id"],
-        "source_task_id": handoff.get("source_task_id"),
-        "artifact_ids": handoff.get("artifact_ids", []),
-        "source_refs": handoff.get("source_refs"),
-        "reason": handoff.get("reason", ""),
-        "context": handoff.get("context", ""),
-        "status": handoff.get("status", ""),
-        "created_at": handoff.get("created_at", ""),
-        "updated_at": handoff.get("updated_at", ""),
-        "object_path": object_path,
-        "file_name": Path(object_path).name,
-        "missing": False,
-    }
 def build_workspace_projection() -> dict[str, Any]:
     manifest = load_manifest(DEFAULT_MANIFEST)
     artifacts = [build_artifact_view(artifact) for artifact in env_store.list_artifacts()]
@@ -252,7 +226,7 @@ def build_workspace_projection() -> dict[str, Any]:
     tasks = [build_task_view(task, artifact_map) for task in env_store.list_tasks()]
     task_map = {task["id"]: task for task in tasks}
 
-    tracks = build_track_views(env_store.list_tracks(), task_map, artifact_map)
+    tracks = build_track_views(env_store.list_tracks(), task_map)
     tracked_task_ids = {
         task_id
         for track in tracks
@@ -266,7 +240,6 @@ def build_workspace_projection() -> dict[str, Any]:
     ]
     standalone_tasks.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
 
-    handoffs = [build_handoff_view(handoff) for handoff in env_store.list_handoffs()]
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "manifest_path": rel(DEFAULT_MANIFEST),
@@ -279,7 +252,6 @@ def build_workspace_projection() -> dict[str, Any]:
         "standalone_tasks": standalone_tasks,
         "tasks": tasks,
         "artifacts": artifacts,
-        "handoffs": handoffs,
     }
 
 

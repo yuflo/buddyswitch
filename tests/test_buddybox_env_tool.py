@@ -569,7 +569,7 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track = env_store.create_track(
             "track-pm-buddybox-product-state",
             "Buddybox Product Boundary",
-            current_buddy="pm",
+            owner_buddy="pm",
         )
         task = env_store.create_task(
             "task-pm-buddybox-product-state",
@@ -588,22 +588,10 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             created_by="pm",
             source_refs=[{"type": "note", "label": "seed"}],
         )
-        handoff = env_store.create_handoff(
-            handoff_id="handoff-pm-dev-buddybox-product-state",
-            track_id=track["id"],
-            source_buddy="pm",
-            target_buddy="dev",
-            source_task_id=task["id"],
-            artifact_ids=[artifact["id"]],
-            source_refs=[{"type": "artifact", "id": artifact["id"]}],
-            reason="seed",
-            context="seed",
-        )
         object_paths = (
             env_store.track_file(track["id"]),
             env_store.task_file(task["id"]),
             env_store.artifact_file(artifact["id"]),
-            env_store.handoff_file(handoff["id"]),
         )
         before = {path: path.read_text(encoding="utf-8") for path in object_paths}
 

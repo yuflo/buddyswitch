@@ -11,7 +11,6 @@ _ALLOWED_TYPES = {
     "artifact",
     "track",
     "task",
-    "handoff",
     "buddybox",
     "external",
     "note",
@@ -59,11 +58,11 @@ def normalize_source_refs(
             raise ValueError(f"unsupported source_ref type: {ref_type}")
 
         item: dict[str, Any] = {"type": ref_type}
-        if ref_type in {"artifact", "track", "task", "handoff"}:
+        if ref_type in {"artifact", "track", "task"}:
             item["id"] = env_store.require_id(raw.get("id"), f"source_refs.{ref_type}.id")
         elif ref_type == "buddybox":
             if not allow_buddybox:
-                raise ValueError("source_refs.buddybox logical names are private provenance and not allowed in handoff payloads")
+                raise ValueError("source_refs.buddybox logical names are private provenance and not allowed in this payload")
             if "path" in raw:
                 raise ValueError("source_refs.buddybox.logical_name is required; path is retired")
             normalized_name = validate_buddybox_ref_logical_name(raw.get("logical_name"), active_buddy=active_buddy)

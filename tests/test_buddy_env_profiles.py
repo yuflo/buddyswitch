@@ -83,7 +83,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
 
         self.assertEqual(
             pm_track_effects_seen,
-            [("pm", ["create", "update", "advance", "archive"])],
+            [("pm", ["create", "update", "archive"])],
         )
 
     def test_validate_all_cli(self) -> None:

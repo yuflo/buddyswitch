@@ -155,8 +155,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         env_store.create_track(
             "track-feedback-foreign",
             "Foreign scope track",
-            current_buddy="pm",
-            next_buddy="dev",
+            owner_buddy="pm",
             summary="scope",
         )
         env_store.create_task(
@@ -177,17 +176,13 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self._assert_rejection_contract(payload)
                 self.assertEqual(payload.get("permission_boundary"), "task.buddy_scope", msg=payload)
                 self.assertIn("task_id", payload.get("correctable_fields", []), msg=payload)
-                self.assertIn("ownership", str(payload.get("retry_guidance", "")).lower(), msg=payload)
-                alternatives = payload.get("alternative_capabilities")
-                self.assertIsInstance(alternatives, list, msg=payload)
-                assert isinstance(alternatives, list)
-                alt_pairs = {
-                    (row.get("tool"), row.get("action"))
-                    for row in alternatives
-                    if isinstance(row, dict)
-                }
-                self.assertIn(("task", "list"), alt_pairs)
-                self.assertIn(("track", "get"), alt_pairs)
+                self.assertIn("owned", str(payload.get("retry_guidance", "")).lower(), msg=payload)
+                next_actions = payload.get("allowed_next_actions")
+                self.assertIsInstance(next_actions, list, msg=payload)
+                assert isinstance(next_actions, list)
+                action_text = "\n".join(str(item).lower() for item in next_actions)
+                self.assertIn("task.list", action_text)
+                self.assertIn("track.get", action_text)
 
 
 if __name__ == "__main__":

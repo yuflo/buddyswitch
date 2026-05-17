@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runless context env.tool integration tests."""
+"""Context env.tool integration tests."""
 
 from __future__ import annotations
 
@@ -20,8 +20,7 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
-_RETIRED_BUDDYBOX_FILE_ROWS_FIELD = "buddybox_" + "files"
-_RETIRED_BUDDYBOX_READINESS_FIELD = "has_" + "buddybox_" + "files"
+_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search"}
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -88,43 +87,46 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return payload
 
     def _seed_context_state(self) -> None:
-        env_store.create_track("track-context-runless", "Context Track", current_buddy="pm", next_buddy="dev")
-        env_store.create_task("task-dev-context", "Context Task", buddy="dev", track_id="track-context-runless", summary="seed")
+        env_store.create_track("track-context-active", "Context Track", owner_buddy="pm")
+        env_store.create_task("task-dev-context", "Context Task", buddy="dev", track_id="track-context-active", summary="seed")
         env_store.create_artifact(
             artifact_id="art-task-dev-context-note-r1",
-            title="Context Artifact",
+            title="Context Artifact v1",
             buddy="dev",
             kind="track-note",
             task_id="task-dev-context",
-            summary="artifact summary",
-            content={"body": "artifact body"},
+            summary="artifact summary v1",
+            content={"body": "artifact body v1"},
             created_by="dev",
             source_refs=[{"type": "note", "label": "context"}],
         )
-        buddybox = env_store.BUDDYBOX_LOCAL_DIR / "dev" / "notes"
-        buddybox.mkdir(parents=True, exist_ok=True)
-        (buddybox / "context.txt").write_text("hello\n", encoding="utf-8")
+        env_store.create_artifact(
+            artifact_id="art-task-dev-context-note-r2",
+            title="Context Artifact v2",
+            buddy="dev",
+            kind="track-note",
+            task_id="task-dev-context",
+            summary="artifact summary v2",
+            content={"body": "artifact body v2"},
+            created_by="dev",
+            source_refs=[{"type": "note", "label": "context"}],
+        )
 
-    def test_context_summarize_is_runless_without_prepare_or_binding_fields(self) -> None:
-        self._seed_context_state()
-        instance_json = self._instance_json()
+        env_store.create_track("track-context-archived", "Archived Track", owner_buddy="pm", status="archived")
+        env_store.create_task("task-dev-archived", "Archived task", buddy="dev", track_id="track-context-archived")
+        env_store.create_artifact(
+            artifact_id="art-task-dev-archived-r1",
+            title="Archived Artifact",
+            buddy="dev",
+            kind="track-note",
+            task_id="task-dev-archived",
+            summary="archived",
+            content={"body": "archived"},
+            created_by="dev",
+            source_refs=[{"type": "note", "label": "context"}],
+        )
 
-        summary = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
-        self.assertTrue(summary.get("ok"), msg=summary)
-        self.assertEqual(summary.get("action"), "context.summarize")
-        self.assertNotIn("run_envelope", summary)
-        self.assertNotIn("persist_command_hint", summary)
-        self.assertNotIn("current_binding", summary)
-        self.assertNotIn("current_task_id", summary)
-        self.assertNotIn("current_track_id", summary)
-        decision_surface = summary.get("decision_surface")
-        self.assertIsInstance(decision_surface, dict, msg=summary)
-        assert isinstance(decision_surface, dict)
-        self.assertEqual(((decision_surface.get("binding_state") or {}).get("state")), "runless")
-        self.assertIn("buddybox_desc", summary)
-        self.assertNotIn(_RETIRED_BUDDYBOX_FILE_ROWS_FIELD, summary)
-
-    def test_context_summarize_exposes_compact_first_pass_tool_affordances(self) -> None:
+    def test_context_summarize_exposes_compact_tool_affordances(self) -> None:
         instance_json = self._instance_json()
         summary = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
         self.assertTrue(summary.get("ok"), msg=summary)
@@ -132,143 +134,73 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         affordances = summary.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=summary)
         assert isinstance(affordances, dict)
-        expected = {
-            "task",
-            "track",
-            "artifact",
-            "handoff",
-            "buddybox",
-            "context",
-            "evidence",
-            "search",
-            "project_source",
-        }
-        self.assertEqual(set(affordances), expected)
-        for tool_name in sorted(expected):
-            row = affordances.get(tool_name)
-            self.assertIsInstance(row, dict, msg=affordances)
-            assert isinstance(row, dict)
-            with self.subTest(tool=tool_name):
-                for required in (
-                    "capability",
-                    "choose_when",
-                    "id_inputs_from",
-                    "returns",
-                    "state_effect",
-                    "durability",
-                    "supports",
-                ):
-                    self.assertIn(required, row, msg=row)
-                self.assertIsInstance(row["supports"], list, msg=row)
+        self.assertEqual(set(affordances), _EXPECTED_TOOLS)
+        self.assertNotIn("handoff", affordances)
 
-    def test_context_uses_buddybox_desc_not_file_projection(self) -> None:
+    def test_context_candidate_tracks_use_owner_buddy_only(self) -> None:
         self._seed_context_state()
         instance_json = self._instance_json()
-        payload = self._dispatch(instance_json=instance_json, tool="context", action="get", args={})
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
         self.assertTrue(payload.get("ok"), msg=payload)
-        self.assertIn("buddybox_desc", payload)
-        self.assertNotIn(_RETIRED_BUDDYBOX_FILE_ROWS_FIELD, payload)
-        desc = payload.get("buddybox_desc")
-        self.assertIsInstance(desc, dict, msg=payload)
-        assert isinstance(desc, dict)
-        self.assertEqual(desc.get("capability"), "private_file_workspace")
-        self.assertEqual(desc.get("owner_scope"), "active_buddy")
-        self.assertEqual(desc.get("lifetime_scope"), "active_instance_workspace")
-        self.assertEqual(desc.get("visibility"), "active_buddy_private")
-        self.assertFalse(desc.get("product_readable"))
-        self.assertFalse(desc.get("cross_buddy_readable"))
-        self.assertFalse(desc.get("mutates_product_state"))
-        self.assertIn("supports", desc)
-        self.assertNotIn("logical_root", desc)
-        self.assertIn("private", str(desc.get("message", "")).lower())
+        rows = payload.get("candidate_tracks")
+        self.assertIsInstance(rows, list, msg=payload)
+        assert isinstance(rows, list)
+        self.assertTrue(rows)
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            self.assertIn("owner_buddy", row)
+            self.assertIn(row.get("active_buddy_role"), {"owner", "track_task", "observer"})
+            self.assertNotIn("current_buddy", row)
+            self.assertNotIn("next_buddy", row)
+            self.assertNotIn("participant", row)
 
-    def test_context_summarize_tool_affordances_stay_compact(self) -> None:
+    def test_context_omits_archived_tracks_from_active_context(self) -> None:
         self._seed_context_state()
         instance_json = self._instance_json()
 
-        summary = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
-
-        self.assertTrue(summary.get("ok"), msg=summary)
-        self.assertIn("buddybox_desc", summary)
-        self.assertNotIn("tool_catalog", summary)
-        self.assertNotIn("operation_semantics", summary)
-        affordances = summary.get("tool_affordances")
-        self.assertIsInstance(affordances, dict, msg=summary)
-        assert isinstance(affordances, dict)
-        for tool_name, row in affordances.items():
-            with self.subTest(tool=tool_name):
-                self.assertIsInstance(row, dict, msg=summary)
-                assert isinstance(row, dict)
-                for forbidden in ("payload_fields", "action_semantics", "content", "content_base64", "files"):
-                    self.assertNotIn(forbidden, row)
-
-    def test_context_get_and_summarize_explain_catalog_scope(self) -> None:
-        instance_json = self._instance_json()
         summary = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
         full = self._dispatch(instance_json=instance_json, tool="context", action="get", args={})
         self.assertTrue(summary.get("ok"), msg=summary)
         self.assertTrue(full.get("ok"), msg=full)
-        summarize_effect = str(summary.get("effect_summary", "")).lower()
-        summarize_scope = str(summary.get("read_scope", "")).lower()
-        self.assertIn("compact", summarize_effect)
-        self.assertTrue("not full catalog" in summarize_scope or "compact" in summarize_scope, msg=summarize_scope)
-        self.assertNotIn("tool_catalog", summary)
-        self.assertNotIn("operation_semantics", summary)
 
-        get_effect = str(full.get("effect_summary", "")).lower()
-        get_scope = str(full.get("read_scope", "")).lower()
-        self.assertIn("tool catalog", get_effect)
-        self.assertIn("operation semantics", get_effect)
-        self.assertIn("catalog", get_scope)
-        self.assertIn("tool_catalog", full)
-        self.assertIn("operation_semantics", full)
+        candidate_ids = {row.get("track_id") for row in summary.get("candidate_tracks", []) if isinstance(row, dict)}
+        track_ids = {row.get("id") for row in full.get("tracks", []) if isinstance(row, dict)}
 
-    def test_context_get_exposes_full_tool_catalog_for_inspection(self) -> None:
+        self.assertIn("track-context-active", candidate_ids)
+        self.assertIn("track-context-active", track_ids)
+        self.assertNotIn("track-context-archived", candidate_ids)
+        self.assertNotIn("track-context-archived", track_ids)
+
+    def test_context_artifact_summaries_are_current_only(self) -> None:
+        self._seed_context_state()
         instance_json = self._instance_json()
-
         payload = self._dispatch(instance_json=instance_json, tool="context", action="get", args={})
-
         self.assertTrue(payload.get("ok"), msg=payload)
-        tool_catalog = payload.get("tool_catalog")
-        operation_semantics = payload.get("operation_semantics")
-        self.assertIsInstance(tool_catalog, dict, msg=payload)
-        self.assertIsInstance(operation_semantics, dict, msg=payload)
-        assert isinstance(tool_catalog, dict)
-        assert isinstance(operation_semantics, dict)
-        self.assertIn("buddybox", tool_catalog)
-        buddybox = tool_catalog["buddybox"]
-        self.assertIsInstance(buddybox, dict, msg=payload)
-        assert isinstance(buddybox, dict)
-        self.assertIn("action_semantics", buddybox)
-        self.assertIn("payload_fields", buddybox)
-        payload_fields = buddybox["payload_fields"]
-        self.assertIsInstance(payload_fields, dict, msg=payload)
-        assert isinstance(payload_fields, dict)
-        write_fields = payload_fields.get("write")
-        self.assertIsInstance(write_fields, list, msg=payload)
-        assert isinstance(write_fields, list)
-        self.assertTrue({"logical_name", "content", "content_base64", "content_type"}.issubset(set(write_fields)), msg=write_fields)
-        self.assertNotIn("path", write_fields)
-        self.assertIn("buddybox.write", operation_semantics)
 
-    def test_context_list_sources_excludes_memory_and_includes_buddybox(self) -> None:
+        rows = payload.get("artifact_summaries")
+        self.assertIsInstance(rows, list, msg=payload)
+        assert isinstance(rows, list)
+        ids = [row.get("artifact_id") for row in rows if isinstance(row, dict)]
+        self.assertIn("art-task-dev-context-note-r2", ids)
+        self.assertNotIn("art-task-dev-context-note-r1", ids)
+        self.assertNotIn("art-task-dev-archived-r1", ids)
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            self.assertIn("readable_by_active_buddy", row)
+            self.assertNotIn("readable_by_current_buddy", row)
+
+    def test_context_list_sources_excludes_handoffs(self) -> None:
         instance_json = self._instance_json()
         listed = self._dispatch(instance_json=instance_json, tool="context", action="list_sources", args={})
         self.assertTrue(listed.get("ok"), msg=listed)
         sources = listed.get("sources")
         self.assertIsInstance(sources, dict, msg=listed)
         assert isinstance(sources, dict)
-        self.assertNotIn("memories", sources)
-        self.assertIn("buddybox", sources)
-        buddybox = sources["buddybox"]
-        self.assertIsInstance(buddybox, dict, msg=listed)
-        assert isinstance(buddybox, dict)
-        self.assertEqual(buddybox.get("capability"), "private_file_workspace")
-        self.assertNotIn("source_of_truth", buddybox)
-        self.assertNotIn("logical_root", buddybox)
-        source_blob = json.dumps(buddybox, ensure_ascii=True).lower()
-        self.assertNotIn("buddyswitch/local/buddybox", source_blob)
-        self.assertNotIn("shared", source_blob)
+        self.assertNotIn("handoffs", sources)
+        self.assertIn("tracks", sources)
+        self.assertIn("artifacts", sources)
 
     def test_context_get_applies_filters(self) -> None:
         self._seed_context_state()
@@ -278,32 +210,17 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=instance_json,
             tool="context",
             action="get",
-            args={"track_id": "track-context-runless", "task_id": "task-dev-context", "limit": 5},
+            args={"track_id": "track-context-active", "task_id": "task-dev-context", "limit": 5},
         )
         self.assertTrue(filtered.get("ok"), msg=filtered)
         tasks = filtered.get("tasks")
         self.assertIsInstance(tasks, list, msg=filtered)
         assert isinstance(tasks, list)
         self.assertEqual({row.get("id") for row in tasks if isinstance(row, dict)}, {"task-dev-context"})
-        self.assertIn("buddybox_desc", filtered)
-        self.assertNotIn(_RETIRED_BUDDYBOX_FILE_ROWS_FIELD, filtered)
-        decision_surface = filtered.get("decision_surface")
-        self.assertIsInstance(decision_surface, dict, msg=filtered)
-        assert isinstance(decision_surface, dict)
-        readiness = decision_surface.get("context_readiness")
-        self.assertIsInstance(readiness, dict, msg=filtered)
-        assert isinstance(readiness, dict)
-        self.assertIn("has_buddybox_workspace", readiness)
-        self.assertNotIn(_RETIRED_BUDDYBOX_READINESS_FIELD, readiness)
 
     def test_context_rejects_unknown_payload_field(self) -> None:
         instance_json = self._instance_json()
-        rejected = self._dispatch(
-            instance_json=instance_json,
-            tool="context",
-            action="get",
-            args={"unknown": 1},
-        )
+        rejected = self._dispatch(instance_json=instance_json, tool="context", action="get", args={"unknown": 1})
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_CONTEXT_PAYLOAD")
 

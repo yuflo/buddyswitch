@@ -9,7 +9,6 @@ const emptyWorkspace = {
   standalone_tasks: [],
   tasks: [],
   artifacts: [],
-  handoffs: [],
 };
 
 const generatedAt = document.getElementById("generatedAt");
@@ -26,7 +25,6 @@ function normalizeWorkspaceData(rawData) {
     standalone_tasks: Array.isArray(rawData?.standalone_tasks) ? rawData.standalone_tasks : [],
     tasks: Array.isArray(rawData?.tasks) ? rawData.tasks : [],
     artifacts: Array.isArray(rawData?.artifacts) ? rawData.artifacts : [],
-    handoffs: Array.isArray(rawData?.handoffs) ? rawData.handoffs : [],
   };
 }
 
@@ -37,68 +35,13 @@ function applyWorkspaceData(nextWorkspace) {
   }
 }
 
-function _trackById(trackId) {
-  return workspace.tracks.find((track) => track && track.id === trackId) || null;
-}
-
-function _taskById(taskId) {
-  return workspace.tasks.find((task) => task && task.id === taskId) || null;
-}
-
-function _modeForBuddies(currentBuddy, nextBuddy) {
-  if (typeof nextBuddy === "string" && nextBuddy && nextBuddy !== currentBuddy) {
-    return "handoff";
-  }
-  return "continue_current_task";
-}
-
-function deriveNextStepStateForTrack(trackPayload) {
+function deriveTrackOwnerState(trackPayload) {
   const track = trackPayload && typeof trackPayload === "object" ? trackPayload : {};
-  const trackId = typeof track.id === "string" ? track.id : "";
-  const currentBuddy = typeof track.current_buddy === "string" && track.current_buddy ? track.current_buddy : "pm";
-  const nextBuddy = typeof track.next_buddy === "string" && track.next_buddy ? track.next_buddy : currentBuddy;
-  const mode = _modeForBuddies(currentBuddy, nextBuddy);
-  const recommendedBuddy = nextBuddy || currentBuddy;
   return {
-    trackId,
-    currentBuddy,
-    nextBuddy,
-    recommendedBuddy,
-    mode,
-    summary:
-      mode === "handoff"
-        ? `Track ${trackId || "(unknown)"} should handoff from ${currentBuddy} to ${recommendedBuddy}.`
-        : `Track ${trackId || "(unknown)"} should continue with ${currentBuddy}.`,
-  };
-}
-
-function deriveNextStepStateForTask(taskPayload) {
-  const task = taskPayload && typeof taskPayload === "object" ? taskPayload : {};
-  const taskId = typeof task.id === "string" ? task.id : "";
-  const currentBuddy = typeof task.buddy === "string" && task.buddy ? task.buddy : "pm";
-
-  let recommendedBuddy = currentBuddy;
-  let nextBuddy = currentBuddy;
-  const trackId = typeof task.track_id === "string" && task.track_id ? task.track_id : null;
-  if (trackId) {
-    const track = _trackById(trackId);
-    if (track && typeof track.next_buddy === "string" && track.next_buddy) {
-      recommendedBuddy = track.next_buddy;
-      nextBuddy = track.next_buddy;
-    }
-  }
-
-  const mode = _modeForBuddies(currentBuddy, nextBuddy);
-  return {
-    taskId,
-    currentBuddy,
-    nextBuddy,
-    recommendedBuddy,
-    mode,
-    summary:
-      mode === "handoff"
-        ? `Task ${taskId || "(unknown)"} should handoff from ${currentBuddy} to ${recommendedBuddy}.`
-        : `Task ${taskId || "(unknown)"} should continue with ${currentBuddy}.`,
+    trackId: typeof track.id === "string" ? track.id : "",
+    ownerBuddy: typeof track.owner_buddy === "string" ? track.owner_buddy : "",
+    status: typeof track.status === "string" ? track.status : "",
+    summary: typeof track.summary === "string" ? track.summary : "",
   };
 }
 
@@ -163,8 +106,7 @@ if (typeof module !== "undefined") {
   module.exports = {
     normalizeWorkspaceData,
     applyWorkspaceData,
-    deriveNextStepStateForTrack,
-    deriveNextStepStateForTask,
+    deriveTrackOwnerState,
     refreshWorkspaceData,
   };
 }

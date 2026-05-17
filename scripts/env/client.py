@@ -86,8 +86,6 @@ def _parse_args() -> argparse.Namespace:
     join_track.add_argument("--task-id")
     update_track = track_sub.add_parser("update", help="Update PM-owned track metadata")
     update_track.add_argument("--payload", required=True, type=Path)
-    advance_track = track_sub.add_parser("advance", help="Advance PM-owned track lifecycle")
-    advance_track.add_argument("--payload", required=True, type=Path)
     archive_track = track_sub.add_parser("archive", help="Archive PM-owned track")
     archive_track.add_argument("--track-id", required=True)
     attach_task = track_sub.add_parser("attach-task", help="Attach active-buddy task to track")
@@ -121,18 +119,6 @@ def _parse_args() -> argparse.Namespace:
     context_summarize.add_argument("--task-id")
     context_summarize.add_argument("--limit", type=int)
     context_sub.add_parser("list-sources", help="List context source descriptions")
-
-    handoff = sub.add_parser("handoff", help="Handoff validation env operations")
-    handoff_sub = handoff.add_subparsers(dest="operation", required=True)
-    list_handoff = handoff_sub.add_parser("list", help="List handoff records")
-    list_handoff.add_argument("--track-id")
-    list_handoff.add_argument("--target-buddy")
-    list_handoff.add_argument("--status")
-    list_handoff.add_argument("--limit", type=int)
-    validate_handoff = handoff_sub.add_parser("validate", help="Validate a handoff payload")
-    validate_handoff.add_argument("--payload", required=True, type=Path)
-    create_handoff = handoff_sub.add_parser("create", help="Create an explicit handoff record")
-    create_handoff.add_argument("--payload", required=True, type=Path)
 
     buddybox = sub.add_parser("buddybox", help="Buddybox env operations")
     buddybox_sub = buddybox.add_subparsers(dest="operation", required=True)
@@ -224,7 +210,7 @@ def _dispatch_task(args: argparse.Namespace) -> dict[str, Any]:
 
 def _dispatch_track(args: argparse.Namespace) -> dict[str, Any]:
     action = _operation_to_action(args.operation)
-    if args.operation in {"create", "update", "advance"}:
+    if args.operation in {"create", "update"}:
         payload = _load_json_object(args.payload)
         return _dispatch_env_tool("track", action, payload)
     if args.operation == "get":
@@ -259,21 +245,6 @@ def _dispatch_artifact(args: argparse.Namespace) -> dict[str, Any]:
 def _dispatch_context(args: argparse.Namespace) -> dict[str, Any]:
     action = _operation_to_action(args.operation)
     return _dispatch_env_tool("context", action, _context_args_from_cli(args))
-
-
-def _dispatch_handoff(args: argparse.Namespace) -> dict[str, Any]:
-    action = _operation_to_action(args.operation)
-    if args.operation in {"validate", "create"}:
-        payload = _load_json_object(args.payload)
-        return _dispatch_env_tool("handoff", action, payload)
-    payload: dict[str, Any] = {}
-    for field in ("track_id", "target_buddy", "status", "limit"):
-        value = getattr(args, field, None)
-        if value is not None:
-            payload[field] = value
-    return _dispatch_env_tool("handoff", action, payload)
-
-
 def _dispatch_buddybox(args: argparse.Namespace) -> dict[str, Any]:
     action = _operation_to_action(args.operation)
     if args.operation == "desc":
@@ -332,8 +303,6 @@ def main() -> int:
             payload = _dispatch_artifact(args)
         elif args.resource == "context":
             payload = _dispatch_context(args)
-        elif args.resource == "handoff":
-            payload = _dispatch_handoff(args)
         elif args.resource == "buddybox":
             payload = _dispatch_buddybox(args)
         elif args.resource == "evidence":

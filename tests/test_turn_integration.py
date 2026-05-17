@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runless integration tests replacing legacy turn prepare/persist flow tests."""
+"""Integration tests for explicit-id collaboration flow."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest_path=self.manifest_path,
         )
 
-    def test_cross_buddy_flow_uses_explicit_ids_without_prepare_or_persist(self) -> None:
+    def test_cross_buddy_flow_uses_track_join_and_artifact_get(self) -> None:
         track = self._dispatch(
             buddy="pm",
             tool="track",
@@ -93,38 +93,28 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(artifact["ok"], msg=artifact)
         artifact_id = artifact["artifact"]["id"]
 
-        handoff = self._dispatch(
-            buddy="pm",
-            tool="handoff",
-            action="create",
-            args={
-                "handoff_id": "handoff-pm-design-runless",
-                "track_id": track_id,
-                "source_task_id": task_id,
-                "target_buddy": "design",
-                "artifact_ids": [artifact_id],
-                "reason": "handoff for design",
-                "context": "handoff context",
-                "status": "active",
-            },
+        join = self._dispatch(
+            buddy="design",
+            tool="track",
+            action="join",
+            args={"track_id": track_id, "title": "Design intake"},
         )
-        self.assertTrue(handoff["ok"], msg=handoff)
+        self.assertTrue(join["ok"], msg=join)
 
-        design_handoffs = self._dispatch(buddy="design", tool="handoff", action="list", args={})
-        self.assertTrue(design_handoffs["ok"], msg=design_handoffs)
-        handoff_ids = {row.get("id") for row in design_handoffs.get("handoffs", [])}
-        self.assertIn("handoff-pm-design-runless", handoff_ids)
+        design_read = self._dispatch(
+            buddy="design",
+            tool="artifact",
+            action="get",
+            args={"artifact_id": artifact_id},
+        )
+        self.assertTrue(design_read["ok"], msg=design_read)
+        self.assertEqual((design_read["artifact"] or {}).get("artifact_id"), artifact_id)
 
         self.assertFalse(self._runtime_path("runs/raw").exists())
         self.assertFalse(self._runtime_path("buddyswitch/content/runs").exists())
 
     def test_market_evidence_requires_target_model(self) -> None:
-        rejected = self._dispatch(
-            buddy="market",
-            tool="evidence",
-            action="issue_browser",
-            args={},
-        )
+        rejected = self._dispatch(buddy="market", tool="evidence", action="issue_browser", args={})
         self.assertFalse(rejected["ok"])
         self.assertEqual(rejected["permission_boundary"], "request-payload")
 

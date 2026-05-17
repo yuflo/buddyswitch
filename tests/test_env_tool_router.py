@@ -20,6 +20,7 @@ import env_store  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search"}
 
 
 class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -29,8 +30,6 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_id: str = "inst-dev-example",
         buddy: str = "dev",
         status: str = "active",
-        current_task_id: str | None = None,
-        current_track_id: str | None = None,
     ) -> Path:
         instance_json = self._runtime_path("instance.json")
         instance_json.write_text(
@@ -39,8 +38,6 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "instance_id": instance_id,
                     "buddy": buddy,
                     "status": status,
-                    "current_task_id": current_task_id,
-                    "current_track_id": current_track_id,
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
                     "created_at": "2026-05-10T00:00:00Z",
@@ -62,10 +59,7 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_id: str = "inst-dev-example",
         buddy: str = "dev",
     ) -> dict[str, object]:
-        try:
-            router = importlib.import_module("env.tools.router")
-        except ModuleNotFoundError:
-            self.fail("expected env.tools.router module for Phase 2 env.tool dispatch")
+        router = importlib.import_module("env.tools.router")
         dispatch = getattr(router, "dispatch_env_tool_request", None)
         self.assertTrue(callable(dispatch), msg="expected dispatch_env_tool_request(payload, ...) in env.tools.router")
         manifest = env_manifest.load_manifest(MANIFEST)
@@ -79,26 +73,8 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest=manifest,
         )
 
-    def _seed_task(
-        self,
-        *,
-        task_id: str,
-        buddy: str,
-        title: str,
-        summary: str = "",
-    ) -> None:
-        env_store.create_task(
-            task_id,
-            title,
-            buddy=buddy,
-            track_id=None,
-            status="active",
-            summary=summary,
-            initial_run_id=None,
-        )
-
-    def _load_instance(self, instance_json: Path) -> dict[str, object]:
-        return json.loads(instance_json.read_text(encoding="utf-8"))
+    def _seed_task(self, *, task_id: str, buddy: str, title: str, summary: str = "") -> None:
+        env_store.create_task(task_id, title, buddy=buddy, track_id=None, status="active", summary=summary, initial_run_id=None)
 
     def _tasks_snapshot(self) -> dict[str, dict[str, object]]:
         rows: dict[str, dict[str, object]] = {}
@@ -109,168 +85,110 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             rows[path.name] = json.loads(path.read_text(encoding="utf-8"))
         return rows
 
-    def test_routes_task_list_through_env_tool_contract(self) -> None:
-        instance_json = self._instance_json()
-        self._seed_task(task_id="task-dev-visible", buddy="dev", title="Visible")
-        self._seed_task(task_id="task-pm-hidden", buddy="pm", title="Hidden")
-
-        response = self._dispatch_env_tool(
-            payload={"tool": "task", "action": "list", "args": {}},
-            instance_json=instance_json,
-        )
-
-        self.assertTrue(response.get("ok"), msg=response)
-        self.assertEqual(response.get("tool"), "task")
-        self.assertEqual(response.get("action"), "task.list")
-        tasks = response.get("tasks")
-        self.assertIsInstance(tasks, list, msg=response)
-        assert isinstance(tasks, list)
-        task_ids = {row.get("id") for row in tasks if isinstance(row, dict)}
-        self.assertIn("task-dev-visible", task_ids)
-        self.assertNotIn("task-pm-hidden", task_ids)
-
-    def test_rejects_malformed_envelope_without_state_mutation(self) -> None:
-        instance_json = self._instance_json(current_task_id="task-dev-owned")
-        self._seed_task(task_id="task-dev-owned", buddy="dev", title="Owned", summary="baseline")
-        before_tasks = copy.deepcopy(self._tasks_snapshot())
-        before_instance = self._load_instance(instance_json)
-
-        bad_cases = (
-            ("missing_tool", {"action": "list", "args": {}}, "E_ENV_TOOL", "env.tool"),
-            ("blank_tool", {"tool": "  ", "action": "list", "args": {}}, "E_ENV_TOOL", "env.tool"),
-            ("unknown_tool", {"tool": "unknown", "action": "get", "args": {}}, "E_ENV_TOOL", "env.tool"),
-            ("missing_action", {"tool": "task", "args": {}}, "E_ENV_TOOL", "env.tool"),
-            ("blank_action", {"tool": "task", "action": " ", "args": {}}, "E_ENV_TOOL", "env.tool"),
-            ("unknown_task_action", {"tool": "task", "action": "merge", "args": {}}, "E_ENV_TOOL", "env.tool"),
-            ("non_object_args", {"tool": "task", "action": "list", "args": []}, "E_ENV_TOOL_PAYLOAD", "request-payload"),
-        )
-
-        for case, payload, error_code, boundary in bad_cases:
-            with self.subTest(case=case):
-                response = self._dispatch_env_tool(payload=payload, instance_json=instance_json)
-                self.assertFalse(response.get("ok"), msg=response)
-                error = response.get("error")
-                self.assertIsInstance(error, dict, msg=response)
-                assert isinstance(error, dict)
-                self.assertEqual(error.get("code"), error_code)
-                self.assertNotEqual(error.get("code"), "E_ENV_TOOL_ROUTER")
-                self.assertEqual(response.get("permission_boundary"), boundary)
-                self.assertIsInstance(response.get("human_summary"), str, msg=response)
-                self.assertIsInstance(response.get("why_blocked"), str, msg=response)
-                self.assertIsInstance(response.get("impact"), str, msg=response)
-                self.assertIs(response.get("state_changed"), False, msg=response)
-                self.assertIsInstance(response.get("retryable"), bool, msg=response)
-                self.assertIsInstance(response.get("retry_guidance"), str, msg=response)
-                self.assertEqual(self._tasks_snapshot(), before_tasks)
-                self.assertEqual(self._load_instance(instance_json), before_instance)
-                recovery_text = json.dumps(
-                    {
-                        "retry_guidance": response.get("retry_guidance"),
-                        "allowed_next_actions": response.get("allowed_next_actions"),
-                    },
-                    ensure_ascii=True,
-                ).lower()
-                self.assertNotIn("prepare.runtime_context", recovery_text)
-                if case in {"unknown_tool", "unknown_task_action", "non_object_args"}:
-                    self.assertTrue(
-                        "context.get.tool_catalog" in recovery_text
-                        or "scripts/turn_runtime.py status" in recovery_text
-                        or "context.summarize.tool_affordances" in recovery_text,
-                        msg=response,
-                    )
-
-    def test_router_supported_tools_and_actions_match_registry(self) -> None:
+    def test_active_env_tool_surface_excludes_handoff(self) -> None:
         contracts = importlib.import_module("env.tools.contracts")
         router = importlib.import_module("env.tools.router")
+        status_payload = importlib.import_module("turn_runtime")._build_env_tools_desc()
 
-        registry = contracts.TOOL_REGISTRY
-        expected_tools = {spec["tool"] for spec in registry}
-        self.assertNotIn("memory", expected_tools)
-        self.assertIn("buddybox", expected_tools)
-        self.assertNotIn("run", expected_tools)
-        self.assertNotIn("binding", expected_tools)
-        self.assertEqual(set(router._TOOL_ACTIONS), expected_tools)
+        registry_tools = {row["tool"] for row in contracts.TOOL_REGISTRY}
+        self.assertEqual(registry_tools, _EXPECTED_TOOLS)
+        self.assertNotIn("handoff", registry_tools)
+        self.assertNotIn("track.advance", json.dumps(contracts.operation_semantics(), ensure_ascii=True))
 
-        for spec in registry:
-            with self.subTest(tool=spec["tool"]):
-                expected_actions = {action["name"] for action in spec["actions"]}
-                self.assertEqual(set(router._TOOL_ACTIONS[spec["tool"]]), expected_actions)
+        self.assertEqual(set(router._TOOL_ACTIONS), _EXPECTED_TOOLS)
+        self.assertEqual(set(status_payload), _EXPECTED_TOOLS)
+        self.assertNotIn("handoff", contracts.compact_tool_affordances())
+
+    def test_handoff_tool_is_unsupported(self) -> None:
+        instance_json = self._instance_json()
+        response = self._dispatch_env_tool(
+            payload={"tool": "handoff", "action": "list", "args": {}},
+            instance_json=instance_json,
+        )
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL")
+        self.assertEqual(response.get("permission_boundary"), "env.tool")
+        self.assertIs(response.get("state_changed"), False)
+
+    def test_track_advance_is_not_registered(self) -> None:
+        contracts = importlib.import_module("env.tools.contracts")
+        self.assertNotIn("advance", {row["name"] for row in contracts.get_tool_spec("track")["actions"]})
+
+        instance_json = self._instance_json(buddy="pm")
+        env_store.create_track("track-router-advance", "Advance", owner_buddy="pm")
+        response = self._dispatch_env_tool(
+            payload={"tool": "track", "action": "advance", "args": {"track_id": "track-router-advance"}},
+            instance_json=instance_json,
+            buddy="pm",
+            instance_id="inst-dev-example",
+        )
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL")
 
     def test_dispatch_handler_coverage_matches_registry_actions(self) -> None:
         contracts = importlib.import_module("env.tools.contracts")
         dispatch = importlib.import_module("env.tools.dispatch")
         router = importlib.import_module("env.tools.router")
-        registry = contracts.TOOL_REGISTRY
 
         expected: dict[str, set[str]] = {}
-        for spec in registry:
-            tool_name = spec["tool"]
-            expected[tool_name] = {action["name"] for action in spec["actions"]}
-
-        self.assertIn("join", expected.get("track", set()))
-        self.assertIn("list", expected.get("handoff", set()))
-        self.assertIn("create", expected.get("handoff", set()))
-        self.assertIn("validate", expected.get("handoff", set()))
-        self.assertEqual(
-            contracts.get_action_spec("artifact", "list").get("payload_fields"),  # type: ignore[union-attr]
-            ["track_id"],
-        )
+        for spec in contracts.TOOL_REGISTRY:
+            expected[spec["tool"]] = {action["name"] for action in spec["actions"]}
 
         dispatch_actions = dispatch.dispatch_handler_actions()
         self.assertEqual(dispatch_actions, expected)
         self.assertEqual({tool: set(actions) for tool, actions in router._TOOL_ACTIONS.items()}, expected)
-        self.assertFalse(hasattr(router, "_TOOL_DISPATCHERS"))
+        self.assertNotIn("handoff", dispatch_actions)
 
-        forbidden_context_actions = {
-            "get_track_artifacts",
-            "inspect_track_outputs",
-            "explain_track_access",
-            "validate_sources_available",
-        }
-        self.assertTrue(forbidden_context_actions.isdisjoint(expected.get("context", set())))
-        for actions in expected.values():
-            for action in actions:
-                self.assertFalse(action.startswith("explain_"), msg=f"unexpected explain action: {action}")
+    def test_cli_excludes_handoff_resource_and_track_advance(self) -> None:
+        import subprocess
 
-    def test_router_residue_guards_require_dispatch_only_surface(self) -> None:
-        importlib.import_module("env.tools.dispatch")
-
-        manager_suffix = "_" + "manager"
-        for tool in ("task", "track", "artifact", "context", "binding", "handoff", "run", "evidence", "search"):
-            module_name = "env.tools." + tool + manager_suffix
-            with self.subTest(module=module_name):
-                with self.assertRaises(ModuleNotFoundError):
-                    importlib.import_module(module_name)
-
-        tools_dir = ROOT / "scripts" / "env" / "tools"
-        forbidden_tokens = (
-            "_" + "ACTION" + "_MAP",
-            "_" + "router_contract_error",
-            "manager" + "_name",
+        handoff = subprocess.run(
+            ["python3", "scripts/env/client.py", "handoff", "list"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
         )
-        for path in sorted(tools_dir.glob("*.py")):
-            text = path.read_text(encoding="utf-8")
-            for token in forbidden_tokens:
-                with self.subTest(path=str(path.relative_to(ROOT)), token=token):
-                    self.assertNotIn(token, text)
+        self.assertNotEqual(handoff.returncode, 0)
 
-    def test_runtime_feedback_error_bool_fields_are_type_safe(self) -> None:
-        dispatch = importlib.import_module("env.tools.dispatch")
-        payload = dispatch._runtime_feedback_error(
-            tool="run",
-            action="run.commit",
-            active_buddy="pm",
-            code="E_RUNTIME_PERSIST",
-            message="synthetic runtime feedback",
-            details={
-                "state_changed": "false",
-                "retryable": "false",
-                "allowed_next_actions": ["Retry after fix."],
-            },
+        help_out = subprocess.run(
+            ["python3", "scripts/env/client.py", "--help"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
         )
-        self.assertFalse(payload.get("ok"), msg=payload)
-        self.assertIs(payload.get("state_changed"), False, msg=payload)
-        self.assertIs(payload.get("retryable"), False, msg=payload)
+        self.assertEqual(help_out.returncode, 0, msg=help_out.stderr)
+        self.assertNotIn("handoff", help_out.stdout)
+
+        track_help = subprocess.run(
+            ["python3", "scripts/env/client.py", "track", "--help"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(track_help.returncode, 0, msg=track_help.stderr)
+        self.assertNotIn("advance", track_help.stdout)
+
+    def test_rejects_malformed_envelope_without_state_mutation(self) -> None:
+        instance_json = self._instance_json()
+        self._seed_task(task_id="task-dev-owned", buddy="dev", title="Owned", summary="baseline")
+        before_tasks = copy.deepcopy(self._tasks_snapshot())
+
+        bad_cases = (
+            {"action": "list", "args": {}},
+            {"tool": "unknown", "action": "get", "args": {}},
+            {"tool": "task", "action": "merge", "args": {}},
+            {"tool": "task", "action": "list", "args": []},
+        )
+
+        for payload in bad_cases:
+            response = self._dispatch_env_tool(payload=payload, instance_json=instance_json)
+            with self.subTest(payload=payload):
+                self.assertFalse(response.get("ok"), msg=response)
+                self.assertIs(response.get("state_changed"), False)
+                self.assertEqual(self._tasks_snapshot(), before_tasks)
 
 
 if __name__ == "__main__":

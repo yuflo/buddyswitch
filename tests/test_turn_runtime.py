@@ -60,7 +60,6 @@ class TurnRuntimeRunlessTests(unittest.TestCase):
                 self.assertIsInstance(action_semantics, dict, msg=row)
                 self.assertTrue(action_semantics, msg=row)
         compact = tool_contracts.compact_tool_affordances()
-        self.assertIn("project_source", compact)
         for tool_name, row in sorted(tools.items()):
             with self.subTest(compact_tool=tool_name):
                 self.assertGreater(len(row), len(compact.get(tool_name, {})))

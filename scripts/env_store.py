@@ -24,7 +24,6 @@ OBJECTS_ROOT = STATE_ROOT / "buddyswitch" / "objects"
 TRACKS_DIR = OBJECTS_ROOT / "tracks"
 TASKS_DIR = OBJECTS_ROOT / "tasks"
 ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
-HANDOFF_OBJECTS_DIR = OBJECTS_ROOT / "handoffs"
 CONTENT_ROOT = STATE_ROOT / "buddyswitch" / "content"
 LOCAL_ROOT = STATE_ROOT / "buddyswitch" / "local"
 BUDDYBOX_LOCAL_DIR = LOCAL_ROOT / "buddybox"
@@ -33,13 +32,12 @@ RUNTIME_WORKSPACE_AGENTS_HEADER = "# BuddySwitch Runtime Workspace"
 
 VALID_TRACK_STATUS = ("active", "blocked", "done", "archived")
 VALID_TASK_STATUS = ("active", "blocked", "done", "archived")
-VALID_HANDOFF_STATUS = ("active", "superseded", "archived")
 
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _LEGACY_TASK_RUN_IDS = "run" + "_ids"
 _LEGACY_TASK_LATEST_RUN = "latest" + "_run_id"
 _LEGACY_SOURCE_RUN = "source" + "_run_id"
-_LEGACY_HANDOFF_PRIVATE_PATHS_KEY = "buddybox_" + "paths"
+_LEGACY_TRACK_BUDDY_FIELDS = ("current" + "_buddy", "next" + "_buddy")
 _KNOWN_BUDDY_IDS = {"pm", "design", "dev", "market", "test"}
 
 
@@ -100,7 +98,6 @@ def ensure_runtime_dirs() -> None:
     TRACKS_DIR.mkdir(parents=True, exist_ok=True)
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
-    HANDOFF_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def require_id(value: str, label: str) -> str:
@@ -124,10 +121,6 @@ def task_file(task_id: str) -> Path:
 
 def artifact_file(artifact_id: str) -> Path:
     return ARTIFACT_OBJECTS_DIR / f"{require_id(artifact_id, 'artifact id')}.json"
-
-
-def handoff_file(handoff_id: str) -> Path:
-    return HANDOFF_OBJECTS_DIR / f"{require_id(handoff_id, 'handoff id')}.json"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -168,20 +161,6 @@ def _validate_buddybox_ref_logical_name(logical_name: Any, *, active_buddy: str 
     return "/".join(parts)
 
 
-def _validate_retired_handoff_private_path(path_value: Any) -> str:
-    if not isinstance(path_value, str) or not path_value.strip():
-        raise ValueError("legacy handoff private path rows must be non-empty strings")
-    normalized = path_value.replace("\\", "/").strip()
-    if normalized.startswith("/"):
-        raise ValueError("legacy handoff private path rows must be relative")
-    parts = [part for part in normalized.split("/") if part not in {"", "."}]
-    if not parts:
-        raise ValueError("legacy handoff private path rows must be non-empty")
-    if any(part == ".." for part in parts):
-        raise ValueError("legacy handoff private path rows must not include '..' traversal")
-    return "/".join(parts)
-
-
 def _normalize_source_refs(
     raw_refs: Any,
     *,
@@ -203,7 +182,7 @@ def _normalize_source_refs(
         ref_type = ref_type.strip()
         row: dict[str, Any] = {"type": ref_type}
 
-        if ref_type in {"artifact", "track", "task", "handoff"}:
+        if ref_type in {"artifact", "track", "task"}:
             row["id"] = require_id(raw.get("id"), f"source_ref.{ref_type}.id")
         elif ref_type == "buddybox":
             if not allow_buddybox:
@@ -240,12 +219,13 @@ def _normalize_source_refs(
 def validate_track(track: dict[str, Any]) -> dict[str, Any]:
     if "artifact_ids" in track:
         raise ValueError("track.artifact_ids is retired; use track.task_ids")
+    if any(field in track for field in _LEGACY_TRACK_BUDDY_FIELDS):
+        raise ValueError("legacy track buddy-routing fields are retired; use immutable owner_buddy")
 
     track_id = require_id(track.get("id", ""), "track.id")
     title = track.get("title")
     status = track.get("status")
-    current_buddy = track.get("current_buddy")
-    next_buddy = track.get("next_buddy")
+    owner_buddy = track.get("owner_buddy")
     task_ids = track.get("task_ids")
     summary = track.get("summary")
     updated_at = track.get("updated_at")
@@ -254,10 +234,8 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("track.title must be a non-empty string")
     if status not in VALID_TRACK_STATUS:
         raise ValueError(f"track.status must be one of {', '.join(VALID_TRACK_STATUS)}")
-    if not isinstance(current_buddy, str) or not current_buddy:
-        raise ValueError("track.current_buddy must be a non-empty string")
-    if next_buddy is not None and (not isinstance(next_buddy, str) or not next_buddy):
-        raise ValueError("track.next_buddy must be a non-empty string or null")
+    if not isinstance(owner_buddy, str) or not owner_buddy.strip():
+        raise ValueError("track.owner_buddy must be a non-empty string")
     if not isinstance(task_ids, list) or any(not isinstance(item, str) or not item for item in task_ids):
         raise ValueError("track.task_ids must be a list of non-empty strings")
     for task_id in task_ids:
@@ -271,8 +249,7 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
         "id": track_id,
         "title": title.strip(),
         "status": status,
-        "current_buddy": current_buddy,
-        "next_buddy": next_buddy,
+        "owner_buddy": owner_buddy.strip(),
         "task_ids": list(dict.fromkeys(task_ids)),
         "summary": summary or "",
         "updated_at": updated_at,
@@ -417,71 +394,6 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def validate_handoff_record(record: dict[str, Any]) -> dict[str, Any]:
-    if _LEGACY_SOURCE_RUN in record:
-        raise ValueError("legacy handoff run lineage field is retired; use product object refs")
-    if "historical_artifact_ids" in record:
-        raise ValueError("handoff.historical_artifact_ids is retired; use source_refs")
-
-    handoff_id = require_id(record.get("id", ""), "handoff.id")
-    track_id = require_id(record.get("track_id", ""), "handoff.track_id")
-    source_buddy = record.get("source_buddy")
-    target_buddy = record.get("target_buddy")
-    source_task_id = record.get("source_task_id")
-    artifact_ids = record.get("artifact_ids", [])
-    legacy_private_paths = record.get(_LEGACY_HANDOFF_PRIVATE_PATHS_KEY)
-    source_refs = _normalize_source_refs(record.get("source_refs"), allow_buddybox=False)
-    reason = record.get("reason")
-    context = record.get("context")
-    status = record.get("status")
-    created_at = record.get("created_at")
-    updated_at = record.get("updated_at")
-
-    if not isinstance(source_buddy, str) or not source_buddy.strip():
-        raise ValueError("handoff.source_buddy must be a non-empty string")
-    if not isinstance(target_buddy, str) or not target_buddy.strip():
-        raise ValueError("handoff.target_buddy must be a non-empty string")
-    if source_task_id is not None:
-        require_id(source_task_id, "handoff.source_task_id")
-    if status not in VALID_HANDOFF_STATUS:
-        raise ValueError(f"handoff.status must be one of {', '.join(VALID_HANDOFF_STATUS)}")
-
-    if not isinstance(artifact_ids, list) or any(not isinstance(item, str) or not item.strip() for item in artifact_ids):
-        raise ValueError("handoff.artifact_ids must be a list of non-empty strings")
-    for artifact_id in artifact_ids:
-        require_id(artifact_id, "handoff.artifact_ids[]")
-
-    if legacy_private_paths is not None:
-        if not isinstance(legacy_private_paths, list):
-            raise ValueError("legacy handoff private path list must be a list when present")
-        for path in legacy_private_paths:
-            _validate_retired_handoff_private_path(path)
-
-    if not isinstance(reason, str) or not reason.strip():
-        raise ValueError("handoff.reason must be a non-empty string")
-    if not isinstance(context, str) or not context.strip():
-        raise ValueError("handoff.context must be a non-empty string")
-    if not isinstance(created_at, str) or not created_at:
-        raise ValueError("handoff.created_at must be a non-empty string")
-    if not isinstance(updated_at, str) or not updated_at:
-        raise ValueError("handoff.updated_at must be a non-empty string")
-
-    return {
-        "id": handoff_id,
-        "track_id": track_id,
-        "source_buddy": source_buddy.strip(),
-        "target_buddy": target_buddy.strip(),
-        "source_task_id": source_task_id,
-        "artifact_ids": list(dict.fromkeys(artifact_ids)),
-        "source_refs": source_refs,
-        "reason": reason.strip(),
-        "context": context.strip(),
-        "status": status,
-        "created_at": created_at,
-        "updated_at": updated_at,
-    }
-
-
 def _artifact_kind_name(task: dict[str, Any], artifact: dict[str, Any] | None = None) -> str:
     if artifact is not None:
         kind = artifact.get("kind")
@@ -521,14 +433,6 @@ def list_artifacts() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in ARTIFACT_OBJECTS_DIR.glob("*.json"):
         rows.append(validate_artifact(_read_json(path)))
-    rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
-    return rows
-
-
-def list_handoffs() -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for path in HANDOFF_OBJECTS_DIR.glob("*.json"):
-        rows.append(validate_handoff_record(_read_json(path)))
     rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
     return rows
 
@@ -619,13 +523,6 @@ def get_artifact(artifact_id: str) -> dict[str, Any] | None:
     return validate_artifact(_read_json(path))
 
 
-def get_handoff(handoff_id: str) -> dict[str, Any] | None:
-    path = handoff_file(handoff_id)
-    if not path.exists():
-        return None
-    return validate_handoff_record(_read_json(path))
-
-
 def save_track(track: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_track(track)
     ensure_runtime_dirs()
@@ -647,20 +544,12 @@ def save_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def save_handoff(record: dict[str, Any]) -> dict[str, Any]:
-    ensure_runtime_dirs()
-    normalized = validate_handoff_record(record)
-    _write_json(handoff_file(normalized["id"]), normalized)
-    return normalized
-
-
 def create_track(
     track_id: str,
     title: str,
     *,
     status: str = "active",
-    current_buddy: str = "pm",
-    next_buddy: str | None = None,
+    owner_buddy: str = "pm",
     summary: str = "",
 ) -> dict[str, Any]:
     require_id(track_id, "track id")
@@ -670,8 +559,7 @@ def create_track(
         "id": track_id,
         "title": title,
         "status": status,
-        "current_buddy": current_buddy,
-        "next_buddy": next_buddy,
+        "owner_buddy": owner_buddy,
         "task_ids": [],
         "summary": summary,
         "updated_at": now_iso(),
@@ -683,7 +571,7 @@ def update_track(track_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     track = get_track(track_id)
     if track is None:
         raise ValueError(f"track not found: {track_id}")
-    allowed = {"title", "status", "current_buddy", "next_buddy", "summary", "task_ids"}
+    allowed = {"title", "status", "summary", "task_ids"}
     for key, value in patch.items():
         if key not in allowed:
             raise ValueError(f"unsupported track field: {key}")
@@ -991,39 +879,6 @@ def update_artifact(
         remove_artifact_from_task(old_task_id, artifact_id)
         add_artifact_to_task(new_task_id, artifact_id, summary=artifact.get("summary") or None)
     return artifact
-
-
-def create_handoff(
-    *,
-    handoff_id: str,
-    track_id: str,
-    source_buddy: str,
-    target_buddy: str,
-    source_task_id: str | None,
-    artifact_ids: list[str],
-    source_refs: list[dict[str, Any]] | None,
-    reason: str,
-    context: str,
-    status: str = "active",
-) -> dict[str, Any]:
-    require_id(handoff_id, "handoff id")
-    if get_handoff(handoff_id) is not None:
-        raise ValueError(f"handoff already exists: {handoff_id}")
-    payload = {
-        "id": handoff_id,
-        "track_id": require_id(track_id, "handoff.track_id"),
-        "source_buddy": source_buddy,
-        "target_buddy": target_buddy,
-        "source_task_id": source_task_id,
-        "artifact_ids": artifact_ids,
-        "source_refs": source_refs,
-        "reason": reason,
-        "context": context,
-        "status": status,
-        "created_at": now_iso(),
-        "updated_at": now_iso(),
-    }
-    return save_handoff(payload)
 
 
 def delete_artifact(artifact_id: str) -> dict[str, Any]:

@@ -3,13 +3,12 @@
 
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 from typing import Any, TypedDict
 
 import env_store
+from env.services import artifact_visibility
 from env.services import source_refs as source_ref_service
-from env.services import track_relations
 from env.tools import responses as tool_responses
 
 
@@ -65,18 +64,6 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
             "Retry with explicit task_id and supported fields.",
         ],
         correctable_fields=correctable_fields,
-        alternative_capabilities=[
-            tool_responses.alternative_capability(
-                tool="task",
-                action="list",
-                condition="Use when you need owned task ids before retrying artifact payloads.",
-            ),
-            tool_responses.alternative_capability(
-                tool="context",
-                action="get",
-                condition="Use when you need full catalog and id-source semantics.",
-            ),
-        ],
     )
 
 
@@ -105,23 +92,6 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
             "Use artifact.list to inspect readable artifacts.",
         ],
         correctable_fields=correctable_fields,
-        alternative_capabilities=[
-            tool_responses.alternative_capability(
-                tool="task",
-                action="list",
-                condition="Use when you need owned task ids before retrying artifact writes.",
-            ),
-            tool_responses.alternative_capability(
-                tool="artifact",
-                action="list",
-                condition="Use when you need readable artifact ids for get/update flows.",
-            ),
-            tool_responses.alternative_capability(
-                tool="track",
-                action="get",
-                condition="Use when you need relation context and artifact summary ids.",
-            ),
-        ],
     )
 
 
@@ -136,11 +106,7 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str
     allowed = allowed_map[action]
     unknown = sorted(key for key in args if key not in allowed)
     if unknown:
-        return _reject_payload(
-            action=action,
-            active_buddy=active_buddy,
-            message=f"unsupported payload fields: {', '.join(unknown)}",
-        )
+        return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")
     if _LEGACY_SOURCE_RUN in args:
         return _reject_payload(
             action=action,
@@ -229,7 +195,7 @@ def _normalized_create_payload(*, args: dict[str, Any], active_buddy: str, actio
 
 
 def _artifact_response_row(artifact: dict[str, Any], active_buddy: str) -> dict[str, Any]:
-    row = track_relations.artifact_summary_row(artifact, active_buddy)
+    row = artifact_visibility.artifact_summary_row(artifact, active_buddy)
     row["task_id"] = artifact.get("task_id")
     row["supersedes_artifact_id"] = artifact.get("supersedes_artifact_id")
     row["content"] = artifact.get("content")
@@ -253,8 +219,16 @@ def list_artifacts_for_track(*, args: dict[str, Any], context: ArtifactServiceCo
     track = env_store.get_track(track_id)
     if track is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"track not found: {track_id}")
+    if track.get("status") == "archived":
+        return _reject_scope(
+            action=action,
+            active_buddy=active_buddy,
+            boundary="track.lifecycle_status",
+            message=f"track '{track_id}' is archived and cannot be read via artifact.list",
+            code="E_TRACK_ARCHIVED",
+        )
 
-    rows = track_relations.current_artifact_rows_for_track(track_id, active_buddy)
+    rows = artifact_visibility.current_artifact_rows_for_track(track_id, active_buddy)
     return tool_responses.success(
         tool="artifact",
         action=action,
@@ -267,7 +241,7 @@ def list_artifacts_for_track(*, args: dict[str, Any], context: ArtifactServiceCo
             "Use artifact.get with readable artifact_id for full record.",
             "Use track.join when relation is missing for intended work track.",
         ],
-        extra={"track_id": track_id, "relation": "owner-or-track", "artifacts": rows},
+        extra={"track_id": track_id, "relation": "owner-or-track_task", "artifacts": rows},
     )
 
 
@@ -287,7 +261,7 @@ def get_artifact_for_active_buddy(*, args: dict[str, Any], context: ArtifactServ
     if artifact is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {artifact_id}")
 
-    decision = track_relations.artifact_read_decision(artifact, active_buddy)
+    decision = artifact_visibility.artifact_read_decision(artifact, active_buddy)
     if not bool(decision.get("allowed")):
         return _reject_scope(
             action=action,
@@ -391,7 +365,6 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
         ],
         allowed_next_actions=[
             "Use artifact.get with artifact_id for full verification.",
-            "Use handoff.create to share this artifact with another buddy.",
         ],
         extra={"artifact_id": artifact["id"], "artifact": row},
     )
@@ -481,7 +454,6 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
         state_changes=[{"object_type": "artifact", "change": "metadata_updated", "artifact_id": artifact_id}],
         allowed_next_actions=[
             "Use artifact.get for updated record.",
-            "Use handoff.create if this artifact should be shared.",
         ],
         extra={"artifact_id": artifact_id, "artifact": row},
     )

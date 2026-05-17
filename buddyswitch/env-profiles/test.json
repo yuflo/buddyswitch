@@ -26,8 +26,7 @@
       "status",
       "summary"
     ],
-    "track_effects": [],
-    "handoff_targets": "manifest-buddies"
+    "track_effects": []
   },
   "tool_capability": {
     "browser_cockpit": "available",

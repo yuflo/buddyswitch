@@ -13,7 +13,7 @@ description: Use when the task is drafting a PRD, defining MVP scope, or turning
 - The user wants PM output that becomes source artifact for downstream design or implementation.
 
 ## Do Not Use When
-- The task is primarily track lifecycle administration (`create`, `update`, `advance`, `archive`).
+- The task is primarily track lifecycle administration (`create`, `update`, `archive`).
 - The user wants design structure, implementation work, market research, or smoke testing as main outcome.
 
 ## Inputs
@@ -40,7 +40,7 @@ description: Use when the task is drafting a PRD, defining MVP scope, or turning
 ## Shared Runtime Rules
 
 - Runtime execution uses env.tool through python3 scripts/env/client.py ... .
-- Product-readable durable state is written explicitly as task, artifact, or handoff objects.
+- Product-readable durable state is written explicitly as task or artifact objects.
 - Use buddybox env tools with `logical_name` for active-buddy-private working files.
 - Return after required explicit durable writes are complete.
 
@@ -60,12 +60,11 @@ Use `artifact-tool` when this skill produces a durable artifact:
 After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
 Use optional `working_notes` for concise reasoning or verification notes.
 Use optional `task_id` or `track_id` only as association metadata for explicit env-tool state.
-Use optional `handoff` when another manifest buddy should continue.
 
 ## Examples
 - `Draft the MVP PRD for onboarding rewrite track`
 - `Continue product definition and define P0/P1 scope`
 
 ## Counterexamples
-- `create track and set next_buddy design`
+- `create track, then let design join with track.join`
 - `implement the approved onboarding rewrite scope`

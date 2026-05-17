@@ -24,6 +24,10 @@ class EnvManifestV2Tests(unittest.TestCase):
         skill_paths = [row["path"] for row in self.manifest.get("skills", []) if isinstance(row, dict)]
         self.assertFalse(any("run-tool" in path for path in skill_paths))
 
+    def test_manifest_has_no_handoff_tool_skill(self) -> None:
+        skill_ids = [row["id"] for row in self.manifest.get("skills", []) if isinstance(row, dict)]
+        self.assertNotIn("handoff-tool", skill_ids)
+
     def test_buddy_permissions_are_runless(self) -> None:
         for buddy in self.manifest.get("buddies", []):
             assert isinstance(buddy, dict)
@@ -33,6 +37,7 @@ class EnvManifestV2Tests(unittest.TestCase):
                 self.assertIn("buddybox.read", permissions)
                 self.assertNotIn("run.commit", permissions)
                 self.assertNotIn("binding.get", permissions)
+                self.assertFalse(any(item.startswith("handoff.") for item in permissions))
 
     def test_buddy_permissions_have_no_buddybox_special_cases(self) -> None:
         expected = {"buddybox.read", "buddybox.write", "buddybox.delete"}
@@ -51,6 +56,10 @@ class EnvManifestV2Tests(unittest.TestCase):
     def test_memory_permissions_are_rejected_by_validator(self) -> None:
         with self.assertRaisesRegex(env_manifest.ManifestError, "unsupported object 'memory'"):
             env_manifest._validate_permission("memory.read", "synthetic")  # noqa: SLF001
+
+    def test_handoff_permissions_are_rejected_by_validator(self) -> None:
+        with self.assertRaisesRegex(env_manifest.ManifestError, "unsupported object 'handoff'"):
+            env_manifest._validate_permission("handoff.read", "synthetic")  # noqa: SLF001
 
     def test_shared_skill_rows_use_id_and_path_contract(self) -> None:
         for row in self.manifest.get("skills", []):
@@ -82,6 +91,13 @@ class EnvManifestV2Tests(unittest.TestCase):
         self.assertEqual(set(row.keys()), {"id", "path"})
         self.assertEqual(row.get("path"), "buddyswitch/skills/shared/buddybox-tool")
         self.assertTrue((ROOT / str(row["path"]) / "SKILL.md").exists())
+
+    def test_pm_manifest_and_profile_exclude_track_advance(self) -> None:
+        pm = next(
+            row for row in self.manifest.get("buddies", []) if isinstance(row, dict) and row.get("id") == "pm"
+        )
+        permissions = set(pm.get("permissions", []))
+        self.assertNotIn("track.advance", permissions)
 
 
 if __name__ == "__main__":

@@ -270,18 +270,12 @@ def validate_env_profile(
             "state_capability.task_effects must be exactly ['status', 'summary']"
         )
     track_effects = _require_string_list(state_capability.get("track_effects"), "state_capability.track_effects")
-    expected_track_effects = ["create", "update", "advance", "archive"] if buddy_id == "pm" else []
+    expected_track_effects = ["create", "update", "archive"] if buddy_id == "pm" else []
     if track_effects != expected_track_effects:
         raise EnvProfileError(
             f"state_capability.track_effects mismatch for '{buddy_id}': "
             f"expected {expected_track_effects}, got {track_effects}"
         )
-    _require_enum(
-        enums=enums,
-        key="state_capability.handoff_targets",
-        value=state_capability.get("handoff_targets"),
-        label="state_capability.handoff_targets",
-    )
 
     tool_capability = _require_dict(profile.get("tool_capability"), "tool_capability")
     browser_cockpit = _require_enum(

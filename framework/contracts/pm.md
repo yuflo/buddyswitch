@@ -6,7 +6,7 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 
 ## Required Behavior
 
-- Keep track lifecycle mutations explicit and PM-owned (`track.create|update|advance|archive`).
+- Keep track lifecycle mutations explicit and PM-owned (`track.create|update|archive`).
 - Write formal PM deliverables via `artifact.create_revision` (`kind="prd"` or other PM kinds).
 - Use buddybox for PM-owned private local drafts, lightweight prototypes, exports, or supporting files; use artifact when content must become product-readable.
 
@@ -20,5 +20,4 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
-- `buddyswitch/objects/handoffs/<handoff-id>.json`
 - Active-buddy-private files via `buddybox.*` logical names (instance-local, not product-readable).

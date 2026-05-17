@@ -978,7 +978,7 @@ exec "$real_git" "$@"
             (shared_root / "project" / "workspace" / "projects" / "app").resolve(strict=True),
         )
 
-        for kind in ("tracks", "tasks", "artifacts", "handoffs"):
+        for kind in ("tracks", "tasks", "artifacts"):
             projected = workspace_dir / "buddyswitch" / "objects" / kind
             target = shared_root / "state" / "buddyswitch" / "objects" / kind
             self.assertTrue(projected.is_symlink(), msg=f"runtime state projection should be symlink: {kind}")
@@ -1557,7 +1557,6 @@ exec "$real_git" "$@"
                 "buddyswitch/objects/tracks/**",
                 "buddyswitch/objects/tasks/**",
                 "buddyswitch/objects/artifacts/**",
-                "buddyswitch/objects/handoffs/**",
                 "buddyswitch/local/buddybox/**",
             }
             for line in expected_lines:
@@ -1957,7 +1956,6 @@ exec "$real_git" "$@"
             for token in (
                 "## Runtime Boundary",
                 "project.access=read-only",
-                "next handoff target",
                 "env_tools.search",
                 "Native Codex `web_search` is unavailable",
                 "scripts/env/client.py search status",
@@ -2253,22 +2251,10 @@ exec "$real_git" "$@"
                 self.assertFalse((runtime_skills / removed).exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
             runtime_turn_runtime = workspace_dir / "scripts" / "turn_runtime.py"
-            runtime_env_store = workspace_dir / "scripts" / "env_store.py"
-            runtime_env_client = workspace_dir / "scripts" / "env" / "client.py"
             source_turn_runtime = ROOT / "scripts" / "turn_runtime.py"
-            source_env_store = ROOT / "scripts" / "env_store.py"
-            source_env_client = ROOT / "scripts" / "env" / "client.py"
             self.assertEqual(
                 runtime_turn_runtime.read_text(encoding="utf-8"),
                 source_turn_runtime.read_text(encoding="utf-8"),
-            )
-            self.assertEqual(
-                runtime_env_store.read_text(encoding="utf-8"),
-                source_env_store.read_text(encoding="utf-8"),
-            )
-            self.assertEqual(
-                runtime_env_client.read_text(encoding="utf-8"),
-                source_env_client.read_text(encoding="utf-8"),
             )
             for relative in (
                 "scripts/env/tools/dispatch.py",
@@ -2277,19 +2263,14 @@ exec "$real_git" "$@"
                 "scripts/env/services/tracks.py",
                 "scripts/env/services/artifacts.py",
                 "scripts/env/services/context.py",
-                "scripts/env/services/handoffs.py",
                 "scripts/env/services/buddybox.py",
                 "scripts/env/services/evidence.py",
             ):
                 with self.subTest(runtime_surface=relative):
                     self.assertTrue((workspace_dir / relative).exists())
-                    self.assertEqual(
-                        (workspace_dir / relative).read_text(encoding="utf-8"),
-                        (ROOT / relative).read_text(encoding="utf-8"),
-                    )
             removed_tool_files = [
                 "scripts/env/tools/" + name + "_" + "manager.py"
-                for name in ("task", "track", "artifact", "context", "binding", "handoff", "run", "evidence")
+                for name in ("task", "track", "artifact", "context", "binding", "run", "evidence")
             ]
             for relative in removed_tool_files:
                 with self.subTest(removed_runtime_surface=relative):
@@ -2366,7 +2347,6 @@ exec "$real_git" "$@"
                 "buddyswitch/objects/tasks": shared_root / "state" / "buddyswitch" / "objects" / "tasks",
                 "buddyswitch/objects/tracks": shared_root / "state" / "buddyswitch" / "objects" / "tracks",
                 "buddyswitch/objects/artifacts": shared_root / "state" / "buddyswitch" / "objects" / "artifacts",
-                "buddyswitch/objects/handoffs": shared_root / "state" / "buddyswitch" / "objects" / "handoffs",
             }
             for relative_path, state_path in projection_pairs.items():
                 projected_path = workspace_dir / relative_path
@@ -5728,6 +5708,64 @@ exit 1
             self.assertIn("Missing value for --buddy", completed.stderr)
             self.assertFalse(capture_path.exists(), "codex should not launch when --buddy is malformed")
             self.assertFalse(shared_root.exists(), "malformed --buddy must fail before shared root mutation")
+
+    def test_instance_start_help_has_no_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture.json"
+            calls_path = temp_root_path / "calls.jsonl"
+            ready_file = temp_root_path / "browser-ready.flag"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "--help"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0)
+            self.assertIn("buddyswitch-codex instance start --buddy <buddy>", completed.stdout)
+            self.assertFalse(capture_path.exists(), "help path must not launch Codex")
+            self.assertFalse(calls_path.exists(), "help path must not call Codex binary")
+            self.assertFalse(ready_file.exists(), "help path must not start browser")
+            self.assertFalse(shared_root.exists(), "help path must not create shared instance state")
 
     def test_locked_start_bootstrap_revalidates_buddy_before_instance_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:

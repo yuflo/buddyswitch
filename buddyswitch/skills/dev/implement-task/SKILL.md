@@ -11,7 +11,7 @@ description: Use when the task is implementing scoped product changes, bug fixes
 ## Use when
 - The task is about building, coding, fixing, integrating, refactoring within scope, or changing behavior in `projects/app/`.
 - The user wants code changes plus verification results.
-- The request references approved scope, a PRD, a prototype handoff, or concrete application behavior.
+- The request references approved scope, a PRD, a prototype artifact, or concrete application behavior.
 
 ## Do Not Use When
 - The user wants product scoping, design specification, market research, or test-only execution.
@@ -20,7 +20,7 @@ description: Use when the task is implementing scoped product changes, bug fixes
 
 ## Inputs
 - Task request and expected behavior.
-- PRD and other approved handoff context when available.
+- PRD and other approved artifact context context when available.
 - Target code paths and technical constraints.
 - Optional track context or summary hint.
 
@@ -46,7 +46,7 @@ description: Use when the task is implementing scoped product changes, bug fixes
 ## Shared Runtime Rules
 
 - Runtime execution uses env.tool through python3 scripts/env/client.py ... .
-- Product-readable durable state is written explicitly as task, artifact, or handoff objects.
+- Product-readable durable state is written explicitly as task or artifact objects.
 - Use buddybox env tools with `logical_name` for active-buddy-private working files.
 - Return after required explicit durable writes are complete.
 
@@ -66,7 +66,6 @@ Use `artifact-tool` when this skill produces a durable artifact:
 After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
 Use optional `working_notes` for concise reasoning or verification notes.
 Use optional `task_id` only as association metadata for an explicitly selected task.
-Use optional `handoff` when another manifest buddy should continue.
 
 ## Guardrails
 
@@ -78,7 +77,7 @@ Use optional `handoff` when another manifest buddy should continue.
 ## Examples
 - `Implement the approved P0 creator profile flow in projects/app`
 - `Fix the regression in onboarding CTA behavior and report verification`
-- `Build the playlist reorder interaction from the approved handoff`
+- `Build the playlist reorder interaction from the approved artifact context`
 
 ## Counterexamples
 - `Define the MVP scope for creator profile`

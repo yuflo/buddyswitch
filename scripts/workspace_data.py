@@ -32,13 +32,7 @@ def build_track_views(
 ) -> list[dict[str, Any]]:
     from runtime_store.projections import build_track_views as _build_track_views
 
-    return _build_track_views(tracks, task_map, artifact_map)
-
-
-def build_handoff_view(handoff: dict[str, Any]) -> dict[str, Any]:
-    from runtime_store.projections import build_handoff_view as _build_handoff_view
-
-    return _build_handoff_view(handoff)
+    return _build_track_views(tracks, task_map)
 
 
 def build_workspace_data() -> dict[str, Any]:

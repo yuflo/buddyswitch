@@ -139,14 +139,14 @@ def _pick_best_task_cover(
 
 def select_artifacts_for_run(
     *,
-    current_buddy: str,
+    active_buddy: str,
     demand: str,
     required_kinds: list[str],
     track_artifact_index: dict[str, Any] | None,
     task_id_scope: str | None = None,
     max_default_items: int | None = None,
 ) -> dict[str, Any]:
-    del current_buddy
+    del active_buddy
     del demand
     del task_id_scope
 
@@ -233,7 +233,7 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     payload = select_artifacts_for_run(
-        current_buddy=args.buddy,
+        active_buddy=args.buddy,
         demand=args.demand,
         required_kinds=args.required_kinds,
         track_artifact_index=_load_json(args.index_file),

@@ -29,10 +29,8 @@
     "track_effects": [
       "create",
       "update",
-      "advance",
       "archive"
-    ],
-    "handoff_targets": "manifest-buddies"
+    ]
   },
   "tool_capability": {
     "browser_cockpit": "available",

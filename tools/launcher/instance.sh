@@ -26,6 +26,19 @@ buddyswitch_instance_buddies() {
 }
 
 buddyswitch_instance_start() {
+  local arg
+  for arg in "$@"; do
+    case "${arg}" in
+      --)
+        break
+        ;;
+      help|-h|--help)
+        buddyswitch_instance_usage
+        return 0
+        ;;
+    esac
+  done
+
   case "${1:-}" in
     --buddy|--buddy=*)
       start_codex "$@"

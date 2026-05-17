@@ -46,7 +46,7 @@ description: Use when the task is sharpening external positioning, value framing
 - Do not silently downgrade to low-density public alternatives when critical evidence refresh is blocked.
 - Do not use silent search API/snippet/crawler fallback.
 - If browser-native access is genuinely blocked, only explicit user-approved one-off downgrade is allowed.
-- The cockpit is execution-time only; canonical outputs remain BuddySwitch task, artifact, or handoff objects; buddybox remains active-buddy private local workspace state.
+- The cockpit is execution-time only; canonical outputs remain BuddySwitch task or artifact objects; buddybox remains active-buddy private local workspace state.
 - Market evidence is target-scoped to artifact ids; do not invent evidence tokens.
 
 ## Verification
@@ -57,7 +57,7 @@ description: Use when the task is sharpening external positioning, value framing
 ## Shared Runtime Rules
 
 - Runtime execution uses env.tool through python3 scripts/env/client.py ... .
-- Product-readable durable state is written explicitly as task, artifact, or handoff objects.
+- Product-readable durable state is written explicitly as task or artifact objects.
 - Use buddybox env tools with `logical_name` for active-buddy-private working files.
 - Return after required explicit durable writes are complete.
 - Do not rely on deprecated prepare/persist flows.
@@ -78,7 +78,6 @@ Use `artifact-tool` when this skill produces a durable artifact:
 After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
 Use optional `working_notes` for concise reasoning or verification notes.
 Use optional `task_id` only as association metadata for an explicitly selected task.
-Use optional `handoff` when another manifest buddy should continue.
 
 Market artifact commits require broker-issued `tool_evidence` from the browser evidence gate. Do not invent token strings.
 

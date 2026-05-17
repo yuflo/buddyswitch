@@ -22,5 +22,4 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
-- `buddyswitch/objects/handoffs/<handoff-id>.json`
 - Active-buddy-private files via `buddybox.*` logical names (instance-local, not product-readable).

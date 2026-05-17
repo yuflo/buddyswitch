@@ -46,7 +46,7 @@ description: Use when the task is running smoke checks, regression verification,
 ## Shared Runtime Rules
 
 - Runtime execution uses env.tool through python3 scripts/env/client.py ... .
-- Product-readable durable state is written explicitly as task, artifact, or handoff objects.
+- Product-readable durable state is written explicitly as task or artifact objects.
 - Use buddybox env tools with `logical_name` for active-buddy-private working files.
 - Return after required explicit durable writes are complete.
 
@@ -66,7 +66,6 @@ Use `artifact-tool` when this skill produces a durable artifact:
 After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
 Use optional `working_notes` for concise reasoning or verification notes.
 Use optional `task_id` only as association metadata for an explicitly selected task.
-Use optional `handoff` when another manifest buddy should continue.
 
 ## Guardrails
 
@@ -77,7 +76,7 @@ Use optional `handoff` when another manifest buddy should continue.
 
 ## Examples
 - `Run smoke checks for the onboarding CTA regression`
-- `Verify the playlist reorder flow after the latest dev handoff`
+- `Verify the playlist reorder flow after the latest dev artifact update`
 - `Smoke test the creator profile release candidate in projects/app`
 
 ## Counterexamples
