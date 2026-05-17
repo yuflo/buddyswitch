@@ -54,14 +54,19 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         correctable_fields=correctable_fields,
         alternative_capabilities=[
             tool_responses.alternative_capability(
-                tool="artifact",
-                action="list",
-                condition="Use when you need artifact target ids before retrying evidence actions.",
+                tool="track",
+                action="open",
+                condition="Use when you need shared material artifact ids on a track before retrying evidence actions.",
             ),
             tool_responses.alternative_capability(
                 tool="artifact",
                 action="get",
                 condition="Use when you need to confirm one artifact target before issuing token metadata.",
+            ),
+            tool_responses.alternative_capability(
+                tool="context",
+                action="summarize",
+                condition="Use when you need candidate track/task/artifact ids before issuing evidence metadata.",
             ),
         ],
     )
@@ -82,15 +87,21 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
         retryable=False,
         retry_guidance="Use readable owner-scoped artifact targets.",
         allowed_next_actions=[
-            "Use artifact.list to inspect readable targets.",
+            "Use track.open to inspect current shared artifact refs.",
+            "Use artifact.get to verify one candidate artifact id.",
             "Retry with a target owned by active buddy.",
         ],
         correctable_fields=["target_type", "target_id"],
         alternative_capabilities=[
             tool_responses.alternative_capability(
-                tool="artifact",
-                action="list",
-                condition="Use when you need readable/owned artifact target ids.",
+                tool="track",
+                action="open",
+                condition="Use when you need readable artifact ids from a shared track page.",
+            ),
+            tool_responses.alternative_capability(
+                tool="context",
+                action="summarize",
+                condition="Use when you need candidate ids before retrying evidence scope checks.",
             )
         ],
     )
@@ -112,13 +123,14 @@ def _resolve_target(*, target_type: str, target_id: str, active_buddy: str, acti
         artifact = env_store.get_artifact(target_id)
         if artifact is None:
             return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {target_id}")
-        if artifact.get("buddy") != active_buddy:
+        owner = artifact.get("created_by")
+        if owner != active_buddy:
             return None, _reject_scope(
                 action=action,
                 active_buddy=active_buddy,
                 boundary="artifact.buddy_scope",
                 code="E_EVIDENCE_TARGET_SCOPE",
-                message=f"artifact '{target_id}' is owned by buddy '{artifact.get('buddy')}'",
+                message=f"artifact '{target_id}' is owned by buddy '{owner}'",
             )
         return artifact, None
     return None, _reject_scope(

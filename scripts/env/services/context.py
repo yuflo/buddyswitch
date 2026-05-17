@@ -62,33 +62,78 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str
     allowed = _GET_FIELDS if action == "context.get" else _SUMMARIZE_FIELDS if action == "context.summarize" else _LIST_SOURCES_FIELDS
     unknown = sorted(key for key in args if key not in allowed)
     if unknown:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=f"unsupported payload fields: {', '.join(unknown)}",
+        )
     return None
 
 
 def _candidate_track_row(*, track: dict[str, Any], active_buddy: str) -> dict[str, Any]:
-    role = "observer"
-    if track.get("owner_buddy") == active_buddy:
-        role = "owner"
-    else:
-        for task_id in track.get("task_ids", []):
-            if not isinstance(task_id, str) or not task_id:
-                continue
-            task = env_store.get_task(task_id)
-            if not isinstance(task, dict):
-                continue
-            if task.get("buddy") == active_buddy and task.get("status") == "active":
-                role = "track_task"
-                break
+    role = "owner" if track.get("owner_buddy") == active_buddy else "collaborator"
     return {
         "track_id": track.get("id"),
         "title": track.get("title"),
-        "status": track.get("status"),
+        "outcome": track.get("outcome", ""),
         "owner_buddy": track.get("owner_buddy"),
-        "summary": track.get("summary", ""),
+        "state": track.get("state"),
+        "health": track.get("health"),
+        "now": track.get("now"),
         "active_buddy_role": role,
         "updated_at": track.get("updated_at"),
     }
+
+
+def _visible_tracks(*, track_filter: str | None, limit_value: int) -> list[dict[str, Any]]:
+    tracks = [row for row in env_store.list_tracks() if row.get("archived_at") is None]
+    if isinstance(track_filter, str) and track_filter.strip():
+        tracks = [row for row in tracks if row.get("id") == track_filter.strip()]
+    return tracks[:limit_value]
+
+
+def _visible_tasks(
+    *,
+    active_buddy: str,
+    task_filter: str | None,
+    visible_track_ids: set[str],
+    limit_value: int,
+) -> list[dict[str, Any]]:
+    tasks = [row for row in env_store.list_tasks() if row.get("buddy") == active_buddy]
+    if isinstance(task_filter, str) and task_filter.strip():
+        tasks = [row for row in tasks if row.get("id") == task_filter.strip()]
+    rows: list[dict[str, Any]] = []
+    for task in tasks:
+        track_id = task.get("track_id")
+        if isinstance(track_id, str) and track_id and track_id not in visible_track_ids:
+            continue
+        rows.append(task)
+        if len(rows) >= limit_value:
+            break
+    return rows
+
+
+def _current_material_rows(
+    *,
+    tracks: list[dict[str, Any]],
+    active_buddy: str,
+    limit_value: int,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen_artifact_ids: set[str] = set()
+    for track in tracks:
+        track_id = track.get("id")
+        if not isinstance(track_id, str) or not track_id:
+            continue
+        for row in artifact_visibility.current_material_rows_for_track(track_id, active_buddy):
+            artifact_id = row.get("artifact_id")
+            if not isinstance(artifact_id, str) or not artifact_id or artifact_id in seen_artifact_ids:
+                continue
+            seen_artifact_ids.add(artifact_id)
+            rows.append(row)
+            if len(rows) >= limit_value:
+                return rows
+    return rows
 
 
 def _current_context_sections(*, active_buddy: str, args: dict[str, Any], instance_payload: dict[str, Any]) -> dict[str, Any]:
@@ -97,41 +142,19 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any], instan
     limit = args.get("limit")
     limit_value = limit if isinstance(limit, int) and limit > 0 else 20
 
-    tracks = [row for row in env_store.list_tracks() if row.get("status") != "archived"]
-    if isinstance(track_filter, str) and track_filter.strip():
-        tracks = [row for row in tracks if row.get("id") == track_filter.strip()]
-
-    tasks = env_store.list_tasks()
-    if isinstance(task_filter, str) and task_filter.strip():
-        tasks = [row for row in tasks if row.get("id") == task_filter.strip()]
-
-    visible_tracks = tracks[:limit_value]
+    visible_tracks = _visible_tracks(track_filter=track_filter if isinstance(track_filter, str) else None, limit_value=limit_value)
     visible_track_ids = {row.get("id") for row in visible_tracks if isinstance(row.get("id"), str)}
-
-    visible_tasks = [
-        row
-        for row in tasks
-        if row.get("buddy") == active_buddy and (
-            not isinstance(row.get("track_id"), str) or row.get("track_id") in visible_track_ids
-        )
-    ][:limit_value]
-
-    visible_artifacts: list[dict[str, Any]] = []
-    seen_artifact_ids: set[str] = set()
-    for track in visible_tracks:
-        track_id = track.get("id")
-        if not isinstance(track_id, str) or not track_id:
-            continue
-        for row in artifact_visibility.current_artifact_rows_for_track(track_id, active_buddy):
-            artifact_id = row.get("artifact_id")
-            if not isinstance(artifact_id, str) or artifact_id in seen_artifact_ids:
-                continue
-            seen_artifact_ids.add(artifact_id)
-            visible_artifacts.append(row)
-            if len(visible_artifacts) >= limit_value:
-                break
-        if len(visible_artifacts) >= limit_value:
-            break
+    visible_tasks = _visible_tasks(
+        active_buddy=active_buddy,
+        task_filter=task_filter if isinstance(task_filter, str) else None,
+        visible_track_ids=visible_track_ids,
+        limit_value=limit_value,
+    )
+    visible_artifacts = _current_material_rows(
+        tracks=visible_tracks,
+        active_buddy=active_buddy,
+        limit_value=limit_value,
+    )
 
     buddybox_desc = buddybox_service.build_buddybox_desc(active_buddy, instance_payload=instance_payload)
     candidate_tracks = [_candidate_track_row(track=row, active_buddy=active_buddy) for row in visible_tracks]
@@ -166,27 +189,27 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any], instan
 def context_sources_desc() -> dict[str, dict[str, Any]]:
     return {
         "tracks": {
-            "description": "Readable track collaboration lanes.",
+            "description": "Readable track pages with current state and published materials.",
             "scope": "product collaboration state",
             "source_of_truth": "buddyswitch/objects/tracks/*.json",
         },
         "tasks": {
-            "description": "Readable task work items.",
-            "scope": "product collaboration state",
+            "description": "Active-buddy private task hints and checklists.",
+            "scope": "active-buddy private task state",
             "source_of_truth": "buddyswitch/objects/tasks/*.json",
         },
         "artifacts": {
-            "description": "Readable artifact summaries and provenance refs.",
+            "description": "Readable artifact summaries for current shared track materials.",
             "scope": "product deliverable state",
             "source_of_truth": "buddyswitch/objects/artifacts/*.json",
         },
         "messages": {
-            "description": "Direct buddy inbox messages, read through message.list, not emitted in context sections.",
+            "description": "Direct buddy inbox messages, read through message.list.",
             "scope": "active-buddy inbox communication",
             "source_of_truth": "buddyswitch/objects/messages/*.json",
         },
         "comments": {
-            "description": "Target-scoped comments on tracks and artifacts, read through comment.list, not emitted as top-level context rows.",
+            "description": "Target-scoped comments on tracks and artifacts, read through comment.list.",
             "scope": "target discussion thread",
             "source_of_truth": "buddyswitch/objects/comments/*.json",
         },
@@ -283,7 +306,6 @@ def list_sources(*, args: dict[str, Any], context: ContextServiceContext) -> dic
     if payload_error is not None:
         return payload_error
 
-    sources = context_sources_desc()
     return tool_responses.success(
         tool="context",
         action=action,
@@ -293,5 +315,5 @@ def list_sources(*, args: dict[str, Any], context: ContextServiceContext) -> dic
         durability="none",
         read_scope="source descriptor metadata only",
         allowed_next_actions=["Use context.summarize or context.get with optional filters."],
-        extra={"sources": sources},
+        extra={"sources": context_sources_desc()},
     )

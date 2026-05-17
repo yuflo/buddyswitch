@@ -10,49 +10,49 @@ _CAPABILITY_BOUNDARY_DEFAULT = "Service-level permission and ownership checks re
 _CAPABILITIES: dict[str, dict[str, Any]] = {
     "task": {
         "title": "Task Management",
-        "plain_description": "Manage active-buddy durable task work items used by track and artifact tools.",
+        "plain_description": "Manage active-buddy private tasks as optional work aids.",
         "use_when": [
             "You need to create, list, read, update, or archive tasks owned by the active buddy.",
-            "You need explicit task ids for artifact revisions.",
+            "You need a private organizational hint via task.track_id.",
         ],
         "do_not_use_when": [
-            "You need PM track lifecycle changes; use track lifecycle actions.",
-            "You need to store artifact body content; use artifact.create_revision.",
+            "You need shared collaboration material; use track.open and artifact.get.",
+            "You need to publish shared artifacts; use track.add_material or track.add_proof.",
         ],
-        "capability_boundary": "Only active-buddy-owned tasks are writable.",
+        "capability_boundary": "Only active-buddy-owned tasks are readable/writable.",
     },
     "track": {
-        "title": "Track Collaboration",
-        "plain_description": "Read track context, maintain task-track relations, and apply PM-owned lifecycle mutations.",
+        "title": "Track Pages",
+        "plain_description": "Operate shared progress pages and shared materials/proof publication.",
         "use_when": [
-            "You need track summaries or one track context with related task/artifact summaries.",
-            "You need to join, attach, or detach task relations for explicit collaboration state.",
+            "You need to create, list, open, update now-state, add materials/updates/proof, or archive tracks.",
+            "You need cross-buddy shared collaboration state on a non-archived track.",
         ],
         "do_not_use_when": [
-            "You need artifact body writes; use artifact actions.",
-            "You need hidden current-track binding; runless mode uses explicit ids only.",
+            "You need to read full artifact body by id; use artifact.get.",
+            "You need private buddy drafts/files; use artifact.create_revision or buddybox tools.",
         ],
-        "capability_boundary": "Track lifecycle writes are PM authority; non-PM buddies can read and manage their relations.",
+        "capability_boundary": "Only PM can create/archive tracks; all buddies can mutate non-archived shared page fields in V1.",
     },
     "artifact": {
-        "title": "Artifact Deliverables",
-        "plain_description": "Read artifact summaries or full bodies and write durable product-readable artifact revisions.",
+        "title": "Artifact Bodies",
+        "plain_description": "Read full artifact bodies and manage active-buddy private artifact metadata/drafts.",
         "use_when": [
-            "You need deliverable content attached to an active-buddy task.",
-            "You need to validate, create, or update artifact metadata with explicit ids and refs.",
+            "You need full artifact content via artifact.get.",
+            "You need to create/update an active-buddy private draft artifact.",
         ],
         "do_not_use_when": [
-            "You only need active-buddy private scratch files; use buddybox.",
-            "You need track lifecycle or task ownership updates; use track or task actions.",
+            "You need to publish artifact to shared collaboration; use track.add_material or track.add_proof.",
+            "You need task relation workflow; task_id publication path is removed.",
         ],
-        "capability_boundary": "Artifact writes require explicit active-buddy task ownership and valid source refs.",
+        "capability_boundary": "Private drafts are owner-only until published to a non-archived track by track actions.",
     },
     "buddybox": {
         "title": "Buddybox Files",
         "plain_description": "Operate active-buddy private files through logical_name values.",
         "use_when": [
             "You need active buddy private files for drafts, exports, logs, or generated files.",
-            "Use artifact.create_revision when the host decides content must become product-readable across buddies.",
+            "Use artifact or track publication when content must become product-readable.",
         ],
         "do_not_use_when": [
             "You need cross-buddy readable deliverables.",
@@ -94,25 +94,21 @@ _CAPABILITIES: dict[str, dict[str, Any]] = {
             "You need to list messages sent to the active buddy inbox.",
         ],
         "do_not_use_when": [
-            "You need broadcast or group messaging; use repeated message.send instead.",
-            "You need read receipts, message status, or read tracking.",
             "You need object-level discussion; use comment.add for track/artifact comments.",
-            "You need to edit or delete sent messages.",
+            "You need message status, read receipts, editing, or deleting.",
         ],
-        "capability_boundary": "Messages are direct buddy-to-buddy only. Self-send, broadcast, status, and read receipts are not supported.",
+        "capability_boundary": "Messages are direct buddy-to-buddy only.",
     },
     "comment": {
         "title": "Object Comments",
         "plain_description": "Add and list plain-text comments on readable track and artifact targets.",
         "use_when": [
             "You need to discuss a specific track or artifact.",
-            "You need to read discussion threads attached to a readable target.",
+            "You need to read comment threads attached to a readable target.",
         ],
         "do_not_use_when": [
             "You need task comments; only track and artifact targets are supported.",
-            "You need comment resolution, status, or edit/delete.",
-            "You need direct buddy messaging; use message.send.",
-            "You need broadcast or review workflows.",
+            "You need comment resolution/status/edit/delete.",
         ],
         "capability_boundary": "Comments require active-buddy read access to the target track or artifact.",
     },
@@ -175,26 +171,24 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
             "common_failures": [],
         }
 
-    add("task", "create", plain_description="Create one active-buddy durable task.", mutates="runtime_objects", open_world=False)
-    add("task", "list", plain_description="List active-buddy tasks.", mutates="none", open_world=False)
-    add("task", "get", plain_description="Get one active-buddy task.", mutates="none", open_world=False)
-    add("task", "update", plain_description="Update one active-buddy task.", mutates="runtime_objects", open_world=False)
-    add("task", "archive", plain_description="Archive one active-buddy task.", mutates="runtime_objects", open_world=False)
+    add("task", "create", plain_description="Create one active-buddy private task.", mutates="runtime_objects", open_world=False)
+    add("task", "list", plain_description="List active-buddy private tasks.", mutates="none", open_world=False)
+    add("task", "get", plain_description="Get one active-buddy private task.", mutates="none", open_world=False)
+    add("task", "update", plain_description="Update one active-buddy private task.", mutates="runtime_objects", open_world=False)
+    add("task", "archive", plain_description="Archive one active-buddy private task.", mutates="runtime_objects", open_world=False)
 
-    add("track", "list", plain_description="List readable tracks.", mutates="none", open_world=False)
-    add("track", "get", plain_description="Read one track context.", mutates="none", open_world=False)
-    add("track", "join", plain_description="Create or reuse active-buddy track-task relation.", mutates="runtime_objects", open_world=False)
-    add("track", "create", plain_description="Create one PM-owned track.", mutates="runtime_objects", open_world=False)
-    add("track", "update", plain_description="Update one PM-owned track.", mutates="runtime_objects", open_world=False)
-    add("track", "archive", plain_description="Archive one PM-owned track.", mutates="runtime_objects", open_world=False)
-    add("track", "attach_task", plain_description="Attach active-buddy task to track.", mutates="runtime_objects", open_world=False)
-    add("track", "detach_task", plain_description="Detach active-buddy task from track.", mutates="runtime_objects", open_world=False)
+    add("track", "create", plain_description="Create one PM-owned shared track page.", mutates="runtime_objects", open_world=False)
+    add("track", "list", plain_description="List non-archived track page summaries.", mutates="none", open_world=False)
+    add("track", "open", plain_description="Open one non-archived shared track page.", mutates="none", open_world=False)
+    add("track", "update_now", plain_description="Update now/state/health on non-archived track page.", mutates="runtime_objects", open_world=False)
+    add("track", "add_material", plain_description="Publish shared material to track page.", mutates="runtime_objects", open_world=False)
+    add("track", "add_update", plain_description="Append timeline update to track page.", mutates="runtime_objects", open_world=False)
+    add("track", "add_proof", plain_description="Publish close proof to track page.", mutates="runtime_objects", open_world=False)
+    add("track", "archive", plain_description="Archive one PM-owned shared track page.", mutates="runtime_objects", open_world=False)
 
-    add("artifact", "list", plain_description="List current artifact summaries for a track.", mutates="none", open_world=False)
-    add("artifact", "get", plain_description="Get one readable artifact with content.", mutates="none", open_world=False)
-    add("artifact", "validate_payload", plain_description="Validate artifact create payload.", mutates="none", open_world=False)
-    add("artifact", "create_revision", plain_description="Create one artifact revision.", mutates="runtime_objects", open_world=False)
-    add("artifact", "update_metadata", plain_description="Update owned artifact metadata.", mutates="runtime_objects", open_world=False)
+    add("artifact", "get", plain_description="Get one readable artifact with full content.", mutates="none", open_world=False)
+    add("artifact", "create_revision", plain_description="Create one active-buddy private artifact draft.", mutates="runtime_objects", open_world=False)
+    add("artifact", "update_metadata", plain_description="Update active-buddy-owned artifact metadata.", mutates="runtime_objects", open_world=False)
 
     add("buddybox", "desc", plain_description="Describe buddybox capability.", mutates="none", open_world=False)
     add("buddybox", "list", plain_description="List buddybox files.", mutates="none", open_world=False)

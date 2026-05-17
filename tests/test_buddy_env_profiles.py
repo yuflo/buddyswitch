@@ -37,7 +37,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
         self.assertEqual(files, self.buddy_set)
 
     def test_profiles_validate_with_matrix_rules(self) -> None:
-        pm_track_effects_seen = []
+        track_effects_seen = []
         for buddy_id in self.buddy_ids:
             profile = env_profiles.require_env_profile(
                 buddy_id,
@@ -79,11 +79,17 @@ class BuddyEnvProfilesTests(unittest.TestCase):
                 self.assertEqual(search["search_api"], "available")
             effects = profile["state_capability"]["track_effects"]
             if effects:
-                pm_track_effects_seen.append((buddy_id, effects))
+                track_effects_seen.append((buddy_id, effects))
 
         self.assertEqual(
-            pm_track_effects_seen,
-            [("pm", ["create", "update", "archive"])],
+            track_effects_seen,
+            [
+                ("market", ["update_now", "add_material", "add_update", "add_proof"]),
+                ("pm", ["create", "update_now", "add_material", "add_update", "add_proof", "archive"]),
+                ("design", ["update_now", "add_material", "add_update", "add_proof"]),
+                ("dev", ["update_now", "add_material", "add_update", "add_proof"]),
+                ("test", ["update_now", "add_material", "add_update", "add_proof"]),
+            ],
         )
 
     def test_validate_all_cli(self) -> None:

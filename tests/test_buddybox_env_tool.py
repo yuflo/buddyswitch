@@ -570,6 +570,9 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "track-pm-buddybox-product-state",
             "Buddybox Product Boundary",
             owner_buddy="pm",
+            outcome="Boundary integrity",
+            appetite="1 day",
+            now={"next": "verify buddybox isolation", "blocker": None},
         )
         task = env_store.create_task(
             "task-pm-buddybox-product-state",
@@ -580,9 +583,7 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         artifact = env_store.create_artifact(
             artifact_id="art-pm-buddybox-product-state-r1",
             title="Buddybox Product Boundary Artifact",
-            buddy="pm",
             kind="prd",
-            task_id=task["id"],
             summary="seed",
             content={"body": "seed"},
             created_by="pm",

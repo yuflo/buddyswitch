@@ -13,7 +13,7 @@ AGENTS.md is guidance only and not the permission source.
 - Buddybox is the active buddy private file capability; use buddybox env tools with `logical_name` for private files.
 - Other buddies cannot list/read/write/delete these local files; use artifact when content must become product-readable.
 - Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
-- If you see a `track_id`, use `python3 scripts/env/client.py track get --track-id <track-id>`.
+- If you see a `track_id`, use `python3 scripts/env/client.py track open --track-id <track-id>`.
 - If you see a `task_id`, use `python3 scripts/env/client.py task get --task-id <task-id>`.
 - If you see an `artifact_id`, use `python3 scripts/env/client.py artifact get --artifact-id <artifact-id>`.
 - Do not claim artifact content was read unless `artifact.get` returned the full body for that artifact id.

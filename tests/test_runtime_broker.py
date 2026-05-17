@@ -608,6 +608,8 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
         for params in (
             {"tool": "task", "action": "list", "args": {}},
             {"tool": "context", "action": "summarize", "args": {}},
+            {"tool": "track", "action": "open", "args": {}},
+            {"tool": "artifact", "action": "get", "args": {}},
         ):
             with self.subTest(params=params):
                 self.assertEqual(self.coordinator.lock_mode_for_request("env.tool", params), self.coordinator.LockMode.READ)
@@ -615,8 +617,11 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
     def test_lock_mode_for_mutating_env_tool_is_write(self) -> None:
         for params in (
             {"tool": "task", "action": "create", "args": {}},
-            {"tool": "track", "action": "attach_task", "args": {}},
-            {"tool": "run", "action": "commit", "args": {}},
+            {"tool": "track", "action": "update_now", "args": {}},
+            {"tool": "track", "action": "add_material", "args": {}},
+            {"tool": "track", "action": "add_update", "args": {}},
+            {"tool": "track", "action": "add_proof", "args": {}},
+            {"tool": "track", "action": "archive", "args": {}},
             {"tool": "evidence", "action": "issue_browser", "args": {}},
         ):
             with self.subTest(params=params):

@@ -35,13 +35,17 @@ function applyWorkspaceData(nextWorkspace) {
   }
 }
 
-function deriveTrackOwnerState(trackPayload) {
+function deriveTrackPageState(trackPayload) {
   const track = trackPayload && typeof trackPayload === "object" ? trackPayload : {};
+  const now = track.now && typeof track.now === "object" ? track.now : {};
   return {
     trackId: typeof track.id === "string" ? track.id : "",
     ownerBuddy: typeof track.owner_buddy === "string" ? track.owner_buddy : "",
-    status: typeof track.status === "string" ? track.status : "",
-    summary: typeof track.summary === "string" ? track.summary : "",
+    state: typeof track.state === "string" ? track.state : "",
+    health: typeof track.health === "string" ? track.health : "",
+    outcome: typeof track.outcome === "string" ? track.outcome : "",
+    nowNext: typeof now.next === "string" ? now.next : "",
+    nowBlocker: typeof now.blocker === "string" ? now.blocker : "",
   };
 }
 
@@ -106,7 +110,7 @@ if (typeof module !== "undefined") {
   module.exports = {
     normalizeWorkspaceData,
     applyWorkspaceData,
-    deriveTrackOwnerState,
+    deriveTrackPageState,
     refreshWorkspaceData,
   };
 }

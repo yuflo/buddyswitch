@@ -89,7 +89,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("next_buddy", lowered)
                 self.assertNotIn("track.advance", lowered)
 
-    def test_track_tool_operation_set_excludes_advance(self) -> None:
+    def test_track_tool_operation_set_uses_track_page_surface(self) -> None:
         track_skill = (ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md").read_text(encoding="utf-8")
         operations_line = ""
         for line in track_skill.splitlines():
@@ -100,7 +100,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         operations = set(re.findall(r"`([^`]+)`", operations_line))
         self.assertEqual(
             operations,
-            {"list", "get", "join", "create", "update", "archive", "attach-task", "detach-task"},
+            {"create", "list", "open", "update-now", "add-material", "add-update", "add-proof", "archive"},
         )
 
 

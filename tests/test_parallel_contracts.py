@@ -47,18 +47,30 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("next_buddy", key_order)
 
     def test_workspace_projection_runtime_payload_matches_contract_surface(self) -> None:
-        track = create_track("track-contract-freeze", "Contract Freeze Track", owner_buddy="dev")
+        track = create_track(
+            "track-contract-freeze",
+            "Contract Freeze Track",
+            owner_buddy="dev",
+            outcome="Freeze runtime contract shape",
+            appetite="2 days",
+            now={"next": "publish report", "blocker": None},
+        )
         task = create_task("task-dev-contract-freeze", "Implement contract freeze", buddy="dev", track_id=track["id"])
         artifact = create_artifact(
             artifact_id="art-dev-contract-freeze",
             title="Implementation Report",
-            buddy="dev",
             kind="implementation-report",
-            task_id=task["id"],
             summary="Implementation summary",
             content={"result": "ok"},
             created_by="dev",
             source_refs=[{"type": "note", "label": "contract freeze"}],
+        )
+        env_store.publish_track_material(
+            track_id=track["id"],
+            artifact_id=artifact["id"],
+            label="Implementation Report",
+            from_buddy="dev",
+            summary="Implementation summary",
         )
         track_comment = env_store.create_comment(
             target_type="track",
@@ -95,6 +107,12 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(tracks, list)
         row = next(r for r in tracks if isinstance(r, dict) and r.get("id") == track["id"])
         self.assertEqual(row.get("owner_buddy"), "dev")
+        self.assertEqual(row.get("outcome"), "Freeze runtime contract shape")
+        self.assertIn("shared_materials", row)
+        self.assertIn("updates", row)
+        self.assertIn("close_proof", row)
+        self.assertNotIn("task_ids", row)
+        self.assertNotIn("tasks", row)
         self.assertIn("comment_ids", row, msg="track view missing comment_ids")
         self.assertEqual(row.get("comment_ids"), [track_comment["id"]])
 
@@ -103,14 +121,18 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(artifacts, list)
         artifact_row = next(r for r in artifacts if isinstance(r, dict) and r.get("id") == artifact["id"])
         self.assertEqual(artifact_row.get("comment_ids"), [artifact_comment["id"]])
+        self.assertEqual(artifact_row.get("published_to_track"), track["id"])
+        self.assertNotIn("task_id", artifact_row)
 
         tasks = payload["tasks"]
         self.assertIsInstance(tasks, list)
         assert isinstance(tasks, list)
         self.assertTrue(any(isinstance(r, dict) and r.get("id") == task["id"] for r in tasks))
-        # Task views must NOT have comment_ids
+        # Task views must not expose artifact linkage.
         task_row = next(r for r in tasks if isinstance(r, dict) and r.get("id") == task["id"])
         self.assertNotIn("comment_ids", task_row, msg="task view must not expose comment_ids")
+        self.assertNotIn("artifact_ids", task_row)
+        self.assertNotIn("artifact" + "_slots", task_row)
 
 
 if __name__ == "__main__":

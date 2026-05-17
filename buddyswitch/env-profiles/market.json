@@ -26,7 +26,12 @@
       "status",
       "summary"
     ],
-    "track_effects": []
+    "track_effects": [
+      "update_now",
+      "add_material",
+      "add_update",
+      "add_proof"
+    ]
   },
   "tool_capability": {
     "browser_cockpit": "required",

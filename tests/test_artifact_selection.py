@@ -19,32 +19,24 @@ class ArtifactSelectionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.track_artifact_index = {
             "track_id": "track-selection",
-            "tasks": [
+            "shared_materials": [
                 {
-                    "task_id": "task-pm-prd",
-                    "buddy": "pm",
-                    "artifacts": [
-                        {
-                            "artifact_id": "art-prd-r1",
-                            "kind": "prd",
-                            "revision": 1,
-                            "updated_at": "2026-05-15T10:00:00+00:00",
-                            "is_current": True,
-                        }
-                    ],
+                    "type": "artifact",
+                    "artifact_id": "art-prd-r1",
+                    "kind": "prd",
+                    "label": "PRD",
+                    "from_buddy": "pm",
+                    "current": True,
+                    "published_at": "2026-05-15T10:00:00+00:00",
                 },
                 {
-                    "task_id": "task-dev-impl",
-                    "buddy": "dev",
-                    "artifacts": [
-                        {
-                            "artifact_id": "art-impl-r1",
-                            "kind": "implementation-report",
-                            "revision": 1,
-                            "updated_at": "2026-05-15T11:00:00+00:00",
-                            "is_current": True,
-                        }
-                    ],
+                    "type": "artifact",
+                    "artifact_id": "art-impl-r1",
+                    "kind": "implementation-report",
+                    "label": "Implementation",
+                    "from_buddy": "dev",
+                    "current": True,
+                    "published_at": "2026-05-15T11:00:00+00:00",
                 },
             ],
         }
@@ -59,6 +51,7 @@ class ArtifactSelectionTests(unittest.TestCase):
         ids = [row["artifact_id"] for row in selected["selected_inputs"]]
         self.assertEqual(ids, ["art-prd-r1", "art-impl-r1"])
         self.assertEqual(selected["selection_mode"], "kind-current-v2")
+        self.assertNotIn("task_id", selected["selected_inputs"][0])
 
     def test_selection_dedupes_repeated_required_kinds(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
@@ -88,6 +81,11 @@ class ArtifactSelectionTests(unittest.TestCase):
         )
         self.assertEqual(len(selected["selected_inputs"]), 1)
         self.assertIn("Trimmed selection", "\n".join(selected["reasons"]))
+
+    def test_parser_omits_retired_current_task_flag(self) -> None:
+        parser = artifact_selection.build_parser()
+        help_text = parser.format_help()
+        self.assertNotIn("current-task" + "-id", help_text)
 
 
 if __name__ == "__main__":

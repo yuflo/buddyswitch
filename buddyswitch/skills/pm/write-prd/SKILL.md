@@ -66,5 +66,5 @@ Use optional `task_id` or `track_id` only as association metadata for explicit e
 - `Continue product definition and define P0/P1 scope`
 
 ## Counterexamples
-- `create track, then let design join with track.join`
+- `create track, then require design task relation before reading`
 - `implement the approved onboarding rewrite scope`

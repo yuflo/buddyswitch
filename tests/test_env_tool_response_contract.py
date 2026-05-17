@@ -151,7 +151,13 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             buddy="pm",
             tool="track",
             action="create",
-            args={"track_id": "track-response", "title": "Response"},
+            args={
+                "track_id": "track-response",
+                "title": "Response",
+                "outcome": "Contract response coverage",
+                "appetite": "2 days",
+                "now": {"next": "publish first material", "blocker": None},
+            },
         )
         self._assert_success_contract(track)
 
@@ -173,7 +179,6 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             action="create_revision",
             args={
                 "artifact_id": "art-response-r1",
-                "task_id": "task-response",
                 "kind": "prd",
                 "title": "Title",
                 "summary": "Summary",

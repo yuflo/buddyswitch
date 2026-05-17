@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compatibility facade for workspace projection builders."""
+"""Workspace projection entrypoints used by runtime tools and tests."""
 
 from __future__ import annotations
 
@@ -7,6 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from env_store import ROOT
+from runtime_store.projections import (
+    build_artifact_view as _build_artifact_view,
+    build_task_view as _build_task_view,
+    build_track_views as _build_track_views,
+    build_workspace_projection,
+)
 
 
 def rel(path: Path) -> str:
@@ -14,15 +20,12 @@ def rel(path: Path) -> str:
 
 
 def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
-    from runtime_store.projections import build_artifact_view as _build_artifact_view
-
-    return _build_artifact_view(artifact)
+    return _build_artifact_view(artifact, {})
 
 
 def build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    from runtime_store.projections import build_task_view as _build_task_view
-
-    return _build_task_view(task, artifact_map)
+    del artifact_map
+    return _build_task_view(task)
 
 
 def build_track_views(
@@ -30,12 +33,9 @@ def build_track_views(
     task_map: dict[str, dict[str, Any]],
     artifact_map: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    from runtime_store.projections import build_track_views as _build_track_views
-
-    return _build_track_views(tracks, task_map)
+    del task_map
+    return _build_track_views(tracks, artifact_map, {})
 
 
 def build_workspace_data() -> dict[str, Any]:
-    from runtime_store.projections import build_workspace_projection
-
     return build_workspace_projection()

@@ -206,6 +206,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_task_artifact_records_reject_run_fields(self) -> None:
         with self.assertRaises(ValueError):
+            legacy_slots = "artifact" + "_slots"
             env_store.validate_task(
                 {
                     "id": "task-pm-runless",
@@ -215,7 +216,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "status": "active",
                     "track_id": None,
                     "artifact_ids": [],
-                    "artifact_slots": {},
+                    legacy_slots: {},
                     "run_ids": ["run-pm-old"],
                     "latest_run_id": "run-pm-old",
                     "created_at": "2026-05-14T00:00:00Z",
@@ -242,30 +243,13 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             )
         self.assertFalse(hasattr(env_store, "validate_handoff_record"))
 
-    def test_artifact_create_revision_requires_explicit_task_id_without_source_run(self) -> None:
+    def test_artifact_create_revision_creates_private_draft_without_task_id(self) -> None:
         instance_json = self._instance_json()
-        self._seed_pm_task("task-pm-runless")
-
-        missing_task = self._dispatch(
-            tool="artifact",
-            action="create_revision",
-            args={
-                "kind": "prd",
-                "title": "Runless Artifact",
-                "summary": "seed",
-                "content": {"body": "..."},
-            },
-            instance_json=instance_json,
-        )
-        self.assertFalse(missing_task.get("ok"), msg=missing_task)
-        self.assertEqual(missing_task.get("action"), "artifact.create_revision")
-        self.assertEqual((missing_task.get("error") or {}).get("code"), "E_ARTIFACT_PAYLOAD")
 
         created = self._dispatch(
             tool="artifact",
             action="create_revision",
             args={
-                "task_id": "task-pm-runless",
                 "kind": "prd",
                 "title": "Runless Artifact",
                 "summary": "seed",
@@ -278,8 +262,24 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         artifact = created.get("artifact")
         self.assertIsInstance(artifact, dict, msg=created)
         assert isinstance(artifact, dict)
-        self.assertEqual(artifact.get("task_id"), "task-pm-runless")
+        self.assertIsNone(artifact.get("published_to_track"))
+        self.assertEqual(artifact.get("created_by"), "pm")
         self.assertNotIn("source_run_id", artifact)
+
+        rejected = self._dispatch(
+            tool="artifact",
+            action="create_revision",
+            args={
+                "task_id": "task-pm-runless",
+                "kind": "prd",
+                "title": "Runless Artifact 2",
+                "summary": "seed",
+                "content": {"body": "..."},
+            },
+            instance_json=instance_json,
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_ARTIFACT_PAYLOAD")
 
     def test_env_client_help_exposes_runless_resources(self) -> None:
         completed = subprocess.run(

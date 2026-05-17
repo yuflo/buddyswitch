@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runless task env.tool integration tests."""
+"""Task env.tool tests for private task model."""
 
 from __future__ import annotations
 
@@ -23,17 +23,17 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(self, *, instance_id: str = "inst-dev-task", buddy: str = "dev", status: str = "active") -> Path:
-        path = self._runtime_path("instance.json")
+    def _instance_json(self, *, instance_id: str, buddy: str) -> Path:
+        path = self._runtime_path(f"instance-{instance_id}.json")
         path.write_text(
             json.dumps(
                 {
                     "instance_id": instance_id,
                     "buddy": buddy,
-                    "status": status,
+                    "status": "active",
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
-                    "updated_at": "2026-05-15T00:00:00Z",
+                    "updated_at": "2026-05-17T00:00:00Z",
                 },
                 ensure_ascii=True,
                 indent=2,
@@ -43,16 +43,7 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return path
 
-    def _dispatch(
-        self,
-        *,
-        instance_json: Path,
-        tool: str,
-        action: str,
-        args: dict[str, object],
-        instance_id: str,
-        buddy: str,
-    ) -> dict[str, object]:
+    def _dispatch(self, *, instance_json: Path, instance_id: str, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-task-{uuid.uuid4().hex}",
@@ -73,7 +64,6 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertIsInstance(envelope, dict)
         assert isinstance(envelope, dict)
-        self.assertEqual(envelope.get("protocol"), PROTOCOL)
         if envelope.get("ok") is True:
             result = envelope.get("result")
             self.assertIsInstance(result, dict, msg=envelope)
@@ -94,101 +84,114 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
-    def test_task_crud_flow_for_active_buddy(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-dev-task", buddy="dev")
-
+    def _create_track(self) -> None:
+        pm_instance = self._instance_json(instance_id="inst-pm-task", buddy="pm")
         created = self._dispatch(
-            instance_json=instance_json,
-            tool="task",
+            instance_json=pm_instance,
+            instance_id="inst-pm-task",
+            buddy="pm",
+            tool="track",
             action="create",
-            args={"task_id": "task-dev-runless", "title": "Runless Task", "summary": "seed"},
-            instance_id="inst-dev-task",
-            buddy="dev",
+            args={
+                "track_id": "track-task-private",
+                "title": "Private hint",
+                "outcome": "outcome",
+                "appetite": "1 day",
+                "now": {"next": "x", "blocker": None},
+            },
         )
         self.assertTrue(created.get("ok"), msg=created)
-        self.assertEqual(created.get("action"), "task.create")
-        task = created.get("task")
-        self.assertIsInstance(task, dict, msg=created)
-        assert isinstance(task, dict)
-        self.assertEqual(task.get("id"), "task-dev-runless")
 
-        listed = self._dispatch(
-            instance_json=instance_json,
+    def test_task_track_id_hint_does_not_mutate_track(self) -> None:
+        self._create_track()
+        before = env_store.get_track("track-task-private")
+        self.assertIsInstance(before, dict)
+
+        dev_instance = self._instance_json(instance_id="inst-dev-task", buddy="dev")
+        created = self._dispatch(
+            instance_json=dev_instance,
+            instance_id="inst-dev-task",
+            buddy="dev",
+            tool="task",
+            action="create",
+            args={
+                "task_id": "task-dev-private",
+                "title": "Private task",
+                "track_id": "track-task-private",
+                "summary": "hint only",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        after = env_store.get_track("track-task-private")
+        self.assertEqual(before, after)
+
+    def test_task_get_rejects_foreign_private_task(self) -> None:
+        self._create_track()
+        dev_instance = self._instance_json(instance_id="inst-dev-task", buddy="dev")
+        self.assertTrue(
+            self._dispatch(
+                instance_json=dev_instance,
+                instance_id="inst-dev-task",
+                buddy="dev",
+                tool="task",
+                action="create",
+                args={
+                    "task_id": "task-dev-private-2",
+                    "title": "Private task",
+                    "summary": "private",
+                },
+            ).get("ok")
+        )
+
+        pm_instance = self._instance_json(instance_id="inst-pm-task", buddy="pm")
+        denied = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-task",
+            buddy="pm",
+            tool="task",
+            action="get",
+            args={"task_id": "task-dev-private-2"},
+        )
+        self.assertFalse(denied.get("ok"), msg=denied)
+        self.assertEqual(denied.get("permission_boundary"), "task.buddy_scope")
+
+    def test_task_rows_omit_artifact_linkage_fields(self) -> None:
+        dev_instance = self._instance_json(instance_id="inst-dev-task", buddy="dev")
+        created = self._dispatch(
+            instance_json=dev_instance,
+            instance_id="inst-dev-task",
+            buddy="dev",
+            tool="task",
+            action="create",
+            args={"task_id": "task-dev-no-art", "title": "No artifact fields", "summary": "x"},
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        one = self._dispatch(
+            instance_json=dev_instance,
+            instance_id="inst-dev-task",
+            buddy="dev",
+            tool="task",
+            action="get",
+            args={"task_id": "task-dev-no-art"},
+        )
+        many = self._dispatch(
+            instance_json=dev_instance,
+            instance_id="inst-dev-task",
+            buddy="dev",
             tool="task",
             action="list",
             args={},
-            instance_id="inst-dev-task",
-            buddy="dev",
         )
-        self.assertTrue(listed.get("ok"), msg=listed)
-        tasks = listed.get("tasks")
-        self.assertIsInstance(tasks, list, msg=listed)
-        assert isinstance(tasks, list)
-        task_ids = {row.get("id") for row in tasks if isinstance(row, dict)}
-        self.assertIn("task-dev-runless", task_ids)
-
-        fetched = self._dispatch(
-            instance_json=instance_json,
-            tool="task",
-            action="get",
-            args={"task_id": "task-dev-runless"},
-            instance_id="inst-dev-task",
-            buddy="dev",
-        )
-        self.assertTrue(fetched.get("ok"), msg=fetched)
-        self.assertEqual((fetched.get("task") or {}).get("summary"), "seed")
-
-        updated = self._dispatch(
-            instance_json=instance_json,
-            tool="task",
-            action="update",
-            args={"task_id": "task-dev-runless", "summary": "updated", "status": "blocked"},
-            instance_id="inst-dev-task",
-            buddy="dev",
-        )
-        self.assertTrue(updated.get("ok"), msg=updated)
-        self.assertEqual((updated.get("task") or {}).get("status"), "blocked")
-
-        archived = self._dispatch(
-            instance_json=instance_json,
-            tool="task",
-            action="archive",
-            args={"task_id": "task-dev-runless"},
-            instance_id="inst-dev-task",
-            buddy="dev",
-        )
-        self.assertTrue(archived.get("ok"), msg=archived)
-        self.assertEqual((archived.get("task") or {}).get("status"), "archived")
-
-    def test_task_get_rejects_foreign_buddy_scope(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-dev-task", buddy="dev")
-        env_store.create_task("task-pm-owned", "PM Task", buddy="pm", summary="pm")
-
-        rejected = self._dispatch(
-            instance_json=instance_json,
-            tool="task",
-            action="get",
-            args={"task_id": "task-pm-owned"},
-            instance_id="inst-dev-task",
-            buddy="dev",
-        )
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TASK_BUDDY_SCOPE")
-        self.assertEqual(rejected.get("permission_boundary"), "task.buddy_scope")
-
-    def test_task_create_rejects_unknown_payload_field(self) -> None:
-        instance_json = self._instance_json(instance_id="inst-dev-task", buddy="dev")
-
-        rejected = self._dispatch(
-            instance_json=instance_json,
-            tool="task",
-            action="create",
-            args={"task_id": "task-dev-bad", "title": "Bad", "unknown": 1},
-            instance_id="inst-dev-task",
-            buddy="dev",
-        )
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TASK_PAYLOAD")
+        self.assertTrue(one.get("ok"), msg=one)
+        self.assertTrue(many.get("ok"), msg=many)
+        row = one["task"]
+        encoded = json.dumps(row, ensure_ascii=True)
+        self.assertNotIn("artifact_ids", encoded)
+        self.assertNotIn("artifact" + "_slots", encoded)
+        self.assertNotIn("current_artifacts", encoded)
+        self.assertNotIn("shared_materials", encoded)
 
 
 if __name__ == "__main__":

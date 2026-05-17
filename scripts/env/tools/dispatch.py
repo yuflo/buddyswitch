@@ -26,19 +26,17 @@ HANDLERS_BY_TOOL = {
         "archive": task_service.archive_task_for_active_buddy,
     },
     "track": {
-        "list": track_service.list_tracks_for_active_buddy,
-        "get": track_service.get_track_for_active_buddy,
-        "join": track_service.join_track_for_active_buddy,
         "create": track_service.create_track_for_pm,
-        "update": track_service.update_track_for_pm,
+        "list": track_service.list_tracks_for_active_buddy,
+        "open": track_service.open_track_for_active_buddy,
+        "update_now": track_service.update_now_for_active_buddy,
+        "add_material": track_service.add_material_to_track,
+        "add_update": track_service.add_update_to_track,
+        "add_proof": track_service.add_proof_to_track,
         "archive": track_service.archive_track_for_pm,
-        "attach_task": track_service.attach_task_to_track,
-        "detach_task": track_service.detach_task_from_track,
     },
     "artifact": {
-        "list": artifact_service.list_artifacts_for_track,
         "get": artifact_service.get_artifact_for_active_buddy,
-        "validate_payload": artifact_service.validate_artifact_payload,
         "create_revision": artifact_service.create_artifact_revision,
         "update_metadata": artifact_service.update_artifact_metadata,
     },
@@ -133,9 +131,24 @@ def _runtime_feedback_error(
                 condition="Use when you need full runtime catalog and semantics before retrying.",
             )
         ]
-    extra = {key: value for key, value in details.items() if key not in {
-        "permission_boundary", "human_summary", "why_blocked", "impact", "state_changed", "retryable", "retry_guidance", "allowed_next_actions", "allowed_next_action_options", "correctable_fields", "alternative_capabilities"
-    }}
+    extra = {
+        key: value
+        for key, value in details.items()
+        if key
+        not in {
+            "permission_boundary",
+            "human_summary",
+            "why_blocked",
+            "impact",
+            "state_changed",
+            "retryable",
+            "retry_guidance",
+            "allowed_next_actions",
+            "allowed_next_action_options",
+            "correctable_fields",
+            "alternative_capabilities",
+        }
+    }
     return tool_responses.rejection(
         tool=tool,
         action=action,

@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 import env_store
+from env.services import artifact_visibility
 
 _ALLOWED_TYPES = {
     "artifact",
@@ -94,7 +95,14 @@ def normalize_source_refs(
             if ref_type == "artifact":
                 ref_id = row["id"]
                 artifact = env_store.get_artifact(ref_id)
-                if artifact is None or artifact.get("buddy") != active_buddy:
+                if artifact is None:
+                    scope_error = {
+                        "permission_boundary": "source_refs.read_scope",
+                        "why_blocked": f"cannot claim full summary of unreadable artifact '{ref_id}'",
+                    }
+                    break
+                decision = artifact_visibility.artifact_read_decision(artifact, active_buddy)
+                if not bool(decision.get("allowed")):
                     scope_error = {
                         "permission_boundary": "source_refs.read_scope",
                         "why_blocked": f"cannot claim full summary of unreadable artifact '{ref_id}'",

@@ -115,7 +115,14 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("advance", {row["name"] for row in contracts.get_tool_spec("track")["actions"]})
 
         instance_json = self._instance_json(buddy="pm")
-        env_store.create_track("track-router-advance", "Advance", owner_buddy="pm")
+        env_store.create_track(
+            "track-router-advance",
+            "Advance",
+            owner_buddy="pm",
+            outcome="Advance outcome",
+            appetite="1 day",
+            now={"next": "next", "blocker": None},
+        )
         response = self._dispatch_env_tool(
             payload={"tool": "track", "action": "advance", "args": {"track_id": "track-router-advance"}},
             instance_json=instance_json,

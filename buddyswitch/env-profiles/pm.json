@@ -28,7 +28,10 @@
     ],
     "track_effects": [
       "create",
-      "update",
+      "update_now",
+      "add_material",
+      "add_update",
+      "add_proof",
       "archive"
     ]
   },

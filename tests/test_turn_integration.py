@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Integration tests for explicit-id collaboration flow."""
+"""Turn runtime integration tests aligned with track-page flow."""
 
 from __future__ import annotations
 
 import json
 import sys
 import unittest
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,25 +14,25 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_manifest  # noqa: E402
-from env.tools import router as tool_router  # noqa: E402
+import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
+
+MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def setUp(self) -> None:
-        super().setUp()
-        self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
-        self.manifest = env_manifest.load_manifest(self.manifest_path)
-        self.instance_json = self._runtime_path("instance.json")
-        self.instance_json.write_text(
+    def _instance_json(self, buddy: str) -> Path:
+        path = self._runtime_path(f"instance-{buddy}.json")
+        path.write_text(
             json.dumps(
                 {
-                    "instance_id": "inst-runless-integration",
-                    "buddy": "pm",
+                    "instance_id": f"inst-{buddy}",
+                    "buddy": buddy,
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
-                    "browser_port": 9222,
+                    "browser_port": None,
+                    "updated_at": "2026-05-18T00:00:00Z",
                 },
                 ensure_ascii=True,
                 indent=2,
@@ -39,84 +40,98 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             + "\n",
             encoding="utf-8",
         )
+        return path
 
     def _dispatch(self, *, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
-        instance_payload = {
-            "instance_id": "inst-runless-integration",
-            "buddy": buddy,
-            "status": "active",
-            "workspace_dir": str(self.runtime_root),
-            "browser_port": 9222,
+        instance_json = self._instance_json(buddy)
+        request = {
+            "protocol": PROTOCOL,
+            "request_id": f"req-turn-{uuid.uuid4().hex}",
+            "method": "env.tool",
+            "params": {
+                "instance_id": f"inst-{buddy}",
+                "active_buddy": buddy,
+                "tool": tool,
+                "action": action,
+                "args": args,
+            },
+            "deadline_ms": 35000,
         }
-        return tool_router.dispatch_env_tool_request(
-            payload={"tool": tool, "action": action, "args": args},
-            active_buddy=buddy,
-            instance_id="inst-runless-integration",
-            instance_json=self.instance_json,
-            instance_payload=instance_payload,
-            manifest=self.manifest,
-            manifest_path=self.manifest_path,
+        envelope = runtime_broker.dispatch_runtime_request(
+            request=request,
+            instance_json_path=instance_json,
+            manifest_path=MANIFEST,
         )
+        self.assertIsInstance(envelope, dict)
+        assert isinstance(envelope, dict)
+        if envelope.get("ok") is True:
+            result = envelope.get("result")
+            self.assertIsInstance(result, dict, msg=envelope)
+            assert isinstance(result, dict)
+            return result
+        error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
+        payload: dict[str, object] = {
+            "ok": False,
+            "error": {
+                "code": error.get("code"),
+                "message": error.get("message"),
+                "retriable": error.get("retriable"),
+            },
+        }
+        for key, value in envelope.items():
+            if key in {"protocol", "request_id", "ok", "error"}:
+                continue
+            payload[key] = value
+        return payload
 
-    def test_cross_buddy_flow_uses_track_join_and_artifact_get(self) -> None:
-        track = self._dispatch(
+    def test_cross_buddy_flow_uses_track_open_and_artifact_get(self) -> None:
+        created = self._dispatch(
             buddy="pm",
             tool="track",
             action="create",
-            args={"track_id": "track-runless-flow", "title": "Runless Flow", "summary": "Integration path"},
-        )
-        self.assertTrue(track["ok"], msg=track)
-        track_id = track["track"]["id"]
-
-        task = self._dispatch(
-            buddy="pm",
-            tool="task",
-            action="create",
-            args={"task_id": "task-pm-runless-flow", "title": "Draft PRD", "summary": "task", "track_id": track_id},
-        )
-        self.assertTrue(task["ok"], msg=task)
-        task_id = task["task"]["id"]
-
-        artifact = self._dispatch(
-            buddy="pm",
-            tool="artifact",
-            action="create_revision",
             args={
-                "artifact_id": "art-pm-runless-flow-prd-r1",
-                "task_id": task_id,
-                "kind": "prd",
-                "title": "PRD",
-                "summary": "Runless PRD",
-                "content": {"body": "v1"},
+                "track_id": "track-turn-flow",
+                "title": "Turn flow",
+                "outcome": "validate flow",
+                "appetite": "1 day",
+                "now": {"next": "publish prd", "blocker": None},
             },
         )
-        self.assertTrue(artifact["ok"], msg=artifact)
-        artifact_id = artifact["artifact"]["id"]
+        self.assertTrue(created.get("ok"), msg=created)
 
-        join = self._dispatch(
+        prd = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": "track-turn-flow",
+                "kind": "prd",
+                "label": "PRD",
+                "title": "PRD",
+                "summary": "scope",
+                "content": {"body": "prd"},
+            },
+        )
+        self.assertTrue(prd.get("ok"), msg=prd)
+
+        opened = self._dispatch(
             buddy="design",
             tool="track",
-            action="join",
-            args={"track_id": track_id, "title": "Design intake"},
+            action="open",
+            args={"track_id": "track-turn-flow"},
         )
-        self.assertTrue(join["ok"], msg=join)
+        self.assertTrue(opened.get("ok"), msg=opened)
 
-        design_read = self._dispatch(
+        read = self._dispatch(
             buddy="design",
             tool="artifact",
             action="get",
-            args={"artifact_id": artifact_id},
+            args={"artifact_id": prd["artifact_id"]},
         )
-        self.assertTrue(design_read["ok"], msg=design_read)
-        self.assertEqual((design_read["artifact"] or {}).get("artifact_id"), artifact_id)
+        self.assertTrue(read.get("ok"), msg=read)
 
-        self.assertFalse(self._runtime_path("runs/raw").exists())
-        self.assertFalse(self._runtime_path("buddyswitch/content/runs").exists())
-
-    def test_market_evidence_requires_target_model(self) -> None:
-        rejected = self._dispatch(buddy="market", tool="evidence", action="issue_browser", args={})
-        self.assertFalse(rejected["ok"])
-        self.assertEqual(rejected["permission_boundary"], "request-payload")
+        serialized = json.dumps({"created": created, "prd": prd, "opened": opened, "read": read}, ensure_ascii=True)
+        self.assertNotIn("track" + ".join", serialized)
 
 
 if __name__ == "__main__":

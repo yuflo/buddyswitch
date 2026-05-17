@@ -176,66 +176,73 @@ def build_artifact_view(
     }
 
 
-def build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    current_artifacts: dict[str, dict[str, Any]] = {}
-    artifact_slots = task.get("artifact_slots", {})
-    if isinstance(artifact_slots, dict):
-        for kind, row in artifact_slots.items():
-            if not isinstance(row, dict):
-                continue
-            artifact_id = row.get("current_artifact_id")
-            if not isinstance(artifact_id, str) or not artifact_id:
-                continue
-            artifact = artifact_map.get(artifact_id)
-            if artifact is not None:
-                current_artifacts[kind] = artifact
+def build_task_view(task: dict[str, Any]) -> dict[str, Any]:
     return {
-        **task,
+        "id": task.get("id"),
+        "buddy": task.get("buddy"),
+        "title": task.get("title"),
+        "status": task.get("status"),
+        "track_id": task.get("track_id"),
+        "summary": task.get("summary", ""),
+        "created_at": task.get("created_at"),
+        "updated_at": task.get("updated_at"),
         "object_path": task_object_path(task["id"]),
         "file_name": Path(task_object_path(task["id"])).name,
-        "current_artifacts": current_artifacts,
         "missing": False,
     }
 
 
+def _track_ref_artifact_ids(track: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+    for key in ("shared_materials", "close_proof"):
+        for row in track.get(key, []):
+            if not isinstance(row, dict):
+                continue
+            artifact_id = row.get("artifact_id")
+            if not isinstance(artifact_id, str) or not artifact_id:
+                continue
+            ids.append(artifact_id)
+    return ids
+
+
 def build_track_views(
     tracks: list[dict[str, Any]],
-    task_map: dict[str, dict[str, Any]],
+    artifact_map: dict[str, dict[str, Any]],
     comment_ids_by_target: dict[tuple[str, str], list[str]],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for track in tracks:
-        tasks: list[dict[str, Any]] = []
-        missing_task_ids: list[str] = []
-        latest = track["updated_at"]
-
-        for task_id in track.get("task_ids", []):
-            task = task_map.get(task_id)
-            if task is None:
-                missing_task_ids.append(task_id)
+        track_id = track.get("id")
+        if not isinstance(track_id, str) or not track_id:
+            continue
+        missing_artifact_ids: list[str] = []
+        latest = str(track.get("updated_at", ""))
+        for artifact_id in _track_ref_artifact_ids(track):
+            artifact = artifact_map.get(artifact_id)
+            if artifact is None:
+                missing_artifact_ids.append(artifact_id)
                 continue
-            tasks.append(task)
-            if task.get("updated_at", "") > latest:
-                latest = task["updated_at"]
-            current_artifacts = task.get("current_artifacts")
-            if isinstance(current_artifacts, dict):
-                for artifact in current_artifacts.values():
-                    if isinstance(artifact, dict) and artifact.get("updated_at", "") > latest:
-                        latest = artifact["updated_at"]
-
-        tasks.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
+            artifact_updated = artifact.get("updated_at")
+            if isinstance(artifact_updated, str) and artifact_updated > latest:
+                latest = artifact_updated
         rows.append(
             {
-                "id": track["id"],
-                "title": track["title"],
-                "status": track["status"],
-                "owner_buddy": track["owner_buddy"],
-                "task_ids": track.get("task_ids", []),
-                "comment_ids": list(comment_ids_by_target.get(("track", track["id"]), [])),
-                "summary": track.get("summary", ""),
+                "id": track_id,
+                "title": track.get("title"),
+                "outcome": track.get("outcome", ""),
+                "owner_buddy": track.get("owner_buddy"),
+                "state": track.get("state"),
+                "health": track.get("health"),
+                "appetite": track.get("appetite"),
+                "now": track.get("now"),
+                "shared_materials": [row for row in track.get("shared_materials", []) if isinstance(row, dict)],
+                "updates": [row for row in track.get("updates", []) if isinstance(row, dict)],
+                "close_proof": [row for row in track.get("close_proof", []) if isinstance(row, dict)],
+                "created_at": track.get("created_at"),
                 "updated_at": latest,
-                "tasks": tasks,
-                "missing_task_ids": missing_task_ids,
+                "archived_at": track.get("archived_at"),
+                "comment_ids": list(comment_ids_by_target.get(("track", track_id), [])),
+                "missing_artifact_ids": missing_artifact_ids,
             }
         )
     rows.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
@@ -252,21 +259,9 @@ def build_workspace_projection() -> dict[str, Any]:
     ]
     artifact_map = {artifact["id"]: artifact for artifact in artifacts}
 
-    tasks = [build_task_view(task, artifact_map) for task in env_store.list_tasks()]
-    task_map = {task["id"]: task for task in tasks}
-
-    tracks = build_track_views(env_store.list_tracks(), task_map, comment_ids_by_target)
-    tracked_task_ids = {
-        task_id
-        for track in tracks
-        for task_id in track.get("task_ids", [])
-        if isinstance(task_id, str) and task_id
-    }
-    standalone_tasks = [
-        task
-        for task in tasks
-        if not task.get("track_id") and task["id"] not in tracked_task_ids
-    ]
+    tasks = [build_task_view(task) for task in env_store.list_tasks()]
+    tracks = build_track_views(env_store.list_tracks(), artifact_map, comment_ids_by_target)
+    standalone_tasks = [task for task in tasks if not task.get("track_id")]
     standalone_tasks.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
 
     return {

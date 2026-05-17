@@ -94,7 +94,7 @@ def _reject_target_scope(
         retry_guidance="Fix the target scope issue and retry." if retryable else "This action cannot be retried as-is.",
         allowed_next_actions=[
             "Use context.summarize to inspect available tracks and artifacts.",
-            "Use track.get or artifact.get to verify the target is readable.",
+            "Use track.open or artifact.get to verify the target is readable.",
         ],
         correctable_fields=correctable_fields,
     )

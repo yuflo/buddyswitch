@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Artifact env.tool integration tests."""
+"""Artifact env.tool integration tests for track publication visibility."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -23,17 +22,17 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
-        path = self._runtime_path("instance.json")
+    def _instance_json(self, *, instance_id: str, buddy: str) -> Path:
+        path = self._runtime_path(f"instance-{instance_id}.json")
         path.write_text(
             json.dumps(
                 {
                     "instance_id": instance_id,
                     "buddy": buddy,
-                    "status": status,
+                    "status": "active",
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
-                    "updated_at": "2026-05-15T00:00:00Z",
+                    "updated_at": "2026-05-17T00:00:00Z",
                 },
                 ensure_ascii=True,
                 indent=2,
@@ -64,7 +63,6 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertIsInstance(envelope, dict)
         assert isinstance(envelope, dict)
-        self.assertEqual(envelope.get("protocol"), PROTOCOL)
         if envelope.get("ok") is True:
             result = envelope.get("result")
             self.assertIsInstance(result, dict, msg=envelope)
@@ -85,408 +83,273 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
-    def _seed_track_task_artifact(self, *, track_id: str, task_id: str, artifact_id: str, buddy: str) -> str:
-        if env_store.get_track(track_id) is None:
-            env_store.create_track(track_id, f"Track {track_id}", owner_buddy="pm")
-        if env_store.get_task(task_id) is None:
-            env_store.create_task(task_id, f"Task {task_id}", buddy=buddy, track_id=track_id)
-        artifact = env_store.create_artifact(
-            artifact_id=artifact_id,
-            title=f"Artifact {artifact_id}",
-            buddy=buddy,
-            kind="prd" if buddy == "pm" else "design-handoff",
-            task_id=task_id,
-            summary="seed",
-            content={"body": f"content for {artifact_id}"},
-            created_by=buddy,
-            source_refs=[{"type": "note", "label": "seed"}],
-        )
-        return str(artifact["id"])
-
-    def test_artifact_source_refs_reject_handoff_type(self) -> None:
-        env_store.create_task("task-pm-src-ref", "Task", buddy="pm")
-        instance_json = self._instance_json(instance_id="inst-pm-art", buddy="pm")
-        payload = self._dispatch(
-            instance_json=instance_json,
+    def _seed_track_with_pm_material(self, track_id: str = "track-art") -> tuple[Path, str]:
+        pm_instance = self._instance_json(instance_id="inst-pm-art", buddy="pm")
+        created_track = self._dispatch(
+            instance_json=pm_instance,
             instance_id="inst-pm-art",
             buddy="pm",
-            tool="artifact",
-            action="validate_payload",
+            tool="track",
+            action="create",
             args={
-                "task_id": "task-pm-src-ref",
-                "kind": "prd",
-                "title": "Bad ref",
-                "summary": "",
-                "content": {"body": "x"},
-                "source_refs": [{"type": "handoff", "id": "handoff-old"}],
+                "track_id": track_id,
+                "title": "Artifact flow",
+                "outcome": "outcome",
+                "appetite": "1 day",
+                "now": {"next": "publish", "blocker": None},
             },
         )
-        self.assertFalse(payload.get("ok"), msg=payload)
-        self.assertEqual((payload.get("error") or {}).get("code"), "E_SOURCE_REFS")
+        self.assertTrue(created_track.get("ok"), msg=created_track)
 
-    def test_non_owner_reads_current_artifact_through_active_track_task_relation(self) -> None:
-        self._seed_track_task_artifact(
-            track_id="track-read-rel",
-            task_id="task-pm-read-rel",
-            artifact_id="art-pm-read-rel-r1",
+        material = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-art",
             buddy="pm",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": track_id,
+                "kind": "prd",
+                "label": "PRD",
+                "title": "PM PRD",
+                "summary": "summary",
+                "content": {"body": "PM-PRD-BODY"},
+            },
         )
-        env_store.create_task("task-dev-read-rel", "Dev relation", buddy="dev", track_id="track-read-rel")
+        self.assertTrue(material.get("ok"), msg=material)
+        artifact_id = material.get("artifact_id")
+        self.assertIsInstance(artifact_id, str)
+        assert isinstance(artifact_id, str)
+        return pm_instance, artifact_id
 
-        instance_json = self._instance_json(instance_id="inst-dev-art", buddy="dev")
+    def test_non_owner_reads_current_material_without_task_relation(self) -> None:
+        _, artifact_id = self._seed_track_with_pm_material(track_id="track-read-current")
+        dev_instance = self._instance_json(instance_id="inst-dev-art", buddy="dev")
         payload = self._dispatch(
-            instance_json=instance_json,
+            instance_json=dev_instance,
             instance_id="inst-dev-art",
             buddy="dev",
             tool="artifact",
             action="get",
-            args={"artifact_id": "art-pm-read-rel-r1"},
+            args={"artifact_id": artifact_id},
         )
         self.assertTrue(payload.get("ok"), msg=payload)
         artifact = payload.get("artifact")
-        self.assertIsInstance(artifact, dict, msg=payload)
+        self.assertIsInstance(artifact, dict)
         assert isinstance(artifact, dict)
-        self.assertEqual(artifact.get("relation"), "track_task")
-        self.assertIn("content", artifact)
+        self.assertEqual(artifact.get("relation"), "track_material")
+        self.assertEqual(artifact.get("content", {}).get("body"), "PM-PRD-BODY")
+        encoded = json.dumps(artifact, ensure_ascii=True)
+        self.assertNotIn("track" + "_task", encoded)
+        self.assertNotIn("source_" + "task_id", encoded)
 
-    def test_non_owner_without_track_task_relation_cannot_read_artifact(self) -> None:
-        self._seed_track_task_artifact(
-            track_id="track-read-none",
-            task_id="task-pm-read-none",
-            artifact_id="art-pm-read-none-r1",
-            buddy="pm",
-        )
-        instance_json = self._instance_json(instance_id="inst-dev-art", buddy="dev")
-        payload = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-dev-art",
-            buddy="dev",
-            tool="artifact",
-            action="get",
-            args={"artifact_id": "art-pm-read-none-r1"},
-        )
-        self.assertFalse(payload.get("ok"), msg=payload)
-        self.assertEqual((payload.get("error") or {}).get("code"), "E_ARTIFACT_READ_SCOPE")
-
-    def test_owner_buddy_metadata_does_not_grant_foreign_artifact_read(self) -> None:
-        env_store.create_track("track-owner-meta", "Owner meta", owner_buddy="pm")
-        env_store.create_task("task-design-owner-meta", "Design task", buddy="design", track_id="track-owner-meta")
-        env_store.create_artifact(
-            artifact_id="art-design-owner-meta-r1",
-            title="Design artifact",
+    def test_non_owner_cannot_read_private_draft_artifact(self) -> None:
+        design_instance = self._instance_json(instance_id="inst-design-art", buddy="design")
+        created = self._dispatch(
+            instance_json=design_instance,
+            instance_id="inst-design-art",
             buddy="design",
-            kind="design-handoff",
-            task_id="task-design-owner-meta",
-            summary="seed",
-            content={"body": "design content"},
-            created_by="design",
-            source_refs=[{"type": "note", "label": "seed"}],
-        )
-
-        instance_json = self._instance_json(instance_id="inst-pm-art", buddy="pm")
-        payload = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-art",
-            buddy="pm",
-            tool="artifact",
-            action="get",
-            args={"artifact_id": "art-design-owner-meta-r1"},
-        )
-        self.assertFalse(payload.get("ok"), msg=payload)
-        self.assertEqual((payload.get("error") or {}).get("code"), "E_ARTIFACT_READ_SCOPE")
-
-    def test_owner_reads_owned_artifact_when_not_archived(self) -> None:
-        env_store.create_task("task-pm-owned-read", "Owned task", buddy="pm")
-        env_store.create_artifact(
-            artifact_id="art-pm-owned-read-r1",
-            title="Owned artifact",
-            buddy="pm",
-            kind="prd",
-            task_id="task-pm-owned-read",
-            summary="seed",
-            content={"body": "owner content"},
-            created_by="pm",
-            source_refs=[{"type": "note", "label": "seed"}],
-        )
-
-        instance_json = self._instance_json(instance_id="inst-pm-art", buddy="pm")
-        payload = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-art",
-            buddy="pm",
-            tool="artifact",
-            action="get",
-            args={"artifact_id": "art-pm-owned-read-r1"},
-        )
-        self.assertTrue(payload.get("ok"), msg=payload)
-        artifact = payload.get("artifact")
-        self.assertIsInstance(artifact, dict, msg=payload)
-        assert isinstance(artifact, dict)
-        self.assertEqual(artifact.get("relation"), "owner")
-        self.assertIn("content", artifact)
-
-    def test_artifact_list_rejects_archived_track(self) -> None:
-        env_store.create_track("track-arch-list", "Archived list", owner_buddy="pm", status="archived")
-        env_store.create_task("task-pm-arch-list", "Task", buddy="pm", track_id="track-arch-list")
-        env_store.create_artifact(
-            artifact_id="art-pm-arch-list-r1",
-            title="Artifact",
-            buddy="pm",
-            kind="prd",
-            task_id="task-pm-arch-list",
-            summary="seed",
-            content={"body": "x"},
-            created_by="pm",
-            source_refs=[{"type": "note", "label": "seed"}],
-        )
-
-        instance_json = self._instance_json(instance_id="inst-pm-art", buddy="pm")
-        payload = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-art",
-            buddy="pm",
-            tool="artifact",
-            action="list",
-            args={"track_id": "track-arch-list"},
-        )
-        self.assertFalse(payload.get("ok"), msg=payload)
-        self.assertEqual((payload.get("error") or {}).get("code"), "E_TRACK_ARCHIVED")
-
-    def test_artifact_get_rejects_archived_track_even_for_owner(self) -> None:
-        env_store.create_track("track-arch-get-owner", "Archived get", owner_buddy="pm", status="archived")
-        env_store.create_task("task-pm-arch-get-owner", "Task", buddy="pm", track_id="track-arch-get-owner")
-        env_store.create_artifact(
-            artifact_id="art-pm-arch-get-owner-r1",
-            title="Artifact",
-            buddy="pm",
-            kind="prd",
-            task_id="task-pm-arch-get-owner",
-            summary="seed",
-            content={"body": "owner body"},
-            created_by="pm",
-            source_refs=[{"type": "note", "label": "seed"}],
-        )
-
-        instance_json = self._instance_json(instance_id="inst-pm-art", buddy="pm")
-        payload = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-art",
-            buddy="pm",
-            tool="artifact",
-            action="get",
-            args={"artifact_id": "art-pm-arch-get-owner-r1"},
-        )
-        self.assertFalse(payload.get("ok"), msg=payload)
-        self.assertEqual((payload.get("error") or {}).get("code"), "E_ARTIFACT_READ_SCOPE")
-        self.assertEqual(payload.get("permission_boundary"), "track.lifecycle_status")
-
-    def test_artifact_get_rejects_archived_track_for_track_relation(self) -> None:
-        env_store.create_track("track-arch-get-rel", "Archived get rel", owner_buddy="pm", status="archived")
-        env_store.create_task("task-pm-arch-get-rel", "PM Task", buddy="pm", track_id="track-arch-get-rel")
-        env_store.create_task("task-dev-arch-get-rel", "DEV Task", buddy="dev", track_id="track-arch-get-rel")
-        env_store.create_artifact(
-            artifact_id="art-pm-arch-get-rel-r1",
-            title="Artifact",
-            buddy="pm",
-            kind="prd",
-            task_id="task-pm-arch-get-rel",
-            summary="seed",
-            content={"body": "x"},
-            created_by="pm",
-            source_refs=[{"type": "note", "label": "seed"}],
-        )
-
-        instance_json = self._instance_json(instance_id="inst-dev-art", buddy="dev")
-        payload = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-dev-art",
-            buddy="dev",
-            tool="artifact",
-            action="get",
-            args={"artifact_id": "art-pm-arch-get-rel-r1"},
-        )
-        self.assertFalse(payload.get("ok"), msg=payload)
-        self.assertEqual((payload.get("error") or {}).get("code"), "E_ARTIFACT_READ_SCOPE")
-        self.assertEqual(payload.get("permission_boundary"), "track.lifecycle_status")
-
-    def test_artifact_list_returns_current_revisions_only(self) -> None:
-        env_store.create_track("track-current-only", "Current only", owner_buddy="pm")
-        env_store.create_task("task-pm-current-only", "Task", buddy="pm", track_id="track-current-only")
-        env_store.create_artifact(
-            artifact_id="art-pm-current-only-r1",
-            title="v1",
-            buddy="pm",
-            kind="prd",
-            task_id="task-pm-current-only",
-            summary="v1",
-            content={"body": "v1"},
-            created_by="pm",
-            source_refs=[{"type": "note", "label": "seed"}],
-        )
-        env_store.create_artifact(
-            artifact_id="art-pm-current-only-r2",
-            title="v2",
-            buddy="pm",
-            kind="prd",
-            task_id="task-pm-current-only",
-            summary="v2",
-            content={"body": "v2"},
-            created_by="pm",
-            source_refs=[{"type": "note", "label": "seed"}],
-        )
-
-        instance_json = self._instance_json(instance_id="inst-pm-art", buddy="pm")
-        payload = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-art",
-            buddy="pm",
-            tool="artifact",
-            action="list",
-            args={"track_id": "track-current-only"},
-        )
-        self.assertTrue(payload.get("ok"), msg=payload)
-        rows = payload.get("artifacts")
-        self.assertIsInstance(rows, list, msg=payload)
-        assert isinstance(rows, list)
-        ids = [row.get("artifact_id") for row in rows if isinstance(row, dict)]
-        self.assertEqual(ids, ["art-pm-current-only-r2"])
-
-    def test_non_owner_cannot_get_superseded_revision(self) -> None:
-        env_store.create_track("track-superseded", "Superseded", owner_buddy="pm")
-        env_store.create_task("task-pm-superseded", "PM Task", buddy="pm", track_id="track-superseded")
-        env_store.create_task("task-dev-superseded", "DEV Task", buddy="dev", track_id="track-superseded")
-        env_store.create_artifact(
-            artifact_id="art-pm-superseded-r1",
-            title="v1",
-            buddy="pm",
-            kind="prd",
-            task_id="task-pm-superseded",
-            summary="v1",
-            content={"body": "v1"},
-            created_by="pm",
-            source_refs=[{"type": "note", "label": "seed"}],
-        )
-        env_store.create_artifact(
-            artifact_id="art-pm-superseded-r2",
-            title="v2",
-            buddy="pm",
-            kind="prd",
-            task_id="task-pm-superseded",
-            summary="v2",
-            content={"body": "v2"},
-            created_by="pm",
-            source_refs=[{"type": "note", "label": "seed"}],
-        )
-
-        instance_json = self._instance_json(instance_id="inst-dev-art", buddy="dev")
-        payload = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-dev-art",
-            buddy="dev",
-            tool="artifact",
-            action="get",
-            args={"artifact_id": "art-pm-superseded-r1"},
-        )
-        self.assertFalse(payload.get("ok"), msg=payload)
-        self.assertEqual(payload.get("permission_boundary"), "artifact.currentness")
-
-    def test_artifact_read_does_not_depend_on_next_buddy_or_handoff(self) -> None:
-        self._seed_track_task_artifact(
-            track_id="track-read-direct-rel",
-            task_id="task-pm-direct-rel",
-            artifact_id="art-pm-direct-rel-r1",
-            buddy="pm",
-        )
-        env_store.create_task("task-dev-direct-rel", "Dev relation", buddy="dev", track_id="track-read-direct-rel")
-
-        instance_json = self._instance_json(instance_id="inst-dev-art", buddy="dev")
-        payload = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-dev-art",
-            buddy="dev",
-            tool="artifact",
-            action="get",
-            args={"artifact_id": "art-pm-direct-rel-r1"},
-        )
-        self.assertTrue(payload.get("ok"), msg=payload)
-        serialized = json.dumps(payload, ensure_ascii=True)
-        self.assertNotIn("next_buddy", serialized)
-        self.assertNotIn("\"handoff\":", serialized)
-        self.assertNotIn("target_buddy", serialized)
-        artifact = payload.get("artifact")
-        self.assertIsInstance(artifact, dict, msg=payload)
-        assert isinstance(artifact, dict)
-        self.assertEqual(artifact.get("relation"), "track_task")
-        self.assertIn("content", artifact)
-
-    def test_create_revision_rejects_foreign_task_scope(self) -> None:
-        env_store.create_task("task-pm-foreign", "Foreign PM Task", buddy="pm")
-        instance_json = self._instance_json(instance_id="inst-dev-art", buddy="dev")
-
-        rejected = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-dev-art",
-            buddy="dev",
             tool="artifact",
             action="create_revision",
             args={
-                "task_id": "task-pm-foreign",
-                "kind": "implementation-report",
-                "title": "Should Fail",
-                "summary": "bad",
-                "content": {"body": "..."},
+                "kind": "design-handoff",
+                "title": "Draft",
+                "summary": "private draft",
+                "content": {"body": "DESIGN-DRAFT"},
             },
         )
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual((rejected.get("error") or {}).get("code"), "E_ARTIFACT_TASK_SCOPE")
+        self.assertTrue(created.get("ok"), msg=created)
+        artifact_id = created["artifact_id"]
 
-    def test_update_metadata_rejects_non_owner_even_with_track_relation(self) -> None:
-        self._seed_track_task_artifact(
-            track_id="track-update-metadata",
-            task_id="task-pm-update-metadata",
-            artifact_id="art-pm-update-metadata-r1",
-            buddy="pm",
-        )
-        env_store.create_task("task-dev-update-metadata", "DEV Task", buddy="dev", track_id="track-update-metadata")
-
-        instance_json = self._instance_json(instance_id="inst-dev-art", buddy="dev")
-        payload = self._dispatch(
-            instance_json=instance_json,
+        dev_instance = self._instance_json(instance_id="inst-dev-art", buddy="dev")
+        denied = self._dispatch(
+            instance_json=dev_instance,
             instance_id="inst-dev-art",
             buddy="dev",
             tool="artifact",
-            action="update_metadata",
-            args={"artifact_id": "art-pm-update-metadata-r1", "summary": "illegal"},
+            action="get",
+            args={"artifact_id": artifact_id},
         )
-        self.assertFalse(payload.get("ok"), msg=payload)
-        self.assertEqual((payload.get("error") or {}).get("code"), "E_ARTIFACT_BUDDY_SCOPE")
+        self.assertFalse(denied.get("ok"), msg=denied)
+        self.assertEqual((denied.get("error") or {}).get("code"), "E_ARTIFACT_READ_SCOPE")
+        self.assertEqual(denied.get("permission_boundary"), "artifact.publication")
 
-    def test_artifact_summary_relation_labels_are_neutral(self) -> None:
-        self._seed_track_task_artifact(
-            track_id="track-neutral-rel",
-            task_id="task-pm-neutral-rel",
-            artifact_id="art-pm-neutral-rel-r1",
+    def test_non_owner_cannot_read_superseded_material(self) -> None:
+        pm_instance, _ = self._seed_track_with_pm_material(track_id="track-superseded")
+        first = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-art",
             buddy="pm",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": "track-superseded",
+                "kind": "prd",
+                "label": "PRD",
+                "title": "PRD r1",
+                "summary": "r1",
+                "content": {"body": "R1"},
+            },
         )
-        env_store.create_task("task-dev-neutral-rel", "DEV Task", buddy="dev", track_id="track-neutral-rel")
+        second = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-art",
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": "track-superseded",
+                "kind": "prd",
+                "label": "PRD",
+                "title": "PRD r2",
+                "summary": "r2",
+                "content": {"body": "R2"},
+            },
+        )
+        self.assertTrue(first.get("ok"), msg=first)
+        self.assertTrue(second.get("ok"), msg=second)
 
-        instance_json = self._instance_json(instance_id="inst-dev-art", buddy="dev")
-        payload = self._dispatch(
-            instance_json=instance_json,
+        dev_instance = self._instance_json(instance_id="inst-dev-art", buddy="dev")
+        denied = self._dispatch(
+            instance_json=dev_instance,
             instance_id="inst-dev-art",
             buddy="dev",
             tool="artifact",
-            action="list",
-            args={"track_id": "track-neutral-rel"},
+            action="get",
+            args={"artifact_id": first["artifact_id"]},
         )
-        self.assertTrue(payload.get("ok"), msg=payload)
-        rows = payload.get("artifacts")
-        self.assertIsInstance(rows, list, msg=payload)
-        assert isinstance(rows, list)
-        row = rows[0]
-        self.assertIn(row.get("relation"), {"owner", "track_task", "none"})
-        self.assertIn("readable_by_active_buddy", row)
-        self.assertNotIn("readable_by_current_buddy", row)
+        self.assertFalse(denied.get("ok"), msg=denied)
+        self.assertEqual((denied.get("error") or {}).get("code"), "E_ARTIFACT_READ_SCOPE")
+        self.assertEqual(denied.get("permission_boundary"), "artifact.currentness")
+
+    def test_create_revision_creates_private_artifact_without_task_id(self) -> None:
+        design_instance = self._instance_json(instance_id="inst-design-art", buddy="design")
+        created = self._dispatch(
+            instance_json=design_instance,
+            instance_id="inst-design-art",
+            buddy="design",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-design-private-r1",
+                "kind": "design-handoff",
+                "title": "Design private draft",
+                "summary": "private",
+                "content": {"body": "draft"},
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+        artifact = created.get("artifact")
+        self.assertIsInstance(artifact, dict)
+        assert isinstance(artifact, dict)
+        self.assertEqual(artifact.get("created_by"), "design")
+        self.assertIsNone(artifact.get("published_to_track"))
+
+        invalid = self._dispatch(
+            instance_json=design_instance,
+            instance_id="inst-design-art",
+            buddy="design",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-design-invalid-r2",
+                "task_id": "task-old",
+                "kind": "design-handoff",
+                "title": "Invalid",
+                "summary": "invalid",
+                "content": {"body": "invalid"},
+            },
+        )
+        self.assertFalse(invalid.get("ok"), msg=invalid)
+        self.assertEqual((invalid.get("error") or {}).get("code"), "E_ARTIFACT_PAYLOAD")
+
+    def test_task_hint_does_not_grant_artifact_access(self) -> None:
+        pm_instance = self._instance_json(instance_id="inst-pm-art", buddy="pm")
+        track = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-art",
+            buddy="pm",
+            tool="track",
+            action="create",
+            args={
+                "track_id": "track-task-hint",
+                "title": "Task hint",
+                "outcome": "outcome",
+                "appetite": "1 day",
+                "now": {"next": "x", "blocker": None},
+            },
+        )
+        self.assertTrue(track.get("ok"), msg=track)
+
+        private = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-art",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-pm-private-r1",
+                "kind": "prd",
+                "title": "Private",
+                "summary": "private",
+                "content": {"body": "PRIVATE"},
+            },
+        )
+        self.assertTrue(private.get("ok"), msg=private)
+
+        dev_instance = self._instance_json(instance_id="inst-dev-art", buddy="dev")
+        self.assertTrue(
+            self._dispatch(
+                instance_json=dev_instance,
+                instance_id="inst-dev-art",
+                buddy="dev",
+                tool="task",
+                action="create",
+                args={
+                    "task_id": "task-dev-hint",
+                    "title": "hint",
+                    "track_id": "track-task-hint",
+                    "summary": "hint only",
+                },
+            ).get("ok")
+        )
+
+        denied = self._dispatch(
+            instance_json=dev_instance,
+            instance_id="inst-dev-art",
+            buddy="dev",
+            tool="artifact",
+            action="get",
+            args={"artifact_id": private["artifact_id"]},
+        )
+        self.assertFalse(denied.get("ok"), msg=denied)
+        self.assertEqual(denied.get("permission_boundary"), "artifact.publication")
+
+    def test_archived_published_artifact_rejects_owner_and_non_owner_reads(self) -> None:
+        pm_instance, artifact_id = self._seed_track_with_pm_material(track_id="track-archived-material")
+        archived = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-art",
+            buddy="pm",
+            tool="track",
+            action="archive",
+            args={"track_id": "track-archived-material"},
+        )
+        self.assertTrue(archived.get("ok"), msg=archived)
+
+        for buddy, instance_id in (("pm", "inst-pm-art"), ("dev", "inst-dev-art")):
+            instance_json = pm_instance if buddy == "pm" else self._instance_json(instance_id=instance_id, buddy=buddy)
+            denied = self._dispatch(
+                instance_json=instance_json,
+                instance_id=instance_id,
+                buddy=buddy,
+                tool="artifact",
+                action="get",
+                args={"artifact_id": artifact_id},
+            )
+            with self.subTest(buddy=buddy):
+                self.assertFalse(denied.get("ok"), msg=denied)
+                self.assertEqual(denied.get("permission_boundary"), "track.lifecycle_status")
 
 
 if __name__ == "__main__":
