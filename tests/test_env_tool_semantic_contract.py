@@ -14,7 +14,7 @@ if str(SCRIPTS) not in sys.path:
 
 from env.tools import contracts  # noqa: E402
 
-_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment"}
 
 
 class EnvToolSemanticContractTests(unittest.TestCase):

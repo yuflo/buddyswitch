@@ -20,7 +20,7 @@ import env_store  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment"}
 
 
 class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):

@@ -64,6 +64,14 @@ path = "buddyswitch/skills/shared/task-tool"
 id = "buddybox-tool"
 path = "buddyswitch/skills/shared/buddybox-tool"
 
+[[skills]]
+id = "message-tool"
+path = "buddyswitch/skills/shared/message-tool"
+
+[[skills]]
+id = "comment-tool"
+path = "buddyswitch/skills/shared/comment-tool"
+
 [[buddies]]
 id = "market"
 label = "Market"
@@ -79,6 +87,8 @@ skills = [
   "artifact-tool",
   "task-tool",
   "buddybox-tool",
+  "message-tool",
+  "comment-tool",
 ]
 artifact_kinds = [
   "market-scan",
@@ -88,13 +98,13 @@ artifact_kinds = [
   "channel-plan",
   "launch-prep",
 ]
-permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "search.use"]
+permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "search.use"]
 
 [[buddies]]
 id = "pm"
 label = "PM"
 scope = "Own product iteration and track progression."
-skills = ["write-prd", "track-tool", "artifact-tool", "task-tool", "buddybox-tool"]
+skills = ["write-prd", "track-tool", "artifact-tool", "task-tool", "buddybox-tool", "message-tool", "comment-tool"]
 artifact_kinds = ["prd", "pm-decision", "track-note"]
 permissions = [
   "track.read",
@@ -114,6 +124,10 @@ permissions = [
   "buddybox.delete",
   "context.read",
   "evidence.issue",
+  "message.send",
+  "message.list",
+  "comment.add",
+  "comment.list",
   "search.use",
 ]
 
@@ -121,22 +135,22 @@ permissions = [
 id = "design"
 label = "Design"
 scope = "Shape UI/UX prototype direction and design artifact outcomes."
-skills = ["shape-prototype", "track-tool", "artifact-tool", "task-tool", "buddybox-tool"]
+skills = ["shape-prototype", "track-tool", "artifact-tool", "task-tool", "buddybox-tool", "message-tool", "comment-tool"]
 artifact_kinds = ["design-handoff", "prototype-brief"]
-permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "search.use"]
+permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "search.use"]
 
 [[buddies]]
 id = "dev"
 label = "Dev"
 scope = "Implement approved scope in project code."
-skills = ["implement-task", "skill-creator-importer", "track-tool", "artifact-tool", "task-tool", "buddybox-tool"]
+skills = ["implement-task", "skill-creator-importer", "track-tool", "artifact-tool", "task-tool", "buddybox-tool", "message-tool", "comment-tool"]
 artifact_kinds = ["implementation-report", "skill-import-report"]
-permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "search.use"]
+permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "search.use"]
 
 [[buddies]]
 id = "test"
 label = "Test"
 scope = "Validate behavior and report pass/fail/blocked outcomes."
-skills = ["smoke-test", "track-tool", "artifact-tool", "task-tool", "buddybox-tool"]
+skills = ["smoke-test", "track-tool", "artifact-tool", "task-tool", "buddybox-tool", "message-tool", "comment-tool"]
 artifact_kinds = ["smoke-test", "test-report"]
-permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "search.use"]
+permissions = ["track.read", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "search.use"]

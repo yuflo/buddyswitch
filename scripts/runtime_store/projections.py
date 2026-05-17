@@ -150,6 +150,7 @@ def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
         **artifact,
         "object_path": artifact_object_path(artifact["id"]),
         "file_name": Path(artifact_object_path(artifact["id"])).name,
+        "comment_ids": list(artifact.get("comment_ids", [])),
         "missing": False,
     }
 
@@ -208,6 +209,7 @@ def build_track_views(
                 "status": track["status"],
                 "owner_buddy": track["owner_buddy"],
                 "task_ids": track.get("task_ids", []),
+                "comment_ids": list(track.get("comment_ids", [])),
                 "summary": track.get("summary", ""),
                 "updated_at": latest,
                 "tasks": tasks,

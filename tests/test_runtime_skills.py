@@ -26,7 +26,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("handoff-tool", all_skill_ids)
 
     def test_each_buddy_keeps_shared_runtime_tools_without_handoff(self) -> None:
-        required = {"track-tool", "artifact-tool", "task-tool", "buddybox-tool"}
+        required = {"track-tool", "artifact-tool", "task-tool", "buddybox-tool", "message-tool", "comment-tool"}
         for buddy in self.manifest.get("buddies", []):
             assert isinstance(buddy, dict)
             skills = set(buddy.get("skills", []))
@@ -40,14 +40,38 @@ class RuntimeSkillsTests(unittest.TestCase):
             ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
             ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
             ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md",
+            ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
+            ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
         ]
         for path in shared_skill_files:
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("env.tool", text)
-                self.assertNotIn("handoff", text)
                 self.assertNotIn("next_buddy", text)
                 self.assertNotIn("track.advance", text)
+                # Allow 'handoff' only in explicit "do not" prohibition context
+                if "handoff" in text:
+                    do_not_idx = text.find("do not")
+                    handoff_idx = text.find("handoff")
+                    self.assertGreaterEqual(do_not_idx, 0, msg=f"{path}: 'handoff' found without 'do not' section")
+                    self.assertGreater(handoff_idx, do_not_idx, msg=f"{path}: 'handoff' found before 'do not' section")
+
+    def test_message_comment_shared_tool_skills_stay_atomic(self) -> None:
+        """MCT-SURF-006: Message/comment skills don't teach non-goal features."""
+        msg_skill = (ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md").read_text(encoding="utf-8").lower()
+        cmt_skill = (ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md").read_text(encoding="utf-8").lower()
+        non_goals = ["broadcast", "read receipt", "read_receipt", "handoff", "edit", "delete", "resolve", "task comment", "whiteboard"]
+        for skill_text, label in [(msg_skill, "message-tool"), (cmt_skill, "comment-tool")]:
+            with self.subTest(skill=label):
+                self.assertIn("env.tool", skill_text)
+                self.assertIn("message.send" if "message" in label else "comment.add", skill_text)
+                # Non-goals should only appear in "Do not" context
+                for term in non_goals:
+                    if term in skill_text:
+                        # Allow "do not" context
+                        do_not_idx = skill_text.find("do not")
+                        term_idx = skill_text.find(term)
+                        self.assertTrue(do_not_idx >= 0, msg=f"{label}: '{term}' found without 'do not' section")
 
     def test_role_skills_remove_optional_handoff_guidance(self) -> None:
         role_skill_files = [

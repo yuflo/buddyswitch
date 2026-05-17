@@ -24,6 +24,8 @@ CATEGORY_ORDER = (
     "artifact_objects",
     "task_objects",
     "track_objects",
+    "message_objects",
+    "comment_objects",
 )
 
 
@@ -241,10 +243,14 @@ def new_plan(scope: str, *, buddy: str | None = None) -> dict[str, Any]:
         "delete_paths": [],
         "artifact_object_ids": [],
         "task_object_ids": [],
+        "message_object_ids": [],
+        "comment_object_ids": [],
         "warnings": [],
         "counts_by_category": counts,
         "artifact_records": [],
         "task_records": [],
+        "message_records": [],
+        "comment_records": [],
         "direct_delete_paths": [],
         "external_delete_paths": {},
     }
@@ -331,6 +337,68 @@ def discover_task_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[s
                 "object_path": relative,
             }
         )
+    return valid, invalid
+
+
+def discover_message_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    valid: list[dict[str, Any]] = []
+    invalid: list[dict[str, Any]] = []
+    for path in iter_files(root, "buddyswitch/objects/messages"):
+        relative = rel(root, path)
+        try:
+            payload = read_json(path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            invalid.append({"path": relative, "reason": f"invalid message object JSON: {exc}"})
+            continue
+
+        msg_id = payload.get("id")
+        from_buddy = payload.get("from_buddy")
+        to_buddy = payload.get("to_buddy")
+        if not isinstance(msg_id, str) or not msg_id:
+            invalid.append({"path": relative, "reason": "message object is missing id"})
+            continue
+        if not isinstance(from_buddy, str) or not from_buddy:
+            invalid.append({"path": relative, "reason": f"message '{msg_id}' is missing from_buddy"})
+            continue
+
+        valid.append({
+            "id": msg_id,
+            "from_buddy": from_buddy,
+            "to_buddy": to_buddy,
+            "object_path": relative,
+        })
+    return valid, invalid
+
+
+def discover_comment_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    valid: list[dict[str, Any]] = []
+    invalid: list[dict[str, Any]] = []
+    for path in iter_files(root, "buddyswitch/objects/comments"):
+        relative = rel(root, path)
+        try:
+            payload = read_json(path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            invalid.append({"path": relative, "reason": f"invalid comment object JSON: {exc}"})
+            continue
+
+        cmt_id = payload.get("id")
+        author_buddy = payload.get("author_buddy")
+        target_type = payload.get("target_type")
+        target_id = payload.get("target_id")
+        if not isinstance(cmt_id, str) or not cmt_id:
+            invalid.append({"path": relative, "reason": "comment object is missing id"})
+            continue
+        if not isinstance(author_buddy, str) or not author_buddy:
+            invalid.append({"path": relative, "reason": f"comment '{cmt_id}' is missing author_buddy"})
+            continue
+
+        valid.append({
+            "id": cmt_id,
+            "author_buddy": author_buddy,
+            "target_type": target_type,
+            "target_id": target_id,
+            "object_path": relative,
+        })
     return valid, invalid
 
 
@@ -682,11 +750,54 @@ def detach_artifact_from_task(
     write_json(task_path, payload)
 
 
+def detach_comment_id_from_target(
+    root: Path,
+    target_type: str,
+    target_id: str | None,
+    comment_id: str,
+    *,
+    warnings: list[str] | None = None,
+) -> None:
+    if not isinstance(target_id, str) or not target_id:
+        return
+    if target_type not in {"track", "artifact"}:
+        return
+    relative_dir = "buddyswitch/objects/tracks" if target_type == "track" else "buddyswitch/objects/artifacts"
+    target_path, blocked_reason = resolve_guarded_object_json_path(
+        root,
+        relative_dir=relative_dir,
+        object_id=target_id,
+    )
+    if target_path is None:
+        if blocked_reason is not None:
+            append_warning(
+                warnings,
+                f"Skipping unsafe comment detach target '{target_id}': {blocked_reason}",
+            )
+        return
+    if not target_path.exists():
+        return
+    try:
+        payload = read_json(target_path)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return
+    comment_ids = payload.get("comment_ids")
+    if not isinstance(comment_ids, list):
+        return
+    filtered = [item for item in comment_ids if item != comment_id]
+    if filtered == comment_ids:
+        return
+    payload["comment_ids"] = filtered
+    write_json(target_path, payload)
+
+
 def ensure_required_skeleton(root: Path, *, warnings: list[str] | None = None) -> None:
     for relative_dir in (
         "buddyswitch/objects/tracks",
         "buddyswitch/objects/tasks",
         "buddyswitch/objects/artifacts",
+        "buddyswitch/objects/messages",
+        "buddyswitch/objects/comments",
     ):
         directory, blocked_reason = resolve_guarded_relative_dir(root, relative_dir, allow_missing=True)
         if directory is None:
@@ -737,6 +848,8 @@ def build_cleanup_plan(
 
     artifact_objects, invalid_artifact_objects = discover_artifact_objects(repo_root)
     task_objects, invalid_task_objects = discover_task_objects(repo_root)
+    message_objects, invalid_message_objects = discover_message_objects(repo_root)
+    comment_objects, invalid_comment_objects = discover_comment_objects(repo_root)
     if scope == "buddy":
         for record in artifact_objects:
             if record["producer_buddy"] == buddy:
@@ -744,12 +857,36 @@ def build_cleanup_plan(
         for record in task_objects:
             if record["buddy"] == buddy:
                 add_indexed_task(plan, record)
+        for record in message_objects:
+            if record.get("from_buddy") == buddy or record.get("to_buddy") == buddy:
+                if record["id"] not in plan["message_object_ids"]:
+                    plan["message_object_ids"].append(record["id"])
+                    plan["message_records"].append(record)
+                object_path = repo_root / record["object_path"]
+                add_path(plan, object_path, "message_objects")
+        for record in comment_objects:
+            if record.get("author_buddy") == buddy:
+                if record["id"] not in plan["comment_object_ids"]:
+                    plan["comment_object_ids"].append(record["id"])
+                    plan["comment_records"].append(record)
+                object_path = repo_root / record["object_path"]
+                add_path(plan, object_path, "comment_objects")
         for item in invalid_artifact_objects:
             add_warning(
                 plan,
                 f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
             )
         for item in invalid_task_objects:
+            add_warning(
+                plan,
+                f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
+            )
+        for item in invalid_message_objects:
+            add_warning(
+                plan,
+                f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
+            )
+        for item in invalid_comment_objects:
             add_warning(
                 plan,
                 f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
@@ -759,6 +896,8 @@ def build_cleanup_plan(
         add_dir_files(plan, "buddyswitch/objects/tracks", "track_objects")
         add_dir_files(plan, "buddyswitch/objects/tasks", "task_objects")
         add_dir_files(plan, "buddyswitch/objects/artifacts", "artifact_objects")
+        add_dir_files(plan, "buddyswitch/objects/messages", "message_objects")
+        add_dir_files(plan, "buddyswitch/objects/comments", "comment_objects")
         for record in artifact_objects:
             if record["id"] not in plan["artifact_object_ids"]:
                 plan["artifact_object_ids"].append(record["id"])
@@ -767,16 +906,30 @@ def build_cleanup_plan(
             if record["id"] not in plan["task_object_ids"]:
                 plan["task_object_ids"].append(record["id"])
                 plan["task_records"].append(record)
+        for record in message_objects:
+            if record["id"] not in plan["message_object_ids"]:
+                plan["message_object_ids"].append(record["id"])
+                plan["message_records"].append(record)
+        for record in comment_objects:
+            if record["id"] not in plan["comment_object_ids"]:
+                plan["comment_object_ids"].append(record["id"])
+                plan["comment_records"].append(record)
         for item in invalid_artifact_objects:
             add_warning(plan, f"All-data cleanup will delete malformed artifact object: {item['path']} ({item['reason']}).")
         for item in invalid_task_objects:
             add_warning(plan, f"All-data cleanup will delete malformed task object: {item['path']} ({item['reason']}).")
+        for item in invalid_message_objects:
+            add_warning(plan, f"All-data cleanup will delete malformed message object: {item['path']} ({item['reason']}).")
+        for item in invalid_comment_objects:
+            add_warning(plan, f"All-data cleanup will delete malformed comment object: {item['path']} ({item['reason']}).")
     else:
         raise ValueError(f"Unsupported cleanup scope: {scope}")
 
     plan["delete_paths"].sort()
     plan["artifact_object_ids"].sort()
     plan["task_object_ids"].sort()
+    plan["message_object_ids"].sort()
+    plan["comment_object_ids"].sort()
     plan["direct_delete_paths"] = sorted(set(plan["direct_delete_paths"]))
     plan["external_delete_paths"] = {
         key: plan["external_delete_paths"][key] for key in sorted(plan["external_delete_paths"])
@@ -798,6 +951,12 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
             detach_artifact_from_task(root, record.get("task_id"), record["id"], warnings=warnings)
         for record in plan["task_records"]:
             detach_task_from_track(root, record.get("track_id"), record["id"], warnings=warnings)
+        # Detach comment ids from surviving targets before deleting comments
+        for record in plan["comment_records"]:
+            target_type = record.get("target_type")
+            target_id = record.get("target_id")
+            if isinstance(target_type, str) and isinstance(target_id, str) and target_type in {"track", "artifact"}:
+                detach_comment_id_from_target(root, target_type, target_id, record["id"], warnings=warnings)
 
     indexed_artifact_paths = set()
     for record in plan["artifact_records"]:
@@ -807,16 +966,22 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
     for record in plan["task_records"]:
         indexed_task_paths.add(record["object_path"])
 
-    for relative_path in sorted(indexed_artifact_paths):
-        delete_relative_path(root, relative_path)
-        deleted_paths.append(relative_path)
+    indexed_message_paths = set()
+    for record in plan["message_records"]:
+        indexed_message_paths.add(record["object_path"])
 
-    for relative_path in sorted(indexed_task_paths):
+    indexed_comment_paths = set()
+    for record in plan["comment_records"]:
+        indexed_comment_paths.add(record["object_path"])
+
+    indexed_all_paths = indexed_artifact_paths | indexed_task_paths | indexed_message_paths | indexed_comment_paths
+
+    for relative_path in sorted(indexed_all_paths):
         delete_relative_path(root, relative_path)
         deleted_paths.append(relative_path)
 
     for relative_path in plan["direct_delete_paths"]:
-        if relative_path in indexed_artifact_paths or relative_path in indexed_task_paths:
+        if relative_path in indexed_all_paths:
             continue
         external_path = plan.get("external_delete_paths", {}).get(relative_path)
         if external_path is not None:
@@ -836,6 +1001,8 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "deleted_count": len(deleted_paths),
         "artifact_object_ids": plan["artifact_object_ids"],
         "task_object_ids": plan["task_object_ids"],
+        "message_object_ids": plan["message_object_ids"],
+        "comment_object_ids": plan["comment_object_ids"],
         "warnings": plan["warnings"],
     }
 
@@ -853,11 +1020,13 @@ def print_text_plan(plan: dict[str, Any]) -> None:
     print(f"Target: {target}")
     print()
     print("Counts by category:")
+    has_any = False
     for key in CATEGORY_ORDER:
-        count = plan["counts_by_category"][key]
+        count = plan["counts_by_category"].get(key, 0)
         if count:
             print(f"  - {key}: {count}")
-    if not any(plan["counts_by_category"].values()):
+            has_any = True
+    if not has_any:
         print("  - no files matched")
     print()
     print(f"Delete candidates: {len(plan['delete_paths'])}")

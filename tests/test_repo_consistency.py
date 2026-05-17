@@ -17,7 +17,7 @@ if str(SCRIPTS) not in sys.path:
 import turn_runtime  # noqa: E402
 from env.tools import contracts as tool_contracts  # noqa: E402
 
-_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment"}
 
 
 class RepoConsistencyTests(unittest.TestCase):

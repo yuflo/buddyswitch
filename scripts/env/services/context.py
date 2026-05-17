@@ -180,6 +180,16 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "scope": "product deliverable state",
             "source_of_truth": "buddyswitch/objects/artifacts/*.json",
         },
+        "messages": {
+            "description": "Direct buddy inbox messages, read through message.list, not emitted in context sections.",
+            "scope": "active-buddy inbox communication",
+            "source_of_truth": "buddyswitch/objects/messages/*.json",
+        },
+        "comments": {
+            "description": "Target-scoped comments on tracks and artifacts, read through comment.list, not emitted as top-level context rows.",
+            "scope": "target discussion thread",
+            "source_of_truth": "buddyswitch/objects/comments/*.json",
+        },
         "buddybox": {
             "description": "Active buddy private file capability metadata and tool-backed private data plane.",
             "scope": "active-buddy private file capability",

@@ -86,6 +86,36 @@ _CAPABILITIES: dict[str, dict[str, Any]] = {
         ],
         "capability_boundary": "Evidence actions operate on target-scoped artifact ids and return transient token metadata.",
     },
+    "message": {
+        "title": "Buddy Messages",
+        "plain_description": "Send and list direct buddy-to-buddy inbox messages.",
+        "use_when": [
+            "You need to send a direct message to another declared manifest buddy.",
+            "You need to list messages sent to the active buddy inbox.",
+        ],
+        "do_not_use_when": [
+            "You need broadcast or group messaging; use repeated message.send instead.",
+            "You need read receipts, message status, or read tracking.",
+            "You need object-level discussion; use comment.add for track/artifact comments.",
+            "You need to edit or delete sent messages.",
+        ],
+        "capability_boundary": "Messages are direct buddy-to-buddy only. Self-send, broadcast, status, and read receipts are not supported.",
+    },
+    "comment": {
+        "title": "Object Comments",
+        "plain_description": "Add and list plain-text comments on readable track and artifact targets.",
+        "use_when": [
+            "You need to discuss a specific track or artifact.",
+            "You need to read discussion threads attached to a readable target.",
+        ],
+        "do_not_use_when": [
+            "You need task comments; only track and artifact targets are supported.",
+            "You need comment resolution, status, or edit/delete.",
+            "You need direct buddy messaging; use message.send.",
+            "You need broadcast or review workflows.",
+        ],
+        "capability_boundary": "Comments require active-buddy read access to the target track or artifact.",
+    },
     "search": {
         "title": "Search Boundary",
         "plain_description": "Expose search backend metadata, target URL planning, and browser-session open actions.",
@@ -178,6 +208,12 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
 
     add("evidence", "issue_browser", plain_description="Issue browser evidence token metadata.", mutates="broker_token", open_world=False)
     add("evidence", "approve_downgrade", plain_description="Issue downgrade approval metadata.", mutates="broker_token", open_world=False)
+
+    add("message", "send", plain_description="Send one durable direct buddy-to-buddy message.", mutates="runtime_objects", open_world=False)
+    add("message", "list", plain_description="List active-buddy inbox messages.", mutates="none", open_world=False)
+
+    add("comment", "add", plain_description="Add one comment to a readable track or artifact.", mutates="runtime_objects", open_world=False)
+    add("comment", "list", plain_description="List comments for a readable track or artifact.", mutates="none", open_world=False)
 
     add("search", "status", plain_description="Read search backend status.", mutates="none", open_world=True)
     add("search", "request", plain_description="Issue search request intent.", mutates="none", open_world=True)

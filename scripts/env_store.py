@@ -24,6 +24,8 @@ OBJECTS_ROOT = STATE_ROOT / "buddyswitch" / "objects"
 TRACKS_DIR = OBJECTS_ROOT / "tracks"
 TASKS_DIR = OBJECTS_ROOT / "tasks"
 ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
+MESSAGES_DIR = OBJECTS_ROOT / "messages"
+COMMENTS_DIR = OBJECTS_ROOT / "comments"
 CONTENT_ROOT = STATE_ROOT / "buddyswitch" / "content"
 LOCAL_ROOT = STATE_ROOT / "buddyswitch" / "local"
 BUDDYBOX_LOCAL_DIR = LOCAL_ROOT / "buddybox"
@@ -98,6 +100,8 @@ def ensure_runtime_dirs() -> None:
     TRACKS_DIR.mkdir(parents=True, exist_ok=True)
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    MESSAGES_DIR.mkdir(parents=True, exist_ok=True)
+    COMMENTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def require_id(value: str, label: str) -> str:
@@ -121,6 +125,14 @@ def task_file(task_id: str) -> Path:
 
 def artifact_file(artifact_id: str) -> Path:
     return ARTIFACT_OBJECTS_DIR / f"{require_id(artifact_id, 'artifact id')}.json"
+
+
+def message_file(message_id: str) -> Path:
+    return MESSAGES_DIR / f"{require_id(message_id, 'message id')}.json"
+
+
+def comment_file(comment_id: str) -> Path:
+    return COMMENTS_DIR / f"{require_id(comment_id, 'comment id')}.json"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -227,6 +239,7 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
     status = track.get("status")
     owner_buddy = track.get("owner_buddy")
     task_ids = track.get("task_ids")
+    comment_ids = track.get("comment_ids", [])
     summary = track.get("summary")
     updated_at = track.get("updated_at")
 
@@ -240,6 +253,12 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("track.task_ids must be a list of non-empty strings")
     for task_id in task_ids:
         require_id(task_id, "track.task_ids[]")
+    if not isinstance(comment_ids, list):
+        raise ValueError("track.comment_ids must be a list (missing normalizes to [])")
+    for comment_id in comment_ids:
+        if not isinstance(comment_id, str) or not comment_id:
+            raise ValueError("track.comment_ids must contain only non-empty strings")
+        require_id(comment_id, "track.comment_ids[]")
     if summary is not None and not isinstance(summary, str):
         raise ValueError("track.summary must be a string or null")
     if not isinstance(updated_at, str) or not updated_at:
@@ -251,6 +270,7 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "owner_buddy": owner_buddy.strip(),
         "task_ids": list(dict.fromkeys(task_ids)),
+        "comment_ids": list(dict.fromkeys(comment_ids)),
         "summary": summary or "",
         "updated_at": updated_at,
     }
@@ -344,6 +364,7 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         active_buddy=buddy if isinstance(buddy, str) else None,
         allow_buddybox=True,
     )
+    comment_ids = artifact.get("comment_ids", [])
     summary = artifact.get("summary")
     content = artifact.get("content", {})
     created_at = artifact.get("created_at")
@@ -371,6 +392,12 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("artifact.summary must be a string or null")
     if not isinstance(content, dict):
         raise ValueError("artifact.content must be an object")
+    if not isinstance(comment_ids, list):
+        raise ValueError("artifact.comment_ids must be a list (missing normalizes to [])")
+    for comment_id in comment_ids:
+        if not isinstance(comment_id, str) or not comment_id:
+            raise ValueError("artifact.comment_ids must contain only non-empty strings")
+        require_id(comment_id, "artifact.comment_ids[]")
     if not isinstance(created_at, str) or not created_at:
         raise ValueError("artifact.created_at must be a non-empty string")
     if not isinstance(updated_at, str) or not updated_at:
@@ -387,10 +414,82 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         "is_current": is_current,
         "created_by": created_by.strip(),
         "source_refs": source_refs,
+        "comment_ids": list(dict.fromkeys(comment_ids)),
         "summary": summary or "",
         "content": content,
         "created_at": created_at,
         "updated_at": updated_at,
+    }
+
+
+def validate_message(message: dict[str, Any]) -> dict[str, Any]:
+    _FORBIDDEN_MSG_FIELDS = {"status", "read_at", "track_id", "task_id", "artifact_id", "recipients", "broadcast"}
+    forbidden = sorted(key for key in message if key in _FORBIDDEN_MSG_FIELDS)
+    if forbidden:
+        raise ValueError(f"unsupported message fields: {', '.join(forbidden)}")
+
+    msg_id = require_id(message.get("id", ""), "message.id")
+    from_buddy = message.get("from_buddy")
+    to_buddy = message.get("to_buddy")
+    content = message.get("content")
+    reply_to = message.get("reply_to")
+    created_at = message.get("created_at")
+
+    if not isinstance(from_buddy, str) or not from_buddy.strip():
+        raise ValueError("message.from_buddy must be a non-empty string")
+    if not isinstance(to_buddy, str) or not to_buddy.strip():
+        raise ValueError("message.to_buddy must be a non-empty string")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("message.content must be a non-empty string")
+    if reply_to is not None:
+        require_id(reply_to, "message.reply_to")
+    if not isinstance(created_at, str) or not created_at:
+        raise ValueError("message.created_at must be a non-empty string")
+
+    return {
+        "id": msg_id,
+        "from_buddy": from_buddy.strip(),
+        "to_buddy": to_buddy.strip(),
+        "content": content.strip(),
+        "reply_to": reply_to,
+        "created_at": created_at,
+    }
+
+
+def validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
+    _FORBIDDEN_CMT_FIELDS = {"status", "resolved", "resolved_at", "task_id", "edit_history", "attachment"}
+    forbidden = sorted(key for key in comment if key in _FORBIDDEN_CMT_FIELDS)
+    if forbidden:
+        raise ValueError(f"unsupported comment fields: {', '.join(forbidden)}")
+
+    cmt_id = require_id(comment.get("id", ""), "comment.id")
+    target_type = comment.get("target_type")
+    target_id = comment.get("target_id")
+    author_buddy = comment.get("author_buddy")
+    content = comment.get("content")
+    reply_to = comment.get("reply_to")
+    created_at = comment.get("created_at")
+
+    if target_type not in {"track", "artifact"}:
+        raise ValueError("comment.target_type must be 'track' or 'artifact'")
+    require_id(target_id, "comment.target_id")
+    if not isinstance(author_buddy, str) or not author_buddy.strip():
+        raise ValueError("comment.author_buddy must be a non-empty string")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("comment.content must be a non-empty string")
+    if reply_to is not None:
+        require_id(reply_to, "comment.reply_to")
+    if not isinstance(created_at, str) or not created_at:
+        raise ValueError("comment.created_at must be a non-empty string")
+
+    return {
+        "id": cmt_id,
+        "target_type": target_type,
+        "target_id": target_id,
+        "author_buddy": author_buddy.strip(),
+        "content": content.strip(),
+        "reply_to": reply_to,
+        "created_at": created_at,
     }
 
 
@@ -561,6 +660,7 @@ def create_track(
         "status": status,
         "owner_buddy": owner_buddy,
         "task_ids": [],
+        "comment_ids": [],
         "summary": summary,
         "updated_at": now_iso(),
     }
@@ -817,6 +917,7 @@ def create_artifact(
         "is_current": True,
         "created_by": created_by,
         "source_refs": source_refs,
+        "comment_ids": [],
         "summary": summary,
         "content": content or {},
         "created_at": timestamp,
@@ -915,3 +1016,167 @@ def delete_all_artifacts(*, dry_run: bool = False) -> list[dict[str, Any]]:
     for artifact in targets:
         delete_artifact(artifact["id"])
     return targets
+
+
+# ---------------------------------------------------------------------------
+# Message object helpers
+# ---------------------------------------------------------------------------
+
+
+def list_messages() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if MESSAGES_DIR.is_dir():
+        for path in MESSAGES_DIR.glob("*.json"):
+            rows.append(validate_message(_read_json(path)))
+    rows.sort(key=lambda row: (row.get("created_at", ""), row["id"]))
+    return rows
+
+
+def get_message(message_id: str) -> dict[str, Any] | None:
+    path = message_file(message_id)
+    if not path.exists():
+        return None
+    return validate_message(_read_json(path))
+
+
+def save_message(message: dict[str, Any]) -> dict[str, Any]:
+    normalize_message = validate_message(message)
+    ensure_runtime_dirs()
+    _write_json(message_file(normalize_message["id"]), normalize_message)
+    return normalize_message
+
+
+def create_message(
+    *,
+    from_buddy: str,
+    to_buddy: str,
+    content: str,
+    reply_to: str | None = None,
+) -> dict[str, Any]:
+    if not isinstance(from_buddy, str) or not from_buddy.strip():
+        raise ValueError("from_buddy must be a non-empty string")
+    if not isinstance(to_buddy, str) or not to_buddy.strip():
+        raise ValueError("to_buddy must be a non-empty string")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("content must be a non-empty string")
+    if reply_to is not None:
+        require_id(reply_to, "reply_to")
+    message_id = f"msg-{uuid.uuid4().hex[:12]}"
+    require_id(message_id, "message id")
+    message = {
+        "id": message_id,
+        "from_buddy": from_buddy.strip(),
+        "to_buddy": to_buddy.strip(),
+        "content": content.strip(),
+        "reply_to": reply_to,
+        "created_at": now_iso(),
+    }
+    return save_message(message)
+
+
+# ---------------------------------------------------------------------------
+# Comment object helpers
+# ---------------------------------------------------------------------------
+
+
+def list_comments() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if COMMENTS_DIR.is_dir():
+        for path in COMMENTS_DIR.glob("*.json"):
+            rows.append(validate_comment(_read_json(path)))
+    rows.sort(key=lambda row: (row.get("created_at", ""), row["id"]))
+    return rows
+
+
+def get_comment(comment_id: str) -> dict[str, Any] | None:
+    path = comment_file(comment_id)
+    if not path.exists():
+        return None
+    return validate_comment(_read_json(path))
+
+
+def save_comment(comment: dict[str, Any]) -> dict[str, Any]:
+    normalize_comment = validate_comment(comment)
+    ensure_runtime_dirs()
+    _write_json(comment_file(normalize_comment["id"]), normalize_comment)
+    return normalize_comment
+
+
+def create_comment(
+    *,
+    target_type: str,
+    target_id: str,
+    author_buddy: str,
+    content: str,
+    reply_to: str | None = None,
+) -> dict[str, Any]:
+    if target_type not in {"track", "artifact"}:
+        raise ValueError("target_type must be 'track' or 'artifact'")
+    require_id(target_id, "target_id")
+    if not isinstance(author_buddy, str) or not author_buddy.strip():
+        raise ValueError("author_buddy must be a non-empty string")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("content must be a non-empty string")
+    if reply_to is not None:
+        require_id(reply_to, "reply_to")
+    comment_id = f"comment-{uuid.uuid4().hex[:12]}"
+    require_id(comment_id, "comment id")
+    comment = {
+        "id": comment_id,
+        "target_type": target_type,
+        "target_id": target_id,
+        "author_buddy": author_buddy.strip(),
+        "content": content.strip(),
+        "reply_to": reply_to,
+        "created_at": now_iso(),
+    }
+    return save_comment(comment)
+
+
+# ---------------------------------------------------------------------------
+# Private target comment_ids helpers (used by comment service and cleanup)
+# ---------------------------------------------------------------------------
+
+
+def add_comment_id_to_track(track_id: str, comment_id: str) -> dict[str, Any]:
+    track = get_track(track_id)
+    if track is None:
+        raise ValueError(f"track not found: {track_id}")
+    require_id(comment_id, "comment id")
+    if comment_id not in track["comment_ids"]:
+        track["comment_ids"].append(comment_id)
+        track["updated_at"] = now_iso()
+    return save_track(track)
+
+
+def add_comment_id_to_artifact(artifact_id: str, comment_id: str) -> dict[str, Any]:
+    artifact = get_artifact(artifact_id)
+    if artifact is None:
+        raise ValueError(f"artifact not found: {artifact_id}")
+    require_id(comment_id, "comment id")
+    if comment_id not in artifact["comment_ids"]:
+        artifact["comment_ids"].append(comment_id)
+        artifact["updated_at"] = now_iso()
+    return save_artifact(artifact)
+
+
+def remove_comment_id_from_target(
+    target_type: str, target_id: str, comment_id: str
+) -> dict[str, Any] | None:
+    if target_type not in {"track", "artifact"}:
+        return None
+    require_id(target_id, "target_id")
+    require_id(comment_id, "comment id")
+    if target_type == "track":
+        target = get_track(target_id)
+    else:
+        target = get_artifact(target_id)
+    if target is None:
+        return None
+    if comment_id not in target.get("comment_ids", []):
+        return None
+    target["comment_ids"] = [item for item in target["comment_ids"] if item != comment_id]
+    target["updated_at"] = now_iso()
+    if target_type == "track":
+        return save_track(target)
+    return save_artifact(target)

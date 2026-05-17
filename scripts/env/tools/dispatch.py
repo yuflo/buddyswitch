@@ -8,8 +8,10 @@ from typing import Any
 
 from env.services import artifacts as artifact_service
 from env.services import buddybox as buddybox_service
+from env.services import comments as comment_service
 from env.services import context as context_service
 from env.services import evidence as evidence_service
+from env.services import messages as message_service
 from env.services import search as search_service
 from env.services import tasks as task_service
 from env.services import tracks as track_service
@@ -55,6 +57,14 @@ HANDLERS_BY_TOOL = {
     "evidence": {
         "issue_browser": evidence_service.issue_browser_for_active_instance,
         "approve_downgrade": evidence_service.approve_downgrade_for_active_instance,
+    },
+    "message": {
+        "send": message_service.send_message,
+        "list": message_service.list_messages,
+    },
+    "comment": {
+        "add": comment_service.add_comment,
+        "list": comment_service.list_comments,
     },
     "search": {
         "status": search_service.status_for_active_instance,

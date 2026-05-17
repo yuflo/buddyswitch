@@ -59,7 +59,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         affordances = response.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=response)
         assert isinstance(affordances, dict)
-        self.assertTrue({"task", "track", "artifact", "buddybox", "context", "evidence", "search"}.issubset(set(affordances)))
+        self.assertTrue({"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment"}.issubset(set(affordances)))
         self.assertNotIn("handoff", affordances)
         self.assertNotIn("project_source", affordances)
 

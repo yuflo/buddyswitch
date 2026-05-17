@@ -152,8 +152,31 @@ class CleanupSystemTests(unittest.TestCase):
             "buddyswitch/objects/tracks",
             "buddyswitch/objects/tasks",
             "buddyswitch/objects/artifacts",
+            "buddyswitch/objects/messages",
+            "buddyswitch/objects/comments",
         ):
             self.assertTrue(self._path(directory).is_dir(), f"missing recreated dir: {directory}")
+
+    def test_cleanup_plan_includes_message_and_comment_objects(self) -> None:
+        """MCT-RUN-003: All-data cleanup plan discovers message and comment objects."""
+        self._write_json(
+            "buddyswitch/objects/messages/msg-test.json",
+            {"id": "msg-test", "from_buddy": "pm", "to_buddy": "dev", "content": "hello", "reply_to": None, "created_at": "2026-05-17T00:00:00+08:00"},
+        )
+        self._write_json(
+            "buddyswitch/objects/comments/comment-test.json",
+            {"id": "comment-test", "target_type": "track", "target_id": "track-demo", "author_buddy": "design", "content": "looks good", "reply_to": None, "created_at": "2026-05-17T00:00:00+08:00"},
+        )
+        plan = env_cleanup.build_cleanup_plan(
+            scope="all-data",
+            buddy=None,
+            repo_root=self.repo_root,
+            manifest_path=self.manifest_path,
+        )
+        self.assertIn("message_object_ids", plan)
+        self.assertIn("msg-test", plan["message_object_ids"])
+        self.assertIn("comment_object_ids", plan)
+        self.assertIn("comment-test", plan["comment_object_ids"])
 
     def test_cleanup_cli_json_reports_active_categories(self) -> None:
         completed = subprocess.run(

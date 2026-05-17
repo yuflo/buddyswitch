@@ -10,15 +10,27 @@ if str(SCRIPTS) not in sys.path:
 
 from env_store import (  # noqa: E402
     create_artifact,
+    create_comment,
+    create_message,
     create_task,
     create_track,
     delete_artifact,
     get_artifact,
+    get_comment,
+    get_message,
     get_track,
     get_task,
-    update_artifact,
+    list_messages,
+    list_comments,
+    save_message,
+    save_comment,
     validate_track,
     validate_task,
+    validate_message,
+    validate_comment,
+    add_comment_id_to_track,
+    add_comment_id_to_artifact,
+    remove_comment_id_from_target,
 )
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -471,3 +483,224 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 content={"body": "x"},
                 source_refs=[{"type": "handoff", "id": "handoff-old"}],
             )
+
+
+class MessageStoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+
+    def test_create_message_persists_flat_message_without_status(self):
+        msg = create_message(from_buddy="design", to_buddy="dev", content="Hello Dev!")
+        self.assertTrue(msg["id"].startswith("msg-"))
+        self.assertEqual(msg["from_buddy"], "design")
+        self.assertEqual(msg["to_buddy"], "dev")
+        self.assertEqual(msg["content"], "Hello Dev!")
+        self.assertIsNone(msg["reply_to"])
+        self.assertIsInstance(msg["created_at"], str)
+        self.assertTrue(len(msg["created_at"]) > 0)
+        self.assertNotIn("status", msg)
+        self.assertNotIn("read_at", msg)
+        self.assertNotIn("track_id", msg)
+        self.assertNotIn("task_id", msg)
+        self.assertNotIn("artifact_id", msg)
+        self.assertNotIn("recipients", msg)
+        self.assertNotIn("broadcast", msg)
+
+        stored = get_message(msg["id"])
+        self.assertIsNotNone(stored)
+        self.assertEqual(stored["from_buddy"], "design")
+        self.assertEqual(stored["to_buddy"], "dev")
+        self.assertNotIn("status", stored)
+
+    def test_create_message_with_reply_to(self):
+        msg1 = create_message(from_buddy="pm", to_buddy="dev", content="First")
+        msg2 = create_message(from_buddy="dev", to_buddy="pm", content="Reply", reply_to=msg1["id"])
+        self.assertEqual(msg2["reply_to"], msg1["id"])
+
+    def test_create_message_rejects_invalid_reply_to(self):
+        create_message(from_buddy="pm", to_buddy="dev", content="Seed")
+        with self.assertRaises(ValueError):
+            create_message(from_buddy="dev", to_buddy="pm", content="Bad", reply_to="not-an-id!")
+
+    def test_validate_message_rejects_forbidden_fields(self):
+        with self.assertRaises(ValueError):
+            validate_message({
+                "id": "msg-test",
+                "from_buddy": "pm",
+                "to_buddy": "dev",
+                "content": "x",
+                "reply_to": None,
+                "created_at": "2026-05-17T00:00:00Z",
+                "status": "unread",
+            })
+
+    def test_validate_message_rejects_blank_content(self):
+        with self.assertRaises(ValueError):
+            validate_message({
+                "id": "msg-test",
+                "from_buddy": "pm",
+                "to_buddy": "dev",
+                "content": "   ",
+                "reply_to": None,
+                "created_at": "2026-05-17T00:00:00Z",
+            })
+
+    def test_list_messages_sorts_by_created_at_ascending(self):
+        msg1 = create_message(from_buddy="pm", to_buddy="dev", content="First")
+        msg2 = create_message(from_buddy="design", to_buddy="dev", content="Second")
+        rows = list_messages()
+        ids = [row["id"] for row in rows]
+        self.assertIn(msg1["id"], ids)
+        self.assertIn(msg2["id"], ids)
+
+    def test_save_message_persists(self):
+        msg_id = create_message(from_buddy="pm", to_buddy="dev", content="Original")["id"]
+        msg = get_message(msg_id)
+        msg["content"] = "Updated"
+        save_message(msg)
+        reloaded = get_message(msg_id)
+        self.assertEqual(reloaded["content"], "Updated")
+
+
+class CommentStoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+
+    def _seed_track(self):
+        return create_track("track-cmt-store", "Comment Track")
+
+    def _seed_artifact(self):
+        task = create_task("task-cmt-store", "Comment Task", buddy="dev")
+        return create_artifact(
+            artifact_id="art-cmt-store",
+            title="Comment Artifact",
+            buddy="dev",
+            kind="prd",
+            task_id=task["id"],
+            created_by="dev",
+        )
+
+    def test_create_comment_persists_flat_comment_without_status(self):
+        track = self._seed_track()
+        cmt = create_comment(
+            target_type="track",
+            target_id=track["id"],
+            author_buddy="design",
+            content="Nice track!",
+        )
+        self.assertTrue(cmt["id"].startswith("comment-"))
+        self.assertEqual(cmt["target_type"], "track")
+        self.assertEqual(cmt["target_id"], track["id"])
+        self.assertEqual(cmt["author_buddy"], "design")
+        self.assertEqual(cmt["content"], "Nice track!")
+        self.assertIsNone(cmt["reply_to"])
+        self.assertIsInstance(cmt["created_at"], str)
+        self.assertNotIn("status", cmt)
+        self.assertNotIn("resolved", cmt)
+        self.assertNotIn("resolved_at", cmt)
+        self.assertNotIn("task_id", cmt)
+        self.assertNotIn("edit_history", cmt)
+        self.assertNotIn("attachment", cmt)
+
+        stored = get_comment(cmt["id"])
+        self.assertIsNotNone(stored)
+        self.assertEqual(stored["author_buddy"], "design")
+        self.assertNotIn("status", stored)
+
+    def test_create_comment_rejects_task_target(self):
+        task = create_task("task-cmt-store-reject", "Reject Task Cmt", buddy="dev")
+        with self.assertRaises(ValueError):
+            create_comment(
+                target_type="task",
+                target_id=task["id"],
+                author_buddy="dev",
+                content="No task comments",
+            )
+
+    def test_validate_comment_rejects_forbidden_fields(self):
+        with self.assertRaises(ValueError):
+            validate_comment({
+                "id": "comment-test",
+                "target_type": "track",
+                "target_id": "track-x",
+                "author_buddy": "dev",
+                "content": "x",
+                "reply_to": None,
+                "created_at": "2026-05-17T00:00:00Z",
+                "status": "open",
+            })
+
+    def test_validate_comment_rejects_blank_content(self):
+        with self.assertRaises(ValueError):
+            validate_comment({
+                "id": "comment-test",
+                "target_type": "track",
+                "target_id": "track-x",
+                "author_buddy": "dev",
+                "content": "   ",
+                "reply_to": None,
+                "created_at": "2026-05-17T00:00:00Z",
+            })
+
+    def test_track_and_artifact_comment_ids_default_and_persist(self):
+        track = self._seed_track()
+        artifact = self._seed_artifact()
+
+        loaded_track = get_track(track["id"])
+        self.assertIn("comment_ids", loaded_track)
+        self.assertEqual(loaded_track["comment_ids"], [])
+
+        loaded_artifact = get_artifact(artifact["id"])
+        self.assertIn("comment_ids", loaded_artifact)
+        self.assertEqual(loaded_artifact["comment_ids"], [])
+
+    def test_new_track_and_artifact_records_persist_empty_comment_ids(self):
+        track = create_track("track-cmt-persist-empty", "Empty Cmt IDs")
+        self.assertEqual(track["comment_ids"], [])
+        reloaded = get_track("track-cmt-persist-empty")
+        self.assertEqual(reloaded["comment_ids"], [])
+
+        task = create_task("task-cmt-persist-2", "Task2", buddy="dev")
+        artifact = create_artifact(
+            artifact_id="art-cmt-persist",
+            title="Persist Artifact",
+            buddy="dev",
+            kind="prd",
+            task_id=task["id"],
+            created_by="dev",
+        )
+        self.assertEqual(artifact["comment_ids"], [])
+        reloaded_art = get_artifact("art-cmt-persist")
+        self.assertEqual(reloaded_art["comment_ids"], [])
+
+    def test_task_records_do_not_gain_comment_ids(self):
+        task = create_task("task-no-comment-ids", "No Comment IDs", buddy="dev")
+        self.assertNotIn("comment_ids", task)
+
+    def test_add_comment_id_to_track_appends(self):
+        track = self._seed_track()
+        self.assertEqual(track["comment_ids"], [])
+        cmt = create_comment(target_type="track", target_id=track["id"], author_buddy="design", content="C1")
+        updated_track = add_comment_id_to_track(track["id"], cmt["id"])
+        self.assertIn(cmt["id"], updated_track["comment_ids"])
+        self.assertEqual(len(updated_track["comment_ids"]), 1)
+
+    def test_add_comment_id_to_artifact_appends(self):
+        artifact = self._seed_artifact()
+        cmt = create_comment(target_type="artifact", target_id=artifact["id"], author_buddy="design", content="C1")
+        updated_artifact = add_comment_id_to_artifact(artifact["id"], cmt["id"])
+        self.assertIn(cmt["id"], updated_artifact["comment_ids"])
+        self.assertEqual(len(updated_artifact["comment_ids"]), 1)
+
+    def test_remove_comment_id_from_target_detaches(self):
+        track = self._seed_track()
+        cmt = create_comment(target_type="track", target_id=track["id"], author_buddy="design", content="ToRemove")
+        add_comment_id_to_track(track["id"], cmt["id"])
+        result = remove_comment_id_from_target("track", track["id"], cmt["id"])
+        self.assertIsNotNone(result)
+        self.assertNotIn(cmt["id"], result["comment_ids"])
+
+    def test_list_comments_sorts_by_created_at_ascending(self):
+        track = self._seed_track()
+        cmt1 = create_comment(target_type="track", target_id=track["id"], author_buddy="dev", content="First")
+        cmt2 = create_comment(target_type="track", target_id=track["id"], author_buddy="design", content="Second")
+        rows = list_comments()
+        ids = [row["id"] for row in rows]
+        self.assertIn(cmt1["id"], ids)
+        self.assertIn(cmt2["id"], ids)

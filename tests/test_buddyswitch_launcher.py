@@ -978,7 +978,7 @@ exec "$real_git" "$@"
             (shared_root / "project" / "workspace" / "projects" / "app").resolve(strict=True),
         )
 
-        for kind in ("tracks", "tasks", "artifacts"):
+        for kind in ("tracks", "tasks", "artifacts", "messages", "comments"):
             projected = workspace_dir / "buddyswitch" / "objects" / kind
             target = shared_root / "state" / "buddyswitch" / "objects" / kind
             self.assertTrue(projected.is_symlink(), msg=f"runtime state projection should be symlink: {kind}")

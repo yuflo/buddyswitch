@@ -146,6 +146,21 @@ def _parse_args() -> argparse.Namespace:
     approve_downgrade.add_argument("--target-id", required=True)
     approve_downgrade.add_argument("--reason", required=True)
 
+    message = sub.add_parser("message", help="Message env tool operations")
+    message_sub = message.add_subparsers(dest="operation", required=True)
+    message_send = message_sub.add_parser("send", help="Send a direct message to a buddy")
+    message_send.add_argument("--payload", required=True, type=Path)
+    message_list = message_sub.add_parser("list", help="List active-buddy inbox messages")
+    message_list.add_argument("--buddy")
+
+    comment = sub.add_parser("comment", help="Comment env tool operations")
+    comment_sub = comment.add_subparsers(dest="operation", required=True)
+    comment_add = comment_sub.add_parser("add", help="Add a comment to a track or artifact")
+    comment_add.add_argument("--payload", required=True, type=Path)
+    comment_list = comment_sub.add_parser("list", help="List comments on a target")
+    comment_list.add_argument("--target-type", required=True)
+    comment_list.add_argument("--target-id", required=True)
+
     search = sub.add_parser(
         "search",
         help="Search env operations",
@@ -292,6 +307,31 @@ def _dispatch_search(args: argparse.Namespace) -> dict[str, Any]:
     return _dispatch_env_tool("search", action, payload)
 
 
+def _dispatch_message(args: argparse.Namespace) -> dict[str, Any]:
+    action = _operation_to_action(args.operation)
+    if args.operation == "send":
+        return _dispatch_env_tool("message", action, _load_json_object(args.payload))
+    if args.operation == "list":
+        payload: dict[str, Any] = {}
+        if isinstance(args.buddy, str) and args.buddy.strip():
+            payload["buddy"] = args.buddy.strip()
+        return _dispatch_env_tool("message", action, payload)
+    raise ValueError(f"unsupported message operation: {args.operation}")
+
+
+def _dispatch_comment(args: argparse.Namespace) -> dict[str, Any]:
+    action = _operation_to_action(args.operation)
+    if args.operation == "add":
+        return _dispatch_env_tool("comment", action, _load_json_object(args.payload))
+    if args.operation == "list":
+        return _dispatch_env_tool(
+            "comment",
+            action,
+            {"target_type": args.target_type, "target_id": args.target_id},
+        )
+    raise ValueError(f"unsupported comment operation: {args.operation}")
+
+
 def main() -> int:
     try:
         args = _parse_args()
@@ -307,6 +347,10 @@ def main() -> int:
             payload = _dispatch_buddybox(args)
         elif args.resource == "evidence":
             payload = _dispatch_evidence(args)
+        elif args.resource == "message":
+            payload = _dispatch_message(args)
+        elif args.resource == "comment":
+            payload = _dispatch_comment(args)
         elif args.resource == "search":
             payload = _dispatch_search(args)
         else:

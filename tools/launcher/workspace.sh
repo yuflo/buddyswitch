@@ -221,6 +221,8 @@ projects/app
 buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
+buddyswitch/objects/messages
+buddyswitch/objects/comments
 EOF
   if [[ -n "${active_buddy}" ]]; then
     printf 'buddyswitch/local/buddybox/%s\n' "${active_buddy}"
@@ -493,6 +495,8 @@ buddyswitch_workspace_runtime_output_paths() {
 buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
+buddyswitch/objects/messages
+buddyswitch/objects/comments
 EOF
   if [[ -n "${active_buddy}" ]]; then
     printf 'buddyswitch/local/buddybox/%s\n' "${active_buddy}"
@@ -504,6 +508,8 @@ buddyswitch_workspace_projected_state_paths() {
 buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
+buddyswitch/objects/messages
+buddyswitch/objects/comments
 EOF
 }
 
@@ -802,6 +808,8 @@ projects/app
 buddyswitch/objects/tracks/**
 buddyswitch/objects/tasks/**
 buddyswitch/objects/artifacts/**
+buddyswitch/objects/messages/**
+buddyswitch/objects/comments/**
 buddyswitch/local/buddybox/**
 .agents/skills/**
 EOF
@@ -825,6 +833,8 @@ buddyswitch_workspace_ensure_state_skeleton() {
 buddyswitch/objects/tracks
 buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
+buddyswitch/objects/messages
+buddyswitch/objects/comments
 buddyswitch/local/buddybox
 EOF
 }

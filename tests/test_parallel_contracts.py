@@ -68,11 +68,21 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(tracks, list)
         row = next(r for r in tracks if isinstance(r, dict) and r.get("id") == track["id"])
         self.assertEqual(row.get("owner_buddy"), "dev")
+        self.assertIn("comment_ids", row, msg="track view missing comment_ids")
+        self.assertIsInstance(row.get("comment_ids"), list)
 
         artifacts = payload["artifacts"]
         self.assertIsInstance(artifacts, list)
         assert isinstance(artifacts, list)
         self.assertTrue(any(isinstance(r, dict) and r.get("id") == artifact["id"] for r in artifacts))
+
+        tasks = payload["tasks"]
+        self.assertIsInstance(tasks, list)
+        assert isinstance(tasks, list)
+        self.assertTrue(any(isinstance(r, dict) and r.get("id") == task["id"] for r in tasks))
+        # Task views must NOT have comment_ids
+        task_row = next(r for r in tasks if isinstance(r, dict) and r.get("id") == task["id"])
+        self.assertNotIn("comment_ids", task_row, msg="task view must not expose comment_ids")
 
 
 if __name__ == "__main__":
