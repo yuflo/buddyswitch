@@ -239,7 +239,6 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
     status = track.get("status")
     owner_buddy = track.get("owner_buddy")
     task_ids = track.get("task_ids")
-    comment_ids = track.get("comment_ids", [])
     summary = track.get("summary")
     updated_at = track.get("updated_at")
 
@@ -253,12 +252,6 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("track.task_ids must be a list of non-empty strings")
     for task_id in task_ids:
         require_id(task_id, "track.task_ids[]")
-    if not isinstance(comment_ids, list):
-        raise ValueError("track.comment_ids must be a list (missing normalizes to [])")
-    for comment_id in comment_ids:
-        if not isinstance(comment_id, str) or not comment_id:
-            raise ValueError("track.comment_ids must contain only non-empty strings")
-        require_id(comment_id, "track.comment_ids[]")
     if summary is not None and not isinstance(summary, str):
         raise ValueError("track.summary must be a string or null")
     if not isinstance(updated_at, str) or not updated_at:
@@ -270,7 +263,6 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "owner_buddy": owner_buddy.strip(),
         "task_ids": list(dict.fromkeys(task_ids)),
-        "comment_ids": list(dict.fromkeys(comment_ids)),
         "summary": summary or "",
         "updated_at": updated_at,
     }
@@ -364,7 +356,6 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         active_buddy=buddy if isinstance(buddy, str) else None,
         allow_buddybox=True,
     )
-    comment_ids = artifact.get("comment_ids", [])
     summary = artifact.get("summary")
     content = artifact.get("content", {})
     created_at = artifact.get("created_at")
@@ -392,12 +383,6 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("artifact.summary must be a string or null")
     if not isinstance(content, dict):
         raise ValueError("artifact.content must be an object")
-    if not isinstance(comment_ids, list):
-        raise ValueError("artifact.comment_ids must be a list (missing normalizes to [])")
-    for comment_id in comment_ids:
-        if not isinstance(comment_id, str) or not comment_id:
-            raise ValueError("artifact.comment_ids must contain only non-empty strings")
-        require_id(comment_id, "artifact.comment_ids[]")
     if not isinstance(created_at, str) or not created_at:
         raise ValueError("artifact.created_at must be a non-empty string")
     if not isinstance(updated_at, str) or not updated_at:
@@ -414,7 +399,6 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         "is_current": is_current,
         "created_by": created_by.strip(),
         "source_refs": source_refs,
-        "comment_ids": list(dict.fromkeys(comment_ids)),
         "summary": summary or "",
         "content": content,
         "created_at": created_at,
@@ -660,7 +644,6 @@ def create_track(
         "status": status,
         "owner_buddy": owner_buddy,
         "task_ids": [],
-        "comment_ids": [],
         "summary": summary,
         "updated_at": now_iso(),
     }
@@ -917,7 +900,6 @@ def create_artifact(
         "is_current": True,
         "created_by": created_by,
         "source_refs": source_refs,
-        "comment_ids": [],
         "summary": summary,
         "content": content or {},
         "created_at": timestamp,
@@ -1132,51 +1114,3 @@ def create_comment(
     }
     return save_comment(comment)
 
-
-# ---------------------------------------------------------------------------
-# Private target comment_ids helpers (used by comment service and cleanup)
-# ---------------------------------------------------------------------------
-
-
-def add_comment_id_to_track(track_id: str, comment_id: str) -> dict[str, Any]:
-    track = get_track(track_id)
-    if track is None:
-        raise ValueError(f"track not found: {track_id}")
-    require_id(comment_id, "comment id")
-    if comment_id not in track["comment_ids"]:
-        track["comment_ids"].append(comment_id)
-        track["updated_at"] = now_iso()
-    return save_track(track)
-
-
-def add_comment_id_to_artifact(artifact_id: str, comment_id: str) -> dict[str, Any]:
-    artifact = get_artifact(artifact_id)
-    if artifact is None:
-        raise ValueError(f"artifact not found: {artifact_id}")
-    require_id(comment_id, "comment id")
-    if comment_id not in artifact["comment_ids"]:
-        artifact["comment_ids"].append(comment_id)
-        artifact["updated_at"] = now_iso()
-    return save_artifact(artifact)
-
-
-def remove_comment_id_from_target(
-    target_type: str, target_id: str, comment_id: str
-) -> dict[str, Any] | None:
-    if target_type not in {"track", "artifact"}:
-        return None
-    require_id(target_id, "target_id")
-    require_id(comment_id, "comment id")
-    if target_type == "track":
-        target = get_track(target_id)
-    else:
-        target = get_artifact(target_id)
-    if target is None:
-        return None
-    if comment_id not in target.get("comment_ids", []):
-        return None
-    target["comment_ids"] = [item for item in target["comment_ids"] if item != comment_id]
-    target["updated_at"] = now_iso()
-    if target_type == "track":
-        return save_track(target)
-    return save_artifact(target)

@@ -178,6 +178,57 @@ class CleanupSystemTests(unittest.TestCase):
         self.assertIn("comment_object_ids", plan)
         self.assertIn("comment-test", plan["comment_object_ids"])
 
+    def test_buddy_cleanup_deletes_authored_comments_without_mutating_surviving_targets(self) -> None:
+        track_path = self._path("buddyswitch/objects/tracks/track-clean-comment.json")
+        track_payload = {
+            "id": "track-clean-comment",
+            "title": "Clean Comment",
+            "status": "active",
+            "owner_buddy": "pm",
+            "task_ids": [],
+            "comment_ids": ["comment-dev-clean", "comment-design-keep"],
+            "summary": "",
+            "updated_at": "2026-05-17T00:00:00+08:00",
+        }
+        self._write_json("buddyswitch/objects/tracks/track-clean-comment.json", track_payload)
+        self._write_json(
+            "buddyswitch/objects/comments/comment-dev-clean.json",
+            {
+                "id": "comment-dev-clean",
+                "target_type": "track",
+                "target_id": "track-clean-comment",
+                "author_buddy": "dev",
+                "content": "delete me",
+                "reply_to": None,
+                "created_at": "2026-05-17T00:00:00+08:00",
+            },
+        )
+        self._write_json(
+            "buddyswitch/objects/comments/comment-design-keep.json",
+            {
+                "id": "comment-design-keep",
+                "target_type": "track",
+                "target_id": "track-clean-comment",
+                "author_buddy": "design",
+                "content": "keep me",
+                "reply_to": None,
+                "created_at": "2026-05-17T00:00:01+08:00",
+            },
+        )
+
+        plan = env_cleanup.build_cleanup_plan(
+            scope="buddy",
+            buddy="dev",
+            repo_root=self.repo_root,
+            manifest_path=self.manifest_path,
+        )
+        result = env_cleanup.execute_cleanup_plan(plan)
+
+        self.assertTrue(result["ok"], msg=result)
+        self.assertFalse(self._path("buddyswitch/objects/comments/comment-dev-clean.json").exists())
+        self.assertTrue(self._path("buddyswitch/objects/comments/comment-design-keep.json").exists())
+        self.assertEqual(json.loads(track_path.read_text(encoding="utf-8")), track_payload)
+
     def test_cleanup_cli_json_reports_active_categories(self) -> None:
         completed = subprocess.run(
             [

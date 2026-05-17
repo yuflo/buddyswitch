@@ -102,8 +102,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             created_by=buddy,
         )
 
-    def test_add_and_list_track_comment_persists_comment_id_on_track(self):
+    def test_add_and_list_track_comment_uses_comment_object_relation_without_target_mutation(self):
         track = self._seed_active_track()
+        before_track = env_store.get_track(track["id"])
         instance_json = self._instance_json(instance_id="inst-design-cmt", buddy="design")
         response = self._dispatch(
             instance_json=instance_json,
@@ -115,14 +116,16 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(response.get("ok"), msg=response)
         self.assertIn("comment_id", response)
+        self.assertEqual(response["comment"]["target_type"], "track")
+        self.assertEqual(response["comment"]["target_id"], track["id"])
         self.assertEqual(response["comment"]["content"], "Nice track design!")
         self.assertEqual(response["comment"]["author_buddy"], "design")
 
-        # Verify comment_ids on track
-        stored_track = env_store.get_track(track["id"])
-        self.assertIn(response["comment_id"], stored_track["comment_ids"])
+        stored_comment = env_store.get_comment(response["comment_id"])
+        self.assertEqual(stored_comment["target_type"], "track")
+        self.assertEqual(stored_comment["target_id"], track["id"])
+        self.assertEqual(env_store.get_track(track["id"]), before_track)
 
-        # List comments
         list_resp = self._dispatch(
             instance_json=instance_json,
             instance_id="inst-design-cmt",
@@ -133,12 +136,12 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(list_resp.get("ok"), msg=list_resp)
         comments = list_resp.get("comments", [])
-        self.assertEqual(len(comments), 1)
-        self.assertEqual(comments[0]["id"], response["comment_id"])
+        self.assertEqual([row["id"] for row in comments], [response["comment_id"]])
 
-    def test_add_and_list_artifact_comment_persists_comment_id_on_artifact(self):
+    def test_add_and_list_artifact_comment_uses_comment_object_relation_without_target_mutation(self):
         self._seed_active_track()
         artifact = self._seed_readable_artifact(buddy="dev")
+        before_artifact = env_store.get_artifact(artifact["id"])
         instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
         response = self._dispatch(
             instance_json=instance_json,
@@ -150,8 +153,10 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(response.get("ok"), msg=response)
 
-        stored_artifact = env_store.get_artifact(artifact["id"])
-        self.assertIn(response["comment_id"], stored_artifact["comment_ids"])
+        stored_comment = env_store.get_comment(response["comment_id"])
+        self.assertEqual(stored_comment["target_type"], "artifact")
+        self.assertEqual(stored_comment["target_id"], artifact["id"])
+        self.assertEqual(env_store.get_artifact(artifact["id"]), before_artifact)
 
         list_resp = self._dispatch(
             instance_json=instance_json,
@@ -162,7 +167,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"target_type": "artifact", "target_id": artifact["id"]},
         )
         self.assertTrue(list_resp.get("ok"), msg=list_resp)
-        self.assertEqual(len(list_resp.get("comments", [])), 1)
+        self.assertEqual([row["id"] for row in list_resp.get("comments", [])], [response["comment_id"]])
 
     def test_comment_add_rejects_archived_track(self):
         self._seed_archived_track()
@@ -235,6 +240,34 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(resp2.get("ok"), msg=resp2)
         self.assertIs(resp1.get("state_changed"), False)
 
+    def test_comment_list_ignores_legacy_target_comment_ids_and_uses_comment_objects(self):
+        track = self._seed_active_track()
+        legacy_track = env_store.get_track(track["id"])
+        legacy_track["comment_ids"] = ["comment-stale"]
+        env_store.track_file(track["id"]).write_text(
+            json.dumps(legacy_track, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        real = env_store.create_comment(
+            target_type="track",
+            target_id=track["id"],
+            author_buddy="design",
+            content="Real relation",
+        )
+        instance_json = self._instance_json(instance_id="inst-design-legacy-list", buddy="design")
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-design-legacy-list",
+            buddy="design",
+            tool="comment",
+            action="list",
+            args={"target_type": "track", "target_id": track["id"]},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual([row["id"] for row in response.get("comments", [])], [real["id"]])
+
     def test_comment_tool_rejects_task_target(self):
         task = env_store.create_task("task-cmt-reject", "Reject Cmt", buddy="dev")
         instance_json = self._instance_json(instance_id="inst-dev-task-cmt", buddy="dev")
@@ -257,7 +290,6 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             author_buddy="design",
             content="First comment",
         )
-        env_store.add_comment_id_to_track("track-cmt-active", cmt1["id"])
         instance_json = self._instance_json(instance_id="inst-design-reply", buddy="design")
         response = self._dispatch(
             instance_json=instance_json,
@@ -280,7 +312,6 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             author_buddy="design",
             content="On track A",
         )
-        env_store.add_comment_id_to_track("track-cmt-active", cmt_on_a["id"])
         instance_json = self._instance_json(instance_id="inst-dev-cross", buddy="dev")
         response = self._dispatch(
             instance_json=instance_json,
@@ -323,8 +354,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(response.get("ok"), msg=response)
         self.assertEqual(response["comment"]["author_buddy"], "dev")
         self.assertEqual(response["target_type"], "artifact")
-        stored = env_store.get_artifact("art-cmt-pm-relation")
-        self.assertIn(response["comment_id"], stored["comment_ids"])
+        stored = env_store.get_comment(response["comment_id"])
+        self.assertEqual(stored["target_type"], "artifact")
+        self.assertEqual(stored["target_id"], "art-cmt-pm-relation")
 
     def test_comment_add_artifact_rejects_missing_track_relation(self):
         """MCT-COM-008: Dev without task on PM's track cannot comment on PM's artifact."""

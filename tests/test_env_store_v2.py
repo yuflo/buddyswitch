@@ -8,6 +8,8 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+import env_store  # noqa: E402
+
 from env_store import (  # noqa: E402
     create_artifact,
     create_comment,
@@ -24,13 +26,11 @@ from env_store import (  # noqa: E402
     list_comments,
     save_message,
     save_comment,
+    update_artifact,
     validate_track,
     validate_task,
     validate_message,
     validate_comment,
-    add_comment_id_to_track,
-    add_comment_id_to_artifact,
-    remove_comment_id_from_target,
 )
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -638,63 +638,51 @@ class CommentStoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "created_at": "2026-05-17T00:00:00Z",
             })
 
-    def test_track_and_artifact_comment_ids_default_and_persist(self):
+    def test_track_and_artifact_records_do_not_persist_comment_ids(self):
         track = self._seed_track()
         artifact = self._seed_artifact()
 
         loaded_track = get_track(track["id"])
-        self.assertIn("comment_ids", loaded_track)
-        self.assertEqual(loaded_track["comment_ids"], [])
+        self.assertNotIn("comment_ids", track)
+        self.assertNotIn("comment_ids", loaded_track)
 
         loaded_artifact = get_artifact(artifact["id"])
-        self.assertIn("comment_ids", loaded_artifact)
-        self.assertEqual(loaded_artifact["comment_ids"], [])
+        self.assertNotIn("comment_ids", artifact)
+        self.assertNotIn("comment_ids", loaded_artifact)
 
-    def test_new_track_and_artifact_records_persist_empty_comment_ids(self):
-        track = create_track("track-cmt-persist-empty", "Empty Cmt IDs")
-        self.assertEqual(track["comment_ids"], [])
-        reloaded = get_track("track-cmt-persist-empty")
-        self.assertEqual(reloaded["comment_ids"], [])
-
-        task = create_task("task-cmt-persist-2", "Task2", buddy="dev")
-        artifact = create_artifact(
-            artifact_id="art-cmt-persist",
-            title="Persist Artifact",
-            buddy="dev",
-            kind="prd",
-            task_id=task["id"],
-            created_by="dev",
+    def test_legacy_target_comment_ids_are_ignored_and_stripped_on_save(self):
+        track_path = env_store.track_file("track-legacy-comments")
+        track_path.parent.mkdir(parents=True, exist_ok=True)
+        track_path.write_text(
+            json.dumps(
+                {
+                    "id": "track-legacy-comments",
+                    "title": "Legacy Comments",
+                    "status": "active",
+                    "owner_buddy": "pm",
+                    "task_ids": [],
+                    "comment_ids": ["comment-stale"],
+                    "summary": "",
+                    "updated_at": "2026-05-17T00:00:00+08:00",
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
         )
-        self.assertEqual(artifact["comment_ids"], [])
-        reloaded_art = get_artifact("art-cmt-persist")
-        self.assertEqual(reloaded_art["comment_ids"], [])
+
+        loaded = get_track("track-legacy-comments")
+        self.assertNotIn("comment_ids", loaded)
+
+        saved = env_store.save_track(loaded)
+        self.assertNotIn("comment_ids", saved)
+        raw = json.loads(track_path.read_text(encoding="utf-8"))
+        self.assertNotIn("comment_ids", raw)
 
     def test_task_records_do_not_gain_comment_ids(self):
         task = create_task("task-no-comment-ids", "No Comment IDs", buddy="dev")
         self.assertNotIn("comment_ids", task)
-
-    def test_add_comment_id_to_track_appends(self):
-        track = self._seed_track()
-        self.assertEqual(track["comment_ids"], [])
-        cmt = create_comment(target_type="track", target_id=track["id"], author_buddy="design", content="C1")
-        updated_track = add_comment_id_to_track(track["id"], cmt["id"])
-        self.assertIn(cmt["id"], updated_track["comment_ids"])
-        self.assertEqual(len(updated_track["comment_ids"]), 1)
-
-    def test_add_comment_id_to_artifact_appends(self):
-        artifact = self._seed_artifact()
-        cmt = create_comment(target_type="artifact", target_id=artifact["id"], author_buddy="design", content="C1")
-        updated_artifact = add_comment_id_to_artifact(artifact["id"], cmt["id"])
-        self.assertIn(cmt["id"], updated_artifact["comment_ids"])
-        self.assertEqual(len(updated_artifact["comment_ids"]), 1)
-
-    def test_remove_comment_id_from_target_detaches(self):
-        track = self._seed_track()
-        cmt = create_comment(target_type="track", target_id=track["id"], author_buddy="design", content="ToRemove")
-        add_comment_id_to_track(track["id"], cmt["id"])
-        result = remove_comment_id_from_target("track", track["id"], cmt["id"])
-        self.assertIsNotNone(result)
-        self.assertNotIn(cmt["id"], result["comment_ids"])
 
     def test_list_comments_sorts_by_created_at_ascending(self):
         track = self._seed_track()

@@ -13,6 +13,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+import env_store  # noqa: E402
 import workspace_data  # noqa: E402
 from env_store import create_artifact, create_task, create_track  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
@@ -35,6 +36,7 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         sources = contract["data_sources"]
         self.assertFalse(any("handoffs" in str(row) for row in sources))
+        self.assertIn("buddyswitch/objects/comments/*.json", sources)
 
     def test_projected_track_shape_uses_owner_buddy(self) -> None:
         contract = _load_json(CONTRACT)
@@ -58,10 +60,35 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             created_by="dev",
             source_refs=[{"type": "note", "label": "contract freeze"}],
         )
+        track_comment = env_store.create_comment(
+            target_type="track",
+            target_id=track["id"],
+            author_buddy="dev",
+            content="Track comment",
+        )
+        artifact_comment = env_store.create_comment(
+            target_type="artifact",
+            target_id=artifact["id"],
+            author_buddy="dev",
+            content="Artifact comment",
+        )
+        raw_track = env_store.get_track(track["id"])
+        raw_track["comment_ids"] = ["comment-stale-track"]
+        env_store.track_file(track["id"]).write_text(
+            json.dumps(raw_track, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        raw_artifact = env_store.get_artifact(artifact["id"])
+        raw_artifact["comment_ids"] = ["comment-stale-artifact"]
+        env_store.artifact_file(artifact["id"]).write_text(
+            json.dumps(raw_artifact, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
         payload = workspace_data.build_workspace_data()
         self.assertEqual(set(payload), set(_load_json(CONTRACT)["top_level_key_order"]))
         self.assertNotIn("handoffs", payload)
+        self.assertNotIn("comments", payload, msg="workspace projection must not expose top-level comments")
 
         tracks = payload["tracks"]
         self.assertIsInstance(tracks, list)
@@ -69,12 +96,13 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         row = next(r for r in tracks if isinstance(r, dict) and r.get("id") == track["id"])
         self.assertEqual(row.get("owner_buddy"), "dev")
         self.assertIn("comment_ids", row, msg="track view missing comment_ids")
-        self.assertIsInstance(row.get("comment_ids"), list)
+        self.assertEqual(row.get("comment_ids"), [track_comment["id"]])
 
         artifacts = payload["artifacts"]
         self.assertIsInstance(artifacts, list)
         assert isinstance(artifacts, list)
-        self.assertTrue(any(isinstance(r, dict) and r.get("id") == artifact["id"] for r in artifacts))
+        artifact_row = next(r for r in artifacts if isinstance(r, dict) and r.get("id") == artifact["id"])
+        self.assertEqual(artifact_row.get("comment_ids"), [artifact_comment["id"]])
 
         tasks = payload["tasks"]
         self.assertIsInstance(tasks, list)

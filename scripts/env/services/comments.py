@@ -295,11 +295,6 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
     except (ValueError, OSError) as exc:
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
-    if target_type == "track":
-        env_store.add_comment_id_to_track(target_id, comment["id"])
-    else:
-        env_store.add_comment_id_to_artifact(target_id, comment["id"])
-
     return tool_responses.success(
         tool="comment",
         action=action,
@@ -308,10 +303,14 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
         state_changed=True,
         durability="durable",
         created_ids=[comment["id"]],
-        updated_ids=[target_id],
         state_changes=[
-            {"object_type": "comment", "change": "added", "comment_id": comment["id"], "target_type": target_type, "target_id": target_id},
-            {"object_type": target_type, "change": "comment_linked", "comment_id": comment["id"], f"{target_type}_id": target_id},
+            {
+                "object_type": "comment",
+                "change": "added",
+                "comment_id": comment["id"],
+                "target_type": target_type,
+                "target_id": target_id,
+            },
         ],
         allowed_next_actions=[
             "Use comment.list to view all comments on this target.",

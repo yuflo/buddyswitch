@@ -16,7 +16,8 @@
     "buddyswitch/manifest.toml",
     "buddyswitch/objects/tracks/*.json",
     "buddyswitch/objects/tasks/*.json",
-    "buddyswitch/objects/artifacts/*.json"
+    "buddyswitch/objects/artifacts/*.json",
+    "buddyswitch/objects/comments/*.json"
   ],
   "read_only": true,
   "no_snapshot_fallback": true,

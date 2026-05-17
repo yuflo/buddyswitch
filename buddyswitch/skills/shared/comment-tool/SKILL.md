@@ -1,3 +1,8 @@
+---
+name: comment-tool
+description: Use when adding and listing comments on readable track and artifact targets through runtime env tools.
+---
+
 # Comment Tool
 
 ## Purpose
@@ -66,7 +71,8 @@ List comments attached to a readable track or artifact.
 
 ## Key Boundary Rules
 
-- Comments are attached to tracks and artifacts via `comment_ids` list on the target object.
+- Comment relations are stored on comment objects via `target_type` and `target_id`.
+- Workspace views may expose `comment_ids` on tracks/artifacts as derived read-only fields; target objects do not persist those lists.
 - Comment objects are immutable after creation. No edit or delete.
 - Task comments are not supported; only `track` and `artifact` targets are accepted.
 - Cross-target replies are rejected (reply must stay on the same target).
@@ -86,5 +92,5 @@ python3 scripts/env/client.py comment list --target-type track --target-id <trac
 - Do not use for resolution workflows, status tracking (`resolved`, `status`), or assignment.
 - Do not attempt to edit or delete comments.
 - Do not use for direct buddy messaging; use `message.send` instead.
-- Do not use for review, approval, or handoff workflows.
+- Do not use for review or approval workflows.
 - Do not include `resolved`, `resolved_at`, `status`, `edit_history`, `attachment`, or `task_id` fields in add payloads.

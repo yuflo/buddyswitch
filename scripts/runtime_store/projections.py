@@ -145,12 +145,33 @@ def task_object_path(task_id: str) -> str:
     return f"buddyswitch/objects/tasks/{task_id}.json"
 
 
-def build_artifact_view(artifact: dict[str, Any]) -> dict[str, Any]:
+def build_comment_ids_by_target(
+    comments: list[dict[str, Any]],
+) -> dict[tuple[str, str], list[str]]:
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for comment in comments:
+        target_type = comment.get("target_type")
+        target_id = comment.get("target_id")
+        comment_id = comment.get("id")
+        if not isinstance(target_type, str) or target_type not in {"track", "artifact"}:
+            continue
+        if not isinstance(target_id, str) or not target_id:
+            continue
+        if not isinstance(comment_id, str) or not comment_id:
+            continue
+        grouped.setdefault((target_type, target_id), []).append(comment_id)
+    return grouped
+
+
+def build_artifact_view(
+    artifact: dict[str, Any],
+    comment_ids_by_target: dict[tuple[str, str], list[str]],
+) -> dict[str, Any]:
     return {
         **artifact,
         "object_path": artifact_object_path(artifact["id"]),
         "file_name": Path(artifact_object_path(artifact["id"])).name,
-        "comment_ids": list(artifact.get("comment_ids", [])),
+        "comment_ids": list(comment_ids_by_target.get(("artifact", artifact["id"]), [])),
         "missing": False,
     }
 
@@ -180,6 +201,7 @@ def build_task_view(task: dict[str, Any], artifact_map: dict[str, dict[str, Any]
 def build_track_views(
     tracks: list[dict[str, Any]],
     task_map: dict[str, dict[str, Any]],
+    comment_ids_by_target: dict[tuple[str, str], list[str]],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for track in tracks:
@@ -209,7 +231,7 @@ def build_track_views(
                 "status": track["status"],
                 "owner_buddy": track["owner_buddy"],
                 "task_ids": track.get("task_ids", []),
-                "comment_ids": list(track.get("comment_ids", [])),
+                "comment_ids": list(comment_ids_by_target.get(("track", track["id"]), [])),
                 "summary": track.get("summary", ""),
                 "updated_at": latest,
                 "tasks": tasks,
@@ -222,13 +244,18 @@ def build_track_views(
 
 def build_workspace_projection() -> dict[str, Any]:
     manifest = load_manifest(DEFAULT_MANIFEST)
-    artifacts = [build_artifact_view(artifact) for artifact in env_store.list_artifacts()]
+    comments = env_store.list_comments()
+    comment_ids_by_target = build_comment_ids_by_target(comments)
+    artifacts = [
+        build_artifact_view(artifact, comment_ids_by_target)
+        for artifact in env_store.list_artifacts()
+    ]
     artifact_map = {artifact["id"]: artifact for artifact in artifacts}
 
     tasks = [build_task_view(task, artifact_map) for task in env_store.list_tasks()]
     task_map = {task["id"]: task for task in tasks}
 
-    tracks = build_track_views(env_store.list_tracks(), task_map)
+    tracks = build_track_views(env_store.list_tracks(), task_map, comment_ids_by_target)
     tracked_task_ids = {
         task_id
         for track in tracks

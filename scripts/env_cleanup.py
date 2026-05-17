@@ -750,47 +750,6 @@ def detach_artifact_from_task(
     write_json(task_path, payload)
 
 
-def detach_comment_id_from_target(
-    root: Path,
-    target_type: str,
-    target_id: str | None,
-    comment_id: str,
-    *,
-    warnings: list[str] | None = None,
-) -> None:
-    if not isinstance(target_id, str) or not target_id:
-        return
-    if target_type not in {"track", "artifact"}:
-        return
-    relative_dir = "buddyswitch/objects/tracks" if target_type == "track" else "buddyswitch/objects/artifacts"
-    target_path, blocked_reason = resolve_guarded_object_json_path(
-        root,
-        relative_dir=relative_dir,
-        object_id=target_id,
-    )
-    if target_path is None:
-        if blocked_reason is not None:
-            append_warning(
-                warnings,
-                f"Skipping unsafe comment detach target '{target_id}': {blocked_reason}",
-            )
-        return
-    if not target_path.exists():
-        return
-    try:
-        payload = read_json(target_path)
-    except (OSError, ValueError, json.JSONDecodeError):
-        return
-    comment_ids = payload.get("comment_ids")
-    if not isinstance(comment_ids, list):
-        return
-    filtered = [item for item in comment_ids if item != comment_id]
-    if filtered == comment_ids:
-        return
-    payload["comment_ids"] = filtered
-    write_json(target_path, payload)
-
-
 def ensure_required_skeleton(root: Path, *, warnings: list[str] | None = None) -> None:
     for relative_dir in (
         "buddyswitch/objects/tracks",
@@ -951,12 +910,6 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
             detach_artifact_from_task(root, record.get("task_id"), record["id"], warnings=warnings)
         for record in plan["task_records"]:
             detach_task_from_track(root, record.get("track_id"), record["id"], warnings=warnings)
-        # Detach comment ids from surviving targets before deleting comments
-        for record in plan["comment_records"]:
-            target_type = record.get("target_type")
-            target_id = record.get("target_id")
-            if isinstance(target_type, str) and isinstance(target_id, str) and target_type in {"track", "artifact"}:
-                detach_comment_id_from_target(root, target_type, target_id, record["id"], warnings=warnings)
 
     indexed_artifact_paths = set()
     for record in plan["artifact_records"]:

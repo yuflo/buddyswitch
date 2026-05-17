@@ -1,3 +1,8 @@
+---
+name: message-tool
+description: Use when sending and reading direct buddy-to-buddy inbox messages through runtime env tools.
+---
+
 # Message Tool
 
 ## Purpose
