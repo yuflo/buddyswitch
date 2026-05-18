@@ -119,6 +119,17 @@ class EnvManifestV2Tests(unittest.TestCase):
         permissions = set(pm.get("permissions", []))
         self.assertNotIn("track.advance", permissions)
 
+    def test_buddies_use_artifact_templates_vocabulary(self) -> None:
+        for buddy in self.manifest.get("buddies", []):
+            assert isinstance(buddy, dict)
+            with self.subTest(buddy=buddy.get("id")):
+                self.assertIn("artifact_templates", buddy)
+                self.assertNotIn("artifact_kinds", buddy)
+                templates = buddy.get("artifact_templates")
+                self.assertIsInstance(templates, list)
+                assert isinstance(templates, list)
+                self.assertTrue(templates)
+
 
 if __name__ == "__main__":
     unittest.main()

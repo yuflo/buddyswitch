@@ -2,7 +2,7 @@
 """Load and validate the BuddySwitch env manifest.
 
 Manifest skill entries define buddy membership and package paths.
-Buddy rows define persistence boundaries (artifact kinds + permissions).
+Buddy rows define persistence boundaries (artifact templates + permissions).
 Codex-native package acceptance is owned by Codex after materialization.
 """
 
@@ -24,6 +24,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 _SAFE_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _SAFE_PERMISSION_PART_RE = re.compile(r"^[a-z][a-z0-9-_]*$")
+_VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", "note")
+_LEGACY_ARTIFACT_KINDS_KEY = "artifact_" + "kinds"
 ADVISORY_RUNTIME_METADATA_POLICY = "advisory"
 DEBUG_API_PERMISSION_SCOPE = "manual_debug_apis"
 BROWSER_COCKPIT_HOST_EXECUTION = {
@@ -37,6 +39,34 @@ BROWSER_COCKPIT_HOST_EXECUTION = {
     "session_continuity": "instance-cockpit",
     "evidence_capture_level": "medium",
 }
+
+_LEGACY_KIND_TEMPLATE_MAP: dict[str, str] = {}
+for _kind in {
+    "prd",
+    "scope-brief",
+    "insight-brief",
+    "market-scan",
+    "pmf-report",
+    "customer-discovery",
+    "positioning-brief",
+    "channel-plan",
+    "launch-prep",
+    "track-note",
+    "prototype-brief",
+    "implementation-report",
+}:
+    _LEGACY_KIND_TEMPLATE_MAP[_kind] = "brief"
+for _kind in {"solution-spec", "technical-proposal", "proposal"}:
+    _LEGACY_KIND_TEMPLATE_MAP[_kind] = "proposal"
+_LEGACY_KIND_TEMPLATE_MAP["design-handoff"] = "design"
+for _kind in {"pm-decision", "decision"}:
+    _LEGACY_KIND_TEMPLATE_MAP[_kind] = "decision"
+for _kind in {"verification-proof", "smoke-test", "test-report"}:
+    _LEGACY_KIND_TEMPLATE_MAP[_kind] = "proof"
+
+
+def _legacy_kind_to_template(kind: str) -> str:
+    return _LEGACY_KIND_TEMPLATE_MAP.get(kind, "note")
 
 
 class ManifestError(ValueError):
@@ -305,19 +335,40 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         _require_string(buddy, "label", label)
         _require_string(buddy, "scope", label)
         declared_skills = _require_string_list(buddy, "skills", label, allow_empty=True)
-        artifact_kinds = _require_string_list(buddy, "artifact_kinds", label)
-        normalized_artifact_kinds: list[str] = []
-        seen_artifact_kinds: set[str] = set()
-        for artifact_kind in artifact_kinds:
-            if not _SAFE_ID_RE.match(artifact_kind):
-                raise ManifestError(
-                    f"{label}.artifact_kinds values must match /^[a-z][a-z0-9-]*$/; got '{artifact_kind}'"
-                )
-            if artifact_kind in seen_artifact_kinds:
-                raise ManifestError(f"{label}.artifact_kinds contains duplicate value '{artifact_kind}'")
-            seen_artifact_kinds.add(artifact_kind)
-            normalized_artifact_kinds.append(artifact_kind)
-        buddy["artifact_kinds"] = normalized_artifact_kinds
+        raw_templates = buddy.get("artifact_templates")
+        normalized_artifact_templates: list[str] = []
+        if raw_templates is None:
+            legacy_kinds = _require_string_list(buddy, _LEGACY_ARTIFACT_KINDS_KEY, label)
+            seen_templates: set[str] = set()
+            for artifact_kind in legacy_kinds:
+                if not _SAFE_ID_RE.match(artifact_kind):
+                    raise ManifestError(
+                        f"{label}.{_LEGACY_ARTIFACT_KINDS_KEY} values must match /^[a-z][a-z0-9-]*$/; got '{artifact_kind}'"
+                    )
+                template = _legacy_kind_to_template(artifact_kind)
+                if template in seen_templates:
+                    continue
+                seen_templates.add(template)
+                normalized_artifact_templates.append(template)
+        else:
+            artifact_templates = _require_string_list(buddy, "artifact_templates", label)
+            seen_artifact_templates: set[str] = set()
+            for artifact_template in artifact_templates:
+                if artifact_template not in _VALID_ARTIFACT_TEMPLATES:
+                    raise ManifestError(
+                        f"{label}.artifact_templates must contain only {', '.join(_VALID_ARTIFACT_TEMPLATES)}; "
+                        f"got '{artifact_template}'"
+                    )
+                if artifact_template in seen_artifact_templates:
+                    raise ManifestError(
+                        f"{label}.artifact_templates contains duplicate value '{artifact_template}'"
+                    )
+                seen_artifact_templates.add(artifact_template)
+                normalized_artifact_templates.append(artifact_template)
+        if not normalized_artifact_templates:
+            raise ManifestError(f"{label}.artifact_templates must not be empty after normalization")
+        buddy["artifact_templates"] = normalized_artifact_templates
+        buddy.pop(_LEGACY_ARTIFACT_KINDS_KEY, None)
         permissions = _require_string_list(buddy, "permissions", label)
         for permission in permissions:
             _validate_permission(permission, label)

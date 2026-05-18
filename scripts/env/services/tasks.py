@@ -104,7 +104,7 @@ def _reject_scope(*, action: str, active_buddy: str, task_id: str, message: str)
         retry_guidance="Use a task owned by the active buddy.",
         allowed_next_actions=[
             "Use task.list to find active-buddy task ids.",
-            "Use track.join to create or attach your own task to a track.",
+            "Use task.create to create an active-buddy task when needed.",
         ],
         correctable_fields=["task_id"],
         alternative_capabilities=[
@@ -112,12 +112,6 @@ def _reject_scope(*, action: str, active_buddy: str, task_id: str, message: str)
                 tool="task",
                 action="list",
                 condition="Use when you need owned task ids before retrying with task_id.",
-            ),
-            tool_responses.alternative_capability(
-                tool="track",
-                action="join",
-                condition="Use when you need to create or attach an owned task relation first.",
-                mutates_product_state=True,
             ),
         ],
         extra={"task_id": task_id},
@@ -132,8 +126,6 @@ def _normalize_task_summary(task: dict[str, Any]) -> dict[str, Any]:
         "summary": task.get("summary", ""),
         "status": task.get("status"),
         "track_id": task.get("track_id"),
-        "artifact_ids": list(task.get("artifact_ids", [])),
-        "artifact_slots": dict(task.get("artifact_slots", {})),
         "created_at": task.get("created_at"),
         "updated_at": task.get("updated_at"),
     }
@@ -215,7 +207,7 @@ def create_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCo
         created_ids=[task["id"]],
         state_changes=[{"object_type": "task", "change": "created", "task_id": task["id"]}],
         allowed_next_actions=[
-            "Use artifact.create_revision with this task_id to write deliverables.",
+            "Use artifact.create_revision to draft or publish shared artifacts.",
             "Use task.update to refine task status or summary.",
         ],
         extra={"task_id": task["id"], "task": created},
@@ -248,13 +240,13 @@ def list_tasks_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCon
         tool="task",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Returned {len(payload_rows)} active-buddy task summary row(s) with task ids and artifact ids only.",
+        effect_summary=f"Returned {len(payload_rows)} active-buddy task summary row(s).",
         state_changed=False,
         durability="none",
         read_scope="active-buddy task summaries",
         allowed_next_actions=[
             "Use task.get with task_id for one task detail.",
-            "Use artifact.create_revision with a returned task_id.",
+            "Use artifact.create_revision to draft or publish shared artifacts.",
         ],
         extra={"tasks": payload_rows, "relation": "owner"},
     )
@@ -287,12 +279,12 @@ def get_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceConte
         tool="task",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Read one active-buddy task record '{task_id}' with metadata and artifact ids (no full artifact bodies).",
+        effect_summary=f"Read one active-buddy task record '{task_id}'.",
         state_changed=False,
         durability="none",
-        read_scope="one active-buddy task record with metadata and artifact ids",
+        read_scope="one active-buddy task record",
         allowed_next_actions=[
-            "Use artifact.create_revision with this task_id.",
+            "Use artifact.create_revision to draft or publish shared artifacts.",
             "Use task.update to change title/summary/status.",
         ],
         extra={"task_id": task_id, "task": _normalize_task_summary(task), "relation": "owner"},

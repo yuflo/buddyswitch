@@ -46,7 +46,14 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
 
     def test_context_summarize_projects_runless_decision_surface(self) -> None:
-        track = env_store.create_track("track-market-decision", "Market Decision", owner_buddy="market")
+        track = env_store.create_track(
+            "track-market-decision",
+            "Market Decision",
+            owner_buddy="pm",
+            outcome="Ship market decision with clear positioning.",
+            appetite="1 day",
+            now={"next": "Scan market", "blocker": None},
+        )
         env_store.create_task("task-market-decision", "Scan market", buddy="market", track_id=track["id"])
 
         response = self._dispatch(buddy="market", tool="context", action="summarize", args={})
@@ -74,9 +81,16 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             buddy="design",
             tool="track",
             action="create",
-            args={"track_id": "track-design-unauthorized", "title": "No", "summary": "denied"},
+            args={
+                "track_id": "track-design-unauthorized",
+                "title": "No",
+                "outcome": "Denied",
+                "appetite": "1 day",
+                "now": {"next": "Denied", "blocker": None},
+            },
         )
         self.assertFalse(response["ok"])
+        self.assertEqual((response.get("error") or {}).get("code"), "E_TRACK_AUTHORITY")
         self.assertEqual(response["permission_boundary"], "track.lifecycle_authority")
 
     def test_pm_page_prototype_decision_surface_prefers_private_buddybox_without_phrase_rule(self) -> None:

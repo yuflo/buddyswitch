@@ -5,25 +5,10 @@
   ],
   "artifacts": [
     {
-      "kind": "prd",
+      "template": "brief",
       "title": "PRD: Requested Outcome",
       "summary": "Selection-ready PRD summary for downstream design/dev/test.",
-      "content": {
-        "prd": {
-          "problem": "",
-          "user_value": "",
-          "requirements": [],
-          "acceptance_criteria": [],
-          "scope": {
-            "in_scope": [],
-            "out_of_scope": []
-          }
-        },
-        "decisions": [],
-        "risks": [],
-        "open_questions": [],
-        "suggested_next_step": ""
-      }
+      "body": "## Problem\\n\\n## User Value\\n\\n## Requirements\\n\\n## Scope\\n\\n## Decisions\\n\\n## Risks\\n\\n## Open Questions\\n\\n## Suggested Next Step"
     }
   ]
 }

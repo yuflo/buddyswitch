@@ -18,13 +18,21 @@
       "items": {
         "type": "object",
         "required": [
-          "kind",
+          "template",
           "title",
-          "content"
+          "body"
         ],
         "properties": {
-          "kind": {
-            "type": "string"
+          "template": {
+            "type": "string",
+            "enum": [
+              "brief",
+              "proposal",
+              "design",
+              "decision",
+              "proof",
+              "note"
+            ]
           },
           "title": {
             "type": "string"
@@ -32,8 +40,26 @@
           "summary": {
             "type": "string"
           },
-          "content": {
-            "type": "object"
+          "body": {
+            "type": "string"
+          },
+          "published_to_track": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_refs": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "supersedes_artifact_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false

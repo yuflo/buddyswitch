@@ -1,29 +1,11 @@
 {
-  "execution_summary": "PMF recon summary with confidence and ICP direction.",
-  "working_notes": [
-    "Record major uncertainty and evidence constraints."
-  ],
+  "execution_summary": "PMF recon summary.",
   "artifacts": [
     {
-      "kind": "pmf-report",
-      "title": "PMF Recon Report",
-      "summary": "Selection-ready PMF signal summary for PM decisions.",
-      "content": {
-        "research_question": "",
-        "evidence": [],
-        "insights": [],
-        "assumptions": [],
-        "risks": [],
-        "conclusion": "",
-        "recommended_next_step": "",
-        "pmf_recon": {
-          "candidate_icps": [],
-          "strongest_pain_signals": [],
-          "existing_alternatives": [],
-          "pmf_confidence": {},
-          "suggested_interview_angles": []
-        }
-      }
+      "template": "brief",
+      "title": "PMF Recon Brief",
+      "summary": "ICP, pain, and PMF confidence summary.",
+      "body": "## Research Question\\n\\n## Evidence\\n\\n## Insights\\n\\n## Assumptions\\n\\n## Risks\\n\\n## Conclusion\\n\\n## Recommended Next Step"
     }
   ]
 }

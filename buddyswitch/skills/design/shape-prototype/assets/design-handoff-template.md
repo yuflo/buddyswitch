@@ -1,21 +1,11 @@
 {
-  "execution_summary": "Design artifact summary for the requested prototype scope.",
-  "working_notes": [
-    "Capture major design constraints and tradeoffs."
-  ],
+  "execution_summary": "Design prototype summary.",
   "artifacts": [
     {
-      "kind": "design-handoff",
-      "title": "Design Handoff: Requested Prototype Scope",
-      "summary": "Selection-ready artifact package for downstream implementation and testing.",
-      "content": {
-        "design_goal": "",
-        "flow_or_screen_summary": "",
-        "interaction_notes": [],
-        "assets_or_preview_refs": [],
-        "artifact_notes": [],
-        "open_questions": []
-      }
+      "template": "design",
+      "title": "Design Prototype Brief",
+      "summary": "Prototype direction and interaction notes.",
+      "body": "## Goal\\n\\n## User Flow\\n\\n## Layout\\n\\n## States\\n\\n## Interaction\\n\\n## Copy\\n\\n## Acceptance\\n\\n## Open Questions"
     }
   ]
 }

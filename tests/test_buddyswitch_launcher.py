@@ -1641,7 +1641,7 @@ exec "$real_git" "$@"
             capability = buddybox_affordance.get("capability")
             self.assertIsInstance(capability, str, msg=buddybox_affordance)
             assert isinstance(capability, str)
-            self.assertIn("private_file_workspace", capability)
+            self.assertIn("Buddybox", capability)
 
             buddybox_desc = by_name["buddybox.desc"]["json"]
             assert isinstance(buddybox_desc, dict)

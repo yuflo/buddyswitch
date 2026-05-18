@@ -6,7 +6,7 @@ description: Use when you need to create, list, read, update, or archive explici
 # task-tool
 
 ## Purpose
-- Manage active-buddy task work items and task ids used by artifacts.
+- Manage active-buddy private task work items.
 
 ## Runtime Route
 - CLI: `python3 scripts/env/client.py task <operation>`
@@ -15,6 +15,7 @@ description: Use when you need to create, list, read, update, or archive explici
 
 ## Workflow Notes
 - Use explicit `task_id` values from runtime responses; there is no hidden current-task binding in runless mode.
+- `task.track_id` is an optional private organization hint and does not grant cross-buddy artifact access.
 - For action payloads and return meanings, inspect `context.get.tool_catalog['task']` or `python3 scripts/turn_runtime.py status`; runtime response fields are authoritative for effects and recovery.
 
 ## Verification

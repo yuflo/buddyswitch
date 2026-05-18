@@ -64,7 +64,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 label = "PM"
                 scope = "PM scope"
                 skills = []
-                artifact_kinds = ["prd", "pm-decision", "track-note"]
+                artifact_templates = ["brief", "decision", "note"]
                 permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
 
                 [[buddies]]
@@ -72,7 +72,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 label = "DEV"
                 scope = "Dev scope"
                 skills = ["implement-task"]
-                artifact_kinds = ["implementation-report", "skill-import-report"]
+                artifact_templates = ["brief", "note"]
                 permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
 
                 [[buddies]]
@@ -80,7 +80,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 label = "TEST"
                 scope = "Test scope"
                 skills = []
-                artifact_kinds = ["smoke-test", "test-report"]
+                artifact_templates = ["proof"]
                 permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
 
                 [[buddies]]
@@ -88,7 +88,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 label = "MARKET"
                 scope = "Market scope"
                 skills = []
-                artifact_kinds = ["market-scan", "pmf-report"]
+                artifact_templates = ["brief"]
                 permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
 
                 [[buddies]]
@@ -96,7 +96,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 label = "DESIGN"
                 scope = "Design scope"
                 skills = []
-                artifact_kinds = ["design-handoff", "prototype-brief"]
+                artifact_templates = ["design", "brief"]
                 permissions = ["track.read", "task.read", "task.create", "task.update", "artifact.read", "artifact.create", "artifact.update"]
                 """
             ),
@@ -160,7 +160,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
         buddy_id: str,
         skill_id: str | None,
         expected_skill_id_for_snapshot: str,
-        artifact_kind: str | None = None,
+        artifact_template: str | None = None,
     ) -> None:
         manifest_before, target_before = self._snapshot(
             repo_root, buddy_id=buddy_id, skill_id=expected_skill_id_for_snapshot
@@ -170,7 +170,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 source=source,
                 buddy_id=buddy_id,
                 skill_id=skill_id,
-                artifact_kind=artifact_kind,
+                artifact_template=artifact_template,
                 repo_root=repo_root,
             )
         manifest_after, target_after = self._snapshot(
@@ -199,7 +199,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
         self.assertEqual(result.buddy_id, "dev")
         self.assertEqual(result.package_path, "buddyswitch/skills/dev/dev-summary")
         self.assertEqual(result.manifest_path, "buddyswitch/manifest.toml")
-        self.assertIsNone(result.artifact_kind)
+        self.assertIsNone(result.artifact_template)
         self.assertTrue((target / "SKILL.md").exists())
         self.assertTrue((target / "assets" / "example-output.md").exists())
         self.assertTrue((target / "references" / "style-guide.md").exists())
@@ -227,9 +227,9 @@ class SkillCreatorImporterTests(unittest.TestCase):
         self.assertIn("dev-summary", skills)
         self.assertEqual(set(skills["dev-summary"].keys()), {"id", "path"})
         self.assertIn("dev-summary", buddies["dev"]["skills"])
-        self.assertNotIn("dev-summary", buddies["dev"]["artifact_kinds"])
+        self.assertNotIn("dev-summary", buddies["dev"]["artifact_templates"])
 
-    def test_import_with_explicit_artifact_kind_updates_buddy_contract(self) -> None:
+    def test_import_with_explicit_artifact_template_updates_buddy_contract(self) -> None:
         repo_root = self._create_temp_repo()
         source_root = self._create_source_package(root=repo_root, package_name="community-dev-report")
 
@@ -237,16 +237,16 @@ class SkillCreatorImporterTests(unittest.TestCase):
             source=source_root,
             buddy_id="dev",
             skill_id="dev-reporter",
-            artifact_kind="community-dev-report",
+            artifact_template="note",
             repo_root=repo_root,
         )
 
-        self.assertEqual(result.artifact_kind, "community-dev-report")
+        self.assertEqual(result.artifact_template, "note")
         manifest = env_manifest.load_manifest(repo_root / "buddyswitch" / "manifest.toml")
         buddies = env_manifest.buddies_by_id(manifest)
-        self.assertIn("community-dev-report", buddies["dev"]["artifact_kinds"])
+        self.assertIn("note", buddies["dev"]["artifact_templates"])
 
-    def test_import_rejects_invalid_artifact_kind_without_writes(self) -> None:
+    def test_import_rejects_invalid_artifact_template_without_writes(self) -> None:
         repo_root = self._create_temp_repo()
         source_root = self._create_source_package(root=repo_root)
         self._assert_failure_without_writes(
@@ -255,7 +255,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
             buddy_id="dev",
             skill_id="dev-summary",
             expected_skill_id_for_snapshot="dev-summary",
-            artifact_kind="Bad/Kind",
+            artifact_template="Bad/Kind",
         )
 
     def test_import_rejects_invalid_skill_id_without_writes(self) -> None:
@@ -351,7 +351,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
                 "--skill-id",
                 "dev-summary-cli",
                 "--artifact-kind",
-                "community-dev-report",
+                "note",
                 "--repo-root",
                 str(repo_root),
             ],
@@ -368,7 +368,7 @@ class SkillCreatorImporterTests(unittest.TestCase):
         self.assertEqual(payload["buddy_id"], "dev")
         self.assertEqual(payload["package_path"], "buddyswitch/skills/dev/dev-summary-cli")
         self.assertEqual(payload["manifest_path"], "buddyswitch/manifest.toml")
-        self.assertEqual(payload["artifact_kind"], "community-dev-report")
+        self.assertEqual(payload["artifact_template"], "note")
         self.assertNotIn("output_slot", payload)
         self.assertNotIn("output_schema", payload)
 

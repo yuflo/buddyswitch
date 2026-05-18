@@ -7,7 +7,9 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 ## Required Behavior
 
 - Keep track lifecycle mutations explicit and PM-owned (`track.create|update|archive`).
-- Write formal PM deliverables via `artifact.create_revision` (`kind="prd"` or other PM kinds).
+- Read shared state from `track.open` before deciding publish/mutation order.
+- Publish collaboration outputs on track pages via `track.add_material` / `track.add_proof`.
+- Write formal PM deliverables via `artifact.create_revision` with `template` + markdown `body`; publish via `published_to_track` when shared.
 - Use buddybox for PM-owned private local drafts, lightweight prototypes, exports, or supporting files; use artifact when content must become product-readable.
 
 ## Runtime Boundary

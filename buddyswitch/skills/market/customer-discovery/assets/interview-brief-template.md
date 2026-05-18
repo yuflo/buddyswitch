@@ -1,29 +1,11 @@
 {
-  "execution_summary": "Customer-discovery brief summary and interview plan.",
-  "working_notes": [
-    "Capture evidence quality and recruiting constraints."
-  ],
+  "execution_summary": "Customer discovery summary.",
   "artifacts": [
     {
-      "kind": "customer-discovery",
+      "template": "brief",
       "title": "Customer Discovery Brief",
-      "summary": "Selection-ready interview brief for upcoming discovery calls.",
-      "content": {
-        "research_question": "",
-        "evidence": [],
-        "insights": [],
-        "assumptions": [],
-        "risks": [],
-        "conclusion": "",
-        "recommended_next_step": "",
-        "customer_discovery": {
-          "target_segments": [],
-          "interview_goals": [],
-          "recruiting_criteria": {},
-          "interview_guide": [],
-          "hypotheses_to_test": []
-        }
-      }
+      "summary": "Interview findings and discovery synthesis.",
+      "body": "## Research Question\\n\\n## Evidence\\n\\n## Insights\\n\\n## Risks\\n\\n## Recommended Next Step"
     }
   ]
 }

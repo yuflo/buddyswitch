@@ -17,7 +17,7 @@ description: Use when the task is drafting a PRD, defining MVP scope, or turning
 - The user wants design structure, implementation work, market research, or smoke testing as main outcome.
 
 ## Inputs
-- Market evidence artifacts when available: `market-scan`, `pmf-report`, `customer-discovery`, `positioning-brief`, `channel-plan`, `launch-prep`.
+- Market evidence artifacts when available (typically `template="brief"`).
 - Track/task/artifact context when relevant.
 - Constraints, assumptions, requirements.
 
@@ -29,12 +29,12 @@ description: Use when the task is drafting a PRD, defining MVP scope, or turning
 ## Steps
 1. Define the PRD summary and key decisions.
 2. Capture risks, open questions, and one concrete suggested next step.
-3. Put PRD-specific detail under the artifact payload `content.prd` (problem, user_value, requirements, scope).
+3. Put PRD-specific detail in artifact `body` markdown (problem, user value, requirements, scope).
 4. If an explicit PM track lifecycle mutation is required, use `track-tool` before returning.
 
 ## Verification
 - Keep the result product-definition centered.
-- Keep PRD detail in the artifact payload `content.prd`, not top-level PM fields.
+- Keep PRD detail in the artifact `body` and supporting metadata (`template`, `summary`).
 - Confirm any task or track lifecycle change was completed through `task-tool` or `track-tool` with `ok=true`.
 
 ## Shared Runtime Rules
@@ -52,12 +52,12 @@ Required top-level field:
 - `execution_summary`
 
 Use `artifact-tool` when this skill produces a durable artifact:
-- `kind`: `prd`
+- `template`: usually `brief`
 - `title`: concise artifact title
 - `summary`: short downstream selection summary
-- `content`: include `prd`, `decisions`, `risks`, `open_questions`, and `suggested_next_step`
+- `body`: include `decisions`, `risks`, `open_questions`, and `suggested_next_step`
 
-After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
+After `artifact.create_revision` returns `ok=true`, use `track.open` and `artifact.get` to verify shared visibility when needed.
 Use optional `working_notes` for concise reasoning or verification notes.
 Use optional `task_id` or `track_id` only as association metadata for explicit env-tool state.
 
@@ -66,5 +66,5 @@ Use optional `task_id` or `track_id` only as association metadata for explicit e
 - `Continue product definition and define P0/P1 scope`
 
 ## Counterexamples
-- `create track, then let design join with track.join`
+- `create track, then wait for design to attach via track task-relation actions`
 - `implement the approved onboarding rewrite scope`

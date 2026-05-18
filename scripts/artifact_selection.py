@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Deterministic artifact selection for track-centric BuddySwitch runs."""
+"""Deterministic artifact selection for track-published Artifact V1 inputs."""
 
 from __future__ import annotations
 
 import argparse
 import json
 from functools import lru_cache
-from itertools import combinations
 from pathlib import Path
 from typing import Any
 
@@ -44,104 +43,43 @@ def _as_int(value: Any) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def _extract_tasks(track_artifact_index: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _extract_artifacts(track_artifact_index: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not isinstance(track_artifact_index, dict):
         return []
     rows = []
-    for task in _as_list(track_artifact_index.get("tasks")):
-        if isinstance(task, dict):
-            rows.append(task)
-    return rows
-
-
-def _all_artifacts(task: dict[str, Any]) -> list[dict[str, Any]]:
-    rows = []
-    for artifact in _as_list(task.get("artifacts")):
+    for artifact in _as_list(track_artifact_index.get("artifacts")):
         if isinstance(artifact, dict):
             rows.append(artifact)
-    rows.sort(key=lambda row: (_as_str(row.get("updated_at")), _as_str(row.get("artifact_id"))), reverse=True)
+    rows.sort(
+        key=lambda row: (_as_str(row.get("updated_at")), _as_str(row.get("artifact_id"))),
+        reverse=True,
+    )
     return rows
 
 
-def _current_artifacts_by_kind(task: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    current_artifacts: dict[str, dict[str, Any]] = {}
-    for artifact in _all_artifacts(task):
-        kind = _as_str(artifact.get("kind"))
-        if not kind or not bool(artifact.get("is_current")) or kind in current_artifacts:
-            continue
-        current_artifacts[kind] = artifact
-    return current_artifacts
-
-
-def _task_bundle_signature(
-    task: dict[str, Any],
-    current_artifacts: dict[str, dict[str, Any]],
-    required_kinds: list[str],
-) -> tuple[int, str, str, str]:
-    covered_kinds = [kind for kind in required_kinds if kind in current_artifacts]
-    newest_updated_at, newest_artifact_id = max(
-        (
-            _as_str(current_artifacts[kind].get("updated_at")),
-            _as_str(current_artifacts[kind].get("artifact_id")),
-        )
-        for kind in covered_kinds
-    )
-    return (
-        len(covered_kinds),
-        newest_updated_at,
-        newest_artifact_id,
-        _as_str(task.get("task_id")),
-    )
-
-
-def _pick_best_task_cover(
-    tasks: list[dict[str, Any]],
-    required_kinds: list[str],
-) -> list[tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]]:
-    bundle_rows: list[tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]] = []
-    for task in tasks:
-        current_artifacts = _current_artifacts_by_kind(task)
-        covered_kinds = [kind for kind in required_kinds if kind in current_artifacts]
-        if covered_kinds:
-            bundle_rows.append((task, current_artifacts, covered_kinds))
-
-    if not bundle_rows:
-        return []
-
-    best_combo: tuple[int, int, tuple[tuple[int, str, str, str], ...], tuple[str, ...]] | None = None
-    best_rows: list[tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]] = []
-
-    for combo_size in range(1, len(bundle_rows) + 1):
-        for combo in combinations(bundle_rows, combo_size):
-            covered = {kind for _, _, kinds in combo for kind in kinds}
-            ranked_rows = sorted(
-                combo,
-                key=lambda row: _task_bundle_signature(row[0], row[1], required_kinds),
-                reverse=True,
-            )
-            row_signatures = tuple(
-                _task_bundle_signature(task, current_artifacts, required_kinds)
-                for task, current_artifacts, _ in ranked_rows
-            )
-            task_ids = tuple(_as_str(task.get("task_id")) for task, _, _ in ranked_rows)
-            combo_score = (
-                len(covered),
-                -len(ranked_rows),
-                row_signatures,
-                task_ids,
-            )
-            if best_combo is None or combo_score > best_combo:
-                best_combo = combo_score
-                best_rows = ranked_rows
-
-    return best_rows
+def _select_template_rows(
+    artifacts: list[dict[str, Any]],
+    required_templates: list[str],
+) -> dict[str, dict[str, Any]]:
+    selected: dict[str, dict[str, Any]] = {}
+    for template in required_templates:
+        for artifact in artifacts:
+            if _as_str(artifact.get("template")) != template:
+                continue
+            if not bool(artifact.get("is_current")):
+                continue
+            if _as_str(artifact.get("status")) != "published":
+                continue
+            selected[template] = artifact
+            break
+    return selected
 
 
 def select_artifacts_for_run(
     *,
     active_buddy: str,
     demand: str,
-    required_kinds: list[str],
+    required_templates: list[str],
     track_artifact_index: dict[str, Any] | None,
     task_id_scope: str | None = None,
     max_default_items: int | None = None,
@@ -156,8 +94,8 @@ def select_artifacts_for_run(
         config["max_default_items"]
     )
 
-    tasks = _extract_tasks(track_artifact_index)
-    if not tasks:
+    artifacts = _extract_artifacts(track_artifact_index)
+    if not artifacts:
         return {
             "selected_inputs": [],
             "reasons": ["No track artifacts available."],
@@ -166,39 +104,26 @@ def select_artifacts_for_run(
 
     selected_inputs: list[dict[str, Any]] = []
     reasons: list[str] = []
-    seen_artifact_ids: set[str] = set()
-    required_kinds_in_order = [kind for kind in required_kinds if isinstance(kind, str) and kind]
-    selected_by_kind: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
-    bundle_rows = _pick_best_task_cover(tasks, required_kinds_in_order)
+    normalized_templates = [template for template in required_templates if isinstance(template, str) and template]
+    selected_by_template = _select_template_rows(artifacts, normalized_templates)
 
-    for task, current_artifacts, covered_kinds in bundle_rows:
-        for kind in covered_kinds:
-            artifact = current_artifacts[kind]
-            artifact_id = _as_str(artifact.get("artifact_id"))
-            if not artifact_id or artifact_id in seen_artifact_ids or kind in selected_by_kind:
-                continue
-            seen_artifact_ids.add(artifact_id)
-            selected_by_kind[kind] = (task, artifact)
-
-    for kind in required_kinds_in_order:
-        picked = selected_by_kind.get(kind)
-        if picked is None:
+    for template in normalized_templates:
+        artifact = selected_by_template.get(template)
+        if artifact is None:
             continue
-        if any(item["kind"] == kind for item in selected_inputs):
-            continue
-        task, artifact = picked
         artifact_id = _as_str(artifact.get("artifact_id"))
+        if any(item.get("artifact_id") == artifact_id for item in selected_inputs):
+            continue
         selected_inputs.append(
             {
-                "kind": kind,
+                "template": template,
                 "artifact_id": artifact_id,
                 "revision": _as_int(artifact.get("revision")),
-                "selection_reason": "current artifact for required upstream kind",
-                "task_id": _as_str(task.get("task_id")),
-                "buddy": _as_str(task.get("buddy")),
+                "selection_reason": "current published artifact for required upstream template",
+                "created_by": _as_str(artifact.get("created_by")),
             }
         )
-        reasons.append(f"Selected current artifact for required kind '{kind}': {artifact_id}")
+        reasons.append(f"Selected current published artifact for required template '{template}': {artifact_id}")
 
     if len(selected_inputs) > max_items:
         selected_inputs = selected_inputs[:max_items]
@@ -223,7 +148,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--buddy", required=True, help="Current executing buddy id")
     parser.add_argument("--demand", required=True, help="Turn request text")
     parser.add_argument("--index-file", type=Path, required=True, help="Path to track_artifact_index JSON")
-    parser.add_argument("--required-kind", action="append", dest="required_kinds", default=[], help="Required input kind")
+    parser.add_argument(
+        "--required-template",
+        action="append",
+        dest="required_templates",
+        default=[],
+        help="Required input template",
+    )
     parser.add_argument("--current-task-id", dest="task_id_scope", help="Task scope id when continuing an existing task")
     parser.add_argument("--max-default-items", type=int)
     return parser
@@ -235,7 +166,7 @@ def main() -> int:
     payload = select_artifacts_for_run(
         active_buddy=args.buddy,
         demand=args.demand,
-        required_kinds=args.required_kinds,
+        required_templates=args.required_templates,
         track_artifact_index=_load_json(args.index_file),
         task_id_scope=args.task_id_scope,
         max_default_items=args.max_default_items,

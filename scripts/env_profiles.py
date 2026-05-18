@@ -260,9 +260,9 @@ def validate_env_profile(
     state_capability = _require_dict(profile.get("state_capability"), "state_capability")
     _require_enum(
         enums=enums,
-        key="state_capability.artifact_kinds",
-        value=state_capability.get("artifact_kinds"),
-        label="state_capability.artifact_kinds",
+        key="state_capability.artifact_templates",
+        value=state_capability.get("artifact_templates"),
+        label="state_capability.artifact_templates",
     )
     task_effects = _require_string_list(state_capability.get("task_effects"), "state_capability.task_effects")
     if task_effects != ["status", "summary"]:
@@ -270,7 +270,9 @@ def validate_env_profile(
             "state_capability.task_effects must be exactly ['status', 'summary']"
         )
     track_effects = _require_string_list(state_capability.get("track_effects"), "state_capability.track_effects")
-    expected_track_effects = ["create", "update", "archive"] if buddy_id == "pm" else []
+    expected_track_effects = ["update_now", "add_material", "add_update", "add_proof"]
+    if buddy_id == "pm":
+        expected_track_effects = ["create", *expected_track_effects, "archive"]
     if track_effects != expected_track_effects:
         raise EnvProfileError(
             f"state_capability.track_effects mismatch for '{buddy_id}': "

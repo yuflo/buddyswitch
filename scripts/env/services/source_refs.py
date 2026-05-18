@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Shared source_refs normalization helpers for runless durable objects."""
+"""Shared source_refs normalization helpers for runless durable objects.
+
+source_refs are provenance-only metadata. They must never become the required
+reading path for artifact understanding.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +20,7 @@ _ALLOWED_TYPES = {
     "note",
 }
 _KNOWN_BUDDY_IDS = {"pm", "design", "dev", "market", "test"}
+PROVENANCE_ONLY_NOTE = "source_refs are provenance-only metadata, not a required reading path"
 
 
 def validate_buddybox_ref_logical_name(logical_name: Any, *, active_buddy: str) -> str:
@@ -62,7 +67,9 @@ def normalize_source_refs(
             item["id"] = env_store.require_id(raw.get("id"), f"source_refs.{ref_type}.id")
         elif ref_type == "buddybox":
             if not allow_buddybox:
-                raise ValueError("source_refs.buddybox logical names are private provenance and not allowed in this payload")
+                raise ValueError(
+                    "source_refs.buddybox logical names are private provenance and not allowed in this payload"
+                )
             if "path" in raw:
                 raise ValueError("source_refs.buddybox.logical_name is required; path is retired")
             normalized_name = validate_buddybox_ref_logical_name(raw.get("logical_name"), active_buddy=active_buddy)
@@ -94,10 +101,23 @@ def normalize_source_refs(
             if ref_type == "artifact":
                 ref_id = row["id"]
                 artifact = env_store.get_artifact(ref_id)
-                if artifact is None or artifact.get("buddy") != active_buddy:
+                if artifact is None:
                     scope_error = {
                         "permission_boundary": "source_refs.read_scope",
-                        "why_blocked": f"cannot claim full summary of unreadable artifact '{ref_id}'",
+                        "why_blocked": (
+                            f"cannot claim full summary of unreadable artifact '{ref_id}'; "
+                            f"{PROVENANCE_ONLY_NOTE}"
+                        ),
+                    }
+                    break
+                authors = artifact.get("authors") if isinstance(artifact.get("authors"), list) else []
+                if active_buddy not in {row for row in authors if isinstance(row, str)}:
+                    scope_error = {
+                        "permission_boundary": "source_refs.read_scope",
+                        "why_blocked": (
+                            f"cannot claim full summary of unreadable artifact '{ref_id}'; "
+                            f"{PROVENANCE_ONLY_NOTE}"
+                        ),
                     }
                     break
 

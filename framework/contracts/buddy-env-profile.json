@@ -26,7 +26,7 @@
     "project.access": ["read-only", "write"],
     "filesystem_capability.project_workspace": ["read-only", "write"],
     "filesystem_capability.raw_state": ["broker-only"],
-    "state_capability.artifact_kinds": ["from-manifest"],
+    "state_capability.artifact_templates": ["from-manifest"],
     "tool_capability.browser_cockpit": ["required", "available", "unavailable"],
     "tool_capability.market_research_evidence": ["required", "not-required"],
     "tool_capability.ordinary_web_fallback": ["available", "user-approved-only"],

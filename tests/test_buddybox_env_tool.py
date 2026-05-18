@@ -577,15 +577,17 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             track_id=track["id"],
         )
-        artifact = env_store.create_artifact(
+        artifact = env_store.create_artifact_revision(
             artifact_id="art-pm-buddybox-product-state-r1",
             title="Buddybox Product Boundary Artifact",
-            buddy="pm",
-            kind="prd",
-            task_id=task["id"],
             summary="seed",
-            content={"body": "seed"},
+            body="seed",
+            template="brief",
+            status="published",
+            published_to_track=track["id"],
+            supersedes_artifact_id=None,
             created_by="pm",
+            authors=["pm"],
             source_refs=[{"type": "note", "label": "seed"}],
         )
         object_paths = (

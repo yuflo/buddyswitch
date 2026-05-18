@@ -11,11 +11,12 @@ description: Use when you need artifact summaries, full artifact reads by id, ar
 ## Runtime Route
 - CLI: `python3 scripts/env/client.py artifact <operation>`
 - Broker method: `env.tool`
-- Operations: `list`, `get`, `validate-payload`, `create-revision`, `update-metadata`
+- Operations: `get`, `create-revision`, `update-metadata`
 
 ## Workflow Notes
-- `list` returns summaries; `get` returns one full artifact body by `artifact_id`.
-- `validate-payload` is read-only; `create-revision` and `update-metadata` persist durable artifact state.
+- `get` returns one full artifact body by `artifact_id`.
+- `create-revision` creates an active-buddy private draft (`published_to_track=null`).
+- Shared publication happens via `track.add-material` or `track.add-proof`, not via artifact task relations.
 - For action payloads and return meanings, inspect `context.get.tool_catalog['artifact']` or `python3 scripts/turn_runtime.py status`; runtime response fields are authoritative for effects and recovery.
 
 ## Verification

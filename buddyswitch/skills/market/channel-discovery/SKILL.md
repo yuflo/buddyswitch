@@ -70,12 +70,12 @@ Required top-level field:
 - `execution_summary`
 
 Use `artifact-tool` when this skill produces a durable artifact:
-- `kind`: `channel-plan`
+- `template`: `brief`
 - `title`: concise artifact title
 - `summary`: short downstream selection summary
-- `content`: include `research_question`, `evidence`, `insights`, `assumptions`, `risks`, `conclusion`, `recommended_next_step`, and channel-specific structured detail
+- `body`: include `research_question`, `evidence`, `insights`, `assumptions`, `risks`, `conclusion`, `recommended_next_step`, and channel-specific structured detail as markdown
 
-After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
+After `artifact.create_revision` returns `ok=true`, use `track.open` and `artifact.get` to verify shared visibility when needed.
 Use optional `working_notes` for concise reasoning or verification notes.
 Use optional `task_id` only as association metadata for an explicitly selected task.
 

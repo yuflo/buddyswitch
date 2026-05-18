@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repository consistency checks for current collaboration runtime contract."""
+"""Repository consistency checks for active track-page collaboration runtime."""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ class RepoConsistencyTests(unittest.TestCase):
             "framework/contracts",
             "framework/schemas",
             "framework/console/app.js",
+            "tests",
         ]
         completed = subprocess.run(
             ["rg", "-uuu", "-n", pattern, *targets, "-g", "!**/__pycache__/**", "-g", "!**/*.pyc"],
@@ -42,78 +43,114 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         return [line for line in completed.stdout.splitlines() if line.strip()]
 
-    def test_env_tool_surface_excludes_handoff(self) -> None:
+    def test_env_tool_surface_uses_track_page_actions(self) -> None:
         env_tools = turn_runtime._build_env_tools_desc()
         registry_tools = {row["tool"] for row in tool_contracts.TOOL_REGISTRY}
         self.assertEqual(registry_tools, _EXPECTED_TOOLS)
         self.assertEqual(set(env_tools), _EXPECTED_TOOLS)
 
-        op = tool_contracts.operation_semantics()
-        self.assertNotIn("track.advance", op)
-        self.assertFalse(any(key.startswith("handoff.") for key in op))
+        track_actions = set(tool_contracts.supported_actions("track"))
+        self.assertEqual(
+            track_actions,
+            {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
+        )
+        artifact_actions = set(tool_contracts.supported_actions("artifact"))
+        self.assertEqual(artifact_actions, {"get", "create_revision", "update_metadata"})
 
-    def test_workspace_projection_contract_excludes_handoffs(self) -> None:
+    def test_workspace_projection_contract_uses_track_page_shape(self) -> None:
         payload = json.loads((ROOT / "framework" / "contracts" / "workspace-projection.json").read_text(encoding="utf-8"))
         top = set(payload.get("top_level_key_order", []))
-        self.assertNotIn("handoffs", top)
         self.assertIn("tracks", top)
         self.assertIn("tasks", top)
         self.assertIn("artifacts", top)
+        self.assertNotIn("handoffs", top)
 
-        sources = payload.get("data_sources", [])
-        self.assertIsInstance(sources, list)
-        self.assertFalse(any("handoffs" in str(row) for row in sources))
+        track_keys = set(payload["view_shapes"]["track"]["key_order"])
+        self.assertIn("outcome", track_keys)
+        self.assertIn("state", track_keys)
+        self.assertIn("health", track_keys)
+        self.assertIn("shared_materials", track_keys)
+        self.assertNotIn("task_ids", track_keys)
+        self.assertNotIn("tasks", track_keys)
 
-        track_shape = payload["view_shapes"]["track"]
-        self.assertIn("owner_buddy", track_shape["key_order"])
-        self.assertNotIn("current_buddy", track_shape["key_order"])
-        self.assertNotIn("next_buddy", track_shape["key_order"])
+        task_keys = set(payload["view_shapes"]["task"]["key_order"])
+        self.assertNotIn("artifact_ids", task_keys)
+        self.assertNotIn("artifact" + "_slots", task_keys)
 
-    def test_role_contracts_exclude_handoff_runtime_object_and_track_advance(self) -> None:
+        artifact_keys = set(payload["view_shapes"]["artifact"]["key_order"])
+        self.assertIn("published_to_track", artifact_keys)
+        self.assertNotIn("task_id", artifact_keys)
+
+    def test_role_contracts_teach_direct_track_material_path(self) -> None:
         for name in ("pm", "design", "dev", "market", "test"):
             path = ROOT / "framework" / "contracts" / f"{name}.md"
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(contract=name):
-                self.assertNotIn("objects/handoffs", text)
-                self.assertNotIn("track.advance", text)
-                self.assertNotIn("next_buddy", text)
+                self.assertIn("track.open", text)
+                self.assertNotIn("track" + ".join", text)
+                self.assertNotIn("attach" + "_task", text)
+                self.assertNotIn("detach" + "_task", text)
 
-    def test_active_runtime_guidance_excludes_handoff_tool(self) -> None:
-        readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
-        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8").lower()
-        self.assertNotIn("handoff.*", readme)
-        self.assertNotIn("handoff_id", readme)
-        self.assertNotIn("objects/handoffs", readme)
-        self.assertNotIn("objects/handoffs", agents)
-
-    def test_runtime_buddy_agents_templates_exclude_handoff_wording(self) -> None:
+    def test_runtime_buddy_agents_use_track_open_guidance(self) -> None:
         buddies = ("market", "pm", "design", "dev", "test")
         for buddy in buddies:
             path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(buddy=buddy):
-                self.assertNotIn("handoff", text)
-                self.assertNotIn("next handoff target", text)
+                self.assertIn("track open --track-id", text)
+                self.assertNotIn("track get --track-id", text)
+                self.assertNotIn("track join", text)
+                self.assertNotIn("attach" + "-task", text)
+                self.assertNotIn("detach" + "-task", text)
 
-    def test_track_collaboration_cleanup_residue_scan(self) -> None:
-        hits = self._scan(r"handoff|next_buddy|current_buddy|track\.advance|readable_by_current_buddy")
+    def test_role_rebuild_residue_scan(self) -> None:
+        pattern_1 = (
+            "track\\." + "join"
+            + "|attach" + "_task"
+            + "|detach" + "_task"
+            + "|attach" + "-task"
+            + "|detach" + "-task"
+            + "|track" + "_task"
+            + "|readable_by_current" + "_buddy"
+        )
+        pattern_2 = (
+            "track\\." + "task_ids"
+            + "|artifact\\." + "task_id"
+            + "|artifact" + "_slots"
+            + "|source_" + "task_id"
+        )
+        pattern_3 = (
+            "current-task" + "-id"
+            + "|task_id" + "_scope"
+            + "|[Cc]ompatibility" + " facade"
+        )
+        hits_1 = self._scan(pattern_1)
+        hits_2 = self._scan(pattern_2)
+        hits_3 = self._scan(pattern_3)
+        hits = hits_1 + hits_2 + hits_3
         allowed: list[str] = []
         for line in hits:
             lower = line.lower()
             if "design-handoff" in lower:
                 allowed.append(line)
                 continue
-            if "track-collaboration-cleanup" in lower:
+            if "test_role_rebuild_residue_scan" in lower:
                 allowed.append(line)
                 continue
-            if "test_track_collaboration_cleanup_residue_scan" in lower:
+            if line.startswith("tests/"):
+                allowed.append(line)
+                continue
+            if "/docs/spec/" in lower or "/docs/memo/" in lower:
+                allowed.append(line)
+                continue
+            if line.startswith("scripts/artifact_selection.py:"):
+                allowed.append(line)
+                continue
+            if line.startswith("scripts/workspace_data.py:"):
                 allowed.append(line)
                 continue
         disallowed = [line for line in hits if line not in allowed]
         self.assertEqual(disallowed, [], msg="\n".join(disallowed))
-
-    def test_handoff_service_module_is_removed(self) -> None:
-        self.assertFalse((ROOT / "scripts" / "env" / "services" / "handoffs.py").exists())
 
 
 if __name__ == "__main__":

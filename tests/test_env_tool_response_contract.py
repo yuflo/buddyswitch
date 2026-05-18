@@ -151,19 +151,15 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             buddy="pm",
             tool="track",
             action="create",
-            args={"track_id": "track-response", "title": "Response"},
+            args={
+                "track_id": "track-response",
+                "title": "Response",
+                "outcome": "Response outcome",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
+            },
         )
         self._assert_success_contract(track)
-
-        task = self._dispatch(
-            instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="pm",
-            tool="task",
-            action="create",
-            args={"task_id": "task-response", "title": "Task", "track_id": "track-response"},
-        )
-        self._assert_success_contract(task)
 
         artifact = self._dispatch(
             instance_json=instance_json,
@@ -173,11 +169,12 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             action="create_revision",
             args={
                 "artifact_id": "art-response-r1",
-                "task_id": "task-response",
-                "kind": "prd",
                 "title": "Title",
                 "summary": "Summary",
-                "content": {"body": "x"},
+                "template": "brief",
+                "body": "x",
+                "status": "published",
+                "published_to_track": "track-response",
             },
         )
         self._assert_success_contract(artifact)

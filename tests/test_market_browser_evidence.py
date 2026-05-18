@@ -207,15 +207,17 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def _seed_market_task_and_artifact(self) -> tuple[str, str]:
         task = env_store.create_task("task-market-evidence", "Market evidence task", buddy="market")
-        artifact = env_store.create_artifact(
+        artifact = env_store.create_artifact_revision(
             artifact_id="art-market-evidence-r1",
             title="Market Evidence Brief",
-            buddy="market",
-            kind="market-report",
-            task_id=task["id"],
             summary="seed",
-            content={"body": "market"},
+            body="market",
+            template="brief",
+            status="draft",
+            published_to_track=None,
+            supersedes_artifact_id=None,
             created_by="market",
+            authors=["market"],
             source_refs=[{"type": "note", "label": "seed"}],
         )
         return task["id"], artifact["id"]
@@ -289,7 +291,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_market_artifact_write_with_browser_evidence_is_runless(self) -> None:
         instance_id = "inst-market-write"
         instance_json = self._instance_json(instance_id=instance_id)
-        task_id, artifact_id = self._seed_market_task_and_artifact()
+        _, artifact_id = self._seed_market_task_and_artifact()
 
         issued = self._dispatch(
             instance_json=instance_json,
@@ -311,11 +313,12 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             tool="artifact",
             action="create_revision",
             args={
-                "task_id": task_id,
-                "kind": "market-report",
+                "artifact_id": "art-market-evidence-r2",
                 "title": "Market update",
                 "summary": "runless evidence ref",
-                "content": {"body": "updated"},
+                "template": "brief",
+                "body": "updated",
+                "supersedes_artifact_id": artifact_id,
                 "source_refs": [
                     {"type": "artifact", "id": artifact_id},
                     {"type": "note", "label": f"evidence:{token.get('token_id')}"},

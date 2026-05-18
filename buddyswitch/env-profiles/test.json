@@ -21,12 +21,17 @@
     "raw_state": "broker-only"
   },
   "state_capability": {
-    "artifact_kinds": "from-manifest",
+    "artifact_templates": "from-manifest",
     "task_effects": [
       "status",
       "summary"
     ],
-    "track_effects": []
+    "track_effects": [
+      "update_now",
+      "add_material",
+      "add_update",
+      "add_proof"
+    ]
   },
   "tool_capability": {
     "browser_cockpit": "available",

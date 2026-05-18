@@ -1,32 +1,11 @@
 {
-  "execution_summary": "Imported a Codex-native skill package into BuddySwitch.",
-  "working_notes": [
-    "Include importer decisions and validation caveats."
-  ],
+  "execution_summary": "Skill import summary.",
   "artifacts": [
     {
-      "kind": "skill-import-report",
+      "template": "note",
       "title": "Skill Import Report",
-      "summary": "Selection-ready report of imported skill packaging and verification.",
-      "content": {
-        "task_summary": "Imported and registered one external Codex-native skill package.",
-        "changed_files": [
-          "buddyswitch/skills/<buddy>/<skill-id>/SKILL.md",
-          "buddyswitch/manifest.toml"
-        ],
-        "implementation_notes": [
-          "Generated package preserves the external workflow and BuddySwitch commit guidance.",
-          "Manifest registration maps the imported skill to the selected buddy."
-        ],
-        "verification": {
-          "checks_run": [],
-          "passed": [],
-          "failed": [],
-          "blocked": []
-        },
-        "risks": [],
-        "follow_ups": []
-      }
+      "summary": "Imported skill package and manifest updates.",
+      "body": "## Task Summary\\n\\n## Changed Files\\n\\n## Implementation Notes\\n\\n## Verification\\n\\n## Risks\\n\\n## Follow-ups"
     }
   ]
 }

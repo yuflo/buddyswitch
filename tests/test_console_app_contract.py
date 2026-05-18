@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contract tests for console track owner derivation behavior."""
+"""Contract tests for console track-page derivation behavior."""
 
 from __future__ import annotations
 
@@ -20,9 +20,9 @@ class ConsoleAppContractTests(unittest.TestCase):
         self.assertNotIn("deriveNextStepStateForTrack", source)
         self.assertNotIn("deriveNextStepStateForTask", source)
         self.assertNotIn("handoff", source.lower())
-        self.assertIn("deriveTrackOwnerState", source)
+        self.assertIn("deriveTrackPageState", source)
 
-    def _derive_track_owner_state(self, track_payload: dict) -> dict:
+    def _derive_track_page_state(self, track_payload: dict) -> dict:
         script = textwrap.dedent(
             """
             const fs = require("fs");
@@ -75,10 +75,10 @@ class ConsoleAppContractTests(unittest.TestCase):
             vm.createContext(context);
 
             const source = fs.readFileSync(process.env.CONSOLE_APP_PATH, "utf8");
-            vm.runInContext(source + "\\nglobalThis.__consoleContract = { deriveTrackOwnerState };\\n", context);
+            vm.runInContext(source + "\\nglobalThis.__consoleContract = { deriveTrackPageState };\\n", context);
 
             const trackPayload = JSON.parse(process.env.TRACK_PAYLOAD_JSON);
-            const result = context.__consoleContract.deriveTrackOwnerState(trackPayload);
+            const result = context.__consoleContract.deriveTrackPageState(trackPayload);
             process.stdout.write(JSON.stringify(result));
             """
         )
@@ -101,23 +101,30 @@ class ConsoleAppContractTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
         return json.loads(completed.stdout)
 
-    def test_track_owner_state_is_neutral(self) -> None:
-        payload = self._derive_track_owner_state(
+    def test_track_page_state_is_neutral(self) -> None:
+        payload = self._derive_track_page_state(
             {
                 "id": "track-alpha",
                 "owner_buddy": "pm",
-                "status": "active",
-                "summary": "alpha",
+                "state": "active",
+                "health": "ok",
+                "outcome": "alpha",
+                "now": {"next": "ship", "blocker": "none"},
             }
         )
-        self.assertEqual(payload, {
-            "trackId": "track-alpha",
-            "ownerBuddy": "pm",
-            "status": "active",
-            "summary": "alpha",
-        })
+        self.assertEqual(
+            payload,
+            {
+                "trackId": "track-alpha",
+                "ownerBuddy": "pm",
+                "state": "active",
+                "health": "ok",
+                "outcome": "alpha",
+                "nowNext": "ship",
+                "nowBlocker": "none",
+            },
+        )
         serialized = json.dumps(payload).lower()
-        self.assertNotIn("next", serialized)
         self.assertNotIn("handoff", serialized)
 
 

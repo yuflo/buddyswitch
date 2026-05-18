@@ -52,7 +52,13 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             tool="track",
             action="create",
-            args={"track_id": "track-e2e-runless", "title": "E2E Runless", "summary": "flow"},
+            args={
+                "track_id": "track-e2e-runless",
+                "title": "E2E Runless",
+                "outcome": "flow",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
+            },
         )
         self.assertTrue(track["ok"], msg=track)
 
@@ -64,20 +70,23 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(task["ok"], msg=task)
 
-        artifact = self._dispatch(
+        material = self._dispatch(
             buddy="pm",
-            tool="artifact",
-            action="create_revision",
+            tool="track",
+            action="add_material",
             args={
-                "artifact_id": "art-pm-e2e-prd-r1",
-                "task_id": "task-pm-e2e-runless",
+                "track_id": "track-e2e-runless",
                 "kind": "prd",
+                "label": "PRD",
                 "title": "PRD",
                 "summary": "runless artifact",
                 "content": {"body": "v1"},
             },
         )
-        self.assertTrue(artifact["ok"], msg=artifact)
+        self.assertTrue(material["ok"], msg=material)
+        artifact_id = material.get("artifact_id")
+        self.assertIsInstance(artifact_id, str, msg=material)
+        assert isinstance(artifact_id, str)
 
         buddybox = self._dispatch(
             buddy="pm",
@@ -105,14 +114,33 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="dev",
             tool="artifact",
             action="get",
-            args={"artifact_id": "art-pm-e2e-prd-r1"},
+            args={"artifact_id": artifact_id},
         )
         self.assertTrue(cross_read["ok"], msg=cross_read)
+        self.assertEqual(cross_read.get("read_scope"), "one readable artifact")
+        read_artifact = cross_read.get("artifact")
+        self.assertIsInstance(read_artifact, dict, msg=cross_read)
+        assert isinstance(read_artifact, dict)
+        self.assertEqual(read_artifact.get("template"), "brief")
+        self.assertEqual(read_artifact.get("body"), "v1")
+        self.assertEqual(read_artifact.get("published_to_track"), "track-e2e-runless")
+
+        track_context = self._dispatch(
+            buddy="dev",
+            tool="track",
+            action="open",
+            args={"track_id": "track-e2e-runless"},
+        )
+        self.assertTrue(track_context["ok"], msg=track_context)
+        shared = (track_context.get("track") or {}).get("shared_materials")
+        self.assertIsInstance(shared, list, msg=track_context)
+        assert isinstance(shared, list)
+        self.assertEqual([row.get("artifact_id") for row in shared], [artifact_id])
 
         self.assertIsNotNone(env_store.get_track("track-e2e-runless"))
         self.assertIsNotNone(env_store.get_task("task-pm-e2e-runless"))
         self.assertIsNotNone(env_store.get_task("task-dev-e2e-runless"))
-        self.assertIsNotNone(env_store.get_artifact("art-pm-e2e-prd-r1"))
+        self.assertIsNotNone(env_store.get_artifact(artifact_id))
         self.assertTrue(self._runtime_path("buddyswitch/local/buddybox/pm/e2e/notes.md").exists())
         self.assertFalse(self._runtime_path(f"{_OLD_BUDDYBOX_ROOT}/pm/e2e/notes.md").exists())
         self.assertFalse(self._runtime_path("runs/raw").exists())
@@ -126,7 +154,9 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={
                 "track_id": "track-e2e-logical-promotion",
                 "title": "Logical Promotion",
-                "summary": "promote private file content",
+                "outcome": "promote private file content",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
             },
         )
         self.assertTrue(track["ok"], msg=track)
@@ -165,12 +195,12 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         created_artifact = self._dispatch(
             buddy="pm",
-            tool="artifact",
-            action="create_revision",
+            tool="track",
+            action="add_material",
             args={
-                "artifact_id": "art-pm-logical-promotion-r1",
-                "task_id": "task-pm-logical-promotion",
+                "track_id": "track-e2e-logical-promotion",
                 "kind": "prd",
+                "label": "PRD",
                 "title": "Promoted PRD Content",
                 "summary": "from private draft",
                 "content": {"body": content},
@@ -178,6 +208,9 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         self.assertTrue(created_artifact["ok"], msg=created_artifact)
+        promoted_artifact_id = created_artifact.get("artifact_id")
+        self.assertIsInstance(promoted_artifact_id, str, msg=created_artifact)
+        assert isinstance(promoted_artifact_id, str)
 
         dev_task = self._dispatch(
             buddy="dev",
@@ -196,13 +229,16 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="dev",
             tool="artifact",
             action="get",
-            args={"artifact_id": "art-pm-logical-promotion-r1"},
+            args={"artifact_id": promoted_artifact_id},
         )
         self.assertTrue(read_as_dev["ok"], msg=read_as_dev)
+        self.assertEqual(read_as_dev.get("read_scope"), "one readable artifact")
         artifact = read_as_dev.get("artifact")
         self.assertIsInstance(artifact, dict, msg=read_as_dev)
         assert isinstance(artifact, dict)
-        self.assertEqual(((artifact.get("content") or {}).get("body")), content)
+        self.assertEqual(artifact.get("body"), content)
+        self.assertEqual(artifact.get("template"), "brief")
+        self.assertEqual(artifact.get("published_to_track"), "track-e2e-logical-promotion")
 
         denied_dev_prefixed = self._dispatch(
             buddy="dev",
@@ -223,22 +259,17 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((denied_dev_local.get("error") or {}).get("code"), "E_BUDDYBOX_NOT_FOUND")
 
     def test_cross_buddy_identity_scope_follows_service_permissions(self) -> None:
-        env_store.create_task(
-            "task-pm-private",
-            "Private task",
-            buddy="pm",
-            track_id=None,
-            summary="seed",
-        )
-        env_store.create_artifact(
+        env_store.create_artifact_revision(
             artifact_id="art-pm-private-r1",
             title="Private artifact",
-            buddy="pm",
-            kind="spec",
-            task_id="task-pm-private",
             summary="private",
-            content={"body": "private"},
+            body="private",
+            template="note",
+            status="draft",
+            published_to_track=None,
+            supersedes_artifact_id=None,
             created_by="pm",
+            authors=["pm"],
             source_refs=[{"type": "note", "label": "seed"}],
         )
         denied = self._dispatch(
@@ -249,13 +280,20 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(denied["ok"])
         self.assertEqual(denied["permission_boundary"], "artifact.buddy_scope")
+        self.assertEqual((denied.get("error") or {}).get("code"), "E_ARTIFACT_SCOPE")
 
     def test_response_planes_distinguish_product_private_token_and_browser_session(self) -> None:
         track = self._dispatch(
             buddy="pm",
             tool="track",
             action="create",
-            args={"track_id": "track-e2e-planes", "title": "Planes", "summary": "planes"},
+            args={
+                "track_id": "track-e2e-planes",
+                "title": "Planes",
+                "outcome": "planes",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
+            },
         )
         self.assertTrue(track["ok"], msg=track)
         task = self._dispatch(
@@ -271,10 +309,11 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="create_revision",
             args={
                 "artifact_id": "art-e2e-planes-r1",
-                "task_id": "task-e2e-planes",
-                "kind": "spec",
                 "title": "Planes spec",
-                "content": {"body": "seed"},
+                "template": "note",
+                "body": "seed",
+                "status": "published",
+                "published_to_track": "track-e2e-planes",
             },
         )
         self.assertTrue(artifact["ok"], msg=artifact)

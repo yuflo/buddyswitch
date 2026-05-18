@@ -67,22 +67,17 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(payload["state_changed"])
 
     def test_artifact_owner_scope_rejection_has_structured_feedback(self) -> None:
-        env_store.create_task(
-            "task-pm-owner-scope",
-            "Owner task",
-            buddy="pm",
-            track_id=None,
-            summary="pm private",
-        )
-        env_store.create_artifact(
+        env_store.create_artifact_revision(
             artifact_id="art-pm-owner-scope-r1",
             title="Owner scope",
-            buddy="pm",
-            kind="spec",
-            task_id="task-pm-owner-scope",
             summary="pm private",
-            content={"body": "private"},
+            body="private",
+            template="note",
+            status="draft",
+            published_to_track=None,
+            supersedes_artifact_id=None,
             created_by="pm",
+            authors=["pm"],
             source_refs=[{"type": "note", "label": "seed"}],
         )
         payload = self._dispatch(
@@ -151,12 +146,12 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     msg=payload,
                 )
 
-    def test_track_relation_scope_rejections_expose_recovery_contract(self) -> None:
+    def test_removed_track_relation_actions_expose_recovery_contract(self) -> None:
         env_store.create_track(
             "track-feedback-foreign",
             "Foreign scope track",
             owner_buddy="pm",
-            summary="scope",
+            outcome="scope",
         )
         env_store.create_task(
             "task-pm-feedback-foreign",
@@ -174,15 +169,14 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             )
             with self.subTest(action=action):
                 self._assert_rejection_contract(payload)
-                self.assertEqual(payload.get("permission_boundary"), "task.buddy_scope", msg=payload)
-                self.assertIn("task_id", payload.get("correctable_fields", []), msg=payload)
-                self.assertIn("owned", str(payload.get("retry_guidance", "")).lower(), msg=payload)
+                self.assertEqual(payload.get("permission_boundary"), "env.tool", msg=payload)
+                self.assertEqual((payload.get("error") or {}).get("code"), "E_ENV_TOOL", msg=payload)
+                self.assertIn("action", payload.get("correctable_fields", []), msg=payload)
                 next_actions = payload.get("allowed_next_actions")
                 self.assertIsInstance(next_actions, list, msg=payload)
                 assert isinstance(next_actions, list)
                 action_text = "\n".join(str(item).lower() for item in next_actions)
-                self.assertIn("task.list", action_text)
-                self.assertIn("track.get", action_text)
+                self.assertIn("supported action", action_text)
 
 
 if __name__ == "__main__":

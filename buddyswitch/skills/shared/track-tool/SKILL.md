@@ -1,21 +1,23 @@
 ---
 name: track-tool
-description: Use when you need explicit track context, PM lifecycle actions, or task-track relation updates through runtime env tools.
+description: Use when you need shared track-page context, PM lifecycle actions, and direct material/update/proof publication through runtime env tools.
 ---
 
 # track-tool
 
 ## Purpose
-- Read track context and maintain explicit task-track relations.
-- Apply PM-owned lifecycle updates when authority allows.
+- Read shared track pages.
+- Publish current materials, timeline updates, and close proof directly on tracks.
+- Apply PM-owned lifecycle create/archive when authority allows.
 
 ## Runtime Route
 - CLI: `python3 scripts/env/client.py track <operation>`
 - Broker method: `env.tool`
-- Operations: `list`, `get`, `join`, `create`, `update`, `archive`, `attach-task`, `detach-task`
+- Operations: `create`, `list`, `open`, `update-now`, `add-material`, `add-update`, `add-proof`, `archive`
 
 ## Workflow Notes
-- `join` creates, attaches, or reuses task relations without hidden binding state.
+- Shared collaboration path is `track.open -> shared_materials -> artifact.get`.
+- Tasks are private hints and never required for shared material reads.
 - For action payloads and return meanings, inspect `context.get.tool_catalog['track']` or `python3 scripts/turn_runtime.py status`; runtime response fields are authoritative for effects and recovery.
 
 ## Verification

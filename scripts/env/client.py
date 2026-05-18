@@ -76,34 +76,27 @@ def _parse_args() -> argparse.Namespace:
 
     track = sub.add_parser("track", help="Track env tool operations")
     track_sub = track.add_subparsers(dest="operation", required=True)
-    create_track = track_sub.add_parser("create", help="Create PM-owned track")
+    create_track = track_sub.add_parser("create", help="Create PM-owned track page")
     create_track.add_argument("--payload", required=True, type=Path)
-    track_sub.add_parser("list", help="List readable tracks")
-    get_track = track_sub.add_parser("get", help="Get track by id")
-    get_track.add_argument("--track-id", required=True)
-    join_track = track_sub.add_parser("join", help="Create or reuse active-buddy task linked to track")
-    join_track.add_argument("--track-id", required=True)
-    join_track.add_argument("--task-id")
-    update_track = track_sub.add_parser("update", help="Update PM-owned track metadata")
-    update_track.add_argument("--payload", required=True, type=Path)
+    track_sub.add_parser("list", help="List non-archived track page summaries")
+    open_track = track_sub.add_parser("open", help="Open one track page by id")
+    open_track.add_argument("--track-id", required=True)
+    update_now = track_sub.add_parser("update-now", help="Update now/state/health on track page")
+    update_now.add_argument("--payload", required=True, type=Path)
+    add_material = track_sub.add_parser("add-material", help="Publish shared material to track page")
+    add_material.add_argument("--payload", required=True, type=Path)
+    add_update = track_sub.add_parser("add-update", help="Append one track timeline update")
+    add_update.add_argument("--payload", required=True, type=Path)
+    add_proof = track_sub.add_parser("add-proof", help="Publish close proof to track page")
+    add_proof.add_argument("--payload", required=True, type=Path)
     archive_track = track_sub.add_parser("archive", help="Archive PM-owned track")
     archive_track.add_argument("--track-id", required=True)
-    attach_task = track_sub.add_parser("attach-task", help="Attach active-buddy task to track")
-    attach_task.add_argument("--track-id", required=True)
-    attach_task.add_argument("--task-id", required=True)
-    detach_task = track_sub.add_parser("detach-task", help="Detach active-buddy task from track")
-    detach_task.add_argument("--track-id", required=True)
-    detach_task.add_argument("--task-id", required=True)
 
     artifact = sub.add_parser("artifact", help="Artifact env tool operations")
     artifact_sub = artifact.add_subparsers(dest="operation", required=True)
-    artifact_list = artifact_sub.add_parser("list", help="List track artifact summaries")
-    artifact_list.add_argument("--track-id", required=True)
     get_artifact = artifact_sub.add_parser("get", help="Get readable artifact by id")
     get_artifact.add_argument("--artifact-id", required=True)
-    validate_artifact = artifact_sub.add_parser("validate-payload", help="Validate artifact revision payload")
-    validate_artifact.add_argument("--payload", required=True, type=Path)
-    create_artifact = artifact_sub.add_parser("create-revision", help="Create a new artifact revision")
+    create_artifact = artifact_sub.add_parser("create-revision", help="Create a private artifact draft revision")
     create_artifact.add_argument("--payload", required=True, type=Path)
     update_artifact = artifact_sub.add_parser("update-metadata", help="Update artifact title/summary/source refs")
     update_artifact.add_argument("--payload", required=True, type=Path)
@@ -225,33 +218,20 @@ def _dispatch_task(args: argparse.Namespace) -> dict[str, Any]:
 
 def _dispatch_track(args: argparse.Namespace) -> dict[str, Any]:
     action = _operation_to_action(args.operation)
-    if args.operation in {"create", "update"}:
+    if args.operation in {"create", "update-now", "add-material", "add-update", "add-proof"}:
         payload = _load_json_object(args.payload)
         return _dispatch_env_tool("track", action, payload)
-    if args.operation == "get":
+    if args.operation == "open":
         return _dispatch_env_tool("track", action, {"track_id": args.track_id})
-    if args.operation == "join":
-        payload: dict[str, Any] = {"track_id": args.track_id}
-        if isinstance(args.task_id, str) and args.task_id.strip():
-            payload["task_id"] = args.task_id.strip()
-        return _dispatch_env_tool("track", action, payload)
     if args.operation == "archive":
         return _dispatch_env_tool("track", action, {"track_id": args.track_id})
-    if args.operation in {"attach-task", "detach-task"}:
-        return _dispatch_env_tool(
-            "track",
-            action,
-            {"track_id": args.track_id, "task_id": args.task_id},
-        )
     return _dispatch_env_tool("track", action, {})
 
 
 def _dispatch_artifact(args: argparse.Namespace) -> dict[str, Any]:
     action = _operation_to_action(args.operation)
-    if args.operation in {"validate-payload", "create-revision", "update-metadata"}:
+    if args.operation in {"create-revision", "update-metadata"}:
         return _dispatch_env_tool("artifact", action, _load_json_object(args.payload))
-    if args.operation == "list":
-        return _dispatch_env_tool("artifact", action, {"track_id": args.track_id})
     if args.operation == "get":
         return _dispatch_env_tool("artifact", action, {"artifact_id": args.artifact_id})
     raise ValueError(f"unsupported artifact operation: {args.operation}")
@@ -260,6 +240,8 @@ def _dispatch_artifact(args: argparse.Namespace) -> dict[str, Any]:
 def _dispatch_context(args: argparse.Namespace) -> dict[str, Any]:
     action = _operation_to_action(args.operation)
     return _dispatch_env_tool("context", action, _context_args_from_cli(args))
+
+
 def _dispatch_buddybox(args: argparse.Namespace) -> dict[str, Any]:
     action = _operation_to_action(args.operation)
     if args.operation == "desc":
@@ -347,19 +329,22 @@ def main() -> int:
             payload = _dispatch_buddybox(args)
         elif args.resource == "evidence":
             payload = _dispatch_evidence(args)
+        elif args.resource == "search":
+            payload = _dispatch_search(args)
         elif args.resource == "message":
             payload = _dispatch_message(args)
         elif args.resource == "comment":
             payload = _dispatch_comment(args)
-        elif args.resource == "search":
-            payload = _dispatch_search(args)
         else:
-            payload = _error_payload("E_ENV_TOOL", f"unsupported resource: {args.resource}")
+            raise ValueError(f"unsupported resource: {args.resource}")
     except Exception as exc:
-        payload = _error_payload("E_ENV_TOOL", str(exc))
+        print(json.dumps(_error_payload("E_ENV_CLI", str(exc)), ensure_ascii=True, indent=2))
+        return 1
 
-    print(json.dumps(payload, ensure_ascii=True))
-    return 0 if payload.get("ok") else 1
+    print(json.dumps(payload, ensure_ascii=True, indent=2))
+    if payload.get("ok") is True:
+        return 0
+    return 1
 
 
 if __name__ == "__main__":

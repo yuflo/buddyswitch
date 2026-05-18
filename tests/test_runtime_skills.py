@@ -100,8 +100,11 @@ class RuntimeSkillsTests(unittest.TestCase):
         operations = set(re.findall(r"`([^`]+)`", operations_line))
         self.assertEqual(
             operations,
-            {"list", "get", "join", "create", "update", "archive", "attach-task", "detach-task"},
+            {"create", "list", "open", "update-now", "add-material", "add-update", "add-proof", "archive"},
         )
+        self.assertNotIn("join", operations)
+        self.assertNotIn("attach-task", operations)
+        self.assertNotIn("detach-task", operations)
 
 
 if __name__ == "__main__":

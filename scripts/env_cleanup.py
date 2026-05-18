@@ -291,18 +291,17 @@ def discover_artifact_objects(root: Path) -> tuple[list[dict[str, Any]], list[di
             continue
 
         artifact_id = payload.get("id")
-        producer_buddy = payload.get("buddy")
+        producer_buddy = payload.get("created_by")
         if not isinstance(artifact_id, str) or not artifact_id:
             invalid.append({"path": relative, "reason": "artifact object is missing id"})
             continue
         if not isinstance(producer_buddy, str) or not producer_buddy:
-            invalid.append({"path": relative, "reason": f"artifact '{artifact_id}' is missing buddy"})
+            invalid.append({"path": relative, "reason": f"artifact '{artifact_id}' is missing created_by"})
             continue
 
         record = {
             "id": artifact_id,
             "producer_buddy": producer_buddy,
-            "task_id": payload.get("task_id"),
             "object_path": relative,
         }
         valid.append(record)
@@ -596,160 +595,6 @@ def delete_absolute_path(path: Path) -> None:
     path.unlink()
 
 
-def detach_task_from_track(
-    root: Path,
-    track_id: str | None,
-    task_id: str,
-    *,
-    warnings: list[str] | None = None,
-) -> None:
-    if not isinstance(track_id, str) or not track_id:
-        return
-    track_path, blocked_reason = resolve_guarded_object_json_path(
-        root,
-        relative_dir="buddyswitch/objects/tracks",
-        object_id=track_id,
-    )
-    if track_path is None:
-        if blocked_reason is not None:
-            append_warning(
-                warnings,
-                f"Skipping unsafe track detach target '{track_id}': {blocked_reason}",
-            )
-        return
-    if not track_path.exists():
-        return
-    try:
-        payload = read_json(track_path)
-    except (OSError, ValueError, json.JSONDecodeError):
-        return
-    task_ids = payload.get("task_ids")
-    if not isinstance(task_ids, list):
-        return
-    filtered = [item for item in task_ids if item != task_id]
-    if filtered == task_ids:
-        return
-    payload["task_ids"] = filtered
-    write_json(track_path, payload)
-
-
-def detach_artifact_from_task(
-    root: Path,
-    task_id: str | None,
-    artifact_id: str,
-    *,
-    warnings: list[str] | None = None,
-) -> None:
-    if not isinstance(task_id, str) or not task_id:
-        return
-    task_path, blocked_reason = resolve_guarded_object_json_path(
-        root,
-        relative_dir="buddyswitch/objects/tasks",
-        object_id=task_id,
-    )
-    if task_path is None:
-        if blocked_reason is not None:
-            append_warning(
-                warnings,
-                f"Skipping unsafe task detach target '{task_id}': {blocked_reason}",
-            )
-        return
-    if not task_path.exists():
-        return
-    try:
-        payload = read_json(task_path)
-    except (OSError, ValueError, json.JSONDecodeError):
-        return
-    artifact_ids = payload.get("artifact_ids")
-    if not isinstance(artifact_ids, list):
-        return
-    filtered = [item for item in artifact_ids if item != artifact_id]
-    if filtered == artifact_ids:
-        return
-    payload["artifact_ids"] = filtered
-
-    artifact_slots = payload.get("artifact_slots")
-    artifact_path, artifact_path_reason = resolve_guarded_object_json_path(
-        root,
-        relative_dir="buddyswitch/objects/artifacts",
-        object_id=artifact_id,
-    )
-    kind: str | None = None
-    if artifact_path is None:
-        if artifact_path_reason is not None:
-            append_warning(
-                warnings,
-                f"Skipping unsafe artifact detach source '{artifact_id}': {artifact_path_reason}",
-            )
-    elif isinstance(artifact_slots, dict) and artifact_path.exists():
-        try:
-            artifact_payload = read_json(artifact_path)
-        except (OSError, ValueError, json.JSONDecodeError):
-            artifact_payload = None
-        if isinstance(artifact_payload, dict):
-            artifact_kind = artifact_payload.get("kind")
-            if isinstance(artifact_kind, str) and artifact_kind:
-                kind = artifact_kind
-
-    if isinstance(artifact_slots, dict) and isinstance(kind, str) and kind:
-        kind_state = artifact_slots.get(kind)
-        deleting_current = isinstance(kind_state, dict) and kind_state.get("current_artifact_id") == artifact_id
-        if deleting_current:
-            candidates: list[tuple[dict[str, Any], Path]] = []
-            for candidate_id in filtered:
-                candidate_path, candidate_reason = resolve_guarded_object_json_path(
-                    root,
-                    relative_dir="buddyswitch/objects/artifacts",
-                    object_id=candidate_id,
-                )
-                if candidate_path is None:
-                    if candidate_reason is not None:
-                        append_warning(
-                            warnings,
-                            f"Skipping unsafe artifact detach candidate '{candidate_id}': {candidate_reason}",
-                        )
-                    continue
-                if not candidate_path.exists():
-                    continue
-                try:
-                    candidate = read_json(candidate_path)
-                except (OSError, ValueError, json.JSONDecodeError):
-                    continue
-                if not isinstance(candidate, dict):
-                    continue
-                candidate_kind = candidate.get("kind")
-                if not isinstance(candidate_kind, str) or candidate_kind != kind:
-                    continue
-                candidates.append((candidate, candidate_path))
-            if candidates:
-                candidates.sort(
-                    key=lambda row: (
-                        row[0].get("revision", 0) if isinstance(row[0].get("revision"), int) else 0,
-                        row[0].get("updated_at", "") if isinstance(row[0].get("updated_at"), str) else "",
-                        row[0].get("id", "") if isinstance(row[0].get("id"), str) else "",
-                    ),
-                    reverse=True,
-                )
-                promoted, _ = candidates[0]
-                revision_count = (
-                    kind_state.get("revision_count", promoted.get("revision"))
-                    if isinstance(kind_state, dict)
-                    else promoted.get("revision")
-                )
-                if not isinstance(revision_count, int) or revision_count < promoted.get("revision", 0):
-                    revision_count = promoted.get("revision", 0)
-                for candidate, candidate_path in candidates:
-                    candidate["is_current"] = candidate.get("id") == promoted.get("id")
-                    write_json(candidate_path, candidate)
-                artifact_slots[kind] = {
-                    "current_artifact_id": promoted["id"],
-                    "revision_count": revision_count,
-                }
-            else:
-                artifact_slots.pop(kind, None)
-    write_json(task_path, payload)
-
-
 def ensure_required_skeleton(root: Path, *, warnings: list[str] | None = None) -> None:
     for relative_dir in (
         "buddyswitch/objects/tracks",
@@ -904,12 +749,6 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
     warnings = plan.get("warnings")
     if not isinstance(warnings, list):
         warnings = None
-
-    if plan["scope"] == "buddy":
-        for record in plan["artifact_records"]:
-            detach_artifact_from_task(root, record.get("task_id"), record["id"], warnings=warnings)
-        for record in plan["task_records"]:
-            detach_task_from_track(root, record.get("track_id"), record["id"], warnings=warnings)
 
     indexed_artifact_paths = set()
     for record in plan["artifact_records"]:
