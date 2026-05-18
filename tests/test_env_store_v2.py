@@ -157,7 +157,7 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("artifact_ids", stored)
         self.assertNotIn("artifact_slots", stored)
 
-    def test_validate_task_drops_legacy_artifact_linkage_fields(self) -> None:
+    def test_validate_task_rejects_legacy_artifact_linkage_fields(self) -> None:
         payload = {
             "id": "task-dev-legacy-drop",
             "buddy": "dev",
@@ -175,13 +175,12 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "created_at": "2026-05-18T10:00:00+08:00",
             "updated_at": "2026-05-18T10:00:00+08:00",
         }
-        normalized = env_store.validate_task(payload)
-        self.assertNotIn("artifact_ids", normalized)
-        self.assertNotIn("artifact_slots", normalized)
+        with self.assertRaisesRegex(ValueError, "legacy task fields are retired: artifact_ids, artifact_slots"):
+            env_store.validate_task(payload)
 
 
 class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def test_validate_track_drops_legacy_task_ids(self) -> None:
+    def test_validate_track_rejects_legacy_task_ids(self) -> None:
         payload = {
             "id": "track-pm-legacy",
             "title": "Legacy track",
@@ -191,8 +190,8 @@ class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "summary": "",
             "updated_at": "2026-05-18T10:00:00+08:00",
         }
-        normalized = env_store.validate_track(payload)
-        self.assertNotIn("task_ids", normalized)
+        with self.assertRaisesRegex(ValueError, "legacy track fields are retired: status, summary, task_ids"):
+            env_store.validate_track(payload)
 
 
 class CommentStoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):

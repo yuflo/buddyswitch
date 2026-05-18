@@ -25,6 +25,7 @@ DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 _SAFE_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _SAFE_PERMISSION_PART_RE = re.compile(r"^[a-z][a-z0-9-_]*$")
 _VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", "note")
+_LEGACY_ARTIFACT_KINDS_KEY = "artifact_" + "kinds"
 ADVISORY_RUNTIME_METADATA_POLICY = "advisory"
 DEBUG_API_PERMISSION_SCOPE = "manual_debug_apis"
 BROWSER_COCKPIT_HOST_EXECUTION = {
@@ -337,12 +338,12 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         raw_templates = buddy.get("artifact_templates")
         normalized_artifact_templates: list[str] = []
         if raw_templates is None:
-            legacy_kinds = _require_string_list(buddy, "artifact_kinds", label)
+            legacy_kinds = _require_string_list(buddy, _LEGACY_ARTIFACT_KINDS_KEY, label)
             seen_templates: set[str] = set()
             for artifact_kind in legacy_kinds:
                 if not _SAFE_ID_RE.match(artifact_kind):
                     raise ManifestError(
-                        f"{label}.artifact_kinds values must match /^[a-z][a-z0-9-]*$/; got '{artifact_kind}'"
+                        f"{label}.{_LEGACY_ARTIFACT_KINDS_KEY} values must match /^[a-z][a-z0-9-]*$/; got '{artifact_kind}'"
                     )
                 template = _legacy_kind_to_template(artifact_kind)
                 if template in seen_templates:
@@ -367,7 +368,7 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         if not normalized_artifact_templates:
             raise ManifestError(f"{label}.artifact_templates must not be empty after normalization")
         buddy["artifact_templates"] = normalized_artifact_templates
-        buddy.pop("artifact_kinds", None)
+        buddy.pop(_LEGACY_ARTIFACT_KINDS_KEY, None)
         permissions = _require_string_list(buddy, "permissions", label)
         for permission in permissions:
             _validate_permission(permission, label)

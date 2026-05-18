@@ -54,9 +54,9 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         correctable_fields=correctable_fields,
         alternative_capabilities=[
             tool_responses.alternative_capability(
-                tool="artifact",
-                action="list",
-                condition="Use when you need artifact target ids before retrying evidence actions.",
+                tool="track",
+                action="open",
+                condition="Use when you need shared material/proof artifact ids before retrying evidence actions.",
             ),
             tool_responses.alternative_capability(
                 tool="artifact",
@@ -82,15 +82,16 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
         retryable=False,
         retry_guidance="Use readable owner-scoped artifact targets.",
         allowed_next_actions=[
-            "Use artifact.list to inspect readable targets.",
+            "Use track.open to inspect shared material/proof artifact ids.",
+            "Use artifact.get to confirm one artifact target.",
             "Retry with a target owned by active buddy.",
         ],
         correctable_fields=["target_type", "target_id"],
         alternative_capabilities=[
             tool_responses.alternative_capability(
-                tool="artifact",
-                action="list",
-                condition="Use when you need readable/owned artifact target ids.",
+                tool="track",
+                action="open",
+                condition="Use when you need readable/owned artifact ids from shared track pages.",
             )
         ],
     )

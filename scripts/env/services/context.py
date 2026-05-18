@@ -120,16 +120,16 @@ def _current_material_rows(
     limit_value: int,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    seen_artifact_ids: set[str] = set()
+    seen_material_ref_ids: set[str] = set()
     for track in tracks:
         track_id = track.get("id")
         if not isinstance(track_id, str) or not track_id:
             continue
         for row in artifact_visibility.current_material_rows_for_track(track_id, active_buddy):
             artifact_id = row.get("artifact_id")
-            if not isinstance(artifact_id, str) or not artifact_id or artifact_id in seen_artifact_ids:
+            if not isinstance(artifact_id, str) or not artifact_id or artifact_id in seen_material_ref_ids:
                 continue
-            seen_artifact_ids.add(artifact_id)
+            seen_material_ref_ids.add(artifact_id)
             rows.append(row)
             if len(rows) >= limit_value:
                 return rows

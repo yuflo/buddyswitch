@@ -63,7 +63,7 @@ Use `artifact-tool` when this skill produces a durable artifact:
 - `summary`: short downstream selection summary
 - `body`: include `task_summary`, `changed_files`, `implementation_notes`, `verification`, `risks`, and `follow_ups` as markdown
 
-After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
+After `artifact.create_revision` returns `ok=true`, use `track.open` and `artifact.get` to verify shared visibility when needed.
 Use optional `working_notes` for concise reasoning or verification notes.
 Use optional `task_id` only as association metadata for an explicitly selected task.
 

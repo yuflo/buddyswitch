@@ -126,8 +126,9 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 instance_id="inst-pm-art",
                 buddy="pm",
                 tool="artifact",
-                action="validate_payload",
+                action="create_revision",
                 args={
+                    "artifact_id": "art-invalid-retired-r1",
                     "title": "Invalid",
                     "summary": "",
                     "template": "brief",
@@ -138,6 +139,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             with self.subTest(field=field):
                 self.assertFalse(payload.get("ok"), msg=payload)
                 self.assertEqual((payload.get("error") or {}).get("code"), "E_ARTIFACT_PAYLOAD")
+                self.assertFalse(bool(payload.get("state_changed")), msg=payload)
 
     def test_create_revision_creates_private_draft_without_task(self) -> None:
         instance_json = self._instance_json(instance_id="inst-pm-art", buddy="pm")
@@ -235,9 +237,15 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=instance_pm,
             instance_id="inst-pm-art",
             buddy="pm",
-            tool="artifact",
-            action="publish",
-            args={"artifact_id": "art-pm-publish-r1", "track_id": "track-art-pub"},
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": "track-art-pub",
+                "artifact_id": "art-pm-publish-r1",
+                "kind": "proposal",
+                "label": "Proposal",
+                "summary": "public",
+            },
         )
         self.assertTrue(published.get("ok"), msg=published)
 
@@ -257,22 +265,25 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(artifact.get("status"), "published")
         self.assertEqual(artifact.get("published_to_track"), "track-art-pub")
 
-        listed = self._dispatch(
+        opened = self._dispatch(
             instance_json=instance_dev,
             instance_id="inst-dev-art",
             buddy="dev",
-            tool="artifact",
-            action="list",
+            tool="track",
+            action="open",
             args={"track_id": "track-art-pub"},
         )
-        self.assertTrue(listed.get("ok"), msg=listed)
-        rows = listed.get("artifacts")
-        self.assertIsInstance(rows, list, msg=listed)
+        self.assertTrue(opened.get("ok"), msg=opened)
+        track = opened.get("track")
+        self.assertIsInstance(track, dict, msg=opened)
+        assert isinstance(track, dict)
+        rows = track.get("shared_materials")
+        self.assertIsInstance(rows, list, msg=opened)
         assert isinstance(rows, list)
         self.assertEqual([row.get("artifact_id") for row in rows], ["art-pm-publish-r1"])
-        self.assertNotIn("body", rows[0])
+        self.assertEqual(rows[0].get("current"), True)
 
-    def test_archive_removes_from_default_list_but_keeps_get_by_id(self) -> None:
+    def test_archive_track_blocks_track_open_and_published_artifact_reads(self) -> None:
         env_store.create_track("track-art-archive", "Artifact archive", owner_buddy="pm")
         instance_pm = self._instance_json(instance_id="inst-pm-art", buddy="pm")
 
@@ -288,58 +299,61 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "summary": "",
                 "template": "decision",
                 "body": "archive body",
-                "status": "published",
-                "published_to_track": "track-art-archive",
+                "status": "draft",
             },
         )
         self.assertTrue(created.get("ok"), msg=created)
 
-        before = self._dispatch(
+        published = self._dispatch(
             instance_json=instance_pm,
             instance_id="inst-pm-art",
             buddy="pm",
-            tool="artifact",
-            action="list",
-            args={"track_id": "track-art-archive"},
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": "track-art-archive",
+                "artifact_id": "art-pm-archive-r1",
+                "kind": "decision",
+                "label": "Decision",
+                "summary": "archive material",
+            },
         )
-        self.assertTrue(before.get("ok"), msg=before)
-        self.assertEqual(len(before.get("artifacts", [])), 1)
+        self.assertTrue(published.get("ok"), msg=published)
 
         archived = self._dispatch(
             instance_json=instance_pm,
             instance_id="inst-pm-art",
             buddy="pm",
-            tool="artifact",
+            tool="track",
             action="archive",
-            args={"artifact_id": "art-pm-archive-r1"},
+            args={"track_id": "track-art-archive"},
         )
         self.assertTrue(archived.get("ok"), msg=archived)
 
-        after = self._dispatch(
+        track_open = self._dispatch(
             instance_json=instance_pm,
             instance_id="inst-pm-art",
             buddy="pm",
-            tool="artifact",
-            action="list",
+            tool="track",
+            action="open",
             args={"track_id": "track-art-archive"},
         )
-        self.assertTrue(after.get("ok"), msg=after)
-        self.assertEqual(after.get("artifacts"), [])
+        self.assertFalse(track_open.get("ok"), msg=track_open)
+        self.assertEqual(track_open.get("permission_boundary"), "track.lifecycle_status")
 
-        instance_dev = self._instance_json(instance_id="inst-dev-art", buddy="dev")
-        readable = self._dispatch(
-            instance_json=instance_dev,
-            instance_id="inst-dev-art",
-            buddy="dev",
-            tool="artifact",
-            action="get",
-            args={"artifact_id": "art-pm-archive-r1"},
-        )
-        self.assertTrue(readable.get("ok"), msg=readable)
-        artifact = readable.get("artifact")
-        self.assertIsInstance(artifact, dict, msg=readable)
-        assert isinstance(artifact, dict)
-        self.assertEqual(artifact.get("status"), "archived")
+        for buddy, instance_id in (("pm", "inst-pm-art"), ("dev", "inst-dev-art")):
+            instance_json = instance_pm if buddy == "pm" else self._instance_json(instance_id=instance_id, buddy=buddy)
+            denied = self._dispatch(
+                instance_json=instance_json,
+                instance_id=instance_id,
+                buddy=buddy,
+                tool="artifact",
+                action="get",
+                args={"artifact_id": "art-pm-archive-r1"},
+            )
+            with self.subTest(buddy=buddy):
+                self.assertFalse(denied.get("ok"), msg=denied)
+                self.assertEqual(denied.get("permission_boundary"), "track.lifecycle_status")
 
     def test_create_revision_supersedes_current_and_keeps_old_body(self) -> None:
         env_store.create_track("track-art-rev", "Artifact revisions", owner_buddy="pm")
@@ -357,8 +371,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "summary": "v1",
                 "template": "brief",
                 "body": "body-v1",
-                "status": "published",
-                "published_to_track": "track-art-rev",
+                "status": "draft",
             },
         )
         self.assertTrue(r1.get("ok"), msg=r1)
@@ -385,6 +398,28 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(previous, dict)
         self.assertFalse(previous.get("is_current"))
         self.assertEqual(previous.get("body"), "body-v1")
+        latest_before_publish = env_store.get_artifact("art-pm-rev-r2")
+        self.assertIsNotNone(latest_before_publish)
+        assert isinstance(latest_before_publish, dict)
+        self.assertEqual(latest_before_publish.get("revision"), 2)
+        self.assertTrue(bool(latest_before_publish.get("is_current")))
+        self.assertEqual(latest_before_publish.get("supersedes_artifact_id"), "art-pm-rev-r1")
+
+        published = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art",
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": "track-art-rev",
+                "artifact_id": "art-pm-rev-r2",
+                "kind": "brief",
+                "label": "Scope",
+                "summary": "v2",
+            },
+        )
+        self.assertTrue(published.get("ok"), msg=published)
 
         latest = self._dispatch(
             instance_json=instance_pm,
@@ -399,23 +434,24 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(artifact, dict, msg=latest)
         assert isinstance(artifact, dict)
         self.assertEqual(artifact.get("revision"), 2)
-        self.assertTrue(artifact.get("is_current"))
-        self.assertEqual(artifact.get("supersedes_artifact_id"), "art-pm-rev-r1")
-        self.assertIsInstance(artifact.get("revision_chain"), list)
-        chain = artifact.get("revision_chain")
-        assert isinstance(chain, list)
-        self.assertEqual([row.get("id") for row in chain], ["art-pm-rev-r2", "art-pm-rev-r1"])
+        self.assertEqual(artifact.get("currentness"), "current")
 
-        listed = self._dispatch(
+        opened = self._dispatch(
             instance_json=instance_pm,
             instance_id="inst-pm-art",
             buddy="pm",
-            tool="artifact",
-            action="list",
+            tool="track",
+            action="open",
             args={"track_id": "track-art-rev"},
         )
-        self.assertTrue(listed.get("ok"), msg=listed)
-        self.assertEqual([row.get("artifact_id") for row in listed.get("artifacts", [])], ["art-pm-rev-r2"])
+        self.assertTrue(opened.get("ok"), msg=opened)
+        track = opened.get("track")
+        self.assertIsInstance(track, dict, msg=opened)
+        assert isinstance(track, dict)
+        shared_materials = track.get("shared_materials")
+        self.assertIsInstance(shared_materials, list, msg=opened)
+        assert isinstance(shared_materials, list)
+        self.assertEqual([row.get("artifact_id") for row in shared_materials], ["art-pm-rev-r2"])
 
     def test_create_revision_rejects_non_current_supersedes_target(self) -> None:
         env_store.create_track("track-art-rev-reject", "Artifact revision reject", owner_buddy="pm")
@@ -469,8 +505,9 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual((rejected.get("error") or {}).get("code"), "E_ARTIFACT_SCOPE")
-        self.assertEqual(rejected.get("permission_boundary"), "artifact.currentness")
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_ARTIFACT_PAYLOAD")
+        message = str((rejected.get("error") or {}).get("message") or "").lower()
+        self.assertIn("current", message)
 
 
 if __name__ == "__main__":

@@ -63,27 +63,34 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             tool="track",
             action="create",
-            args={"track_id": "track-runless-flow", "title": "Runless Flow", "summary": "Integration path"},
+            args={
+                "track_id": "track-runless-flow",
+                "title": "Runless Flow",
+                "outcome": "Integration path",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
+            },
         )
         self.assertTrue(track["ok"], msg=track)
         track_id = track["track"]["id"]
 
-        artifact = self._dispatch(
+        material = self._dispatch(
             buddy="pm",
-            tool="artifact",
-            action="create_revision",
+            tool="track",
+            action="add_material",
             args={
-                "artifact_id": "art-pm-runless-flow-prd-r1",
+                "track_id": track_id,
+                "kind": "prd",
+                "label": "PRD",
                 "title": "PRD",
                 "summary": "Runless PRD",
-                "template": "brief",
-                "body": "v1",
-                "status": "published",
-                "published_to_track": track_id,
+                "content": {"body": "v1"},
             },
         )
-        self.assertTrue(artifact["ok"], msg=artifact)
-        artifact_id = artifact["artifact"]["id"]
+        self.assertTrue(material["ok"], msg=material)
+        artifact_id = material.get("artifact_id")
+        self.assertIsInstance(artifact_id, str, msg=material)
+        assert isinstance(artifact_id, str)
 
         design_read = self._dispatch(
             buddy="design",
@@ -92,7 +99,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"artifact_id": artifact_id},
         )
         self.assertTrue(design_read["ok"], msg=design_read)
-        self.assertEqual(design_read.get("read_scope"), "one readable artifact markdown page")
+        self.assertEqual(design_read.get("read_scope"), "one readable artifact")
         self.assertEqual((design_read["artifact"] or {}).get("id"), artifact_id)
         self.assertEqual((design_read["artifact"] or {}).get("template"), "brief")
         self.assertEqual((design_read["artifact"] or {}).get("published_to_track"), track_id)
@@ -100,12 +107,12 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track_context = self._dispatch(
             buddy="design",
             tool="track",
-            action="get",
+            action="open",
             args={"track_id": track_id},
         )
         self.assertTrue(track_context["ok"], msg=track_context)
         self.assertEqual(
-            [row.get("artifact_id") for row in track_context.get("shared_materials", [])],
+            [row.get("artifact_id") for row in (track_context.get("track") or {}).get("shared_materials", [])],
             [artifact_id],
         )
 

@@ -97,12 +97,19 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             summary="seed summary",
             body="Original body",
             template="brief",
-            status="published",
-            published_to_track=track_id,
+            status="draft",
+            published_to_track=None,
             supersedes_artifact_id=None,
             created_by="pm",
             authors=["pm"],
             source_refs=[{"type": "note", "label": "seed"}],
+        )
+        env_store.publish_track_material(
+            track_id=track_id,
+            artifact_id=str(artifact["id"]),
+            label="Seed",
+            from_buddy="pm",
+            summary="seed summary",
         )
         return str(artifact["id"])
 
@@ -200,8 +207,8 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             summary="r1",
             body="r1",
             template="brief",
-            status="published",
-            published_to_track=track_id,
+            status="draft",
+            published_to_track=None,
             supersedes_artifact_id=None,
             created_by="pm",
             authors=["pm"],
@@ -219,6 +226,13 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             created_by="pm",
             authors=None,
             source_refs=[{"type": "note", "label": "seed"}],
+        )
+        env_store.publish_track_material(
+            track_id=track_id,
+            artifact_id="art-cmt-chain-r2",
+            label="R2",
+            from_buddy="pm",
+            summary="r2",
         )
         self._seed_published_artifact(artifact_id="art-cmt-other-r1", track_id=track_id)
 
@@ -312,7 +326,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(bad_reply.get("ok"), msg=bad_reply)
         self.assertEqual(bad_reply.get("permission_boundary"), "comment.reply_to_scope")
 
-    def test_resolve_and_reopen_thread_updates_thread_status(self) -> None:
+    def test_resolve_and_reopen_actions_are_not_supported(self) -> None:
         track = self._seed_track("track-cmt-resolve")
         instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
 
@@ -348,18 +362,8 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="resolve",
             args={"comment_id": (reply.get("comment") or {}).get("id")},
         )
-        self.assertTrue(resolved.get("ok"), msg=resolved)
-
-        after_resolve = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-dev-cmt",
-            buddy="dev",
-            tool="comment",
-            action="list",
-            args={"target_type": "track", "target_id": track["id"], "status": "all"},
-        )
-        self.assertTrue(after_resolve.get("ok"), msg=after_resolve)
-        self.assertEqual((after_resolve.get("status_counts") or {}).get("open"), 0)
+        self.assertFalse(resolved.get("ok"), msg=resolved)
+        self.assertEqual((resolved.get("error") or {}).get("code"), "E_ENV_TOOL")
 
         reopened = self._dispatch(
             instance_json=instance_json,
@@ -369,7 +373,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="reopen",
             args={"comment_id": (root.get("comment") or {}).get("id")},
         )
-        self.assertTrue(reopened.get("ok"), msg=reopened)
+        self.assertFalse(reopened.get("ok"), msg=reopened)
+        self.assertEqual((reopened.get("error") or {}).get("code"), "E_ENV_TOOL")
+
         after_reopen = self._dispatch(
             instance_json=instance_json,
             instance_id="inst-dev-cmt",
@@ -454,7 +460,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_archived_artifact_rejects_comment_add(self) -> None:
         artifact_id = self._seed_published_artifact(artifact_id="art-cmt-archived")
-        env_store.archive_artifact(artifact_id, "pm")
+        env_store.update_track("track-comment", {"archived_at": "2026-05-18T10:00:00+08:00"})
         instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
 
         add = self._dispatch(
@@ -466,7 +472,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"target_type": "artifact", "target_id": artifact_id, "content": "no archived comments"},
         )
         self.assertFalse(add.get("ok"), msg=add)
-        self.assertEqual(add.get("permission_boundary"), "artifact.status")
+        self.assertEqual(add.get("permission_boundary"), "track.lifecycle_status")
 
 
 if __name__ == "__main__":

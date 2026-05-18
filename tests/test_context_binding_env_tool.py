@@ -95,8 +95,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             summary="artifact summary v1",
             body="artifact body v1",
             template="note",
-            status="published",
-            published_to_track="track-context-active",
+            status="draft",
+            published_to_track=None,
             supersedes_artifact_id=None,
             created_by="dev",
             authors=["dev"],
@@ -115,8 +115,25 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             authors=None,
             source_refs=[{"type": "note", "label": "context"}],
         )
+        env_store.publish_track_material(
+            track_id="track-context-active",
+            artifact_id="art-task-dev-context-note-r2",
+            label="Context",
+            from_buddy="dev",
+            summary="artifact summary v2",
+        )
 
-        env_store.create_track("track-context-archived", "Archived Track", owner_buddy="pm", status="archived")
+        env_store.create_track(
+            "track-context-archived",
+            "Archived Track",
+            owner_buddy="pm",
+            state="done",
+            health="ok",
+        )
+        env_store.update_track(
+            "track-context-archived",
+            {"archived_at": "2026-05-18T10:00:00+08:00"},
+        )
         env_store.create_task("task-dev-archived", "Archived task", buddy="dev", track_id="track-context-archived")
         env_store.create_artifact_revision(
             artifact_id="art-task-dev-archived-r1",
@@ -156,7 +173,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             if not isinstance(row, dict):
                 continue
             self.assertIn("owner_buddy", row)
-            self.assertIn(row.get("active_buddy_role"), {"owner", "observer"})
+            self.assertIn(row.get("active_buddy_role"), {"owner", "observer", "collaborator"})
             self.assertNotIn("current_buddy", row)
             self.assertNotIn("next_buddy", row)
             self.assertNotIn("participant", row)

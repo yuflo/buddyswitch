@@ -146,7 +146,7 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual({tool: set(actions) for tool, actions in router._TOOL_ACTIONS.items()}, expected)
         self.assertNotIn("handoff", dispatch_actions)
 
-    def test_artifact_router_surface_uses_publication_actions(self) -> None:
+    def test_artifact_router_surface_uses_revision_actions(self) -> None:
         contracts = importlib.import_module("env.tools.contracts")
         artifact_spec = contracts.get_tool_spec("artifact")
         self.assertIsInstance(artifact_spec, dict)
@@ -155,12 +155,10 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         actions = {row["name"] for row in artifact_spec["actions"]}
         self.assertEqual(
             actions,
-            {"list", "get", "validate_payload", "create_revision", "publish", "archive", "update_metadata"},
+            {"get", "create_revision", "update_metadata"},
         )
 
         payload_fields = {row["name"]: set(row.get("payload_fields", [])) for row in artifact_spec["actions"]}
-        self.assertEqual(payload_fields["publish"], {"artifact_id", "track_id"})
-        self.assertEqual(payload_fields["archive"], {"artifact_id"})
         self.assertIn("template", payload_fields["create_revision"])
         self.assertIn("body", payload_fields["create_revision"])
         self.assertIn("published_to_track", payload_fields["create_revision"])
@@ -168,7 +166,7 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("kind", payload_fields["create_revision"])
         self.assertNotIn("content", payload_fields["create_revision"])
 
-    def test_cli_excludes_handoff_resource_and_track_advance(self) -> None:
+    def test_cli_exposes_final_track_operations_without_handoff(self) -> None:
         import subprocess
 
         handoff = subprocess.run(
@@ -199,6 +197,9 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertEqual(track_help.returncode, 0, msg=track_help.stderr)
         self.assertNotIn("advance", track_help.stdout)
+        self.assertIn("open", track_help.stdout)
+        self.assertIn("add-material", track_help.stdout)
+        self.assertIn("add-proof", track_help.stdout)
 
         artifact_help = subprocess.run(
             ["python3", "scripts/env/client.py", "artifact", "--help"],
@@ -208,8 +209,8 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             check=False,
         )
         self.assertEqual(artifact_help.returncode, 0, msg=artifact_help.stderr)
-        self.assertIn("publish", artifact_help.stdout)
-        self.assertIn("archive", artifact_help.stdout)
+        self.assertNotIn("publish", artifact_help.stdout)
+        self.assertNotIn("archive", artifact_help.stdout)
 
     def test_rejects_malformed_envelope_without_state_mutation(self) -> None:
         instance_json = self._instance_json()

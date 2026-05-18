@@ -151,7 +151,13 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             buddy="pm",
             tool="track",
             action="create",
-            args={"track_id": "track-response", "title": "Response"},
+            args={
+                "track_id": "track-response",
+                "title": "Response",
+                "outcome": "Response outcome",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
+            },
         )
         self._assert_success_contract(track)
 

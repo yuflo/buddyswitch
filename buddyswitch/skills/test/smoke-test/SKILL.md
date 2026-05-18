@@ -63,7 +63,7 @@ Use `artifact-tool` when this skill produces a durable artifact:
 - `summary`: short downstream selection summary
 - `body`: include `test_scope`, `checks_run`, `passed_items`, `failed_items`, `blocked_items`, `reproduction_notes`, and `readiness` as markdown
 
-After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
+After `artifact.create_revision` returns `ok=true`, use `track.open` and `artifact.get` to verify shared visibility when needed.
 Use optional `working_notes` for concise reasoning or verification notes.
 Use optional `task_id` only as association metadata for an explicitly selected task.
 

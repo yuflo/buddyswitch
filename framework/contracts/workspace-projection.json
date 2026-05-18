@@ -44,24 +44,36 @@
       "key_order": [
         "id",
         "title",
-        "status",
+        "outcome",
+        "state",
+        "health",
         "owner_buddy",
+        "appetite",
+        "now",
         "shared_materials",
+        "updates",
+        "close_proof",
         "comment_ids",
-        "summary",
         "updated_at",
+        "archived_at",
         "open_comment_count",
         "resolved_comment_count"
       ],
       "field_types": {
         "id": "string",
         "title": "string",
-        "status": "string",
+        "outcome": "string",
+        "state": "string",
+        "health": "string",
         "owner_buddy": "string",
+        "appetite": "string",
+        "now": "object",
         "shared_materials": "artifact-summary-array",
+        "updates": "object-array",
+        "close_proof": "artifact-summary-array",
         "comment_ids": "string-array",
-        "summary": "string",
         "updated_at": "string",
+        "archived_at": "string-or-null",
         "open_comment_count": "integer",
         "resolved_comment_count": "integer"
       }
@@ -145,6 +157,7 @@
   },
   "derived_invariants": {
     "track_shared_material_source": "current published artifacts on the track",
+    "track_close_proof_source": "published proof references on the track page",
     "task_objects_are_private_execution_state": true,
     "comments_are_derived_not_embedded_in_artifact_body": true,
     "run_fields_removed": true

@@ -7,6 +7,8 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 ## Required Behavior
 
 - Start discovery from `search open-browser` and continue in `chrome-devtools-cockpit`.
+- Use `track.open` as the shared publication context before cross-buddy handoff decisions.
+- Publish market-facing evidence outputs through `track.add_material` / `track.add_proof` when they should become shared track artifacts.
 - Write market deliverables via `artifact.create_revision` using `template` + markdown `body`; publication authority comes from `published_to_track`, not task relation.
 - Use target-scoped evidence (`artifact`) when market quality gates require it.
 - Use buddybox for private research exports, logs, or local reports; use artifact for market deliverables PM, Design, or Dev must read.

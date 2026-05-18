@@ -278,7 +278,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(opened.get("ok"), msg=opened)
         refs = opened["track"]["shared_materials"]
         self.assertEqual(len(refs), 1)
-        self.assertEqual(refs[0]["kind"], "prd")
+        self.assertEqual(refs[0]["kind"], "brief")
         self.assertEqual(refs[0]["label"], "PRD")
 
     def test_design_publishes_material_without_task_relation(self) -> None:
@@ -394,10 +394,10 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="create_revision",
             args={
                 "artifact_id": "art-cross-track-material-r1",
-                "kind": "prd",
                 "title": "Cross track material",
                 "summary": "draft",
-                "content": {"body": "draft"},
+                "template": "brief",
+                "body": "draft",
             },
         )
         self.assertTrue(draft.get("ok"), msg=draft)
@@ -448,7 +448,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(artifact, dict)
         assert isinstance(artifact, dict)
         self.assertEqual(artifact.get("published_to_track"), "track-material-a")
-        self.assertEqual(artifact.get("publication_role"), "material")
+        self.assertEqual(artifact.get("template"), "brief")
 
     def test_add_proof_rejects_cross_track_republish_without_state_pollution(self) -> None:
         instance_json = self._pm_instance()
@@ -463,10 +463,10 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="create_revision",
             args={
                 "artifact_id": "art-cross-track-proof-r1",
-                "kind": "smoke-test",
                 "title": "Cross track proof",
                 "summary": "draft",
-                "content": {"result": "pass"},
+                "template": "proof",
+                "body": "pass",
             },
         )
         self.assertTrue(draft.get("ok"), msg=draft)
@@ -517,7 +517,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(artifact, dict)
         assert isinstance(artifact, dict)
         self.assertEqual(artifact.get("published_to_track"), "track-proof-a")
-        self.assertEqual(artifact.get("publication_role"), "proof")
+        self.assertEqual(artifact.get("template"), "proof")
 
     def test_add_update_and_add_proof(self) -> None:
         pm_instance = self._pm_instance()
@@ -753,10 +753,10 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="create_revision",
             args={
                 "artifact_id": "art-private-draft-r1",
-                "kind": "prd",
                 "title": "Private draft",
                 "summary": "private",
-                "content": {"body": "private"},
+                "template": "brief",
+                "body": "private",
             },
         )
         self.assertTrue(private_draft.get("ok"), msg=private_draft)

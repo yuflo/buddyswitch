@@ -431,7 +431,6 @@ def _create_material_artifact(
     args: dict[str, Any],
     action: str,
     track_id: str,
-    publication_role: str,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     artifact_id = args.get("artifact_id")
     if isinstance(artifact_id, str) and artifact_id.strip():
@@ -470,16 +469,6 @@ def _create_material_artifact(
                     message=(
                         f"artifact '{artifact_id.strip()}' is already published to track '{published_to_track}' "
                         f"and cannot be republished to '{track_id}'"
-                    ),
-                )
-            role = artifact.get("publication_role")
-            if role != publication_role:
-                return None, _reject_payload(
-                    action=action,
-                    active_buddy=active_buddy,
-                    message=(
-                        f"artifact '{artifact_id.strip()}' is already published on track '{track_id}' as role '{role}' "
-                        f"and cannot be republished as {publication_role}"
                     ),
                 )
         return artifact, None
@@ -537,7 +526,6 @@ def add_material_to_track(*, args: dict[str, Any], context: TrackServiceContext)
         args=args,
         action=action,
         track_id=track_id,
-        publication_role="material",
     )
     if artifact_error is not None:
         return artifact_error
@@ -704,7 +692,6 @@ def add_proof_to_track(*, args: dict[str, Any], context: TrackServiceContext) ->
         args=args,
         action=action,
         track_id=track_id,
-        publication_role="proof",
     )
     if artifact_error is not None:
         return artifact_error

@@ -216,6 +216,12 @@ def build_track_views(
     comment_status_by_target: dict[tuple[str, str], dict[str, int]],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    artifact_by_id: dict[str, dict[str, Any]] = {}
+    for artifact in artifacts:
+        artifact_id = artifact.get("id")
+        if isinstance(artifact_id, str) and artifact_id:
+            artifact_by_id[artifact_id] = artifact
+
     artifact_rows_by_track: dict[str, list[dict[str, Any]]] = {}
     for artifact in artifacts:
         status = artifact.get("status")
@@ -252,17 +258,58 @@ def build_track_views(
                     "resolved_comment_count": counts.get("resolved_comment_count", 0),
                 }
             )
+        close_proof: list[dict[str, Any]] = []
+        for ref in track.get("close_proof", []):
+            if not isinstance(ref, dict):
+                continue
+            if ref.get("type") != "artifact":
+                continue
+            artifact_id = ref.get("artifact_id")
+            if not isinstance(artifact_id, str) or not artifact_id:
+                continue
+            artifact = artifact_by_id.get(artifact_id)
+            counts = comment_status_by_target.get(("artifact", artifact_id), {"open_comment_count": 0, "resolved_comment_count": 0})
+            close_proof.append(
+                {
+                    "artifact_id": artifact_id,
+                    "title": artifact.get("title") if isinstance(artifact, dict) else None,
+                    "summary": ref.get("summary", ""),
+                    "template": artifact.get("template") if isinstance(artifact, dict) else None,
+                    "status": artifact.get("status") if isinstance(artifact, dict) else None,
+                    "published_to_track": artifact.get("published_to_track") if isinstance(artifact, dict) else track_id,
+                    "revision": artifact.get("revision") if isinstance(artifact, dict) else None,
+                    "is_current": artifact.get("is_current") if isinstance(artifact, dict) else None,
+                    "supersedes_artifact_id": artifact.get("supersedes_artifact_id") if isinstance(artifact, dict) else None,
+                    "label": ref.get("label"),
+                    "kind": ref.get("kind"),
+                    "from_buddy": ref.get("from_buddy"),
+                    "published_at": ref.get("published_at"),
+                    "updated_at": artifact.get("updated_at") if isinstance(artifact, dict) else None,
+                    "open_comment_count": counts.get("open_comment_count", 0),
+                    "resolved_comment_count": counts.get("resolved_comment_count", 0),
+                }
+            )
+        close_proof.sort(
+            key=lambda row: (str(row.get("published_at") or ""), str(row.get("artifact_id") or "")),
+            reverse=True,
+        )
         comment_counts = comment_status_by_target.get(("track", track_id), {"open_comment_count": 0, "resolved_comment_count": 0})
         rows.append(
             {
                 "id": track_id,
                 "title": track["title"],
-                "status": track["status"],
+                "outcome": track.get("outcome", ""),
+                "state": track.get("state"),
+                "health": track.get("health"),
                 "owner_buddy": track["owner_buddy"],
+                "appetite": track.get("appetite", ""),
+                "now": track.get("now"),
                 "shared_materials": shared_materials,
+                "updates": [row for row in track.get("updates", []) if isinstance(row, dict)],
+                "close_proof": close_proof,
                 "comment_ids": list(comment_ids_by_target.get(("track", track_id), [])),
-                "summary": track.get("summary", ""),
                 "updated_at": track["updated_at"],
+                "archived_at": track.get("archived_at"),
                 "open_comment_count": comment_counts.get("open_comment_count", 0),
                 "resolved_comment_count": comment_counts.get("resolved_comment_count", 0),
             }

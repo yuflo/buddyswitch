@@ -87,7 +87,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"artifact_id": "art-pm-owner-scope-r1", "summary": "rewrite"},
         )
         self._assert_rejection_contract(payload)
-        self.assertEqual(payload["permission_boundary"], "artifact.authors")
+        self.assertEqual(payload["permission_boundary"], "artifact.buddy_scope")
 
     def test_evidence_target_rejection_has_structured_feedback(self) -> None:
         payload = self._dispatch(
@@ -151,7 +151,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "track-feedback-foreign",
             "Foreign scope track",
             owner_buddy="pm",
-            summary="scope",
+            outcome="scope",
         )
         env_store.create_task(
             "task-pm-feedback-foreign",

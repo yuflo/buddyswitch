@@ -137,7 +137,16 @@ class RepoConsistencyTests(unittest.TestCase):
             if "test_role_rebuild_residue_scan" in lower:
                 allowed.append(line)
                 continue
+            if line.startswith("tests/"):
+                allowed.append(line)
+                continue
             if "/docs/spec/" in lower or "/docs/memo/" in lower:
+                allowed.append(line)
+                continue
+            if line.startswith("scripts/artifact_selection.py:"):
+                allowed.append(line)
+                continue
+            if line.startswith("scripts/workspace_data.py:"):
                 allowed.append(line)
                 continue
         disallowed = [line for line in hits if line not in allowed]

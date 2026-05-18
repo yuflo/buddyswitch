@@ -438,14 +438,18 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     if _LEGACY_SOURCE_RUN in artifact:
         raise ValueError("legacy artifact run lineage field is retired; use source_refs")
     forbidden = sorted(field for field in artifact if field in _LEGACY_ARTIFACT_FIELDS)
-    allow_legacy = (
-        "task_id" in artifact
-        or "kind" in artifact
-        or "content" in artifact
-        or "buddy" in artifact
+    legacy_fields_present = any(field in artifact for field in ("task_id", "kind", "content", "buddy"))
+    canonical_fields_present = any(
+        field in artifact for field in ("body", "template", "status", "published_to_track", "authors")
     )
-    if forbidden and not allow_legacy:
-        raise ValueError(f"legacy artifact fields are retired: {', '.join(forbidden)}")
+    allow_legacy = legacy_fields_present and not canonical_fields_present
+    if forbidden:
+        if not allow_legacy:
+            raise ValueError(f"legacy artifact fields are retired: {', '.join(forbidden)}")
+        legacy_normalizable = {"task_id", "kind", "content"}
+        unsupported_legacy = [field for field in forbidden if field not in legacy_normalizable]
+        if unsupported_legacy:
+            raise ValueError(f"legacy artifact fields are retired: {', '.join(unsupported_legacy)}")
 
     artifact_id = require_id(artifact.get("id", ""), "artifact.id")
     title = _require_non_empty_text(artifact.get("title"), "artifact.title")
@@ -570,18 +574,55 @@ def validate_message(message: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
-    forbidden_fields = {"status", "resolved", "resolved_at", "task_id", "edit_history", "attachment"}
+    forbidden_fields = {"resolved", "resolved_at", "task_id", "edit_history", "attachment"}
     forbidden = sorted(key for key in comment if key in forbidden_fields)
     if forbidden:
         raise ValueError(f"unsupported comment fields: {', '.join(forbidden)}")
 
     comment_id = require_id(comment.get("id", ""), "comment.id")
     target_type = comment.get("target_type")
-    if target_type not in {"track", "artifact"}:
-        raise ValueError("comment.target_type must be 'track' or 'artifact'")
+    if target_type not in {"track", "artifact", "artifact_section"}:
+        raise ValueError("comment.target_type must be one of 'track'|'artifact'|'artifact_section'")
     target_id = require_id(comment.get("target_id"), "comment.target_id")
-    author_buddy = _require_non_empty_text(comment.get("author_buddy"), "comment.author_buddy")
+    by_buddy = _require_non_empty_text(comment.get("by_buddy") or comment.get("author_buddy"), "comment.by_buddy")
     content = _require_non_empty_text(comment.get("content"), "comment.content")
+
+    thread_id_raw = comment.get("thread_id")
+    if thread_id_raw is None:
+        thread_id = comment_id
+    else:
+        thread_id = require_id(_require_non_empty_text(thread_id_raw, "comment.thread_id"), "comment.thread_id")
+
+    status = _require_non_empty_text(comment.get("status", "open"), "comment.status")
+    if status not in {"open", "resolved"}:
+        raise ValueError("comment.status must be one of open|resolved")
+
+    mentions_raw = comment.get("mentions", [])
+    if mentions_raw is None:
+        mentions: list[str] = []
+    else:
+        if not isinstance(mentions_raw, list):
+            raise ValueError("comment.mentions must be a list when provided")
+        mentions = []
+        seen: set[str] = set()
+        for idx, row in enumerate(mentions_raw):
+            buddy = _require_non_empty_text(row, f"comment.mentions[{idx}]")
+            if buddy in seen:
+                continue
+            seen.add(buddy)
+            mentions.append(buddy)
+
+    anchor = comment.get("anchor")
+    if anchor is not None:
+        anchor = _require_non_empty_text(anchor, "comment.anchor")
+
+    artifact_revision_id = comment.get("artifact_revision_id")
+    if artifact_revision_id is not None:
+        artifact_revision_id = require_id(
+            _require_non_empty_text(artifact_revision_id, "comment.artifact_revision_id"),
+            "comment.artifact_revision_id",
+        )
+
     reply_to = comment.get("reply_to")
     if reply_to is not None:
         require_id(reply_to, "comment.reply_to")
@@ -591,8 +632,13 @@ def validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
         "id": comment_id,
         "target_type": target_type,
         "target_id": target_id,
-        "author_buddy": author_buddy,
+        "by_buddy": by_buddy,
         "content": content,
+        "thread_id": thread_id,
+        "status": status,
+        "mentions": mentions,
+        "anchor": anchor,
+        "artifact_revision_id": artifact_revision_id,
         "reply_to": reply_to,
         "created_at": created_at,
     }
@@ -623,6 +669,35 @@ def list_artifacts() -> list[dict[str, Any]]:
             rows.append(validate_artifact(_read_json(path)))
     rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
     return rows
+
+
+def artifact_revision_chain(artifact_id: str) -> list[dict[str, Any]]:
+    current = get_artifact(artifact_id)
+    if current is None:
+        return []
+    by_id = {
+        row.get("id"): row
+        for row in list_artifacts()
+        if isinstance(row, dict) and isinstance(row.get("id"), str)
+    }
+    chain: list[dict[str, Any]] = []
+    visited: set[str] = set()
+    while isinstance(current, dict):
+        current_id = current.get("id")
+        if not isinstance(current_id, str) or not current_id or current_id in visited:
+            break
+        chain.append(current)
+        visited.add(current_id)
+        supersedes_id = current.get("supersedes_artifact_id")
+        if not isinstance(supersedes_id, str) or not supersedes_id:
+            break
+        previous = by_id.get(supersedes_id)
+        if not isinstance(previous, dict):
+            previous = get_artifact(supersedes_id)
+        if not isinstance(previous, dict):
+            break
+        current = previous
+    return chain
 
 
 def build_track_artifact_index(track_id: str | None) -> dict[str, Any] | None:
@@ -1001,6 +1076,10 @@ def publish_track_material(
             next_row["current"] = False
         next_refs.append(next_row)
 
+    existing_supersedes = artifact.get("supersedes_artifact_id")
+    if supersedes is None and isinstance(existing_supersedes, str) and existing_supersedes:
+        supersedes = existing_supersedes
+
     artifact_revision = int(artifact.get("revision", 1))
     if supersedes:
         previous = get_artifact(supersedes)
@@ -1253,19 +1332,45 @@ def create_comment(
     *,
     target_type: str,
     target_id: str,
-    author_buddy: str,
+    by_buddy: str | None = None,
+    author_buddy: str | None = None,
     content: str,
     reply_to: str | None = None,
+    mentions: list[str] | None = None,
+    thread_id: str | None = None,
+    status: str = "open",
+    anchor: str | None = None,
+    artifact_revision_id: str | None = None,
 ) -> dict[str, Any]:
-    if target_type not in {"track", "artifact"}:
-        raise ValueError("target_type must be 'track' or 'artifact'")
+    if target_type not in {"track", "artifact", "artifact_section"}:
+        raise ValueError("target_type must be one of 'track'|'artifact'|'artifact_section'")
     require_id(target_id, "target_id")
-    if not isinstance(author_buddy, str) or not author_buddy.strip():
-        raise ValueError("author_buddy must be a non-empty string")
+    author = by_buddy if isinstance(by_buddy, str) and by_buddy.strip() else author_buddy
+    if not isinstance(author, str) or not author.strip():
+        raise ValueError("by_buddy must be a non-empty string")
     if not isinstance(content, str) or not content.strip():
         raise ValueError("content must be a non-empty string")
     if reply_to is not None:
         require_id(reply_to, "reply_to")
+    if thread_id is not None:
+        require_id(thread_id, "thread_id")
+    if status not in {"open", "resolved"}:
+        raise ValueError("status must be one of open|resolved")
+    if anchor is not None and (not isinstance(anchor, str) or not anchor.strip()):
+        raise ValueError("anchor must be a non-empty string when provided")
+    if artifact_revision_id is not None:
+        require_id(artifact_revision_id, "artifact_revision_id")
+    normalized_mentions: list[str] = []
+    if mentions is not None:
+        if not isinstance(mentions, list):
+            raise ValueError("mentions must be a list when provided")
+        seen_mentions: set[str] = set()
+        for idx, row in enumerate(mentions):
+            buddy = _require_non_empty_text(row, f"mentions[{idx}]")
+            if buddy in seen_mentions:
+                continue
+            seen_mentions.add(buddy)
+            normalized_mentions.append(buddy)
 
     comment_id = f"comment-{uuid.uuid4().hex[:12]}"
     require_id(comment_id, "comment id")
@@ -1273,9 +1378,55 @@ def create_comment(
         "id": comment_id,
         "target_type": target_type,
         "target_id": target_id,
-        "author_buddy": author_buddy.strip(),
+        "by_buddy": author.strip(),
         "content": content.strip(),
+        "thread_id": thread_id or comment_id,
+        "status": status,
+        "mentions": normalized_mentions,
+        "anchor": anchor.strip() if isinstance(anchor, str) else None,
+        "artifact_revision_id": artifact_revision_id,
         "reply_to": reply_to,
         "created_at": now_iso(),
     }
     return save_comment(comment)
+
+
+def comments_for_target(target_type: str, target_id: str) -> list[dict[str, Any]]:
+    if target_type not in {"track", "artifact", "artifact_section"}:
+        raise ValueError("target_type must be one of 'track'|'artifact'|'artifact_section'")
+    require_id(target_id, "target_id")
+
+    matched: list[dict[str, Any]] = []
+    for row in list_comments():
+        row_type = row.get("target_type")
+        row_target_id = row.get("target_id")
+        if row_target_id != target_id:
+            continue
+        if row_type == target_type:
+            matched.append(row)
+            continue
+        if target_type == "artifact" and row_type == "artifact_section":
+            matched.append(row)
+    matched.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
+    return matched
+
+
+def update_comment_thread_status(thread_id: str, status: str) -> list[dict[str, Any]]:
+    require_id(thread_id, "thread_id")
+    if status not in {"open", "resolved"}:
+        raise ValueError("status must be one of open|resolved")
+
+    rows = list_comments()
+    updated: list[dict[str, Any]] = []
+    for row in rows:
+        row_thread_id = row.get("thread_id")
+        if row_thread_id != thread_id:
+            continue
+        patched = dict(row)
+        patched["status"] = status
+        patched = save_comment(patched)
+        updated.append(patched)
+    if not updated:
+        raise ValueError(f"thread not found: {thread_id}")
+    updated.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
+    return updated

@@ -62,7 +62,7 @@ Use `artifact-tool` when this skill produces a durable artifact:
 - `summary`: short downstream selection summary
 - `body`: include `design_goal`, `flow_or_screen_summary`, `interaction_notes`, `assets_or_preview_refs`, `artifact_notes`, and `open_questions` as markdown
 
-After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
+After `artifact.create_revision` returns `ok=true`, use `track.open` and `artifact.get` to verify shared visibility when needed.
 Use optional `working_notes` for concise reasoning or verification notes.
 Use optional `task_id` only as association metadata for an explicitly selected task.
 
