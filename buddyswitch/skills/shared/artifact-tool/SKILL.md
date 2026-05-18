@@ -13,6 +13,24 @@ description: Use when you need artifact summaries, full artifact reads by id, ar
 - Broker method: `env.tool`
 - Operations: `get`, `create-revision`, `update-metadata`
 
+## CLI Payload Rule
+- `--payload` takes one JSON object string.
+- Do not pass a filesystem path to `--payload`.
+- For long markdown bodies, generate JSON with `python3 - <<'PY'` and pass it via command substitution.
+
+```bash
+python3 scripts/env/client.py artifact create-revision --payload "$(python3 - <<'PY'
+import json
+print(json.dumps({
+  "title": "Design Direction",
+  "summary": "Draft",
+  "template": "design",
+  "body": "# Design Direction\n\nLong markdown body."
+}))
+PY
+)"
+```
+
 ## Workflow Notes
 - `get` returns one full artifact body by `artifact_id`.
 - `create-revision` creates an active-buddy private draft/revision only.

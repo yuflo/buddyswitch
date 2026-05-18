@@ -21,6 +21,16 @@ The CLI entry point is:
 python3 scripts/env/client.py comment <operation>
 ```
 
+## CLI Payload Rule
+
+- `--payload` takes one JSON object string.
+- Do not pass a filesystem path to `--payload`.
+- For long markdown bodies, generate JSON with `python3 - <<'PY'` and pass it via command substitution.
+
+```bash
+python3 scripts/env/client.py comment add --payload '{"target_type":"track","target_id":"track-alpha","content":"Design direction is ready."}'
+```
+
 ## Operations
 
 ### comment.add

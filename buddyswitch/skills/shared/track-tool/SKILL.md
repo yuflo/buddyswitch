@@ -15,6 +15,15 @@ description: Use when you need shared track-page context, PM lifecycle actions, 
 - Broker method: `env.tool`
 - Operations: `create`, `list`, `open`, `update-now`, `add-material`, `add-update`, `add-proof`, `archive`
 
+## CLI Payload Rule
+- `--payload` takes one JSON object string.
+- Do not pass a filesystem path to `--payload`.
+- For long markdown bodies, generate JSON with `python3 - <<'PY'` and pass it via command substitution.
+
+```bash
+python3 scripts/env/client.py track add-material --payload '{"track_id":"track-alpha","artifact_id":"art-alpha","label":"Design Direction","summary":"Current design direction."}'
+```
+
 ## Workflow Notes
 - Shared collaboration path is `track.open -> shared_materials -> artifact.get`.
 - `add-material` and `add-proof` publish existing draft `artifact_id` values.

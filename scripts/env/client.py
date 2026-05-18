@@ -47,15 +47,27 @@ def _error_payload(code: str, message: str, extra: dict[str, Any] | None = None)
     return payload
 
 
-def _load_json_object(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+def _load_json_object(raw: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"--payload must be a JSON object string: {exc.msg} at char {exc.pos}") from exc
     if not isinstance(payload, dict):
-        raise ValueError(f"payload file must contain a JSON object: {path}")
+        raise ValueError("--payload must be a JSON object string")
     return payload
 
 
 def _operation_to_action(operation: str) -> str:
     return operation.replace("-", "_")
+
+
+def _add_payload_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--payload",
+        required=True,
+        metavar="JSON_OBJECT",
+        help="JSON object string to send as env.tool args; do not pass a file path.",
+    )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -65,30 +77,30 @@ def _parse_args() -> argparse.Namespace:
     task = sub.add_parser("task", help="Task env tool operations")
     task_sub = task.add_subparsers(dest="operation", required=True)
     create = task_sub.add_parser("create", help="Create active-buddy task")
-    create.add_argument("--payload", required=True, type=Path)
+    _add_payload_argument(create)
     task_sub.add_parser("list", help="List active-buddy tasks")
     get = task_sub.add_parser("get", help="Get active-buddy task by id")
     get.add_argument("--task-id", required=True)
     update = task_sub.add_parser("update", help="Update active-buddy task fields")
-    update.add_argument("--payload", required=True, type=Path)
+    _add_payload_argument(update)
     archive = task_sub.add_parser("archive", help="Archive active-buddy task")
     archive.add_argument("--task-id", required=True)
 
     track = sub.add_parser("track", help="Track env tool operations")
     track_sub = track.add_subparsers(dest="operation", required=True)
     create_track = track_sub.add_parser("create", help="Create PM-owned track page")
-    create_track.add_argument("--payload", required=True, type=Path)
+    _add_payload_argument(create_track)
     track_sub.add_parser("list", help="List non-archived track page summaries")
     open_track = track_sub.add_parser("open", help="Open one track page by id")
     open_track.add_argument("--track-id", required=True)
     update_now = track_sub.add_parser("update-now", help="Update now/state/health on track page")
-    update_now.add_argument("--payload", required=True, type=Path)
+    _add_payload_argument(update_now)
     add_material = track_sub.add_parser("add-material", help="Publish an existing draft artifact as current track material")
-    add_material.add_argument("--payload", required=True, type=Path)
+    _add_payload_argument(add_material)
     add_update = track_sub.add_parser("add-update", help="Append one track timeline update")
-    add_update.add_argument("--payload", required=True, type=Path)
+    _add_payload_argument(add_update)
     add_proof = track_sub.add_parser("add-proof", help="Publish an existing draft artifact as close proof")
-    add_proof.add_argument("--payload", required=True, type=Path)
+    _add_payload_argument(add_proof)
     archive_track = track_sub.add_parser("archive", help="Archive PM-owned track")
     archive_track.add_argument("--track-id", required=True)
 
@@ -97,9 +109,9 @@ def _parse_args() -> argparse.Namespace:
     get_artifact = artifact_sub.add_parser("get", help="Get readable artifact by id")
     get_artifact.add_argument("--artifact-id", required=True)
     create_artifact = artifact_sub.add_parser("create-revision", help="Create a private draft/revision artifact")
-    create_artifact.add_argument("--payload", required=True, type=Path)
+    _add_payload_argument(create_artifact)
     update_artifact = artifact_sub.add_parser("update-metadata", help="Update artifact title/summary/source refs")
-    update_artifact.add_argument("--payload", required=True, type=Path)
+    _add_payload_argument(update_artifact)
 
     context_parser = sub.add_parser("context", help="Context env operations")
     context_sub = context_parser.add_subparsers(dest="operation", required=True)
@@ -124,7 +136,7 @@ def _parse_args() -> argparse.Namespace:
     buddybox_read.add_argument("--logical-name", required=True)
     buddybox_read.add_argument("--encoding")
     buddybox_write = buddybox_sub.add_parser("write", help="Write buddybox file")
-    buddybox_write.add_argument("--payload", required=True, type=Path)
+    _add_payload_argument(buddybox_write)
     buddybox_delete = buddybox_sub.add_parser("delete", help="Delete buddybox file")
     buddybox_delete.add_argument("--logical-name", required=True)
 
@@ -142,14 +154,14 @@ def _parse_args() -> argparse.Namespace:
     message = sub.add_parser("message", help="Message env tool operations")
     message_sub = message.add_subparsers(dest="operation", required=True)
     message_send = message_sub.add_parser("send", help="Send a direct message to a buddy")
-    message_send.add_argument("--payload", required=True, type=Path)
+    _add_payload_argument(message_send)
     message_list = message_sub.add_parser("list", help="List active-buddy inbox messages")
     message_list.add_argument("--buddy")
 
     comment = sub.add_parser("comment", help="Comment env tool operations")
     comment_sub = comment.add_subparsers(dest="operation", required=True)
     comment_add = comment_sub.add_parser("add", help="Add a comment to a track or artifact")
-    comment_add.add_argument("--payload", required=True, type=Path)
+    _add_payload_argument(comment_add)
     comment_list = comment_sub.add_parser("list", help="List comments on a target")
     comment_list.add_argument("--target-type", required=True)
     comment_list.add_argument("--target-id", required=True)

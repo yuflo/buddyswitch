@@ -178,6 +178,31 @@ class RepoConsistencyTests(unittest.TestCase):
             disallowed.append(line)
         self.assertEqual(disallowed, [], msg="\n".join(disallowed))
 
+    def test_active_cli_guidance_has_no_payload_file_route(self) -> None:
+        targets = [
+            "AGENTS.md",
+            "buddyswitch/skills",
+            "framework/contracts",
+            "tools/launcher/assets/buddies",
+            "scripts/env/client.py",
+        ]
+        completed = subprocess.run(
+            [
+                "rg",
+                "-uuu",
+                "-n",
+                "payload file|--payload /tmp|--payload <json-file>|--payload <file>|PAYLOAD_JSON_FILE",
+                *targets,
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
 
 if __name__ == "__main__":
     unittest.main()

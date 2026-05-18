@@ -212,6 +212,33 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("publish", artifact_help.stdout)
         self.assertNotIn("archive", artifact_help.stdout)
 
+    def test_cli_payload_help_requires_inline_json_object_string(self) -> None:
+        import subprocess
+
+        payload_help_cases = [
+            ["task", "create", "--help"],
+            ["track", "add-material", "--help"],
+            ["artifact", "create-revision", "--help"],
+            ["buddybox", "write", "--help"],
+            ["message", "send", "--help"],
+            ["comment", "add", "--help"],
+        ]
+
+        for args in payload_help_cases:
+            with self.subTest(args=args):
+                completed = subprocess.run(
+                    ["python3", "scripts/env/client.py", *args],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+                self.assertIn("--payload JSON_OBJECT", completed.stdout)
+                self.assertIn("JSON object string", completed.stdout)
+                self.assertNotIn("--payload PAYLOAD", completed.stdout)
+                self.assertNotIn("payload file", completed.stdout.lower())
+
     def test_rejects_malformed_envelope_without_state_mutation(self) -> None:
         instance_json = self._instance_json()
         self._seed_task(task_id="task-dev-owned", buddy="dev", title="Owned", summary="baseline")

@@ -13,6 +13,15 @@ description: Use when you need to create, list, read, update, or archive explici
 - Broker method: `env.tool`
 - Operations: `create`, `list`, `get`, `update`, `archive`
 
+## CLI Payload Rule
+- `--payload` takes one JSON object string.
+- Do not pass a filesystem path to `--payload`.
+- For long markdown bodies, generate JSON with `python3 - <<'PY'` and pass it via command substitution.
+
+```bash
+python3 scripts/env/client.py task create --payload '{"task_id":"task-alpha","title":"Review design direction","buddy":"design","summary":"Review shared material."}'
+```
+
 ## Workflow Notes
 - Use explicit `task_id` values from runtime responses; there is no hidden current-task binding in runless mode.
 - `task.track_id` is an optional private organization hint and does not grant cross-buddy artifact access.

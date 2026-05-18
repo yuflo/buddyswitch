@@ -17,9 +17,14 @@ description: Use when the active buddy needs private files such as drafts, proto
 python3 scripts/env/client.py buddybox desc
 python3 scripts/env/client.py buddybox list --logical-name prototypes --recursive
 python3 scripts/env/client.py buddybox read --logical-name prototypes/landing.html
-python3 scripts/env/client.py buddybox write --payload /tmp/buddybox-write.json
+python3 scripts/env/client.py buddybox write --payload '{"logical_name":"prototypes/landing.html","content":"<!doctype html>","content_type":"text/html"}'
 python3 scripts/env/client.py buddybox delete --logical-name tmp/obsolete.txt
 ```
+
+## CLI Payload Rule
+- `--payload` takes one JSON object string.
+- Do not pass a filesystem path to `--payload`.
+- For long markdown bodies, generate JSON with `python3 - <<'PY'` and pass it via command substitution.
 
 ## Logical Name Rules
 - Use `logical_name` relative to the active buddy private file capability.
