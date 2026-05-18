@@ -161,7 +161,7 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         payload_fields = {row["name"]: set(row.get("payload_fields", [])) for row in artifact_spec["actions"]}
         self.assertIn("template", payload_fields["create_revision"])
         self.assertIn("body", payload_fields["create_revision"])
-        self.assertIn("published_to_track", payload_fields["create_revision"])
+        self.assertNotIn("published_to_track", payload_fields["create_revision"])
         self.assertNotIn("task_id", payload_fields["create_revision"])
         self.assertNotIn("kind", payload_fields["create_revision"])
         self.assertNotIn("content", payload_fields["create_revision"])

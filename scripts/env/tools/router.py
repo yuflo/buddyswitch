@@ -62,6 +62,7 @@ def _reject(
         "why_blocked": why_blocked,
         "impact": impact,
         "state_changed": state_changed,
+        "durability": "none",
         "retryable": retryable,
         "retry_guidance": retry_guidance,
     }

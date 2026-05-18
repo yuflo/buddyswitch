@@ -17,6 +17,9 @@ description: Use when you need shared track-page context, PM lifecycle actions, 
 
 ## Workflow Notes
 - Shared collaboration path is `track.open -> shared_materials -> artifact.get`.
+- `add-material` and `add-proof` publish existing draft `artifact_id` values.
+- Track publication is the shared-state mutation path for artifact visibility.
+- `track.open` returns refs/summaries; use `artifact.get` for full markdown bodies.
 - Tasks are private hints and never required for shared material reads.
 - For action payloads and return meanings, inspect `context.get.tool_catalog['track']` or `python3 scripts/turn_runtime.py status`; runtime response fields are authoritative for effects and recovery.
 

@@ -309,6 +309,7 @@ def _normalize_proof_ref(row: Any) -> dict[str, Any]:
         "kind": _require_non_empty_text(row.get("kind"), "track.close_proof[].kind"),
         "from_buddy": _require_non_empty_text(row.get("from_buddy"), "track.close_proof[].from_buddy"),
         "summary": row.get("summary", "") if isinstance(row.get("summary", ""), str) else "",
+        "current": bool(row.get("current", True)),
         "published_at": published_at,
     }
 
@@ -861,8 +862,6 @@ def create_artifact_revision(
     template: str,
     summary: str = "",
     source_refs: list[dict[str, Any]] | None = None,
-    status: str | None = None,
-    published_to_track: str | None = None,
     supersedes_artifact_id: str | None = None,
     authors: list[str] | None = None,
     legacy_source_run: str | None = None,
@@ -885,9 +884,10 @@ def create_artifact_revision(
         raise ValueError("summary must be a string")
     normalized_refs = _normalize_source_refs(source_refs, active_buddy=created_by, allow_buddybox=True)
 
-    inherited_track = published_to_track
     revision = 1
     supersedes_id: str | None = None
+    new_is_current = False
+    demote_previous: dict[str, Any] | None = None
     if supersedes_artifact_id is not None:
         require_id(supersedes_artifact_id, "artifact.supersedes_artifact_id")
         previous = get_artifact(supersedes_artifact_id)
@@ -895,28 +895,48 @@ def create_artifact_revision(
             raise ValueError(f"artifact not found: {supersedes_artifact_id}")
         if not bool(previous.get("is_current")):
             raise ValueError(f"artifact '{supersedes_artifact_id}' is not current and cannot be superseded")
-        supersedes_id = supersedes_artifact_id
-        revision = int(previous.get("revision", 1)) + 1
-        previous_track = previous.get("published_to_track")
-        if inherited_track is None:
-            inherited_track = previous_track
-        elif previous_track is not None and inherited_track != previous_track:
-            raise ValueError("published_to_track must match superseded artifact publication target")
-        previous["is_current"] = False
-        previous["updated_at"] = now_iso()
-        save_artifact(previous)
 
-    resolved_status = status if isinstance(status, str) else ("published" if inherited_track else "draft")
-    if resolved_status not in VALID_ARTIFACT_STATUS:
-        raise ValueError(f"status must be one of {', '.join(VALID_ARTIFACT_STATUS)}")
-    if inherited_track is not None:
-        require_id(inherited_track, "artifact.published_to_track")
-        if get_track(inherited_track) is None:
-            raise ValueError(f"track not found: {inherited_track}")
-    if resolved_status == "draft" and inherited_track is not None:
-        raise ValueError("published_to_track must be omitted when status is draft")
-    if resolved_status in {"published", "archived"} and inherited_track is None:
-        raise ValueError("published_to_track is required when status is published or archived")
+        previous_status = previous.get("status")
+        previous_owner = previous.get("created_by")
+        previous_track_id = previous.get("published_to_track")
+        revision = int(previous.get("revision", 1)) + 1
+        supersedes_id = supersedes_artifact_id
+
+        if previous_status == "draft":
+            if previous_owner != created_by:
+                raise ValueError("supersedes_artifact_id must reference an active-buddy-owned current draft")
+            new_is_current = True
+            previous_patch = dict(previous)
+            previous_patch["is_current"] = False
+            previous_patch["updated_at"] = now_iso()
+            # Validate before any write so rejects never mutate prior artifacts.
+            validate_artifact(previous_patch)
+            demote_previous = previous_patch
+        elif previous_status == "published":
+            if not isinstance(previous_track_id, str) or not previous_track_id:
+                raise ValueError("supersedes published artifact is missing track publication id")
+            track = get_track(previous_track_id)
+            if track is None:
+                raise ValueError(f"track not found: {previous_track_id}")
+            if track.get("archived_at") is not None:
+                raise ValueError("supersedes published artifact belongs to an archived track")
+            in_shared = any(
+                isinstance(row, dict)
+                and row.get("type") == "artifact"
+                and row.get("artifact_id") == supersedes_artifact_id
+                for row in track.get("shared_materials", [])
+            )
+            in_proof = any(
+                isinstance(row, dict)
+                and row.get("type") == "artifact"
+                and row.get("artifact_id") == supersedes_artifact_id
+                for row in track.get("close_proof", [])
+            )
+            if not (in_shared or in_proof):
+                raise ValueError("supersedes_artifact_id must reference current published material/proof on a readable track")
+            new_is_current = False
+        else:
+            raise ValueError("supersedes_artifact_id must reference a current draft or published artifact")
 
     author_rows = [created_by]
     if isinstance(authors, list):
@@ -931,10 +951,10 @@ def create_artifact_revision(
         "summary": summary,
         "body": body,
         "template": template,
-        "status": resolved_status,
-        "published_to_track": inherited_track,
+        "status": "draft",
+        "published_to_track": None,
         "revision": revision,
-        "is_current": True,
+        "is_current": new_is_current,
         "supersedes_artifact_id": supersedes_id,
         "created_by": created_by,
         "authors": author_rows,
@@ -942,48 +962,10 @@ def create_artifact_revision(
         "created_at": timestamp,
         "updated_at": timestamp,
     }
-    return save_artifact(artifact)
-
-
-def create_artifact(
-    *,
-    artifact_id: str | None,
-    title: str,
-    kind: str,
-    created_by: str,
-    summary: str = "",
-    content: dict[str, Any] | None = None,
-    source_refs: list[dict[str, Any]] | None = None,
-    published_to_track: str | None = None,
-    publication_role: str | None = None,
-    supersedes_artifact_id: str | None = None,
-    revision: int | None = None,
-    is_current: bool = True,
-    legacy_source_run: str | None = None,
-) -> dict[str, Any]:
-    del revision, is_current
-    if publication_role is not None:
-        raise ValueError("artifact.publication_role is retired")
-    normalized_kind = _require_non_empty_text(kind, "artifact.kind")
-    if not isinstance(content, dict):
-        raise ValueError("artifact.content must be an object")
-    body = content.get("body")
-    if not isinstance(body, str) or not body.strip():
-        body = json.dumps(content, ensure_ascii=True, sort_keys=True)
-    return create_artifact_revision(
-        artifact_id=artifact_id,
-        title=title,
-        created_by=created_by,
-        body=body,
-        template=_template_from_legacy_kind(normalized_kind),
-        summary=summary,
-        source_refs=source_refs,
-        status="published" if published_to_track else "draft",
-        published_to_track=published_to_track,
-        supersedes_artifact_id=supersedes_artifact_id,
-        authors=[created_by],
-        legacy_source_run=legacy_source_run,
-    )
+    created = save_artifact(artifact)
+    if demote_previous is not None:
+        save_artifact(demote_previous)
+    return created
 
 
 def update_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
@@ -1025,67 +1007,105 @@ def publish_track_material(
     label: str,
     from_buddy: str,
     summary: str,
-) -> tuple[dict[str, Any], dict[str, Any], bool]:
+) -> tuple[dict[str, Any], dict[str, Any], str | None]:
     track = get_track(track_id)
     if track is None:
         raise ValueError(f"track not found: {track_id}")
+    if track.get("archived_at") is not None:
+        raise ValueError(f"track '{track_id}' is archived and cannot accept material publication")
     artifact = get_artifact(artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
+    if artifact.get("created_by") != from_buddy:
+        raise ValueError(f"artifact '{artifact_id}' is owned by buddy '{artifact.get('created_by')}'")
 
     kind = str(artifact.get("template") or "")
     if not kind:
         raise ValueError("artifact.template is required for track publication")
 
+    status = artifact.get("status")
     published_to_track = artifact.get("published_to_track")
-    if published_to_track is not None and published_to_track != track_id:
-        raise ValueError(
-            f"artifact '{artifact_id}' is already published to track '{published_to_track}' and cannot be republished to '{track_id}'"
-        )
-    if published_to_track == track_id:
-        already_current = any(
+    if status != "draft":
+        if published_to_track is None:
+            raise ValueError(f"artifact '{artifact_id}' is not a publishable draft")
+        if published_to_track != track_id:
+            raise ValueError(
+                f"artifact '{artifact_id}' is already published to track '{published_to_track}' and cannot be republished to '{track_id}'"
+            )
+        if any(
             isinstance(row, dict)
             and row.get("type") == "artifact"
             and row.get("artifact_id") == artifact_id
             and bool(row.get("current"))
             for row in track.get("shared_materials", [])
+        ):
+            raise ValueError(f"artifact '{artifact_id}' is already current material on track '{track_id}'")
+        if any(
+            isinstance(row, dict)
+            and row.get("type") == "artifact"
+            and row.get("artifact_id") == artifact_id
+            and bool(row.get("current", True))
+            for row in track.get("close_proof", [])
+        ):
+            raise ValueError(f"artifact '{artifact_id}' is already bound as close proof on track '{track_id}'")
+        raise ValueError(
+            f"artifact '{artifact_id}' is already bound to track '{track_id}' but not as current material; create a new revision instead"
         )
-        if not already_current:
-            raise ValueError(
-                f"artifact '{artifact_id}' is already bound to track '{track_id}' but not as current material; create a new revision instead"
-            )
-        return track, artifact, False
 
     supersedes: str | None = None
+    replaced_artifact_id: str | None = None
     next_refs: list[dict[str, Any]] = []
     for row in track.get("shared_materials", []):
         if not isinstance(row, dict):
             continue
         same_slot = row.get("kind") == kind and row.get("label") == label and row.get("from_buddy") == from_buddy
         if same_slot and bool(row.get("current")):
-            supersedes = str(row.get("artifact_id") or "") or supersedes
-            old_artifact_id = row.get("artifact_id")
-            if isinstance(old_artifact_id, str):
-                old_artifact = get_artifact(old_artifact_id)
-                if isinstance(old_artifact, dict):
-                    old_artifact["is_current"] = False
-                    old_artifact["updated_at"] = now_iso()
-                    save_artifact(old_artifact)
+            replaced_artifact_id = str(row.get("artifact_id") or "") or replaced_artifact_id
         next_row = dict(row)
         if same_slot:
             next_row["current"] = False
         next_refs.append(next_row)
 
+    history_ids = {
+        str(row.get("artifact_id"))
+        for row in track.get("shared_materials", [])
+        if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+    }
+    history_ids.update(
+        str(row.get("artifact_id"))
+        for row in track.get("close_proof", [])
+        if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+    )
     existing_supersedes = artifact.get("supersedes_artifact_id")
-    if supersedes is None and isinstance(existing_supersedes, str) and existing_supersedes:
-        supersedes = existing_supersedes
+    if isinstance(existing_supersedes, str) and existing_supersedes:
+        if replaced_artifact_id is not None and existing_supersedes == replaced_artifact_id:
+            supersedes = existing_supersedes
+        elif existing_supersedes in history_ids:
+            supersedes = existing_supersedes
+        else:
+            raise ValueError(
+                f"artifact '{artifact_id}' supersedes_artifact_id '{existing_supersedes}' does not match readable history on track '{track_id}'"
+            )
+    else:
+        supersedes = replaced_artifact_id
+
+    old_artifact_patch: dict[str, Any] | None = None
+    if replaced_artifact_id is not None:
+        old_artifact = get_artifact(replaced_artifact_id)
+        if isinstance(old_artifact, dict):
+            old_artifact_patch = dict(old_artifact)
+            old_artifact_patch["is_current"] = False
+            old_artifact_patch["updated_at"] = now_iso()
+            validate_artifact(old_artifact_patch)
 
     artifact_revision = int(artifact.get("revision", 1))
-    if supersedes:
-        previous = get_artifact(supersedes)
+    if replaced_artifact_id:
+        previous = get_artifact(replaced_artifact_id)
         if previous is not None:
             artifact_revision = max(int(previous.get("revision", 1)) + 1, artifact_revision)
-    artifact.update(
+
+    artifact_patch = dict(artifact)
+    artifact_patch.update(
         {
             "published_to_track": track_id,
             "status": "published",
@@ -1095,7 +1115,7 @@ def publish_track_material(
             "updated_at": now_iso(),
         }
     )
-    artifact = save_artifact(artifact)
+    validate_artifact(artifact_patch)
 
     ref = {
         "type": "artifact",
@@ -1109,10 +1129,16 @@ def publish_track_material(
     }
     next_refs.append(ref)
 
-    track["shared_materials"] = next_refs
-    track["updated_at"] = now_iso()
-    track = save_track(track)
-    return track, artifact, True
+    track_patch = dict(track)
+    track_patch["shared_materials"] = next_refs
+    track_patch["updated_at"] = now_iso()
+    validate_track(track_patch)
+
+    if old_artifact_patch is not None:
+        save_artifact(old_artifact_patch)
+    saved_artifact = save_artifact(artifact_patch)
+    saved_track = save_track(track_patch)
+    return saved_track, saved_artifact, replaced_artifact_id
 
 
 def publish_track_proof(
@@ -1122,45 +1148,106 @@ def publish_track_proof(
     label: str,
     from_buddy: str,
     summary: str,
-) -> tuple[dict[str, Any], dict[str, Any], bool]:
+) -> tuple[dict[str, Any], dict[str, Any], str | None]:
     track = get_track(track_id)
     if track is None:
         raise ValueError(f"track not found: {track_id}")
+    if track.get("archived_at") is not None:
+        raise ValueError(f"track '{track_id}' is archived and cannot accept proof publication")
     artifact = get_artifact(artifact_id)
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
+    if artifact.get("created_by") != from_buddy:
+        raise ValueError(f"artifact '{artifact_id}' is owned by buddy '{artifact.get('created_by')}'")
 
     kind = str(artifact.get("template") or "")
     if not kind:
         raise ValueError("artifact.template is required for track proof publication")
 
+    status = artifact.get("status")
     published_to_track = artifact.get("published_to_track")
-    if published_to_track is not None and published_to_track != track_id:
-        raise ValueError(
-            f"artifact '{artifact_id}' is already published to track '{published_to_track}' and cannot be republished to '{track_id}'"
-        )
-    if published_to_track == track_id:
-        already_listed = any(
+    if status != "draft":
+        if published_to_track is None:
+            raise ValueError(f"artifact '{artifact_id}' is not a publishable draft")
+        if published_to_track != track_id:
+            raise ValueError(
+                f"artifact '{artifact_id}' is already published to track '{published_to_track}' and cannot be republished to '{track_id}'"
+            )
+        if any(
             isinstance(row, dict)
             and row.get("type") == "artifact"
             and row.get("artifact_id") == artifact_id
+            and bool(row.get("current", True))
             for row in track.get("close_proof", [])
+        ):
+            raise ValueError(f"artifact '{artifact_id}' is already current close proof on track '{track_id}'")
+        if any(
+            isinstance(row, dict)
+            and row.get("type") == "artifact"
+            and row.get("artifact_id") == artifact_id
+            and bool(row.get("current"))
+            for row in track.get("shared_materials", [])
+        ):
+            raise ValueError(f"artifact '{artifact_id}' is already bound as shared material on track '{track_id}'")
+        raise ValueError(
+            f"artifact '{artifact_id}' is already bound to track '{track_id}' but missing close_proof current ref; create a new proof artifact instead"
         )
-        if not already_listed:
-            raise ValueError(
-                f"artifact '{artifact_id}' is already bound to track '{track_id}' but missing close_proof ref; create a new proof artifact instead"
-            )
-        return track, artifact, False
 
-    artifact.update(
+    replaced_artifact_id: str | None = None
+    next_proof_rows: list[dict[str, Any]] = []
+    for row in track.get("close_proof", []):
+        if not isinstance(row, dict):
+            continue
+        same_slot = row.get("kind") == kind and row.get("label") == label and row.get("from_buddy") == from_buddy
+        if same_slot and bool(row.get("current", True)):
+            replaced_artifact_id = str(row.get("artifact_id") or "") or replaced_artifact_id
+        next_row = dict(row)
+        if same_slot:
+            next_row["current"] = False
+        next_proof_rows.append(next_row)
+
+    history_ids = {
+        str(row.get("artifact_id"))
+        for row in track.get("shared_materials", [])
+        if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+    }
+    history_ids.update(
+        str(row.get("artifact_id"))
+        for row in track.get("close_proof", [])
+        if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+    )
+    supersedes: str | None = replaced_artifact_id
+    existing_supersedes = artifact.get("supersedes_artifact_id")
+    if isinstance(existing_supersedes, str) and existing_supersedes:
+        if replaced_artifact_id is not None and existing_supersedes == replaced_artifact_id:
+            supersedes = existing_supersedes
+        elif existing_supersedes in history_ids:
+            supersedes = existing_supersedes
+        else:
+            raise ValueError(
+                f"artifact '{artifact_id}' supersedes_artifact_id '{existing_supersedes}' does not match readable history on track '{track_id}'"
+            )
+
+    old_artifact_patch: dict[str, Any] | None = None
+    if replaced_artifact_id is not None:
+        old_artifact = get_artifact(replaced_artifact_id)
+        if isinstance(old_artifact, dict):
+            old_artifact_patch = dict(old_artifact)
+            old_artifact_patch["is_current"] = False
+            old_artifact_patch["updated_at"] = now_iso()
+            validate_artifact(old_artifact_patch)
+
+    artifact_patch = dict(artifact)
+    artifact_patch.update(
         {
             "published_to_track": track_id,
             "status": "published",
+            "supersedes_artifact_id": supersedes,
             "is_current": True,
             "updated_at": now_iso(),
         }
     )
-    artifact = save_artifact(artifact)
+    validate_artifact(artifact_patch)
 
     proof_ref = {
         "type": "artifact",
@@ -1169,14 +1256,20 @@ def publish_track_proof(
         "kind": kind,
         "from_buddy": from_buddy,
         "summary": summary,
+        "current": True,
         "published_at": now_iso(),
     }
-    close_proof = [row for row in track.get("close_proof", []) if isinstance(row, dict)]
-    close_proof.append(proof_ref)
-    track["close_proof"] = close_proof
-    track["updated_at"] = now_iso()
-    track = save_track(track)
-    return track, artifact, True
+    next_proof_rows.append(proof_ref)
+    track_patch = dict(track)
+    track_patch["close_proof"] = next_proof_rows
+    track_patch["updated_at"] = now_iso()
+    validate_track(track_patch)
+
+    if old_artifact_patch is not None:
+        save_artifact(old_artifact_patch)
+    saved_artifact = save_artifact(artifact_patch)
+    saved_track = save_track(track_patch)
+    return saved_track, saved_artifact, replaced_artifact_id
 
 
 def append_track_update(

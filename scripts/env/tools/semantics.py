@@ -213,6 +213,186 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
     add("search", "request", plain_description="Issue search request intent.", mutates="none", open_world=True)
     add("search", "open_browser", plain_description="Open browser query URL.", mutates="browser_session", open_world=True)
 
+    rows[("track", "create")].update(
+        {
+            "use_when": [
+                "You need PM to initialize one shared track page before publishing materials/proof.",
+            ],
+            "do_not_use_when": [
+                "You need to write artifact markdown body content; use artifact.create_revision.",
+            ],
+            "inputs_explained": {
+                "track_id": "Stable id for one track page object.",
+                "title": "Human-readable track title.",
+                "outcome": "Target outcome for this track.",
+                "appetite": "Expected timebox text.",
+                "now": "Current next step and blocker object.",
+            },
+            "side_effects": _side_effects(
+                mutates="runtime_objects",
+                writes=["buddyswitch/objects/tracks/<track-id>.json"],
+                does_not_write=["artifacts", "tasks"],
+                durability="durable",
+                idempotency="non-idempotent create",
+            ),
+            "success_means": "One PM-owned non-archived track object was created and is readable via track.open.",
+            "common_failures": [
+                "active buddy is not pm",
+                "track_id already exists",
+                "payload fields are missing or invalid",
+            ],
+        }
+    )
+    rows[("track", "open")].update(
+        {
+            "use_when": [
+                "You need current shared material/proof refs and track timeline from a non-archived track.",
+            ],
+            "do_not_use_when": [
+                "You need full markdown body text for an artifact id; use artifact.get.",
+            ],
+            "inputs_explained": {
+                "track_id": "Track page id to read.",
+            },
+            "side_effects": _side_effects(
+                mutates="none",
+                writes=[],
+                does_not_write=["tracks", "artifacts", "tasks"],
+                durability="none",
+                idempotency="idempotent read",
+            ),
+            "success_means": "Returned one track page view with current shared_materials and current close_proof refs only.",
+            "common_failures": [
+                "track_id not found",
+                "track is archived",
+            ],
+        }
+    )
+    rows[("track", "add_material")].update(
+        {
+            "use_when": [
+                "You need to publish an existing active-buddy-owned draft artifact as current shared track material.",
+            ],
+            "do_not_use_when": [
+                "You need to create artifact body content from scratch; use artifact.create_revision first.",
+            ],
+            "inputs_explained": {
+                "track_id": "Non-archived track target.",
+                "artifact_id": "Existing active-buddy draft artifact id.",
+                "label": "Track-facing display label for the material slot.",
+                "summary": "Short track-facing summary for the publication row.",
+            },
+            "side_effects": _side_effects(
+                mutates="runtime_objects",
+                writes=[
+                    "artifact publication fields (status, published_to_track, is_current)",
+                    "track.shared_materials row with current flag",
+                ],
+                does_not_write=["artifact body content"],
+                durability="durable",
+                idempotency="non-idempotent publish",
+            ),
+            "success_means": "Artifact is published and track.shared_materials has a new current ref for the publication slot.",
+            "common_failures": [
+                "track is archived",
+                "artifact is missing, not owned, non-draft, duplicate, or cross-track bound",
+                "legacy inline kind/content payload fields were sent",
+            ],
+        }
+    )
+    rows[("track", "add_proof")].update(
+        {
+            "use_when": [
+                "You need to publish an existing active-buddy-owned draft artifact as current close proof.",
+            ],
+            "do_not_use_when": [
+                "You need to create proof markdown body content first; use artifact.create_revision.",
+            ],
+            "inputs_explained": {
+                "track_id": "Non-archived track target.",
+                "artifact_id": "Existing active-buddy draft artifact id.",
+                "label": "Track-facing label for proof slot.",
+                "summary": "Proof summary text for close_proof and update row.",
+            },
+            "side_effects": _side_effects(
+                mutates="runtime_objects",
+                writes=[
+                    "artifact publication fields (status, published_to_track, is_current)",
+                    "track.close_proof row with current flag",
+                    "track.updates proof row",
+                ],
+                does_not_write=["artifact body content"],
+                durability="durable",
+                idempotency="non-idempotent publish",
+            ),
+            "success_means": "Artifact is published as close proof, track.close_proof is updated, and proof update row is appended.",
+            "common_failures": [
+                "track is archived",
+                "artifact is missing, not owned, non-draft, duplicate, or cross-track bound",
+                "legacy inline kind/content payload fields were sent",
+            ],
+        }
+    )
+    rows[("artifact", "create_revision")].update(
+        {
+            "use_when": [
+                "You need one active-buddy private markdown draft/revision artifact.",
+            ],
+            "do_not_use_when": [
+                "You need to publish shared material/proof directly; use track.add_material or track.add_proof.",
+            ],
+            "inputs_explained": {
+                "artifact_id": "Optional explicit artifact id; autogenerated when omitted.",
+                "title": "Artifact title for summaries.",
+                "summary": "Short summary line.",
+                "template": "Artifact V1 template kind.",
+                "body": "Non-empty markdown body text.",
+                "supersedes_artifact_id": "Optional current draft/published artifact id for revision linkage.",
+                "source_refs": "Optional structured provenance refs.",
+                "read_claim": "Optional source_refs readability hint.",
+            },
+            "side_effects": _side_effects(
+                mutates="runtime_objects",
+                writes=["buddyswitch/objects/artifacts/<artifact-id>.json"],
+                does_not_write=["track objects"],
+                durability="durable",
+                idempotency="non-idempotent create",
+            ),
+            "success_means": "Created one private draft artifact only; no track publication happened.",
+            "common_failures": [
+                "status or published_to_track was supplied",
+                "template/body/title payload validation failed",
+                "supersedes_artifact_id is invalid for current revision scope",
+            ],
+        }
+    )
+    rows[("artifact", "get")].update(
+        {
+            "use_when": [
+                "You need full markdown body content for one explicit readable artifact id.",
+            ],
+            "do_not_use_when": [
+                "You only need current artifact refs; use track.open.",
+            ],
+            "inputs_explained": {
+                "artifact_id": "Explicit artifact id to read.",
+            },
+            "side_effects": _side_effects(
+                mutates="none",
+                writes=[],
+                does_not_write=["tracks", "artifacts"],
+                durability="none",
+                idempotency="idempotent read",
+            ),
+            "success_means": "Returned full artifact body for an id readable by owner or by track publication scope.",
+            "common_failures": [
+                "artifact_id missing or not found",
+                "artifact is private draft owned by another buddy",
+                "artifact publication track is archived",
+            ],
+        }
+    )
+
     return rows
 
 

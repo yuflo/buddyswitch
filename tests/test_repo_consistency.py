@@ -90,6 +90,11 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("track" + ".join", text)
                 self.assertNotIn("attach" + "_task", text)
                 self.assertNotIn("detach" + "_task", text)
+                if name == "pm":
+                    self.assertIn("artifact.create_revision", text)
+                    self.assertIn("track.add_material", text)
+                    self.assertIn("track.add_proof", text)
+                    self.assertNotIn("published_to_track", text)
 
     def test_runtime_buddy_agents_use_track_open_guidance(self) -> None:
         buddies = ("market", "pm", "design", "dev", "test")
@@ -150,6 +155,27 @@ class RepoConsistencyTests(unittest.TestCase):
                 allowed.append(line)
                 continue
         disallowed = [line for line in hits if line not in allowed]
+        self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+
+    def test_track_artifact_publication_residue_scan(self) -> None:
+        pattern = (
+            "kind=prd"
+            + "|content\\.prd"
+            + "|track\\.join"
+            + "|attach_task"
+            + "|detach_task"
+            + "|attach-task"
+            + "|detach-task"
+        )
+        hits = self._scan(pattern)
+        disallowed: list[str] = []
+        for line in hits:
+            lower = line.lower()
+            if line.startswith("tests/"):
+                continue
+            if "/docs/spec/" in lower or "/docs/memo/" in lower or "/docs/bitter/" in lower:
+                continue
+            disallowed.append(line)
         self.assertEqual(disallowed, [], msg="\n".join(disallowed))
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Artifact services aligned to direct track publication model."""
+"""Artifact services aligned to draft-first publication model."""
 
 from __future__ import annotations
 
@@ -27,8 +27,6 @@ _CREATE_FIELDS = {
     "summary",
     "body",
     "template",
-    "status",
-    "published_to_track",
     "supersedes_artifact_id",
     "source_refs",
     "read_claim",
@@ -44,7 +42,7 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         if suffix:
             correctable_fields = [row.strip() for row in suffix.split(",") if row.strip()]
     else:
-        for field in ("artifact_id", "title", "summary", "template", "body", "status", "published_to_track", "source_refs"):
+        for field in ("artifact_id", "title", "summary", "template", "body", "supersedes_artifact_id", "source_refs"):
             if field in message:
                 correctable_fields = [field]
                 break
@@ -57,7 +55,7 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         permission_boundary="request-payload",
         human_summary="Artifact payload is invalid.",
         why_blocked=message,
-        impact="No artifact state changed.",
+        impact="No artifact or track state changed.",
         state_changed=False,
         retryable=True,
         retry_guidance="Fix artifact payload fields and retry.",
@@ -66,6 +64,34 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
             "Retry with supported payload fields only.",
         ],
         correctable_fields=correctable_fields,
+    )
+
+
+def _reject_publication_path(
+    *,
+    active_buddy: str,
+    field: str,
+    why_blocked: str,
+) -> dict[str, Any]:
+    return tool_responses.rejection(
+        tool="artifact",
+        action="artifact.create_revision",
+        active_buddy=active_buddy,
+        code="E_ARTIFACT_PUBLICATION_PATH",
+        message=why_blocked,
+        permission_boundary="artifact.publication_path",
+        human_summary="artifact.create_revision only creates private draft revisions.",
+        why_blocked=why_blocked,
+        impact="No artifact or track state changed.",
+        state_changed=False,
+        retryable=True,
+        retry_guidance="Create a draft revision first, then publish through track.add_material or track.add_proof.",
+        allowed_next_actions=[
+            "Create artifact.create_revision without publication fields.",
+            "Use track.add_material with this artifact_id to publish current shared material.",
+            "Use track.add_proof with this artifact_id to publish close proof.",
+        ],
+        correctable_fields=[field],
     )
 
 
@@ -79,7 +105,7 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
         permission_boundary=boundary,
         human_summary="Artifact scope check failed.",
         why_blocked=message,
-        impact="No artifact state changed.",
+        impact="No artifact or track state changed.",
         state_changed=False,
         retryable=False,
         retry_guidance="Use readable or active-buddy-owned artifact ids.",
@@ -151,6 +177,21 @@ def get_artifact_for_active_buddy(*, args: dict[str, Any], context: ArtifactServ
 def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
     action = "artifact.create_revision"
     active_buddy = context["active_buddy"]
+    if "published_to_track" in args:
+        return _reject_publication_path(
+            active_buddy=active_buddy,
+            field="published_to_track",
+            why_blocked=(
+                "artifact.create_revision creates private drafts; "
+                "track.add_material or track.add_proof publishes existing artifacts"
+            ),
+        )
+    if "status" in args:
+        return _reject_publication_path(
+            active_buddy=active_buddy,
+            field="status",
+            why_blocked="artifact.create_revision always creates status=draft artifacts",
+        )
     payload_error = _require_allowed_fields(action, args, active_buddy)
     if payload_error is not None:
         return payload_error
@@ -159,8 +200,6 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
     summary = args.get("summary", "")
     body = args.get("body")
     template = args.get("template")
-    status = args.get("status")
-    published_to_track = args.get("published_to_track")
     supersedes_artifact_id = args.get("supersedes_artifact_id")
     if not isinstance(title, str) or not title.strip():
         return _reject_payload(action=action, active_buddy=active_buddy, message="title is required")
@@ -173,18 +212,6 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
             action=action,
             active_buddy=active_buddy,
             message=f"template must be one of {', '.join(env_store.VALID_ARTIFACT_TEMPLATES)}",
-        )
-    if status is not None and (not isinstance(status, str) or status not in env_store.VALID_ARTIFACT_STATUS):
-        return _reject_payload(
-            action=action,
-            active_buddy=active_buddy,
-            message=f"status must be one of {', '.join(env_store.VALID_ARTIFACT_STATUS)}",
-        )
-    if published_to_track is not None and (not isinstance(published_to_track, str) or not published_to_track.strip()):
-        return _reject_payload(
-            action=action,
-            active_buddy=active_buddy,
-            message="published_to_track must be a non-empty string",
         )
     if supersedes_artifact_id is not None and (not isinstance(supersedes_artifact_id, str) or not supersedes_artifact_id.strip()):
         return _reject_payload(
@@ -234,27 +261,47 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
             body=body,
             template=template,
             source_refs=normalized_refs,
-            status=status if isinstance(status, str) else None,
-            published_to_track=published_to_track.strip() if isinstance(published_to_track, str) else None,
             supersedes_artifact_id=supersedes_artifact_id.strip() if isinstance(supersedes_artifact_id, str) else None,
             authors=[active_buddy],
         )
     except ValueError as exc:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
+        message = str(exc)
+        if "supersedes_artifact_id" in message or "superseded" in message:
+            return tool_responses.rejection(
+                tool="artifact",
+                action=action,
+                active_buddy=active_buddy,
+                code="E_ARTIFACT_SCOPE",
+                message=message,
+                permission_boundary="artifact.revision_scope",
+                human_summary="Supersede target is not publishable in the requested draft path.",
+                why_blocked=message,
+                impact="No artifact or track state changed.",
+                state_changed=False,
+                retryable=True,
+                retry_guidance="Use a current readable supersedes_artifact_id or omit supersedes_artifact_id.",
+                allowed_next_actions=[
+                    "Use track.open to inspect current shared material/proof ids.",
+                    "Retry artifact.create_revision with a valid supersedes_artifact_id.",
+                ],
+                correctable_fields=["supersedes_artifact_id"],
+            )
+        return _reject_payload(action=action, active_buddy=active_buddy, message=message)
 
     row = _artifact_response_row(artifact, active_buddy)
     return tool_responses.success(
         tool="artifact",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Created one artifact markdown revision '{artifact['id']}'.",
+        effect_summary=f"Created one private draft artifact revision '{artifact['id']}' (not shared on track yet).",
         state_changed=True,
         durability="durable",
         created_ids=[artifact["id"]],
-        state_changes=[{"object_type": "artifact", "change": "created", "artifact_id": artifact["id"]}],
+        state_changes=[{"object_type": "artifact", "change": "draft_created", "artifact_id": artifact["id"]}],
         allowed_next_actions=[
-            "Use track.add_material or track.add_proof to publish this artifact.",
-            "Use artifact.update_metadata to refine metadata.",
+            "Use track.add_material with this artifact_id when this draft should become current shared material.",
+            "Use track.add_proof with this artifact_id when this draft is close proof.",
+            "Use artifact.get with this artifact_id to read the full body.",
         ],
         extra={"artifact_id": artifact["id"], "artifact": row},
     )

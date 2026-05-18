@@ -15,8 +15,8 @@ description: Use when you need artifact summaries, full artifact reads by id, ar
 
 ## Workflow Notes
 - `get` returns one full artifact body by `artifact_id`.
-- `create-revision` creates an active-buddy private draft (`published_to_track=null`).
-- Shared publication happens via `track.add-material` or `track.add-proof`, not via artifact task relations.
+- `create-revision` creates an active-buddy private draft/revision only.
+- Shared publication starts only after `track.add-material` or `track.add-proof` succeeds.
 - For action payloads and return meanings, inspect `context.get.tool_catalog['artifact']` or `python3 scripts/turn_runtime.py status`; runtime response fields are authoritative for effects and recovery.
 
 ## Verification

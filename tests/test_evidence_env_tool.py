@@ -98,8 +98,6 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             summary="seed",
             body="market",
             template="brief",
-            status="draft",
-            published_to_track=None,
             supersedes_artifact_id=None,
             created_by="market",
             authors=["market"],

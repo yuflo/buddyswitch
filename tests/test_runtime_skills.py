@@ -89,6 +89,35 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("next_buddy", lowered)
                 self.assertNotIn("track.advance", lowered)
 
+    def test_pm_and_shared_tool_skills_describe_single_publication_path(self) -> None:
+        pm_skill = (ROOT / "buddyswitch/skills/pm/write-prd/SKILL.md").read_text(encoding="utf-8").lower()
+        artifact_skill = (ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md").read_text(encoding="utf-8").lower()
+        track_skill = (ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md").read_text(encoding="utf-8").lower()
+
+        self.assertIn("artifact.create_revision", pm_skill)
+        self.assertIn("track.add_material", pm_skill)
+        self.assertIn("track.add_proof", pm_skill)
+        self.assertIn("track.open", pm_skill)
+        self.assertIn("artifact.get", pm_skill)
+        self.assertNotIn("published_to_track", pm_skill)
+        self.assertNotIn("content.prd", pm_skill)
+        self.assertNotIn("kind=prd", pm_skill)
+
+        self.assertIn("create-revision", artifact_skill)
+        self.assertIn("private draft", artifact_skill)
+        self.assertIn("track.add-material", artifact_skill)
+        self.assertIn("track.add-proof", artifact_skill)
+        self.assertNotIn("published_to_track", artifact_skill)
+        self.assertNotIn("content.prd", artifact_skill)
+        self.assertNotIn("kind=prd", artifact_skill)
+
+        self.assertIn("add-material", track_skill)
+        self.assertIn("add-proof", track_skill)
+        self.assertIn("artifact.get", track_skill)
+        self.assertNotIn("content.prd", track_skill)
+        self.assertNotIn("kind=prd", track_skill)
+        self.assertNotIn("published_to_track", track_skill)
+
     def test_track_tool_operation_set_excludes_advance(self) -> None:
         track_skill = (ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md").read_text(encoding="utf-8")
         operations_line = ""

@@ -71,18 +71,23 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_context_summarize_exposes_runless_decision_surface(self) -> None:
         track = env_store.create_track("track-runless-router", "Runless Router", owner_buddy="pm")
         task = env_store.create_task("task-pm-router", "Prepare design intake", buddy="pm", track_id=track["id"])
-        env_store.create_artifact_revision(
+        artifact = env_store.create_artifact_revision(
             artifact_id="art-pm-router-r1",
             title="Router PRD",
             summary="router artifact",
             body="v1",
             template="brief",
-            status="published",
-            published_to_track=track["id"],
             supersedes_artifact_id=None,
             created_by="pm",
             authors=["pm"],
             source_refs=None,
+        )
+        env_store.publish_track_material(
+            track_id=track["id"],
+            artifact_id=artifact["id"],
+            label="Router PRD",
+            from_buddy="pm",
+            summary="router artifact",
         )
 
         buddybox = self._runtime_path("buddyswitch/local/buddybox/pm")

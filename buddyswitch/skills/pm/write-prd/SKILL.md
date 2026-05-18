@@ -1,70 +1,45 @@
 ---
 name: write-prd
-description: Use when the task is drafting a PRD, defining MVP scope, or turning validated requirements into product requirements.
+description: Use when the task is producing PM product definition outputs such as product brief, direction, scope, requirements, acceptance criteria, or PM decisions.
 ---
 
 # write-prd
 
 ## Purpose
-- Produce a scoped MVP PRD that turns explicit market evidence and requirements into concrete product definition.
+- Produce durable PM product-definition outputs that guide downstream design/dev/test collaboration.
 
 ## Use when
-- The task is about drafting a PRD, defining MVP scope, clarifying acceptance criteria, or writing product requirements.
-- The user wants PM output that becomes source artifact for downstream design or implementation.
+- The task is drafting product brief/PRD/direction/scope/requirements/acceptance criteria.
+- The task needs PM decisions captured as shared collaboration material or close proof.
 
 ## Do Not Use When
-- The task is primarily track lifecycle administration (`create`, `update`, `archive`).
-- The user wants design structure, implementation work, market research, or smoke testing as main outcome.
+- The task is pure track lifecycle admin without product-definition content.
+- The main outcome is direct implementation, design execution, market research collection, or test execution.
 
-## Inputs
-- Market evidence artifacts when available (typically `template="brief"`).
-- Track/task/artifact context when relevant.
-- Constraints, assumptions, requirements.
-
-## Outputs
-- Durable outputs are written explicitly through env tools.
-- Durable PRD content is written through `artifact-tool` `artifact.create_revision`.
-- Reference written artifacts by explicit ids when relevant.
-
-## Steps
-1. Define the PRD summary and key decisions.
-2. Capture risks, open questions, and one concrete suggested next step.
-3. Put PRD-specific detail in artifact `body` markdown (problem, user value, requirements, scope).
-4. If an explicit PM track lifecycle mutation is required, use `track-tool` before returning.
+## Workflow
+1. Read current collaboration context with `track.open` and `artifact.get` when ids are available.
+2. Draft PM content in markdown body using:
+   - `template="brief"` for product brief/direction/scope output
+   - `template="decision"` for PM decision output
+3. Create a private draft/revision artifact via `artifact.create_revision`.
+4. Publish with exactly one track action:
+   - `track.add_material` for shared current material
+   - `track.add_proof` for close proof
+5. Verify publication with `track.open` and `artifact.get`.
 
 ## Verification
-- Keep the result product-definition centered.
-- Keep PRD detail in the artifact `body` and supporting metadata (`template`, `summary`).
-- Confirm any task or track lifecycle change was completed through `task-tool` or `track-tool` with `ok=true`.
+- Confirm publish/create responses include `state_changes`.
+- Confirm `track.open.shared_materials` or `track.open.close_proof` contains the expected `artifact_id`.
+- Confirm `artifact.get` returns the expected full markdown body.
+- Keep durable writes inside env.tool (`python3 scripts/env/client.py ...`) only.
 
 ## Shared Runtime Rules
-
-- Runtime execution uses env.tool through python3 scripts/env/client.py ... .
-- Product-readable durable state is written explicitly as task or artifact objects.
-- Use buddybox env tools with `logical_name` for active-buddy-private working files.
-- Return after required explicit durable writes are complete.
-
-## BuddySwitch Commit Output
-
-Write durable outputs explicitly via env tools. Do not rely on deprecated prepare/persist flows.
-
-Required top-level field:
-- `execution_summary`
-
-Use `artifact-tool` when this skill produces a durable artifact:
-- `template`: usually `brief`
-- `title`: concise artifact title
-- `summary`: short downstream selection summary
-- `body`: include `decisions`, `risks`, `open_questions`, and `suggested_next_step`
-
-After `artifact.create_revision` returns `ok=true`, use `track.open` and `artifact.get` to verify shared visibility when needed.
-Use optional `working_notes` for concise reasoning or verification notes.
-Use optional `task_id` or `track_id` only as association metadata for explicit env-tool state.
+- `artifact.create_revision` creates private draft/revision artifacts only.
+- Shared publication happens via `track.add_material` or `track.add_proof`.
+- Do not edit `buddyswitch/objects/**` directly.
+- Use buddybox `logical_name` only for active-buddy-private working files.
 
 ## Examples
-- `Draft the MVP PRD for onboarding rewrite track`
-- `Continue product definition and define P0/P1 scope`
-
-## Counterexamples
-- `create track, then wait for design to attach via track task-relation actions`
-- `implement the approved onboarding rewrite scope`
+- `Draft landing-page product brief with acceptance criteria`
+- `Publish PM decision about scope tradeoff`
+- `Revise current PM brief and republish as latest shared material`

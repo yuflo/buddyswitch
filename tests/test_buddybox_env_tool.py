@@ -583,12 +583,17 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             summary="seed",
             body="seed",
             template="brief",
-            status="published",
-            published_to_track=track["id"],
             supersedes_artifact_id=None,
             created_by="pm",
             authors=["pm"],
             source_refs=[{"type": "note", "label": "seed"}],
+        )
+        env_store.publish_track_material(
+            track_id=track["id"],
+            artifact_id=artifact["id"],
+            label="Seed",
+            from_buddy="pm",
+            summary="seed",
         )
         object_paths = (
             env_store.track_file(track["id"]),

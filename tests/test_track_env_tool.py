@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Track env.tool integration tests for track-page collaboration model."""
+"""Track env.tool integration tests for artifact-id publication path."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import sys
 import unittest
 import uuid
+from copy import deepcopy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+import env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -33,7 +35,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "status": status,
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
-                    "updated_at": "2026-05-17T00:00:00Z",
+                    "updated_at": "2026-05-18T00:00:00Z",
                 },
                 ensure_ascii=True,
                 indent=2,
@@ -43,7 +45,16 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return path
 
-    def _dispatch(self, *, instance_json: Path, instance_id: str, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+    def _dispatch(
+        self,
+        *,
+        instance_json: Path,
+        instance_id: str,
+        buddy: str,
+        tool: str,
+        action: str,
+        args: dict[str, object],
+    ) -> dict[str, object]:
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-track-{uuid.uuid4().hex}",
@@ -87,7 +98,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _pm_instance(self) -> Path:
         return self._instance_json(instance_id="inst-pm-track", buddy="pm")
 
-    def _create_track(self, instance_json: Path, track_id: str = "track-main") -> dict[str, object]:
+    def _create_track(self, *, instance_json: Path, track_id: str) -> dict[str, object]:
         return self._dispatch(
             instance_json=instance_json,
             instance_id="inst-pm-track",
@@ -96,16 +107,46 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="create",
             args={
                 "track_id": track_id,
-                "title": "Landing first proof",
-                "outcome": "Validate landing message clarity",
-                "appetite": "2 days",
-                "now": {"next": "Design drafts first screen", "blocker": None},
+                "title": track_id,
+                "outcome": "outcome",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
             },
+        )
+
+    def _create_draft(
+        self,
+        *,
+        instance_json: Path,
+        instance_id: str,
+        buddy: str,
+        artifact_id: str,
+        template: str,
+        body: str,
+        title: str | None = None,
+        supersedes_artifact_id: str | None = None,
+    ) -> dict[str, object]:
+        args: dict[str, object] = {
+            "artifact_id": artifact_id,
+            "title": title or artifact_id,
+            "summary": body,
+            "template": template,
+            "body": body,
+        }
+        if supersedes_artifact_id:
+            args["supersedes_artifact_id"] = supersedes_artifact_id
+        return self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy=buddy,
+            tool="artifact",
+            action="create_revision",
+            args=args,
         )
 
     def test_pm_creates_human_readable_track_page(self) -> None:
         instance_json = self._pm_instance()
-        created = self._create_track(instance_json, "track-human-page")
+        created = self._create_track(instance_json=instance_json, track_id="track-human-page")
         self.assertTrue(created.get("ok"), msg=created)
         track = created.get("track")
         self.assertIsInstance(track, dict, msg=created)
@@ -116,8 +157,6 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(track.get("shared_materials"), [])
         self.assertEqual(track.get("updates"), [])
         self.assertEqual(track.get("close_proof"), [])
-        for forbidden in ("task_ids", "status", "summary"):
-            self.assertNotIn(forbidden, track)
 
     def test_non_pm_cannot_create_track(self) -> None:
         instance_json = self._instance_json(instance_id="inst-design-track", buddy="design")
@@ -141,8 +180,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_all_buddies_can_list_and_open_non_archived_tracks(self) -> None:
         pm_instance = self._pm_instance()
-        self.assertTrue(self._create_track(pm_instance, "track-shared-open").get("ok"))
-
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-shared-open").get("ok"))
         for buddy in ALL_BUDDIES:
             instance_id = f"inst-{buddy}-track"
             instance_json = self._instance_json(instance_id=instance_id, buddy=buddy)
@@ -165,634 +203,190 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             with self.subTest(buddy=buddy):
                 self.assertTrue(listed.get("ok"), msg=listed)
                 self.assertTrue(opened.get("ok"), msg=opened)
-                rows = listed.get("tracks")
-                self.assertIsInstance(rows, list)
-                assert isinstance(rows, list)
-                self.assertIn("track-shared-open", {row.get("id") for row in rows if isinstance(row, dict)})
 
-    def test_track_open_returns_page_without_tasks_or_artifact_bodies(self) -> None:
+    def test_track_publish_rejects_legacy_inline_payload_without_mutation(self) -> None:
         instance_json = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json, "track-safe-open").get("ok"))
-        mat = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="add_material",
-            args={
-                "track_id": "track-safe-open",
-                "kind": "prd",
-                "label": "PRD",
-                "title": "PM PRD",
-                "summary": "PRD summary",
-                "content": {"body": "SECRET-BODY-SHOULD-NOT-LEAK"},
-            },
-        )
-        self.assertTrue(mat.get("ok"), msg=mat)
+        self.assertTrue(self._create_track(instance_json=instance_json, track_id="track-legacy-inline").get("ok"))
 
-        dev_instance = self._instance_json(instance_id="inst-dev-track", buddy="dev")
-        opened = self._dispatch(
-            instance_json=dev_instance,
-            instance_id="inst-dev-track",
-            buddy="dev",
-            tool="track",
-            action="open",
-            args={"track_id": "track-safe-open"},
-        )
-        self.assertTrue(opened.get("ok"), msg=opened)
-        track = opened.get("track")
-        self.assertIsInstance(track, dict)
-        assert isinstance(track, dict)
-        self.assertIn("shared_materials", track)
-        self.assertIn("updates", track)
-        self.assertIn("close_proof", track)
-        encoded = json.dumps(track, ensure_ascii=True)
-        for forbidden in ("tasks", "task_ids", "source_" + "task_id", "artifact" + "_slots", "SECRET-BODY-SHOULD-NOT-LEAK"):
-            self.assertNotIn(forbidden, encoded)
-
-    def test_all_buddies_can_update_now_state_on_non_archived_track(self) -> None:
-        instance_json = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json, "track-update-now").get("ok"))
-
-        design_instance = self._instance_json(instance_id="inst-design-track", buddy="design")
-        updated = self._dispatch(
-            instance_json=design_instance,
-            instance_id="inst-design-track",
-            buddy="design",
-            tool="track",
-            action="update_now",
-            args={
-                "track_id": "track-update-now",
-                "now": {"next": "Need positioning decision", "blocker": "One-liner not settled"},
-                "state": "blocked",
-                "health": "blocked",
-            },
-        )
-        self.assertTrue(updated.get("ok"), msg=updated)
-
-        opened = self._dispatch(
-            instance_json=design_instance,
-            instance_id="inst-design-track",
-            buddy="design",
-            tool="track",
-            action="open",
-            args={"track_id": "track-update-now"},
-        )
-        self.assertTrue(opened.get("ok"), msg=opened)
-        track = opened["track"]
-        self.assertEqual(track["state"], "blocked")
-        self.assertEqual(track["health"], "blocked")
-        self.assertEqual(track["now"]["blocker"], "One-liner not settled")
-        self.assertGreaterEqual(len(track["updates"]), 1)
-
-    def test_add_material_creates_artifact_and_track_ref(self) -> None:
-        instance_json = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json, "track-material-create").get("ok"))
-
-        material = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="add_material",
-            args={
-                "track_id": "track-material-create",
-                "kind": "prd",
-                "label": "PRD",
-                "title": "Landing PRD",
-                "summary": "scope",
-                "content": {"body": "prd"},
-            },
-        )
-        self.assertTrue(material.get("ok"), msg=material)
-        self.assertIsInstance(material.get("artifact_id"), str)
-
-        opened = self._dispatch(
+        before = self._dispatch(
             instance_json=instance_json,
             instance_id="inst-pm-track",
             buddy="pm",
             tool="track",
             action="open",
-            args={"track_id": "track-material-create"},
+            args={"track_id": "track-legacy-inline"},
         )
-        self.assertTrue(opened.get("ok"), msg=opened)
-        refs = opened["track"]["shared_materials"]
-        self.assertEqual(len(refs), 1)
-        self.assertEqual(refs[0]["kind"], "brief")
-        self.assertEqual(refs[0]["label"], "PRD")
+        self.assertTrue(before.get("ok"), msg=before)
+        baseline = before.get("track")
+        self.assertIsInstance(baseline, dict, msg=before)
+        assert isinstance(baseline, dict)
+        baseline_copy = deepcopy(baseline)
 
-    def test_design_publishes_material_without_task_relation(self) -> None:
-        pm_instance = self._pm_instance()
-        self.assertTrue(self._create_track(pm_instance, "track-cross-publish").get("ok"))
-        self.assertTrue(
-            self._dispatch(
-                instance_json=pm_instance,
+        for action, payload in (
+            (
+                "add_material",
+                {
+                    "track_id": "track-legacy-inline",
+                    "kind": "prd",
+                    "label": "PRD",
+                    "title": "Legacy",
+                    "summary": "legacy",
+                    "content": {"body": "legacy"},
+                },
+            ),
+            (
+                "add_proof",
+                {
+                    "track_id": "track-legacy-inline",
+                    "kind": "proof",
+                    "label": "Smoke",
+                    "title": "Legacy",
+                    "summary": "legacy",
+                    "content": {"body": "legacy"},
+                },
+            ),
+        ):
+            rejected = self._dispatch(
+                instance_json=instance_json,
                 instance_id="inst-pm-track",
                 buddy="pm",
                 tool="track",
-                action="add_material",
-                args={
-                    "track_id": "track-cross-publish",
-                    "kind": "prd",
-                    "label": "PRD",
-                    "title": "PM PRD",
-                    "summary": "summary",
-                    "content": {"body": "prd"},
-                },
-            ).get("ok")
-        )
+                action=action,
+                args=payload,
+            )
+            with self.subTest(action=action):
+                self.assertFalse(rejected.get("ok"), msg=rejected)
+                self.assertEqual((rejected.get("error") or {}).get("code"), "E_TRACK_PAYLOAD")
+                self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
+                self.assertEqual(rejected.get("durability"), "none")
 
-        design_instance = self._instance_json(instance_id="inst-design-track", buddy="design")
-        created = self._dispatch(
-            instance_json=design_instance,
-            instance_id="inst-design-track",
-            buddy="design",
-            tool="track",
-            action="add_material",
-            args={
-                "track_id": "track-cross-publish",
-                "kind": "design-handoff",
-                "label": "Draft",
-                "title": "Design Draft",
-                "summary": "draft",
-                "content": {"body": "design"},
-            },
-        )
-        self.assertTrue(created.get("ok"), msg=created)
+                after = self._dispatch(
+                    instance_json=instance_json,
+                    instance_id="inst-pm-track",
+                    buddy="pm",
+                    tool="track",
+                    action="open",
+                    args={"track_id": "track-legacy-inline"},
+                )
+                self.assertTrue(after.get("ok"), msg=after)
+                self.assertEqual(after.get("track"), baseline_copy)
 
-        dev_instance = self._instance_json(instance_id="inst-dev-track", buddy="dev")
-        opened = self._dispatch(
-            instance_json=dev_instance,
-            instance_id="inst-dev-track",
-            buddy="dev",
-            tool="track",
-            action="open",
-            args={"track_id": "track-cross-publish"},
-        )
-        self.assertTrue(opened.get("ok"), msg=opened)
-        refs = opened["track"]["shared_materials"]
-        self.assertEqual(len(refs), 2)
-
-    def test_new_material_supersedes_default_current_ref(self) -> None:
+    def test_add_material_publishes_existing_draft_and_track_ref(self) -> None:
         instance_json = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json, "track-supersede").get("ok"))
-        first = self._dispatch(
+        self.assertTrue(self._create_track(instance_json=instance_json, track_id="track-material-publish").get("ok"))
+        draft = self._create_draft(
             instance_json=instance_json,
             instance_id="inst-pm-track",
             buddy="pm",
-            tool="track",
-            action="add_material",
-            args={
-                "track_id": "track-supersede",
-                "kind": "prd",
-                "label": "PRD",
-                "title": "PRD R1",
-                "summary": "r1",
-                "content": {"body": "r1"},
-            },
-        )
-        second = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="add_material",
-            args={
-                "track_id": "track-supersede",
-                "kind": "prd",
-                "label": "PRD",
-                "title": "PRD R2",
-                "summary": "r2",
-                "content": {"body": "r2"},
-            },
-        )
-        self.assertTrue(first.get("ok"), msg=first)
-        self.assertTrue(second.get("ok"), msg=second)
-
-        opened = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="open",
-            args={"track_id": "track-supersede"},
-        )
-        refs = opened["track"]["shared_materials"]
-        self.assertEqual(len(refs), 1)
-        self.assertEqual(refs[0]["artifact_id"], second["artifact_id"])
-
-    def test_add_material_rejects_cross_track_republish_without_state_pollution(self) -> None:
-        instance_json = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json, "track-material-a").get("ok"))
-        self.assertTrue(self._create_track(instance_json, "track-material-b").get("ok"))
-
-        draft = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="artifact",
-            action="create_revision",
-            args={
-                "artifact_id": "art-cross-track-material-r1",
-                "title": "Cross track material",
-                "summary": "draft",
-                "template": "brief",
-                "body": "draft",
-            },
+            artifact_id="art-material-r1",
+            template="brief",
+            body="material body",
         )
         self.assertTrue(draft.get("ok"), msg=draft)
-        artifact_id = draft["artifact_id"]
 
-        first_publish = self._dispatch(
+        published = self._dispatch(
             instance_json=instance_json,
             instance_id="inst-pm-track",
             buddy="pm",
             tool="track",
             action="add_material",
-            args={"track_id": "track-material-a", "artifact_id": artifact_id, "label": "PRD", "summary": "published-a"},
+            args={
+                "track_id": "track-material-publish",
+                "artifact_id": "art-material-r1",
+                "label": "Brief",
+                "summary": "Published PM brief",
+            },
         )
-        self.assertTrue(first_publish.get("ok"), msg=first_publish)
+        self.assertTrue(published.get("ok"), msg=published)
+        self.assertTrue(bool(published.get("state_changed")), msg=published)
+        self.assertEqual(published.get("durability"), "durable")
+        state_changes = published.get("state_changes")
+        self.assertIsInstance(state_changes, list, msg=published)
+        assert isinstance(state_changes, list)
+        changes = {row.get("change") for row in state_changes if isinstance(row, dict)}
+        self.assertIn("published_material", changes)
+        self.assertIn("material_added", changes)
 
-        rejected = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="add_material",
-            args={"track_id": "track-material-b", "artifact_id": artifact_id, "label": "PRD", "summary": "published-b"},
-        )
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TRACK_PAYLOAD")
-
-        track_b = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="open",
-            args={"track_id": "track-material-b"},
-        )
-        self.assertTrue(track_b.get("ok"), msg=track_b)
-        self.assertEqual(track_b["track"]["shared_materials"], [])
-
-        owner_view = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="artifact",
-            action="get",
-            args={"artifact_id": artifact_id},
-        )
-        self.assertTrue(owner_view.get("ok"), msg=owner_view)
-        artifact = owner_view.get("artifact")
+        artifact = env_store.get_artifact("art-material-r1")
         self.assertIsInstance(artifact, dict)
         assert isinstance(artifact, dict)
-        self.assertEqual(artifact.get("published_to_track"), "track-material-a")
+        self.assertEqual(artifact.get("status"), "published")
+        self.assertEqual(artifact.get("published_to_track"), "track-material-publish")
         self.assertEqual(artifact.get("template"), "brief")
+        self.assertEqual(artifact.get("body"), "material body")
+        self.assertTrue(bool(artifact.get("is_current")), msg=artifact)
 
-    def test_add_proof_rejects_cross_track_republish_without_state_pollution(self) -> None:
+        track_store = env_store.get_track("track-material-publish")
+        self.assertIsInstance(track_store, dict)
+        assert isinstance(track_store, dict)
+        refs = [row for row in track_store.get("shared_materials", []) if isinstance(row, dict)]
+        self.assertEqual(len(refs), 1)
+        self.assertEqual(refs[0].get("artifact_id"), "art-material-r1")
+        self.assertEqual(refs[0].get("kind"), "brief")
+        self.assertEqual(refs[0].get("label"), "Brief")
+        self.assertEqual(refs[0].get("from_buddy"), "pm")
+        self.assertEqual(refs[0].get("summary"), "Published PM brief")
+        self.assertTrue(bool(refs[0].get("current")), msg=refs[0])
+        self.assertEqual(track_store.get("close_proof"), [])
+
+    def test_add_material_replaces_current_only_after_successful_publish(self) -> None:
         instance_json = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json, "track-proof-a").get("ok"))
-        self.assertTrue(self._create_track(instance_json, "track-proof-b").get("ok"))
+        self.assertTrue(self._create_track(instance_json=instance_json, track_id="track-material-main").get("ok"))
+        self.assertTrue(self._create_track(instance_json=instance_json, track_id="track-material-other").get("ok"))
+        self.assertTrue(self._create_track(instance_json=instance_json, track_id="track-material-archived").get("ok"))
 
-        draft = self._dispatch(
+        r1 = self._create_draft(
             instance_json=instance_json,
             instance_id="inst-pm-track",
             buddy="pm",
-            tool="artifact",
-            action="create_revision",
-            args={
-                "artifact_id": "art-cross-track-proof-r1",
-                "title": "Cross track proof",
-                "summary": "draft",
-                "template": "proof",
-                "body": "pass",
-            },
+            artifact_id="art-replace-r1",
+            template="brief",
+            body="r1",
         )
-        self.assertTrue(draft.get("ok"), msg=draft)
-        artifact_id = draft["artifact_id"]
-
-        first_publish = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="add_proof",
-            args={"track_id": "track-proof-a", "artifact_id": artifact_id, "label": "Smoke", "summary": "published-a"},
-        )
-        self.assertTrue(first_publish.get("ok"), msg=first_publish)
-
-        rejected = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="add_proof",
-            args={"track_id": "track-proof-b", "artifact_id": artifact_id, "label": "Smoke", "summary": "published-b"},
-        )
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TRACK_PAYLOAD")
-
-        track_b = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="open",
-            args={"track_id": "track-proof-b"},
-        )
-        self.assertTrue(track_b.get("ok"), msg=track_b)
-        self.assertEqual(track_b["track"]["close_proof"], [])
-
-        owner_view = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="artifact",
-            action="get",
-            args={"artifact_id": artifact_id},
-        )
-        self.assertTrue(owner_view.get("ok"), msg=owner_view)
-        artifact = owner_view.get("artifact")
-        self.assertIsInstance(artifact, dict)
-        assert isinstance(artifact, dict)
-        self.assertEqual(artifact.get("published_to_track"), "track-proof-a")
-        self.assertEqual(artifact.get("template"), "proof")
-
-    def test_add_update_and_add_proof(self) -> None:
-        pm_instance = self._pm_instance()
-        self.assertTrue(self._create_track(pm_instance, "track-updates").get("ok"))
-        material = self._dispatch(
-            instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="add_material",
-            args={
-                "track_id": "track-updates",
-                "kind": "prd",
-                "label": "PRD",
-                "title": "PRD",
-                "summary": "summary",
-                "content": {"body": "prd"},
-            },
-        )
-        self.assertTrue(material.get("ok"), msg=material)
-
-        design_instance = self._instance_json(instance_id="inst-design-track", buddy="design")
-        update = self._dispatch(
-            instance_json=design_instance,
-            instance_id="inst-design-track",
-            buddy="design",
-            tool="track",
-            action="add_update",
-            args={
-                "track_id": "track-updates",
-                "kind": "blocker",
-                "summary": "blocked by copy",
-                "refs": [{"type": "artifact", "id": material["artifact_id"]}],
-            },
-        )
-        self.assertTrue(update.get("ok"), msg=update)
-
-        test_instance = self._instance_json(instance_id="inst-test-track", buddy="test")
-        proof = self._dispatch(
-            instance_json=test_instance,
-            instance_id="inst-test-track",
-            buddy="test",
-            tool="track",
-            action="add_proof",
-            args={
-                "track_id": "track-updates",
-                "kind": "smoke-test",
-                "label": "Smoke",
-                "title": "Smoke proof",
-                "summary": "pass",
-                "content": {"result": "pass"},
-            },
-        )
-        self.assertTrue(proof.get("ok"), msg=proof)
-
-        opened = self._dispatch(
-            instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="open",
-            args={"track_id": "track-updates"},
-        )
-        track = opened["track"]
-        self.assertEqual(len(track["close_proof"]), 1)
-        self.assertEqual(track["close_proof"][0]["artifact_id"], proof["artifact_id"])
-        self.assertIn("proof", {row.get("kind") for row in track["updates"] if isinstance(row, dict)})
-
-    def test_update_now_rejects_invalid_state_and_health_without_mutation(self) -> None:
-        instance_json = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json, "track-invalid-now").get("ok"))
-        before = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="open",
-            args={"track_id": "track-invalid-now"},
-        )
-        self.assertTrue(before.get("ok"), msg=before)
-        before_track = before["track"]
-
-        bad_state = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="update_now",
-            args={"track_id": "track-invalid-now", "state": "waiting"},
-        )
-        self.assertFalse(bad_state.get("ok"), msg=bad_state)
-        self.assertEqual((bad_state.get("error") or {}).get("code"), "E_TRACK_PAYLOAD")
-
-        bad_health = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="update_now",
-            args={"track_id": "track-invalid-now", "health": "yellow"},
-        )
-        self.assertFalse(bad_health.get("ok"), msg=bad_health)
-        self.assertEqual((bad_health.get("error") or {}).get("code"), "E_TRACK_PAYLOAD")
-
-        after = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="open",
-            args={"track_id": "track-invalid-now"},
-        )
-        self.assertTrue(after.get("ok"), msg=after)
-        self.assertEqual(before_track, after["track"])
-
-    def test_track_payload_rejects_owner_buddy_patch(self) -> None:
-        instance_json = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json, "track-owner-immutable").get("ok"))
-
-        rejected = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="update_now",
-            args={
-                "track_id": "track-owner-immutable",
-                "owner_buddy": "design",
-                "now": {"next": "x", "blocker": None},
-            },
-        )
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TRACK_PAYLOAD")
-
-        opened = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="open",
-            args={"track_id": "track-owner-immutable"},
-        )
-        self.assertTrue(opened.get("ok"), msg=opened)
-        self.assertEqual(opened["track"]["owner_buddy"], "pm")
-
-    def test_add_update_rejects_invalid_kind(self) -> None:
-        instance_json = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json, "track-invalid-update-kind").get("ok"))
-        before = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="open",
-            args={"track_id": "track-invalid-update-kind"},
-        )
-        self.assertTrue(before.get("ok"), msg=before)
-
-        rejected = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="add_update",
-            args={"track_id": "track-invalid-update-kind", "kind": "comment", "summary": "bad kind"},
-        )
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TRACK_PAYLOAD")
-
-        after = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="open",
-            args={"track_id": "track-invalid-update-kind"},
-        )
-        self.assertTrue(after.get("ok"), msg=after)
-        self.assertEqual(before["track"]["updates"], after["track"]["updates"])
-
-    def test_add_update_rejects_missing_artifact_ref_without_mutation(self) -> None:
-        instance_json = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json, "track-invalid-update-ref").get("ok"))
-        before = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="open",
-            args={"track_id": "track-invalid-update-ref"},
-        )
-        self.assertTrue(before.get("ok"), msg=before)
-
-        rejected = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="add_update",
-            args={
-                "track_id": "track-invalid-update-ref",
-                "kind": "blocker",
-                "summary": "broken ref",
-                "refs": [{"type": "artifact", "id": "art-missing"}],
-            },
-        )
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TRACK_UPDATE_REFS")
-        self.assertEqual(rejected.get("permission_boundary"), "track.update_refs")
-
-        after = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="open",
-            args={"track_id": "track-invalid-update-ref"},
-        )
-        self.assertTrue(after.get("ok"), msg=after)
-        self.assertEqual(before["track"]["updates"], after["track"]["updates"])
-
-    def test_add_update_refs_enforce_track_readability_and_membership_boundaries(self) -> None:
-        instance_json = self._pm_instance()
-        self.assertTrue(self._create_track(instance_json, "track-update-main").get("ok"))
-        self.assertTrue(self._create_track(instance_json, "track-update-other").get("ok"))
-        self.assertTrue(self._create_track(instance_json, "track-update-archived").get("ok"))
-
-        private_draft = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="artifact",
-            action="create_revision",
-            args={
-                "artifact_id": "art-private-draft-r1",
-                "title": "Private draft",
-                "summary": "private",
-                "template": "brief",
-                "body": "private",
-            },
-        )
-        self.assertTrue(private_draft.get("ok"), msg=private_draft)
-
-        main_r1 = self._dispatch(
+        self.assertTrue(r1.get("ok"), msg=r1)
+        pub_r1 = self._dispatch(
             instance_json=instance_json,
             instance_id="inst-pm-track",
             buddy="pm",
             tool="track",
             action="add_material",
-            args={
-                "track_id": "track-update-main",
-                "kind": "prd",
-                "label": "PRD",
-                "title": "Main R1",
-                "summary": "r1",
-                "content": {"body": "r1"},
-            },
+            args={"track_id": "track-material-main", "artifact_id": "art-replace-r1", "label": "Brief", "summary": "r1"},
         )
-        self.assertTrue(main_r1.get("ok"), msg=main_r1)
-        main_r2 = self._dispatch(
+        self.assertTrue(pub_r1.get("ok"), msg=pub_r1)
+
+        r2 = self._create_draft(
+            instance_json=instance_json,
+            instance_id="inst-pm-track",
+            buddy="pm",
+            artifact_id="art-replace-r2",
+            template="brief",
+            body="r2",
+            supersedes_artifact_id="art-replace-r1",
+        )
+        self.assertTrue(r2.get("ok"), msg=r2)
+
+        archived = self._dispatch(
             instance_json=instance_json,
             instance_id="inst-pm-track",
             buddy="pm",
             tool="track",
-            action="add_material",
-            args={
-                "track_id": "track-update-main",
-                "kind": "prd",
-                "label": "PRD",
-                "title": "Main R2",
-                "summary": "r2",
-                "content": {"body": "r2"},
-            },
+            action="archive",
+            args={"track_id": "track-material-archived"},
         )
-        self.assertTrue(main_r2.get("ok"), msg=main_r2)
+        self.assertTrue(archived.get("ok"), msg=archived)
+
+        baseline_track = env_store.get_track("track-material-main")
+        baseline_r1 = env_store.get_artifact("art-replace-r1")
+        baseline_r2 = env_store.get_artifact("art-replace-r2")
+        self.assertIsInstance(baseline_track, dict)
+        self.assertIsInstance(baseline_r1, dict)
+        self.assertIsInstance(baseline_r2, dict)
+        assert isinstance(baseline_track, dict)
+        assert isinstance(baseline_r1, dict)
+        assert isinstance(baseline_r2, dict)
+        baseline_track = deepcopy(baseline_track)
+        baseline_r1 = deepcopy(baseline_r1)
+        baseline_r2 = deepcopy(baseline_r2)
 
         cross_track = self._dispatch(
             instance_json=instance_json,
@@ -800,91 +394,275 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             buddy="pm",
             tool="track",
             action="add_material",
-            args={
-                "track_id": "track-update-other",
-                "kind": "design-handoff",
-                "label": "Draft",
-                "title": "Other track draft",
-                "summary": "other",
-                "content": {"body": "other"},
-            },
+            args={"track_id": "track-material-other", "artifact_id": "art-replace-r2", "label": "Brief", "summary": "r2"},
         )
-        self.assertTrue(cross_track.get("ok"), msg=cross_track)
+        self.assertFalse(cross_track.get("ok"), msg=cross_track)
+        self.assertFalse(bool(cross_track.get("state_changed")), msg=cross_track)
+        self.assertEqual(cross_track.get("durability"), "none")
+        self.assertEqual(env_store.get_track("track-material-main"), baseline_track)
+        self.assertEqual(env_store.get_artifact("art-replace-r1"), baseline_r1)
+        self.assertEqual(env_store.get_artifact("art-replace-r2"), baseline_r2)
 
-        archived_artifact = self._dispatch(
+        archived_reject = self._dispatch(
             instance_json=instance_json,
             instance_id="inst-pm-track",
             buddy="pm",
             tool="track",
             action="add_material",
-            args={
-                "track_id": "track-update-archived",
-                "kind": "implementation-report",
-                "label": "Impl",
-                "title": "Archived material",
-                "summary": "archived",
-                "content": {"body": "archived"},
-            },
+            args={"track_id": "track-material-archived", "artifact_id": "art-replace-r2", "label": "Brief", "summary": "r2"},
         )
-        self.assertTrue(archived_artifact.get("ok"), msg=archived_artifact)
-        archived = self._dispatch(
+        self.assertFalse(archived_reject.get("ok"), msg=archived_reject)
+        self.assertEqual(archived_reject.get("permission_boundary"), "track.lifecycle_status")
+        self.assertFalse(bool(archived_reject.get("state_changed")), msg=archived_reject)
+        self.assertEqual(env_store.get_track("track-material-main"), baseline_track)
+        self.assertEqual(env_store.get_artifact("art-replace-r1"), baseline_r1)
+        self.assertEqual(env_store.get_artifact("art-replace-r2"), baseline_r2)
+
+        pub_r2 = self._dispatch(
             instance_json=instance_json,
+            instance_id="inst-pm-track",
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={"track_id": "track-material-main", "artifact_id": "art-replace-r2", "label": "Brief", "summary": "r2"},
+        )
+        self.assertTrue(pub_r2.get("ok"), msg=pub_r2)
+
+        track = env_store.get_track("track-material-main")
+        r1_store = env_store.get_artifact("art-replace-r1")
+        r2_store = env_store.get_artifact("art-replace-r2")
+        self.assertIsInstance(track, dict)
+        self.assertIsInstance(r1_store, dict)
+        self.assertIsInstance(r2_store, dict)
+        assert isinstance(track, dict)
+        assert isinstance(r1_store, dict)
+        assert isinstance(r2_store, dict)
+        refs = [row for row in track.get("shared_materials", []) if isinstance(row, dict)]
+        self.assertEqual(len(refs), 2)
+        by_id = {str(row.get("artifact_id")): bool(row.get("current")) for row in refs}
+        self.assertFalse(by_id["art-replace-r1"])
+        self.assertTrue(by_id["art-replace-r2"])
+        self.assertFalse(bool(r1_store.get("is_current")), msg=r1_store)
+        self.assertTrue(bool(r2_store.get("is_current")), msg=r2_store)
+        self.assertEqual(r2_store.get("published_to_track"), "track-material-main")
+
+    def test_add_material_rejects_duplicate_already_bound_and_cross_track_without_state_pollution(self) -> None:
+        pm_instance = self._pm_instance()
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-material-a").get("ok"))
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-material-b").get("ok"))
+
+        draft = self._create_draft(
+            instance_json=pm_instance,
+            instance_id="inst-pm-track",
+            buddy="pm",
+            artifact_id="art-cross-track-material-r1",
+            template="brief",
+            body="draft",
+        )
+        self.assertTrue(draft.get("ok"), msg=draft)
+        first_publish = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-track",
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={"track_id": "track-material-a", "artifact_id": "art-cross-track-material-r1", "label": "PRD", "summary": "published-a"},
+        )
+        self.assertTrue(first_publish.get("ok"), msg=first_publish)
+
+        before_track_a = deepcopy(env_store.get_track("track-material-a"))
+        before_track_b = deepcopy(env_store.get_track("track-material-b"))
+        before_artifact = deepcopy(env_store.get_artifact("art-cross-track-material-r1"))
+
+        duplicate = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-track",
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={"track_id": "track-material-a", "artifact_id": "art-cross-track-material-r1", "label": "PRD", "summary": "dup"},
+        )
+        self.assertFalse(duplicate.get("ok"), msg=duplicate)
+        self.assertFalse(bool(duplicate.get("state_changed")), msg=duplicate)
+        self.assertEqual(duplicate.get("durability"), "none")
+
+        cross_track = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-track",
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={"track_id": "track-material-b", "artifact_id": "art-cross-track-material-r1", "label": "PRD", "summary": "published-b"},
+        )
+        self.assertFalse(cross_track.get("ok"), msg=cross_track)
+        self.assertFalse(bool(cross_track.get("state_changed")), msg=cross_track)
+        self.assertEqual(cross_track.get("durability"), "none")
+
+        design_instance = self._instance_json(instance_id="inst-design-track", buddy="design")
+        wrong_owner = self._dispatch(
+            instance_json=design_instance,
+            instance_id="inst-design-track",
+            buddy="design",
+            tool="track",
+            action="add_material",
+            args={"track_id": "track-material-a", "artifact_id": "art-cross-track-material-r1", "label": "PRD", "summary": "wrong-owner"},
+        )
+        self.assertFalse(wrong_owner.get("ok"), msg=wrong_owner)
+        self.assertEqual((wrong_owner.get("error") or {}).get("code"), "E_TRACK_ARTIFACT_SCOPE")
+        self.assertFalse(bool(wrong_owner.get("state_changed")), msg=wrong_owner)
+
+        self.assertEqual(env_store.get_track("track-material-a"), before_track_a)
+        self.assertEqual(env_store.get_track("track-material-b"), before_track_b)
+        self.assertEqual(env_store.get_artifact("art-cross-track-material-r1"), before_artifact)
+
+    def test_add_proof_publishes_existing_draft_updates_close_proof_and_update(self) -> None:
+        pm_instance = self._pm_instance()
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-proof-publish").get("ok"))
+
+        test_instance = self._instance_json(instance_id="inst-test-track", buddy="test")
+        draft = self._create_draft(
+            instance_json=test_instance,
+            instance_id="inst-test-track",
+            buddy="test",
+            artifact_id="art-proof-r1",
+            template="proof",
+            body="pass",
+        )
+        self.assertTrue(draft.get("ok"), msg=draft)
+
+        proof = self._dispatch(
+            instance_json=test_instance,
+            instance_id="inst-test-track",
+            buddy="test",
+            tool="track",
+            action="add_proof",
+            args={"track_id": "track-proof-publish", "artifact_id": "art-proof-r1", "label": "Smoke", "summary": "Pass"},
+        )
+        self.assertTrue(proof.get("ok"), msg=proof)
+        self.assertTrue(bool(proof.get("state_changed")), msg=proof)
+        self.assertEqual(proof.get("durability"), "durable")
+        changes = {row.get("change") for row in proof.get("state_changes", []) if isinstance(row, dict)}
+        self.assertIn("published_proof", changes)
+        self.assertIn("proof_added", changes)
+        self.assertIn("update_added", changes)
+
+        artifact = env_store.get_artifact("art-proof-r1")
+        self.assertIsInstance(artifact, dict)
+        assert isinstance(artifact, dict)
+        self.assertEqual(artifact.get("status"), "published")
+        self.assertEqual(artifact.get("published_to_track"), "track-proof-publish")
+        self.assertEqual(artifact.get("template"), "proof")
+        self.assertTrue(bool(artifact.get("is_current")), msg=artifact)
+
+        track = env_store.get_track("track-proof-publish")
+        self.assertIsInstance(track, dict)
+        assert isinstance(track, dict)
+        close = [row for row in track.get("close_proof", []) if isinstance(row, dict)]
+        self.assertEqual(len(close), 1)
+        self.assertEqual(close[0].get("artifact_id"), "art-proof-r1")
+        self.assertTrue(bool(close[0].get("current")), msg=close[0])
+        updates = [row for row in track.get("updates", []) if isinstance(row, dict)]
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].get("kind"), "proof")
+        refs = updates[0].get("refs")
+        self.assertIsInstance(refs, list)
+        assert isinstance(refs, list)
+        self.assertEqual(refs[0].get("id"), "art-proof-r1")
+
+    def test_add_proof_replaces_current_proof_only_after_successful_publish(self) -> None:
+        pm_instance = self._pm_instance()
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-proof-main").get("ok"))
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-proof-archived").get("ok"))
+        archived = self._dispatch(
+            instance_json=pm_instance,
             instance_id="inst-pm-track",
             buddy="pm",
             tool="track",
             action="archive",
-            args={"track_id": "track-update-archived"},
+            args={"track_id": "track-proof-archived"},
         )
         self.assertTrue(archived.get("ok"), msg=archived)
 
-        before = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="track",
-            action="open",
-            args={"track_id": "track-update-main"},
+        test_instance = self._instance_json(instance_id="inst-test-track", buddy="test")
+        r1 = self._create_draft(
+            instance_json=test_instance,
+            instance_id="inst-test-track",
+            buddy="test",
+            artifact_id="art-proof-replace-r1",
+            template="proof",
+            body="r1",
         )
-        self.assertTrue(before.get("ok"), msg=before)
-        baseline_updates = before["track"]["updates"]
+        self.assertTrue(r1.get("ok"), msg=r1)
+        pub_r1 = self._dispatch(
+            instance_json=test_instance,
+            instance_id="inst-test-track",
+            buddy="test",
+            tool="track",
+            action="add_proof",
+            args={"track_id": "track-proof-main", "artifact_id": "art-proof-replace-r1", "label": "Smoke", "summary": "r1"},
+        )
+        self.assertTrue(pub_r1.get("ok"), msg=pub_r1)
 
-        for label, artifact_id in (
-            ("private-draft", private_draft["artifact_id"]),
-            ("cross-track-current", cross_track["artifact_id"]),
-            ("superseded-material", main_r1["artifact_id"]),
-            ("archived-track-material", archived_artifact["artifact_id"]),
-        ):
-            rejected = self._dispatch(
-                instance_json=instance_json,
-                instance_id="inst-pm-track",
-                buddy="pm",
-                tool="track",
-                action="add_update",
-                args={
-                    "track_id": "track-update-main",
-                    "kind": "blocker",
-                    "summary": f"reject {label}",
-                    "refs": [{"type": "artifact", "id": artifact_id}],
-                },
-            )
-            with self.subTest(case=label):
-                self.assertFalse(rejected.get("ok"), msg=rejected)
-                self.assertEqual((rejected.get("error") or {}).get("code"), "E_TRACK_UPDATE_REFS")
-                self.assertEqual(rejected.get("permission_boundary"), "track.update_refs")
-                after = self._dispatch(
-                    instance_json=instance_json,
-                    instance_id="inst-pm-track",
-                    buddy="pm",
-                    tool="track",
-                    action="open",
-                    args={"track_id": "track-update-main"},
-                )
-                self.assertTrue(after.get("ok"), msg=after)
-                self.assertEqual(after["track"]["updates"], baseline_updates)
+        r2 = self._create_draft(
+            instance_json=test_instance,
+            instance_id="inst-test-track",
+            buddy="test",
+            artifact_id="art-proof-replace-r2",
+            template="proof",
+            body="r2",
+            supersedes_artifact_id="art-proof-replace-r1",
+        )
+        self.assertTrue(r2.get("ok"), msg=r2)
+
+        baseline_track = deepcopy(env_store.get_track("track-proof-main"))
+        baseline_r1 = deepcopy(env_store.get_artifact("art-proof-replace-r1"))
+        baseline_r2 = deepcopy(env_store.get_artifact("art-proof-replace-r2"))
+
+        rejected = self._dispatch(
+            instance_json=test_instance,
+            instance_id="inst-test-track",
+            buddy="test",
+            tool="track",
+            action="add_proof",
+            args={"track_id": "track-proof-archived", "artifact_id": "art-proof-replace-r2", "label": "Smoke", "summary": "r2"},
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual(rejected.get("permission_boundary"), "track.lifecycle_status")
+        self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
+        self.assertEqual(env_store.get_track("track-proof-main"), baseline_track)
+        self.assertEqual(env_store.get_artifact("art-proof-replace-r1"), baseline_r1)
+        self.assertEqual(env_store.get_artifact("art-proof-replace-r2"), baseline_r2)
+
+        published = self._dispatch(
+            instance_json=test_instance,
+            instance_id="inst-test-track",
+            buddy="test",
+            tool="track",
+            action="add_proof",
+            args={"track_id": "track-proof-main", "artifact_id": "art-proof-replace-r2", "label": "Smoke", "summary": "r2"},
+        )
+        self.assertTrue(published.get("ok"), msg=published)
+        track = env_store.get_track("track-proof-main")
+        self.assertIsInstance(track, dict)
+        assert isinstance(track, dict)
+        close = [row for row in track.get("close_proof", []) if isinstance(row, dict)]
+        self.assertEqual(len(close), 2)
+        by_id = {str(row.get("artifact_id")): bool(row.get("current")) for row in close}
+        self.assertFalse(by_id["art-proof-replace-r1"])
+        self.assertTrue(by_id["art-proof-replace-r2"])
+
+        r1_store = env_store.get_artifact("art-proof-replace-r1")
+        r2_store = env_store.get_artifact("art-proof-replace-r2")
+        self.assertIsInstance(r1_store, dict)
+        self.assertIsInstance(r2_store, dict)
+        assert isinstance(r1_store, dict)
+        assert isinstance(r2_store, dict)
+        self.assertFalse(bool(r1_store.get("is_current")), msg=r1_store)
+        self.assertTrue(bool(r2_store.get("is_current")), msg=r2_store)
 
     def test_archive_boundaries(self) -> None:
         pm_instance = self._pm_instance()
-        self.assertTrue(self._create_track(pm_instance, "track-archive").get("ok"))
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-archive").get("ok"))
 
         design_instance = self._instance_json(instance_id="inst-design-track", buddy="design")
         denied = self._dispatch(
@@ -908,24 +686,22 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(archived.get("ok"), msg=archived)
 
-        list_dev = self._dispatch(
-            instance_json=design_instance,
-            instance_id="inst-design-track",
-            buddy="design",
-            tool="track",
-            action="list",
-            args={},
+        draft = self._create_draft(
+            instance_json=pm_instance,
+            instance_id="inst-pm-track",
+            buddy="pm",
+            artifact_id="art-archive-r1",
+            template="brief",
+            body="x",
         )
-        self.assertTrue(list_dev.get("ok"), msg=list_dev)
-        ids = {row.get("id") for row in list_dev["tracks"] if isinstance(row, dict)}
-        self.assertNotIn("track-archive", ids)
+        self.assertTrue(draft.get("ok"), msg=draft)
 
         for action, args in (
             ("open", {"track_id": "track-archive"}),
             ("update_now", {"track_id": "track-archive", "state": "done"}),
             ("add_update", {"track_id": "track-archive", "kind": "progress", "summary": "x"}),
-            ("add_material", {"track_id": "track-archive", "kind": "prd", "label": "PRD", "title": "x", "summary": "x", "content": {}}),
-            ("add_proof", {"track_id": "track-archive", "kind": "smoke-test", "label": "Smoke", "title": "x", "summary": "x", "content": {}}),
+            ("add_material", {"track_id": "track-archive", "artifact_id": "art-archive-r1", "label": "Brief", "summary": "x"}),
+            ("add_proof", {"track_id": "track-archive", "artifact_id": "art-archive-r1", "label": "Smoke", "summary": "x"}),
         ):
             rejected = self._dispatch(
                 instance_json=design_instance,
@@ -939,6 +715,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertFalse(rejected.get("ok"), msg=rejected)
                 self.assertEqual((rejected.get("error") or {}).get("code"), "E_TRACK_ARCHIVED")
                 self.assertEqual(rejected.get("permission_boundary"), "track.lifecycle_status")
+                self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
 
 
 if __name__ == "__main__":

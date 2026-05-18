@@ -55,12 +55,17 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             summary="Implementation summary",
             body="Implementation summary",
             template="brief",
-            status="published",
-            published_to_track=track["id"],
             supersedes_artifact_id=None,
             created_by="dev",
             authors=["dev"],
             source_refs=[{"type": "note", "label": "contract freeze"}],
+        )
+        _, artifact, _ = env_store.publish_track_material(
+            track_id=track["id"],
+            artifact_id=artifact["id"],
+            label="Implementation Report",
+            from_buddy="dev",
+            summary="Implementation summary",
         )
         track_comment = env_store.create_comment(
             target_type="track",

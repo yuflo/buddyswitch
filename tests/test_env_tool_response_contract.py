@@ -34,7 +34,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
-                    "updated_at": "2026-05-15T00:00:00Z",
+                    "updated_at": "2026-05-18T00:00:00Z",
                 },
                 ensure_ascii=True,
                 indent=2,
@@ -100,6 +100,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertIsInstance(payload.get("retryable"), bool, msg=payload)
         self.assertIsInstance(payload.get("retry_guidance"), str, msg=payload)
         self.assertIsInstance(payload.get("allowed_next_actions"), list, msg=payload)
+        self.assertEqual(payload.get("state_changed"), False, msg=payload)
+        self.assertEqual(payload.get("durability"), "none", msg=payload)
 
     def _assert_success_contract(self, payload: dict[str, object]) -> None:
         self.assertTrue(payload.get("ok"), msg=payload)
@@ -173,12 +175,91 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "summary": "Summary",
                 "template": "brief",
                 "body": "x",
-                "status": "published",
-                "published_to_track": "track-response",
             },
         )
         self._assert_success_contract(artifact)
         self.assertTrue((artifact.get("artifact") or {}).get("id"))
+        self.assertEqual((artifact.get("artifact") or {}).get("status"), "draft")
+        self.assertIsNone((artifact.get("artifact") or {}).get("published_to_track"))
+        self.assertEqual((artifact.get("artifact") or {}).get("currentness"), "draft")
+        self.assertIn("track.add_material", "\n".join(str(x) for x in artifact.get("allowed_next_actions", [])))
+        self.assertIn("track.add_proof", "\n".join(str(x) for x in artifact.get("allowed_next_actions", [])))
+
+        published = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": "track-response",
+                "artifact_id": "art-response-r1",
+                "label": "Brief",
+                "summary": "published",
+            },
+        )
+        self._assert_success_contract(published)
+        self.assertTrue(bool(published.get("state_changed")), msg=published)
+        self.assertEqual(set(published.get("updated_ids", [])), {"track-response", "art-response-r1"})
+        changes = {row.get("change") for row in published.get("state_changes", []) if isinstance(row, dict)}
+        self.assertIn("published_material", changes)
+        self.assertIn("material_added", changes)
+
+    def test_publication_success_responses_describe_object_mutations(self) -> None:
+        instance_id = "inst-pm-mutation-response"
+        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        track = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            tool="track",
+            action="create",
+            args={
+                "track_id": "track-mutation-response",
+                "title": "Mutation response",
+                "outcome": "outcome",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
+            },
+        )
+        self.assertTrue(track.get("ok"), msg=track)
+
+        proof_draft = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-proof-response-r1",
+                "title": "proof",
+                "summary": "pass",
+                "template": "proof",
+                "body": "pass",
+            },
+        )
+        self.assertTrue(proof_draft.get("ok"), msg=proof_draft)
+
+        proof = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            tool="track",
+            action="add_proof",
+            args={
+                "track_id": "track-mutation-response",
+                "artifact_id": "art-proof-response-r1",
+                "label": "Smoke",
+                "summary": "pass",
+            },
+        )
+        self._assert_success_contract(proof)
+        self.assertTrue(bool(proof.get("state_changed")), msg=proof)
+        self.assertEqual(set(proof.get("updated_ids", [])), {"track-mutation-response", "art-proof-response-r1"})
+        changes = {row.get("change") for row in proof.get("state_changes", []) if isinstance(row, dict)}
+        self.assertIn("published_proof", changes)
+        self.assertIn("proof_added", changes)
+        self.assertIn("update_added", changes)
 
 
 if __name__ == "__main__":

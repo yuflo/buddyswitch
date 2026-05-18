@@ -206,19 +206,25 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return payload
 
     def _seed_market_task_and_artifact(self) -> tuple[str, str]:
-        task = env_store.create_task("task-market-evidence", "Market evidence task", buddy="market")
+        track = env_store.create_track("track-market-evidence", "Market Evidence", owner_buddy="market")
+        task = env_store.create_task("task-market-evidence", "Market evidence task", buddy="market", track_id=track["id"])
         artifact = env_store.create_artifact_revision(
             artifact_id="art-market-evidence-r1",
             title="Market Evidence Brief",
             summary="seed",
             body="market",
             template="brief",
-            status="draft",
-            published_to_track=None,
             supersedes_artifact_id=None,
             created_by="market",
             authors=["market"],
             source_refs=[{"type": "note", "label": "seed"}],
+        )
+        env_store.publish_track_material(
+            track_id=track["id"],
+            artifact_id=artifact["id"],
+            label="Market Evidence Brief",
+            from_buddy="market",
+            summary="seed",
         )
         return task["id"], artifact["id"]
 

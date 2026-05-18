@@ -29,8 +29,6 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             summary="seed",
             body="## Context\n\nSeed",
             template="brief",
-            status="draft",
-            published_to_track=None,
             supersedes_artifact_id=None,
             created_by="pm",
             authors=["pm"],

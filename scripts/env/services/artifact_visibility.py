@@ -28,7 +28,20 @@ def _track_proof_ref(track: dict[str, Any], artifact_id: str) -> dict[str, Any] 
             continue
         if row.get("type") != "artifact":
             continue
-        if row.get("artifact_id") == artifact_id:
+        if row.get("artifact_id") == artifact_id and bool(row.get("current", True)):
+            return row
+    return None
+
+
+def _track_history_ref(track: dict[str, Any], artifact_id: str) -> dict[str, Any] | None:
+    for key in ("shared_materials", "close_proof"):
+        for row in track.get(key, []):
+            if not isinstance(row, dict):
+                continue
+            if row.get("type") != "artifact":
+                continue
+            if row.get("artifact_id") != artifact_id:
+                continue
             return row
     return None
 
@@ -121,6 +134,17 @@ def artifact_read_decision(artifact: dict[str, Any], active_buddy: str) -> dict[
             "why": "artifact is published as close proof on readable track",
         }
 
+    history_ref = _track_history_ref(track, str(artifact_id or ""))
+    if isinstance(history_ref, dict):
+        return {
+            "allowed": True,
+            "artifact_id": artifact_id,
+            "track_id": published_track_id,
+            "relation": "track_history",
+            "permission_boundary": "none",
+            "why": "artifact is readable as historical published material/proof on readable track",
+        }
+
     return {
         "allowed": False,
         "artifact_id": artifact_id,
@@ -136,10 +160,20 @@ def artifact_summary_row(
     active_buddy: str,
 ) -> dict[str, Any]:
     decision = artifact_read_decision(artifact, active_buddy)
-    is_current = bool(artifact.get("is_current"))
     relation = decision.get("relation")
-    if relation not in {"owner", "track_material", "track_proof"}:
+    if relation not in {"owner", "track_material", "track_proof", "track_history"}:
         relation = "none"
+    status = artifact.get("status")
+    if status == "draft":
+        currentness = "draft"
+    elif relation == "track_material":
+        currentness = "current"
+    elif relation == "track_proof":
+        currentness = "proof"
+    elif relation == "track_history":
+        currentness = "superseded"
+    else:
+        currentness = "superseded"
     return {
         "id": artifact.get("id"),
         "artifact_id": artifact.get("id"),
@@ -155,7 +189,7 @@ def artifact_summary_row(
         "authors": artifact.get("authors"),
         "source_refs": artifact.get("source_refs"),
         "revision": artifact.get("revision"),
-        "currentness": "current" if is_current else "superseded",
+        "currentness": currentness,
         "readable_by_active_buddy": bool(decision.get("allowed")),
         "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
         "published_to_track": artifact.get("published_to_track"),
@@ -210,6 +244,8 @@ def proof_rows_for_track(track_id: str, active_buddy: str) -> list[dict[str, Any
         if not isinstance(ref, dict):
             continue
         if ref.get("type") != "artifact":
+            continue
+        if not bool(ref.get("current", True)):
             continue
         artifact_id = ref.get("artifact_id")
         if not isinstance(artifact_id, str) or not artifact_id:

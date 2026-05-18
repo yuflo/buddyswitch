@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +55,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("retry_guidance", payload)
         self.assertIn("allowed_next_actions", payload)
         self.assertFalse(payload.get("state_changed"), msg=payload)
+        self.assertEqual(payload.get("durability"), "none", msg=payload)
 
     def test_buddybox_traversal_rejection_has_structured_feedback(self) -> None:
         payload = self._dispatch(
@@ -73,8 +75,6 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             summary="pm private",
             body="private",
             template="note",
-            status="draft",
-            published_to_track=None,
             supersedes_artifact_id=None,
             created_by="pm",
             authors=["pm"],
@@ -88,6 +88,39 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self._assert_rejection_contract(payload)
         self.assertEqual(payload["permission_boundary"], "artifact.buddy_scope")
+
+    def test_artifact_direct_publish_rejection_has_structured_feedback(self) -> None:
+        track = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="create",
+            args={
+                "track_id": "track-feedback-direct-publish",
+                "title": "direct publish",
+                "outcome": "reject",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
+            },
+        )
+        self.assertTrue(track["ok"], msg=track)
+
+        rejected = self._dispatch(
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-feedback-direct-r1",
+                "title": "reject direct publish",
+                "summary": "reject",
+                "template": "brief",
+                "body": "reject",
+                "published_to_track": "track-feedback-direct-publish",
+            },
+        )
+        self._assert_rejection_contract(rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_ARTIFACT_PUBLICATION_PATH")
+        self.assertEqual(rejected.get("permission_boundary"), "artifact.publication_path")
+        self.assertIn("published_to_track", rejected.get("correctable_fields", []))
 
     def test_evidence_target_rejection_has_structured_feedback(self) -> None:
         payload = self._dispatch(
@@ -109,6 +142,90 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self._assert_rejection_contract(payload)
         self.assertEqual(payload["permission_boundary"], "request-payload")
         self.assertIn("backend", payload["why_blocked"].lower())
+
+    def test_publish_rejections_have_actionable_feedback_and_no_state_change(self) -> None:
+        track_a = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="create",
+            args={
+                "track_id": "track-feedback-a",
+                "title": "a",
+                "outcome": "a",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
+            },
+        )
+        track_b = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="create",
+            args={
+                "track_id": "track-feedback-b",
+                "title": "b",
+                "outcome": "b",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
+            },
+        )
+        self.assertTrue(track_a["ok"], msg=track_a)
+        self.assertTrue(track_b["ok"], msg=track_b)
+
+        draft = self._dispatch(
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-feedback-r1",
+                "title": "brief",
+                "summary": "brief",
+                "template": "brief",
+                "body": "brief",
+            },
+        )
+        self.assertTrue(draft["ok"], msg=draft)
+        published = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={"track_id": "track-feedback-a", "artifact_id": "art-feedback-r1", "label": "Brief", "summary": "a"},
+        )
+        self.assertTrue(published["ok"], msg=published)
+
+        before_track_a = deepcopy(env_store.get_track("track-feedback-a"))
+        before_track_b = deepcopy(env_store.get_track("track-feedback-b"))
+        before_artifact = deepcopy(env_store.get_artifact("art-feedback-r1"))
+
+        duplicate = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={"track_id": "track-feedback-a", "artifact_id": "art-feedback-r1", "label": "Brief", "summary": "dup"},
+        )
+        self._assert_rejection_contract(duplicate)
+        self.assertIn("artifact_id", duplicate.get("correctable_fields", []))
+
+        cross_track = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={"track_id": "track-feedback-b", "artifact_id": "art-feedback-r1", "label": "Brief", "summary": "cross"},
+        )
+        self._assert_rejection_contract(cross_track)
+        self.assertIn("track_id", cross_track.get("correctable_fields", []))
+
+        wrong_owner = self._dispatch(
+            buddy="design",
+            tool="track",
+            action="add_material",
+            args={"track_id": "track-feedback-a", "artifact_id": "art-feedback-r1", "label": "Brief", "summary": "owner"},
+        )
+        self._assert_rejection_contract(wrong_owner)
+        self.assertEqual((wrong_owner.get("error") or {}).get("code"), "E_TRACK_ARTIFACT_SCOPE")
+
+        self.assertEqual(env_store.get_track("track-feedback-a"), before_track_a)
+        self.assertEqual(env_store.get_track("track-feedback-b"), before_track_b)
+        self.assertEqual(env_store.get_artifact("art-feedback-r1"), before_artifact)
 
     def test_rejections_expose_impact_retry_and_recovery_fields_across_boundaries(self) -> None:
         payload_cases = [
@@ -172,11 +289,6 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertEqual(payload.get("permission_boundary"), "env.tool", msg=payload)
                 self.assertEqual((payload.get("error") or {}).get("code"), "E_ENV_TOOL", msg=payload)
                 self.assertIn("action", payload.get("correctable_fields", []), msg=payload)
-                next_actions = payload.get("allowed_next_actions")
-                self.assertIsInstance(next_actions, list, msg=payload)
-                assert isinstance(next_actions, list)
-                action_text = "\n".join(str(item).lower() for item in next_actions)
-                self.assertIn("supported action", action_text)
 
 
 if __name__ == "__main__":

@@ -61,6 +61,49 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertIsInstance(row.get("returns"), list)
                 self.assertIsInstance(row.get("risk_hints"), dict)
 
+    def test_critical_track_artifact_action_semantics_are_not_placeholders(self) -> None:
+        op = contracts.operation_semantics()
+        critical = (
+            "track.create",
+            "track.open",
+            "track.add_material",
+            "track.add_proof",
+            "artifact.create_revision",
+            "artifact.get",
+        )
+        for key in critical:
+            semantic = op.get(key)
+            self.assertIsInstance(semantic, dict, msg=key)
+            assert isinstance(semantic, dict)
+            with self.subTest(action=key):
+                self.assertIsInstance(semantic.get("risk_hints"), dict)
+                full_semantic = contracts.env_tools_description()[key.split(".", 1)[0]]["action_semantics"][key.split(".", 1)[1]]
+                self.assertIsInstance(full_semantic.get("use_when"), list)
+                self.assertGreater(len(full_semantic.get("use_when", [])), 0)
+                self.assertIsInstance(full_semantic.get("do_not_use_when"), list)
+                self.assertGreater(len(full_semantic.get("do_not_use_when", [])), 0)
+                self.assertIsInstance(full_semantic.get("inputs_explained"), dict)
+                self.assertGreater(len(full_semantic.get("inputs_explained", {})), 0)
+                self.assertIsInstance(full_semantic.get("common_failures"), list)
+                self.assertGreater(len(full_semantic.get("common_failures", [])), 0)
+                self.assertIsInstance(full_semantic.get("success_means"), str)
+                self.assertNotIn("Operation completed with structured tool feedback.", full_semantic.get("success_means", ""))
+
+    def test_publication_payload_fields_match_single_publication_path(self) -> None:
+        desc = contracts.env_tools_description()
+        track_fields = desc["track"]["payload_fields"]
+        artifact_fields = desc["artifact"]["payload_fields"]
+        self.assertEqual(track_fields["add_material"], ["track_id", "artifact_id", "label", "summary"])
+        self.assertEqual(track_fields["add_proof"], ["track_id", "artifact_id", "label", "summary"])
+        self.assertEqual(
+            artifact_fields["create_revision"],
+            ["artifact_id", "title", "summary", "template", "body", "supersedes_artifact_id", "source_refs", "read_claim"],
+        )
+        self.assertEqual(
+            artifact_fields["update_metadata"],
+            ["artifact_id", "title", "summary", "template", "body", "source_refs", "read_claim"],
+        )
+
     def test_compact_affordances_are_registry_aligned(self) -> None:
         compact = contracts.compact_tool_affordances()
         self.assertEqual(set(compact), _EXPECTED_TOOLS)

@@ -95,12 +95,17 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             summary="artifact summary v1",
             body="artifact body v1",
             template="note",
-            status="draft",
-            published_to_track=None,
             supersedes_artifact_id=None,
             created_by="dev",
             authors=["dev"],
             source_refs=[{"type": "note", "label": "context"}],
+        )
+        env_store.publish_track_material(
+            track_id="track-context-active",
+            artifact_id="art-task-dev-context-note-r1",
+            label="Context",
+            from_buddy="dev",
+            summary="artifact summary v1",
         )
         env_store.create_artifact_revision(
             artifact_id="art-task-dev-context-note-r2",
@@ -108,8 +113,6 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             summary="artifact summary v2",
             body="artifact body v2",
             template="note",
-            status=None,
-            published_to_track=None,
             supersedes_artifact_id="art-task-dev-context-note-r1",
             created_by="dev",
             authors=None,
@@ -130,23 +133,28 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             state="done",
             health="ok",
         )
-        env_store.update_track(
-            "track-context-archived",
-            {"archived_at": "2026-05-18T10:00:00+08:00"},
-        )
         env_store.create_task("task-dev-archived", "Archived task", buddy="dev", track_id="track-context-archived")
-        env_store.create_artifact_revision(
+        archived_artifact = env_store.create_artifact_revision(
             artifact_id="art-task-dev-archived-r1",
             title="Archived Artifact",
             summary="archived",
             body="archived",
             template="note",
-            status="published",
-            published_to_track="track-context-archived",
             supersedes_artifact_id=None,
             created_by="dev",
             authors=["dev"],
             source_refs=[{"type": "note", "label": "context"}],
+        )
+        env_store.publish_track_material(
+            track_id="track-context-archived",
+            artifact_id=str(archived_artifact["id"]),
+            label="Archived",
+            from_buddy="dev",
+            summary="archived",
+        )
+        env_store.update_track(
+            "track-context-archived",
+            {"archived_at": "2026-05-18T10:00:00+08:00"},
         )
 
     def test_context_summarize_exposes_compact_tool_affordances(self) -> None:

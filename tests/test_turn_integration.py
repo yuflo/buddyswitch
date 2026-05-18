@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Integration tests for explicit-id collaboration flow."""
+"""Integration tests for PM/product publication route."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest_path=self.manifest_path,
         )
 
-    def test_cross_buddy_flow_uses_track_publication_and_artifact_get(self) -> None:
+    def test_pm_product_request_uses_track_artifact_publication_not_project_write(self) -> None:
         track = self._dispatch(
             buddy="pm",
             tool="track",
@@ -72,52 +72,71 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         self.assertTrue(track["ok"], msg=track)
-        track_id = track["track"]["id"]
+        track_id = (track.get("track") or {}).get("id")
+        self.assertEqual(track_id, "track-runless-flow")
 
-        material = self._dispatch(
+        draft = self._dispatch(
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-runless-prd-r1",
+                "title": "Landing brief",
+                "summary": "PM product definition",
+                "template": "brief",
+                "body": "# Landing brief\n\n- audience\n- positioning\n- acceptance criteria",
+            },
+        )
+        self.assertTrue(draft["ok"], msg=draft)
+        self.assertEqual((draft.get("artifact") or {}).get("status"), "draft")
+
+        publish = self._dispatch(
             buddy="pm",
             tool="track",
             action="add_material",
             args={
-                "track_id": track_id,
-                "kind": "prd",
-                "label": "PRD",
-                "title": "PRD",
-                "summary": "Runless PRD",
-                "content": {"body": "v1"},
+                "track_id": "track-runless-flow",
+                "artifact_id": "art-runless-prd-r1",
+                "label": "PM Brief",
+                "summary": "Landing scope and acceptance",
             },
         )
-        self.assertTrue(material["ok"], msg=material)
-        artifact_id = material.get("artifact_id")
-        self.assertIsInstance(artifact_id, str, msg=material)
-        assert isinstance(artifact_id, str)
+        self.assertTrue(publish["ok"], msg=publish)
+        self.assertEqual(publish.get("durability"), "durable")
+        state_changes = publish.get("state_changes")
+        self.assertIsInstance(state_changes, list, msg=publish)
+        assert isinstance(state_changes, list)
+        changes = {row.get("change") for row in state_changes if isinstance(row, dict)}
+        self.assertIn("published_material", changes)
+        self.assertIn("material_added", changes)
+
+        opened = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="open",
+            args={"track_id": "track-runless-flow"},
+        )
+        self.assertTrue(opened["ok"], msg=opened)
+        self.assertEqual(
+            [row.get("artifact_id") for row in (opened.get("track") or {}).get("shared_materials", [])],
+            ["art-runless-prd-r1"],
+        )
 
         design_read = self._dispatch(
             buddy="design",
             tool="artifact",
             action="get",
-            args={"artifact_id": artifact_id},
+            args={"artifact_id": "art-runless-prd-r1"},
         )
         self.assertTrue(design_read["ok"], msg=design_read)
-        self.assertEqual(design_read.get("read_scope"), "one readable artifact")
-        self.assertEqual((design_read["artifact"] or {}).get("id"), artifact_id)
-        self.assertEqual((design_read["artifact"] or {}).get("template"), "brief")
-        self.assertEqual((design_read["artifact"] or {}).get("published_to_track"), track_id)
+        self.assertIn("acceptance criteria", (design_read.get("artifact") or {}).get("body", ""))
 
-        track_context = self._dispatch(
-            buddy="design",
-            tool="track",
-            action="open",
-            args={"track_id": track_id},
-        )
-        self.assertTrue(track_context["ok"], msg=track_context)
-        self.assertEqual(
-            [row.get("artifact_id") for row in (track_context.get("track") or {}).get("shared_materials", [])],
-            [artifact_id],
-        )
-
-        self.assertFalse(self._runtime_path("runs/raw").exists())
-        self.assertFalse(self._runtime_path("buddyswitch/content/runs").exists())
+        project_app = self._runtime_path("projects/app")
+        if project_app.exists():
+            if project_app.is_file():
+                self.assertEqual(project_app.stat().st_size, 0)
+            else:
+                self.assertEqual(list(project_app.rglob("*")), [])
 
     def test_market_evidence_requires_target_model(self) -> None:
         rejected = self._dispatch(buddy="market", tool="evidence", action="issue_browser", args={})

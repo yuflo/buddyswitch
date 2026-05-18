@@ -283,7 +283,6 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "summary": "seed",
                 "template": "brief",
                 "body": "...",
-                "status": "draft",
                 "source_refs": [{"type": "note", "label": "runless seed"}],
             },
             instance_json=instance_json,
