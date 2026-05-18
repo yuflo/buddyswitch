@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""End-to-end tests for direct track material flow."""
+"""Runless end-to-end env layer coverage."""
 
 from __future__ import annotations
 
 import json
 import sys
 import unittest
-import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,228 +13,315 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import runtime_kernel.broker as runtime_broker  # noqa: E402
+import env_manifest  # noqa: E402
+import env_store  # noqa: E402
+from env.tools import router as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-PROTOCOL = "buddyswitch-runtime-broker/v2"
+_OLD_BUDDYBOX_ROOT = "buddyswitch/content/" + "buddybox"
 
 
 class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(self, buddy: str) -> Path:
-        path = self._runtime_path(f"instance-{buddy}.json")
-        path.write_text(
-            json.dumps(
-                {
-                    "instance_id": f"inst-{buddy}",
-                    "buddy": buddy,
-                    "status": "active",
-                    "workspace_dir": str(self.runtime_root),
-                    "browser_port": None,
-                    "updated_at": "2026-05-18T00:00:00Z",
-                },
-                ensure_ascii=True,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        return path
+    def setUp(self) -> None:
+        super().setUp()
+        self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
+        self.manifest = env_manifest.load_manifest(self.manifest_path)
+        self.instance_json = self._runtime_path("instance.json")
+        self.instance_payload = {
+            "instance_id": "inst-e2e-runless",
+            "buddy": "pm",
+            "status": "active",
+            "workspace_dir": str(self.runtime_root),
+            "browser_port": 9333,
+        }
+        self.instance_json.write_text(json.dumps(self.instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
     def _dispatch(self, *, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
-        instance_json = self._instance_json(buddy)
-        request = {
-            "protocol": PROTOCOL,
-            "request_id": f"req-e2e-{uuid.uuid4().hex}",
-            "method": "env.tool",
-            "params": {
-                "instance_id": f"inst-{buddy}",
-                "active_buddy": buddy,
-                "tool": tool,
-                "action": action,
-                "args": args,
-            },
-            "deadline_ms": 35000,
-        }
-        envelope = runtime_broker.dispatch_runtime_request(
-            request=request,
-            instance_json_path=instance_json,
-            manifest_path=MANIFEST,
+        return tool_router.dispatch_env_tool_request(
+            payload={"tool": tool, "action": action, "args": args},
+            active_buddy=buddy,
+            instance_id="inst-e2e-runless",
+            instance_json=self.instance_json,
+            instance_payload={**self.instance_payload, "buddy": buddy},
+            manifest=self.manifest,
+            manifest_path=self.manifest_path,
         )
-        self.assertIsInstance(envelope, dict)
-        assert isinstance(envelope, dict)
-        if envelope.get("ok") is True:
-            result = envelope.get("result")
-            self.assertIsInstance(result, dict, msg=envelope)
-            assert isinstance(result, dict)
-            return result
-        error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
-        payload: dict[str, object] = {
-            "ok": False,
-            "error": {
-                "code": error.get("code"),
-                "message": error.get("message"),
-                "retriable": error.get("retriable"),
-            },
-        }
-        for key, value in envelope.items():
-            if key in {"protocol", "request_id", "ok", "error"}:
-                continue
-            payload[key] = value
-        return payload
 
-    def test_pm_design_dev_test_direct_track_material_flow_without_tasks(self) -> None:
-        created = self._dispatch(
+    def test_full_flow_persists_only_runless_product_state(self) -> None:
+        track = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="create",
+            args={"track_id": "track-e2e-runless", "title": "E2E Runless", "summary": "flow"},
+        )
+        self.assertTrue(track["ok"], msg=track)
+
+        task = self._dispatch(
+            buddy="pm",
+            tool="task",
+            action="create",
+            args={"task_id": "task-pm-e2e-runless", "title": "Draft PRD", "summary": "flow", "track_id": "track-e2e-runless"},
+        )
+        self.assertTrue(task["ok"], msg=task)
+
+        artifact = self._dispatch(
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-pm-e2e-prd-r1",
+                "title": "PRD",
+                "summary": "runless artifact",
+                "template": "brief",
+                "body": "v1",
+                "status": "published",
+                "published_to_track": "track-e2e-runless",
+            },
+        )
+        self.assertTrue(artifact["ok"], msg=artifact)
+        self.assertIsNone(artifact.get("read_scope"))
+
+        buddybox = self._dispatch(
+            buddy="pm",
+            tool="buddybox",
+            action="write",
+            args={"logical_name": "e2e/notes.md", "content": "# runless\n"},
+        )
+        self.assertTrue(buddybox["ok"], msg=buddybox)
+        self.assertEqual(buddybox.get("logical_name"), "e2e/notes.md")
+
+        dev_task = self._dispatch(
+            buddy="dev",
+            tool="task",
+            action="create",
+            args={
+                "task_id": "task-dev-e2e-runless",
+                "title": "Implement",
+                "summary": "consume PM artifact",
+                "track_id": "track-e2e-runless",
+            },
+        )
+        self.assertTrue(dev_task["ok"], msg=dev_task)
+
+        cross_read = self._dispatch(
+            buddy="dev",
+            tool="artifact",
+            action="get",
+            args={"artifact_id": "art-pm-e2e-prd-r1"},
+        )
+        self.assertTrue(cross_read["ok"], msg=cross_read)
+        self.assertEqual(cross_read.get("read_scope"), "one readable artifact markdown page")
+        read_artifact = cross_read.get("artifact")
+        self.assertIsInstance(read_artifact, dict, msg=cross_read)
+        assert isinstance(read_artifact, dict)
+        self.assertEqual(read_artifact.get("template"), "brief")
+        self.assertEqual(read_artifact.get("body"), "v1")
+        self.assertEqual(read_artifact.get("published_to_track"), "track-e2e-runless")
+
+        track_context = self._dispatch(
+            buddy="dev",
+            tool="track",
+            action="get",
+            args={"track_id": "track-e2e-runless"},
+        )
+        self.assertTrue(track_context["ok"], msg=track_context)
+        shared = track_context.get("shared_materials")
+        self.assertIsInstance(shared, list, msg=track_context)
+        assert isinstance(shared, list)
+        self.assertEqual([row.get("artifact_id") for row in shared], ["art-pm-e2e-prd-r1"])
+
+        self.assertIsNotNone(env_store.get_track("track-e2e-runless"))
+        self.assertIsNotNone(env_store.get_task("task-pm-e2e-runless"))
+        self.assertIsNotNone(env_store.get_task("task-dev-e2e-runless"))
+        self.assertIsNotNone(env_store.get_artifact("art-pm-e2e-prd-r1"))
+        self.assertTrue(self._runtime_path("buddyswitch/local/buddybox/pm/e2e/notes.md").exists())
+        self.assertFalse(self._runtime_path(f"{_OLD_BUDDYBOX_ROOT}/pm/e2e/notes.md").exists())
+        self.assertFalse(self._runtime_path("runs/raw").exists())
+        self.assertFalse(self._runtime_path("buddyswitch/content/runs").exists())
+
+    def test_private_buddybox_logical_file_can_be_promoted_by_artifact_content_only(self) -> None:
+        track = self._dispatch(
             buddy="pm",
             tool="track",
             action="create",
             args={
-                "track_id": "track-e2e-main",
-                "title": "Landing page first proof",
-                "outcome": "Validate whether landing explains core value.",
-                "appetite": "2 days",
-                "now": {"next": "PM writes PRD", "blocker": None},
+                "track_id": "track-e2e-logical-promotion",
+                "title": "Logical Promotion",
+                "summary": "promote private file content",
             },
         )
-        self.assertTrue(created.get("ok"), msg=created)
+        self.assertTrue(track["ok"], msg=track)
 
-        pm_prd = self._dispatch(
+        task = self._dispatch(
             buddy="pm",
-            tool="track",
-            action="add_material",
+            tool="task",
+            action="create",
             args={
-                "track_id": "track-e2e-main",
-                "kind": "prd",
-                "label": "PRD",
-                "title": "Landing PRD",
-                "summary": "scope, constraints, checks",
-                "content": {"body": "PM PRD body"},
+                "task_id": "task-pm-logical-promotion",
+                "title": "Draft private notes",
+                "summary": "pm private draft",
+                "track_id": "track-e2e-logical-promotion",
             },
         )
-        self.assertTrue(pm_prd.get("ok"), msg=pm_prd)
+        self.assertTrue(task["ok"], msg=task)
 
-        opened_design = self._dispatch(
-            buddy="design",
-            tool="track",
-            action="open",
-            args={"track_id": "track-e2e-main"},
+        written = self._dispatch(
+            buddy="pm",
+            tool="buddybox",
+            action="write",
+            args={"logical_name": "drafts/prd.html", "content": "<h1>PRD draft</h1>\n"},
         )
-        self.assertTrue(opened_design.get("ok"), msg=opened_design)
-        self.assertEqual(len(opened_design["track"]["shared_materials"]), 1)
+        self.assertTrue(written["ok"], msg=written)
 
-        design_reads_prd = self._dispatch(
-            buddy="design",
+        read_pm = self._dispatch(
+            buddy="pm",
+            tool="buddybox",
+            action="read",
+            args={"logical_name": "drafts/prd.html", "encoding": "utf-8"},
+        )
+        self.assertTrue(read_pm["ok"], msg=read_pm)
+        content = read_pm.get("content")
+        self.assertIsInstance(content, str, msg=read_pm)
+        assert isinstance(content, str)
+
+        created_artifact = self._dispatch(
+            buddy="pm",
             tool="artifact",
-            action="get",
-            args={"artifact_id": pm_prd["artifact_id"]},
-        )
-        self.assertTrue(design_reads_prd.get("ok"), msg=design_reads_prd)
-
-        design_draft = self._dispatch(
-            buddy="design",
-            tool="track",
-            action="add_material",
+            action="create_revision",
             args={
-                "track_id": "track-e2e-main",
-                "kind": "design-handoff",
-                "label": "Draft",
-                "title": "Design Draft",
-                "summary": "first-screen structure",
-                "content": {"body": "Design draft body"},
+                "artifact_id": "art-pm-logical-promotion-r1",
+                "title": "Promoted PRD Content",
+                "summary": "from private draft",
+                "template": "brief",
+                "body": content,
+                "status": "published",
+                "published_to_track": "track-e2e-logical-promotion",
+                "source_refs": [{"type": "buddybox", "logical_name": "drafts/prd.html"}],
             },
         )
-        self.assertTrue(design_draft.get("ok"), msg=design_draft)
+        self.assertTrue(created_artifact["ok"], msg=created_artifact)
 
-        opened_dev = self._dispatch(
+        dev_task = self._dispatch(
             buddy="dev",
-            tool="track",
-            action="open",
-            args={"track_id": "track-e2e-main"},
+            tool="task",
+            action="create",
+            args={
+                "task_id": "task-dev-logical-promotion",
+                "title": "Read promoted PRD",
+                "summary": "linked for cross-buddy read",
+                "track_id": "track-e2e-logical-promotion",
+            },
         )
-        self.assertTrue(opened_dev.get("ok"), msg=opened_dev)
-        self.assertEqual(len(opened_dev["track"]["shared_materials"]), 2)
+        self.assertTrue(dev_task["ok"], msg=dev_task)
 
-        dev_reads_pm = self._dispatch(
-            buddy="dev",
-            tool="artifact",
-            action="get",
-            args={"artifact_id": pm_prd["artifact_id"]},
-        )
-        dev_reads_design = self._dispatch(
+        read_as_dev = self._dispatch(
             buddy="dev",
             tool="artifact",
             action="get",
-            args={"artifact_id": design_draft["artifact_id"]},
+            args={"artifact_id": "art-pm-logical-promotion-r1"},
         )
-        self.assertTrue(dev_reads_pm.get("ok"), msg=dev_reads_pm)
-        self.assertTrue(dev_reads_design.get("ok"), msg=dev_reads_design)
+        self.assertTrue(read_as_dev["ok"], msg=read_as_dev)
+        self.assertEqual(read_as_dev.get("read_scope"), "one readable artifact markdown page")
+        artifact = read_as_dev.get("artifact")
+        self.assertIsInstance(artifact, dict, msg=read_as_dev)
+        assert isinstance(artifact, dict)
+        self.assertEqual(artifact.get("body"), content)
+        self.assertEqual(artifact.get("template"), "brief")
+        self.assertEqual(artifact.get("published_to_track"), "track-e2e-logical-promotion")
 
-        proof = self._dispatch(
-            buddy="test",
-            tool="track",
-            action="add_proof",
-            args={
-                "track_id": "track-e2e-main",
-                "kind": "smoke-test",
-                "label": "Smoke",
-                "title": "Smoke result",
-                "summary": "smoke pass",
-                "content": {"result": "pass"},
-            },
+        denied_dev_prefixed = self._dispatch(
+            buddy="dev",
+            tool="buddybox",
+            action="read",
+            args={"logical_name": "pm/drafts/prd.html"},
         )
-        self.assertTrue(proof.get("ok"), msg=proof)
+        self.assertFalse(denied_dev_prefixed["ok"], msg=denied_dev_prefixed)
+        self.assertEqual((denied_dev_prefixed.get("error") or {}).get("code"), "E_BUDDYBOX_LOGICAL_NAME")
 
-        done = self._dispatch(
+        denied_dev_local = self._dispatch(
+            buddy="dev",
+            tool="buddybox",
+            action="read",
+            args={"logical_name": "drafts/prd.html"},
+        )
+        self.assertFalse(denied_dev_local["ok"], msg=denied_dev_local)
+        self.assertEqual((denied_dev_local.get("error") or {}).get("code"), "E_BUDDYBOX_NOT_FOUND")
+
+    def test_cross_buddy_identity_scope_follows_service_permissions(self) -> None:
+        env_store.create_artifact_revision(
+            artifact_id="art-pm-private-r1",
+            title="Private artifact",
+            summary="private",
+            body="private",
+            template="note",
+            status="draft",
+            published_to_track=None,
+            supersedes_artifact_id=None,
+            created_by="pm",
+            authors=["pm"],
+            source_refs=[{"type": "note", "label": "seed"}],
+        )
+        denied = self._dispatch(
+            buddy="design",
+            tool="artifact",
+            action="update_metadata",
+            args={"artifact_id": "art-pm-private-r1", "summary": "mutate"},
+        )
+        self.assertFalse(denied["ok"])
+        self.assertEqual(denied["permission_boundary"], "artifact.authors")
+        self.assertEqual((denied.get("error") or {}).get("code"), "E_ARTIFACT_SCOPE")
+
+    def test_response_planes_distinguish_product_private_token_and_browser_session(self) -> None:
+        track = self._dispatch(
             buddy="pm",
             tool="track",
-            action="update_now",
-            args={
-                "track_id": "track-e2e-main",
-                "state": "done",
-                "health": "ok",
-                "now": {"next": "ship", "blocker": None},
-            },
+            action="create",
+            args={"track_id": "track-e2e-planes", "title": "Planes", "summary": "planes"},
         )
-        self.assertTrue(done.get("ok"), msg=done)
-
-        final_open = self._dispatch(
+        self.assertTrue(track["ok"], msg=track)
+        task = self._dispatch(
             buddy="pm",
-            tool="track",
-            action="open",
-            args={"track_id": "track-e2e-main"},
+            tool="task",
+            action="create",
+            args={"task_id": "task-e2e-planes", "title": "Planes task", "track_id": "track-e2e-planes"},
         )
-        self.assertTrue(final_open.get("ok"), msg=final_open)
-        track = final_open["track"]
-        self.assertEqual(track["state"], "done")
-        self.assertEqual(len(track["shared_materials"]), 2)
-        self.assertEqual(len(track["close_proof"]), 1)
-
-        serialized = json.dumps(
-            {
-                "created": created,
-                "pm_prd": pm_prd,
-                "opened_design": opened_design,
-                "design_reads_prd": design_reads_prd,
-                "design_draft": design_draft,
-                "opened_dev": opened_dev,
-                "dev_reads_pm": dev_reads_pm,
-                "dev_reads_design": dev_reads_design,
-                "proof": proof,
-                "done": done,
-                "final_open": final_open,
+        self.assertTrue(task["ok"], msg=task)
+        artifact = self._dispatch(
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-e2e-planes-r1",
+                "title": "Planes spec",
+                "template": "note",
+                "body": "seed",
+                "status": "published",
+                "published_to_track": "track-e2e-planes",
             },
-            ensure_ascii=True,
         )
-        for forbidden in (
-            "track" + ".join",
-            "track" + ".attach_" + "task",
-            "track" + ".detach_" + "task",
-            "track" + "_task",
-            "source_" + "task_id",
-            "task_ids",
-            "artifact." + "task_id",
-        ):
-            self.assertNotIn(forbidden, serialized)
+        self.assertTrue(artifact["ok"], msg=artifact)
+        self.assertEqual(artifact.get("durability"), "durable")
+        self.assertIsInstance(artifact.get("state_changes"), list, msg=artifact)
+
+        buddybox_write = self._dispatch(
+            buddy="pm",
+            tool="buddybox",
+            action="write",
+            args={"logical_name": "planes/private.txt", "content": "private"},
+        )
+        self.assertTrue(buddybox_write["ok"], msg=buddybox_write)
+        self.assertEqual(buddybox_write.get("durability"), "active_instance_local")
+        self.assertFalse(buddybox_write.get("mutates_product_state"), msg=buddybox_write)
+
+        evidence = self._dispatch(
+            buddy="pm",
+            tool="evidence",
+            action="issue_browser",
+            args={"target_type": "artifact", "target_id": "art-e2e-planes-r1"},
+        )
+        self.assertTrue(evidence["ok"], msg=evidence)
+        self.assertEqual(evidence.get("durability"), "transient token")
+        self.assertFalse(evidence.get("mutates_product_state"), msg=evidence)
 
 
 if __name__ == "__main__":

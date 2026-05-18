@@ -39,22 +39,22 @@ class OutputSchemaBoundaryTests(unittest.TestCase):
         return output_schema.load_output_schema(path)
 
     def _sample_payload_for_buddy(self, buddy_id: str) -> dict[str, object]:
-        kind_by_buddy = {
-            "pm": "prd",
-            "dev": "implementation-report",
-            "test": "smoke-test",
-            "market": "market-scan",
-            "design": "design-handoff",
+        template_by_buddy = {
+            "pm": "brief",
+            "dev": "brief",
+            "test": "proof",
+            "market": "brief",
+            "design": "design",
         }
         return {
             "execution_summary": f"{buddy_id} result summary",
             "working_notes": ["Focused contract result."],
             "artifacts": [
                 {
-                    "kind": kind_by_buddy[buddy_id],
+                    "template": template_by_buddy[buddy_id],
                     "title": f"{buddy_id} artifact",
                     "summary": f"{buddy_id} artifact summary",
-                    "content": {"body": "x"},
+                    "body": "x",
                 }
             ],
         }

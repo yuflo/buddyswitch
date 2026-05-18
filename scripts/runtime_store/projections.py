@@ -145,14 +145,14 @@ def task_object_path(task_id: str) -> str:
     return f"buddyswitch/objects/tasks/{task_id}.json"
 
 
-def build_comment_ids_by_target(
-    comments: list[dict[str, Any]],
-) -> dict[tuple[str, str], list[str]]:
+def build_comment_ids_by_target(comments: list[dict[str, Any]]) -> dict[tuple[str, str], list[str]]:
     grouped: dict[tuple[str, str], list[str]] = {}
     for comment in comments:
         target_type = comment.get("target_type")
         target_id = comment.get("target_id")
         comment_id = comment.get("id")
+        if target_type == "artifact_section":
+            target_type = "artifact"
         if not isinstance(target_type, str) or target_type not in {"track", "artifact"}:
             continue
         if not isinstance(target_id, str) or not target_id:
@@ -163,86 +163,108 @@ def build_comment_ids_by_target(
     return grouped
 
 
+def build_comment_status_counts_by_target(comments: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, int]]:
+    grouped: dict[tuple[str, str], dict[str, int]] = {}
+    for comment in comments:
+        target_type = comment.get("target_type")
+        target_id = comment.get("target_id")
+        if target_type == "artifact_section":
+            target_type = "artifact"
+        if not isinstance(target_type, str) or target_type not in {"track", "artifact"}:
+            continue
+        if not isinstance(target_id, str) or not target_id:
+            continue
+        key = (target_type, target_id)
+        bucket = grouped.setdefault(key, {"open_comment_count": 0, "resolved_comment_count": 0})
+        if comment.get("status") == "resolved":
+            bucket["resolved_comment_count"] += 1
+        else:
+            bucket["open_comment_count"] += 1
+    return grouped
+
+
 def build_artifact_view(
     artifact: dict[str, Any],
     comment_ids_by_target: dict[tuple[str, str], list[str]],
+    comment_status_by_target: dict[tuple[str, str], dict[str, int]],
 ) -> dict[str, Any]:
+    counts = comment_status_by_target.get(("artifact", artifact["id"]), {"open_comment_count": 0, "resolved_comment_count": 0})
     return {
         **artifact,
         "object_path": artifact_object_path(artifact["id"]),
         "file_name": Path(artifact_object_path(artifact["id"])).name,
         "comment_ids": list(comment_ids_by_target.get(("artifact", artifact["id"]), [])),
+        "open_comment_count": counts.get("open_comment_count", 0),
+        "resolved_comment_count": counts.get("resolved_comment_count", 0),
         "missing": False,
     }
 
 
 def build_task_view(task: dict[str, Any]) -> dict[str, Any]:
     return {
-        "id": task.get("id"),
-        "buddy": task.get("buddy"),
-        "title": task.get("title"),
-        "status": task.get("status"),
-        "track_id": task.get("track_id"),
-        "summary": task.get("summary", ""),
-        "created_at": task.get("created_at"),
-        "updated_at": task.get("updated_at"),
+        **task,
         "object_path": task_object_path(task["id"]),
         "file_name": Path(task_object_path(task["id"])).name,
         "missing": False,
     }
 
 
-def _track_ref_artifact_ids(track: dict[str, Any]) -> list[str]:
-    ids: list[str] = []
-    for key in ("shared_materials", "close_proof"):
-        for row in track.get(key, []):
-            if not isinstance(row, dict):
-                continue
-            artifact_id = row.get("artifact_id")
-            if not isinstance(artifact_id, str) or not artifact_id:
-                continue
-            ids.append(artifact_id)
-    return ids
-
-
 def build_track_views(
     tracks: list[dict[str, Any]],
-    artifact_map: dict[str, dict[str, Any]],
+    artifacts: list[dict[str, Any]],
     comment_ids_by_target: dict[tuple[str, str], list[str]],
+    comment_status_by_target: dict[tuple[str, str], dict[str, int]],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for track in tracks:
-        track_id = track.get("id")
-        if not isinstance(track_id, str) or not track_id:
+    artifact_rows_by_track: dict[str, list[dict[str, Any]]] = {}
+    for artifact in artifacts:
+        status = artifact.get("status")
+        is_current = bool(artifact.get("is_current"))
+        track_id = artifact.get("published_to_track")
+        if status != "published" or not is_current or not isinstance(track_id, str) or not track_id:
             continue
-        missing_artifact_ids: list[str] = []
-        latest = str(track.get("updated_at", ""))
-        for artifact_id in _track_ref_artifact_ids(track):
-            artifact = artifact_map.get(artifact_id)
-            if artifact is None:
-                missing_artifact_ids.append(artifact_id)
-                continue
-            artifact_updated = artifact.get("updated_at")
-            if isinstance(artifact_updated, str) and artifact_updated > latest:
-                latest = artifact_updated
+        artifact_rows_by_track.setdefault(track_id, []).append(artifact)
+    for track_id in artifact_rows_by_track:
+        artifact_rows_by_track[track_id].sort(
+            key=lambda row: (str(row.get("updated_at", "")), str(row.get("id", ""))),
+            reverse=True,
+        )
+
+    for track in tracks:
+        track_id = str(track["id"])
+        shared_materials: list[dict[str, Any]] = []
+        for artifact in artifact_rows_by_track.get(track_id, []):
+            artifact_id = str(artifact.get("id", ""))
+            counts = comment_status_by_target.get(("artifact", artifact_id), {"open_comment_count": 0, "resolved_comment_count": 0})
+            shared_materials.append(
+                {
+                    "artifact_id": artifact_id,
+                    "title": artifact.get("title"),
+                    "summary": artifact.get("summary", ""),
+                    "template": artifact.get("template"),
+                    "status": artifact.get("status"),
+                    "published_to_track": artifact.get("published_to_track"),
+                    "revision": artifact.get("revision"),
+                    "is_current": artifact.get("is_current"),
+                    "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
+                    "updated_at": artifact.get("updated_at"),
+                    "open_comment_count": counts.get("open_comment_count", 0),
+                    "resolved_comment_count": counts.get("resolved_comment_count", 0),
+                }
+            )
+        comment_counts = comment_status_by_target.get(("track", track_id), {"open_comment_count": 0, "resolved_comment_count": 0})
         rows.append(
             {
                 "id": track_id,
-                "title": track.get("title"),
-                "outcome": track.get("outcome", ""),
-                "owner_buddy": track.get("owner_buddy"),
-                "state": track.get("state"),
-                "health": track.get("health"),
-                "appetite": track.get("appetite"),
-                "now": track.get("now"),
-                "shared_materials": [row for row in track.get("shared_materials", []) if isinstance(row, dict)],
-                "updates": [row for row in track.get("updates", []) if isinstance(row, dict)],
-                "close_proof": [row for row in track.get("close_proof", []) if isinstance(row, dict)],
-                "created_at": track.get("created_at"),
-                "updated_at": latest,
-                "archived_at": track.get("archived_at"),
+                "title": track["title"],
+                "status": track["status"],
+                "owner_buddy": track["owner_buddy"],
+                "shared_materials": shared_materials,
                 "comment_ids": list(comment_ids_by_target.get(("track", track_id), [])),
-                "missing_artifact_ids": missing_artifact_ids,
+                "summary": track.get("summary", ""),
+                "updated_at": track["updated_at"],
+                "open_comment_count": comment_counts.get("open_comment_count", 0),
+                "resolved_comment_count": comment_counts.get("resolved_comment_count", 0),
             }
         )
     rows.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
@@ -253,14 +275,13 @@ def build_workspace_projection() -> dict[str, Any]:
     manifest = load_manifest(DEFAULT_MANIFEST)
     comments = env_store.list_comments()
     comment_ids_by_target = build_comment_ids_by_target(comments)
+    comment_status_by_target = build_comment_status_counts_by_target(comments)
     artifacts = [
-        build_artifact_view(artifact, comment_ids_by_target)
+        build_artifact_view(artifact, comment_ids_by_target, comment_status_by_target)
         for artifact in env_store.list_artifacts()
     ]
-    artifact_map = {artifact["id"]: artifact for artifact in artifacts}
-
     tasks = [build_task_view(task) for task in env_store.list_tasks()]
-    tracks = build_track_views(env_store.list_tracks(), artifact_map, comment_ids_by_target)
+    tracks = build_track_views(env_store.list_tracks(), artifacts, comment_ids_by_target, comment_status_by_target)
     standalone_tasks = [task for task in tasks if not task.get("track_id")]
     standalone_tasks.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
 

@@ -6,9 +6,8 @@ Shape product interaction and UX direction into durable design outputs.
 
 ## Required Behavior
 
-- Read shared collaboration state via `track.open`.
-- Publish design deliverables via `track.add_material` using design artifact kinds.
-- Use `track.add_update` and `track.update_now` for concise progress and blocker state.
+- Keep scope aligned to explicit `task_id` / `track_id` context.
+- Persist deliverables via `artifact.create_revision` using V1 artifact templates and markdown body content.
 - Use buddybox for private local prototypes or exports; use artifact for design artifact briefs another buddy must read.
 
 ## Runtime Boundary
@@ -19,7 +18,6 @@ Shape product interaction and UX direction into durable design outputs.
 
 ## Durable Output Targets
 
-- `buddyswitch/objects/tracks/<track-id>.json`
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - Active-buddy-private files via `buddybox.*` logical names (instance-local, not product-readable).

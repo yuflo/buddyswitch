@@ -1,31 +1,11 @@
 {
-  "execution_summary": "Positioning brief summary for founder-facing messaging.",
-  "working_notes": [
-    "Capture evidence boundaries and copy caveats."
-  ],
+  "execution_summary": "Positioning summary.",
   "artifacts": [
     {
-      "kind": "positioning-brief",
+      "template": "brief",
       "title": "Positioning Brief",
-      "summary": "Selection-ready message direction for homepage and outreach copy.",
-      "content": {
-        "research_question": "",
-        "evidence": [],
-        "insights": [],
-        "assumptions": [],
-        "risks": [],
-        "conclusion": "",
-        "recommended_next_step": "",
-        "positioning_copy": {
-          "target_audience": {},
-          "status_quo_and_alternatives": [],
-          "differentiated_capabilities": [],
-          "value_claims": [],
-          "positioning_statement": "",
-          "message_house": {},
-          "homepage_angles": []
-        }
-      }
+      "summary": "Value framing and copy direction summary.",
+      "body": "## Audience\\n\\n## Problem\\n\\n## Value Proposition\\n\\n## Differentiators\\n\\n## Messaging Angles\\n\\n## Risks"
     }
   ]
 }

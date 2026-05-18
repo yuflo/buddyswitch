@@ -46,10 +46,10 @@ Required top-level field:
 - `execution_summary`
 
 Use `artifact-tool` when this skill produces a durable artifact:
-- `kind`: `skill-import-report`
+- `template`: `note`
 - `title`: concise artifact title
 - `summary`: short downstream selection summary
-- `content`: include `task_summary`, `changed_files`, `implementation_notes`, `verification`, `risks`, and `follow_ups`
+- `body`: include `task_summary`, `changed_files`, `implementation_notes`, `verification`, `risks`, and `follow_ups` as markdown
 
 After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
 Use optional `working_notes` for concise reasoning or verification notes.

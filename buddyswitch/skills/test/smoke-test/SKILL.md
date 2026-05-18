@@ -58,10 +58,10 @@ Required top-level field:
 - `execution_summary`
 
 Use `artifact-tool` when this skill produces a durable artifact:
-- `kind`: `smoke-test`
+- `template`: `proof`
 - `title`: concise artifact title
 - `summary`: short downstream selection summary
-- `content`: include `test_scope`, `checks_run`, `passed_items`, `failed_items`, `blocked_items`, `reproduction_notes`, and `readiness`
+- `body`: include `test_scope`, `checks_run`, `passed_items`, `failed_items`, `blocked_items`, `reproduction_notes`, and `readiness` as markdown
 
 After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
 Use optional `working_notes` for concise reasoning or verification notes.

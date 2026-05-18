@@ -206,7 +206,6 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_task_artifact_records_reject_run_fields(self) -> None:
         with self.assertRaises(ValueError):
-            legacy_slots = "artifact" + "_slots"
             env_store.validate_task(
                 {
                     "id": "task-pm-runless",
@@ -216,7 +215,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "status": "active",
                     "track_id": None,
                     "artifact_ids": [],
-                    legacy_slots: {},
+                    "artifact_slots": {},
                     "run_ids": ["run-pm-old"],
                     "latest_run_id": "run-pm-old",
                     "created_at": "2026-05-14T00:00:00Z",
@@ -243,17 +242,48 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             )
         self.assertFalse(hasattr(env_store, "validate_handoff_record"))
 
-    def test_artifact_create_revision_creates_private_draft_without_task_id(self) -> None:
+    def test_artifact_create_revision_requires_v1_payload_without_source_run(self) -> None:
         instance_json = self._instance_json()
+
+        missing_required_body = self._dispatch(
+            tool="artifact",
+            action="create_revision",
+            args={
+                "title": "Runless Artifact",
+                "summary": "seed",
+                "template": "brief",
+            },
+            instance_json=instance_json,
+        )
+        self.assertFalse(missing_required_body.get("ok"), msg=missing_required_body)
+        self.assertEqual(missing_required_body.get("action"), "artifact.create_revision")
+        self.assertEqual((missing_required_body.get("error") or {}).get("code"), "E_ARTIFACT_PAYLOAD")
+
+        retired_shape = self._dispatch(
+            tool="artifact",
+            action="create_revision",
+            args={
+                "task_id": "task-pm-runless",
+                "kind": "prd",
+                "title": "Runless Artifact",
+                "summary": "seed",
+                "content": {"body": "..."},
+            },
+            instance_json=instance_json,
+        )
+        self.assertFalse(retired_shape.get("ok"), msg=retired_shape)
+        self.assertEqual((retired_shape.get("error") or {}).get("code"), "E_ARTIFACT_PAYLOAD")
 
         created = self._dispatch(
             tool="artifact",
             action="create_revision",
             args={
-                "kind": "prd",
+                "artifact_id": "art-pm-runless-r1",
                 "title": "Runless Artifact",
                 "summary": "seed",
-                "content": {"body": "..."},
+                "template": "brief",
+                "body": "...",
+                "status": "draft",
                 "source_refs": [{"type": "note", "label": "runless seed"}],
             },
             instance_json=instance_json,
@@ -262,24 +292,14 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         artifact = created.get("artifact")
         self.assertIsInstance(artifact, dict, msg=created)
         assert isinstance(artifact, dict)
+        self.assertEqual(artifact.get("template"), "brief")
+        self.assertEqual(artifact.get("body"), "...")
+        self.assertEqual(artifact.get("status"), "draft")
         self.assertIsNone(artifact.get("published_to_track"))
-        self.assertEqual(artifact.get("created_by"), "pm")
+        self.assertNotIn("task_id", artifact)
+        self.assertNotIn("kind", artifact)
+        self.assertNotIn("content", artifact)
         self.assertNotIn("source_run_id", artifact)
-
-        rejected = self._dispatch(
-            tool="artifact",
-            action="create_revision",
-            args={
-                "task_id": "task-pm-runless",
-                "kind": "prd",
-                "title": "Runless Artifact 2",
-                "summary": "seed",
-                "content": {"body": "..."},
-            },
-            instance_json=instance_json,
-        )
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual((rejected.get("error") or {}).get("code"), "E_ARTIFACT_PAYLOAD")
 
     def test_env_client_help_exposes_runless_resources(self) -> None:
         completed = subprocess.run(

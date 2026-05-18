@@ -1,31 +1,11 @@
 {
-  "execution_summary": "Channel discovery summary with recommended first experiment.",
-  "working_notes": [
-    "Capture reachability constraints and confidence level."
-  ],
+  "execution_summary": "Channel discovery summary.",
   "artifacts": [
     {
-      "kind": "channel-plan",
-      "title": "Channel Discovery Plan",
-      "summary": "Selection-ready first-channel experiment plan.",
-      "content": {
-        "research_question": "",
-        "evidence": [],
-        "insights": [],
-        "assumptions": [],
-        "risks": [],
-        "conclusion": "",
-        "recommended_next_step": "",
-        "channel_discovery": {
-          "candidate_channels": [],
-          "selection_criteria": [],
-          "channel_scores": [],
-          "recommended_primary_channel": {},
-          "recommended_secondary_channel": {},
-          "experiment_plan": {},
-          "kill_signals": []
-        }
-      }
+      "template": "brief",
+      "title": "Channel Discovery Brief",
+      "summary": "Channel hypothesis and experiment direction.",
+      "body": "## Research Question\\n\\n## Candidate Channels\\n\\n## Evidence\\n\\n## Risks\\n\\n## Recommended Next Step"
     }
   ]
 }

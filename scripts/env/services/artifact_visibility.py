@@ -37,8 +37,9 @@ def artifact_read_decision(artifact: dict[str, Any], active_buddy: str) -> dict[
     artifact_id = artifact.get("id") if isinstance(artifact.get("id"), str) else None
     owner = artifact.get("created_by")
     published_track_id = artifact.get("published_to_track")
+    status = artifact.get("status")
 
-    if published_track_id is None:
+    if status == "draft":
         if owner == active_buddy:
             return {
                 "allowed": True,
@@ -48,6 +49,16 @@ def artifact_read_decision(artifact: dict[str, Any], active_buddy: str) -> dict[
                 "permission_boundary": "none",
                 "why": "active buddy owns private draft artifact",
             }
+        return {
+            "allowed": False,
+            "artifact_id": artifact_id,
+            "track_id": None,
+            "relation": "none",
+            "permission_boundary": "artifact.status",
+            "why": "artifact is private draft and readable by owner only",
+        }
+
+    if published_track_id is None:
         return {
             "allowed": False,
             "artifact_id": artifact_id,
@@ -134,19 +145,20 @@ def artifact_summary_row(
         "artifact_id": artifact.get("id"),
         "track_id": artifact.get("published_to_track"),
         "relation": relation,
-        "kind": artifact.get("kind"),
         "title": artifact.get("title"),
         "summary": artifact.get("summary", ""),
+        "body": artifact.get("body"),
+        "template": artifact.get("template"),
+        "status": artifact.get("status"),
         "from_buddy": artifact.get("created_by"),
         "created_by": artifact.get("created_by"),
+        "authors": artifact.get("authors"),
         "source_refs": artifact.get("source_refs"),
         "revision": artifact.get("revision"),
         "currentness": "current" if is_current else "superseded",
         "readable_by_active_buddy": bool(decision.get("allowed")),
         "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
-        "publication_role": artifact.get("publication_role"),
         "published_to_track": artifact.get("published_to_track"),
-        "content": artifact.get("content"),
         "updated_at": artifact.get("updated_at"),
         "created_at": artifact.get("created_at"),
     }

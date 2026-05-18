@@ -6,10 +6,8 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 
 ## Required Behavior
 
-- Read shared collaboration status via `track.open`.
-- Keep track lifecycle mutations explicit and PM-owned (`track.create|track.archive`).
-- Maintain shared track state via `track.update_now`, `track.add_update`, `track.add_material`, and `track.add_proof`.
-- Publish formal PM deliverables through `track.add_material` (`kind="prd"` or other PM kinds).
+- Keep track lifecycle mutations explicit and PM-owned (`track.create|update|archive`).
+- Write formal PM deliverables via `artifact.create_revision` with `template` + markdown `body`; publish via `published_to_track` when shared.
 - Use buddybox for PM-owned private local drafts, lightweight prototypes, exports, or supporting files; use artifact when content must become product-readable.
 
 ## Runtime Boundary
@@ -20,7 +18,6 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 
 ## Durable Output Targets
 
-- `buddyswitch/objects/tracks/<track-id>.json`
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - Active-buddy-private files via `buddybox.*` logical names (instance-local, not product-readable).

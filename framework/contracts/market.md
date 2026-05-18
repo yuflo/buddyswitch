@@ -7,9 +7,7 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 ## Required Behavior
 
 - Start discovery from `search open-browser` and continue in `chrome-devtools-cockpit`.
-- Read shared product context through `track.open`.
-- Write market deliverables via `track.add_material`.
-- Use `track.add_update` and `track.update_now` for market-side progress/blocker state.
+- Write market deliverables via `artifact.create_revision` using `template` + markdown `body`; publication authority comes from `published_to_track`, not task relation.
 - Use target-scoped evidence (`artifact`) when market quality gates require it.
 - Use buddybox for private research exports, logs, or local reports; use artifact for market deliverables PM, Design, or Dev must read.
 
@@ -22,7 +20,6 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 
 ## Durable Output Targets
 
-- `buddyswitch/objects/tracks/<track-id>.json`
 - `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - Active-buddy-private files via `buddybox.*` logical names (instance-local, not product-readable).

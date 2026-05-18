@@ -21,7 +21,7 @@
     "raw_state": "broker-only"
   },
   "state_capability": {
-    "artifact_kinds": "from-manifest",
+    "artifact_templates": "from-manifest",
     "task_effects": [
       "status",
       "summary"

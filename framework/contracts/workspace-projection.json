@@ -1,6 +1,6 @@
 {
   "contract_id": "workspace-projection",
-  "contract_version": "2026-05-18",
+  "contract_version": "2026-05-15",
   "endpoint": "/api/workspace",
   "top_level_key_order": [
     "generated_at",
@@ -33,11 +33,7 @@
   },
   "view_shapes": {
     "buddy": {
-      "key_order": [
-        "id",
-        "label",
-        "scope"
-      ],
+      "key_order": ["id", "label", "scope"],
       "field_types": {
         "id": "string",
         "label": "string",
@@ -48,38 +44,26 @@
       "key_order": [
         "id",
         "title",
-        "outcome",
+        "status",
         "owner_buddy",
-        "state",
-        "health",
-        "appetite",
-        "now",
         "shared_materials",
-        "updates",
-        "close_proof",
-        "created_at",
-        "updated_at",
-        "archived_at",
         "comment_ids",
-        "missing_artifact_ids"
+        "summary",
+        "updated_at",
+        "open_comment_count",
+        "resolved_comment_count"
       ],
       "field_types": {
         "id": "string",
         "title": "string",
-        "outcome": "string",
+        "status": "string",
         "owner_buddy": "string",
-        "state": "string",
-        "health": "string",
-        "appetite": "string",
-        "now": "object",
-        "shared_materials": "object-array",
-        "updates": "object-array",
-        "close_proof": "object-array",
-        "created_at": "string",
-        "updated_at": "string",
-        "archived_at": "string-or-null",
+        "shared_materials": "artifact-summary-array",
         "comment_ids": "string-array",
-        "missing_artifact_ids": "string-array"
+        "summary": "string",
+        "updated_at": "string",
+        "open_comment_count": "integer",
+        "resolved_comment_count": "integer"
       }
     },
     "task": {
@@ -114,50 +98,55 @@
       "key_order": [
         "id",
         "title",
-        "kind",
-        "created_by",
-        "published_to_track",
-        "publication_role",
         "summary",
-        "content",
-        "source_refs",
+        "body",
+        "template",
+        "status",
+        "published_to_track",
         "revision",
         "supersedes_artifact_id",
         "is_current",
+        "created_by",
+        "authors",
+        "source_refs",
+        "comment_ids",
+        "open_comment_count",
+        "resolved_comment_count",
         "created_at",
         "updated_at",
         "object_path",
         "file_name",
-        "comment_ids",
         "missing"
       ],
       "field_types": {
         "id": "string",
         "title": "string",
-        "kind": "string",
-        "created_by": "string",
-        "published_to_track": "string-or-null",
-        "publication_role": "string-or-null",
         "summary": "string",
-        "content": "object",
-        "source_refs": "object-array-or-null",
+        "body": "string",
+        "template": "string",
+        "status": "string",
+        "published_to_track": "string-or-null",
         "revision": "integer",
         "supersedes_artifact_id": "string-or-null",
         "is_current": "boolean",
+        "created_by": "string",
+        "authors": "string-array",
+        "source_refs": "object-array-or-null",
+        "comment_ids": "string-array",
+        "open_comment_count": "integer",
+        "resolved_comment_count": "integer",
         "created_at": "string",
         "updated_at": "string",
         "object_path": "repo-relative-path",
         "file_name": "basename",
-        "comment_ids": "string-array",
         "missing": "boolean"
       }
     }
   },
   "derived_invariants": {
-    "track_page_shape": true,
-    "tracks_embed_tasks": false,
-    "task_artifact_linkage_removed": true,
-    "artifact_publication_uses_track": true,
+    "track_shared_material_source": "current published artifacts on the track",
+    "task_objects_are_private_execution_state": true,
+    "comments_are_derived_not_embedded_in_artifact_body": true,
     "run_fields_removed": true
   }
 }

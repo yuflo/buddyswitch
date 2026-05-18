@@ -21,8 +21,19 @@ class ArtifactServiceContext(TypedDict):
 
 
 _GET_FIELDS = {"artifact_id"}
-_CREATE_FIELDS = {"artifact_id", "kind", "title", "summary", "content", "source_refs", "read_claim", "task_id"}
-_UPDATE_FIELDS = {"artifact_id", "title", "summary", "source_refs", "read_claim"}
+_CREATE_FIELDS = {
+    "artifact_id",
+    "title",
+    "summary",
+    "body",
+    "template",
+    "status",
+    "published_to_track",
+    "supersedes_artifact_id",
+    "source_refs",
+    "read_claim",
+}
+_UPDATE_FIELDS = {"artifact_id", "title", "summary", "template", "body", "source_refs", "read_claim"}
 _LEGACY_SOURCE_RUN = "source" + "_run_id"
 
 
@@ -33,7 +44,7 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         if suffix:
             correctable_fields = [row.strip() for row in suffix.split(",") if row.strip()]
     else:
-        for field in ("artifact_id", "kind", "title", "summary", "content", "source_refs", "task_id"):
+        for field in ("artifact_id", "title", "summary", "template", "body", "status", "published_to_track", "source_refs"):
             if field in message:
                 correctable_fields = [field]
                 break
@@ -125,7 +136,7 @@ def get_artifact_for_active_buddy(*, args: dict[str, Any], context: ArtifactServ
         tool="artifact",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Read one readable artifact '{artifact_id}' including full content.",
+        effect_summary=f"Read one readable artifact '{artifact_id}' including full markdown body.",
         state_changed=False,
         durability="none",
         read_scope="one readable artifact",
@@ -144,21 +155,43 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
     if payload_error is not None:
         return payload_error
 
-    if "task_id" in args:
-        return _reject_payload(action=action, active_buddy=active_buddy, message="task_id is retired for artifact.create_revision")
-
-    kind = args.get("kind")
     title = args.get("title")
     summary = args.get("summary", "")
-    content = args.get("content")
-    if not isinstance(kind, str) or not kind.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="kind is required")
+    body = args.get("body")
+    template = args.get("template")
+    status = args.get("status")
+    published_to_track = args.get("published_to_track")
+    supersedes_artifact_id = args.get("supersedes_artifact_id")
     if not isinstance(title, str) or not title.strip():
         return _reject_payload(action=action, active_buddy=active_buddy, message="title is required")
     if not isinstance(summary, str):
         return _reject_payload(action=action, active_buddy=active_buddy, message="summary must be a string")
-    if not isinstance(content, dict):
-        return _reject_payload(action=action, active_buddy=active_buddy, message="content must be a JSON object")
+    if not isinstance(body, str) or not body.strip():
+        return _reject_payload(action=action, active_buddy=active_buddy, message="body is required")
+    if not isinstance(template, str) or template not in env_store.VALID_ARTIFACT_TEMPLATES:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=f"template must be one of {', '.join(env_store.VALID_ARTIFACT_TEMPLATES)}",
+        )
+    if status is not None and (not isinstance(status, str) or status not in env_store.VALID_ARTIFACT_STATUS):
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=f"status must be one of {', '.join(env_store.VALID_ARTIFACT_STATUS)}",
+        )
+    if published_to_track is not None and (not isinstance(published_to_track, str) or not published_to_track.strip()):
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="published_to_track must be a non-empty string",
+        )
+    if supersedes_artifact_id is not None and (not isinstance(supersedes_artifact_id, str) or not supersedes_artifact_id.strip()):
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="supersedes_artifact_id must be a non-empty string",
+        )
 
     read_claim = args.get("read_claim")
     if read_claim is not None and not isinstance(read_claim, str):
@@ -193,16 +226,18 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
         return _reject_payload(action=action, active_buddy=active_buddy, message="artifact_id must be a non-empty string")
 
     try:
-        artifact = env_store.create_artifact(
+        artifact = env_store.create_artifact_revision(
             artifact_id=artifact_id.strip() if isinstance(artifact_id, str) and artifact_id.strip() else None,
             title=title.strip(),
-            kind=kind.strip(),
             created_by=active_buddy,
             summary=summary,
-            content=content,
+            body=body,
+            template=template,
             source_refs=normalized_refs,
-            published_to_track=None,
-            publication_role=None,
+            status=status if isinstance(status, str) else None,
+            published_to_track=published_to_track.strip() if isinstance(published_to_track, str) else None,
+            supersedes_artifact_id=supersedes_artifact_id.strip() if isinstance(supersedes_artifact_id, str) else None,
+            authors=[active_buddy],
         )
     except ValueError as exc:
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
@@ -212,7 +247,7 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
         tool="artifact",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Created one private draft artifact '{artifact['id']}' without task relation.",
+        effect_summary=f"Created one artifact markdown revision '{artifact['id']}'.",
         state_changed=True,
         durability="durable",
         created_ids=[artifact["id"]],
@@ -250,13 +285,21 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
         )
 
     patch: dict[str, Any] = {}
-    for field in ("title", "summary"):
+    for field in ("title", "summary", "template", "body"):
         if field in args:
             patch[field] = args[field]
     if "title" in patch and (not isinstance(patch["title"], str) or not patch["title"].strip()):
         return _reject_payload(action=action, active_buddy=active_buddy, message="title must be a non-empty string")
     if "summary" in patch and not isinstance(patch["summary"], str):
         return _reject_payload(action=action, active_buddy=active_buddy, message="summary must be a string")
+    if "template" in patch and (not isinstance(patch["template"], str) or patch["template"] not in env_store.VALID_ARTIFACT_TEMPLATES):
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=f"template must be one of {', '.join(env_store.VALID_ARTIFACT_TEMPLATES)}",
+        )
+    if "body" in patch and (not isinstance(patch["body"], str) or not patch["body"].strip()):
+        return _reject_payload(action=action, active_buddy=active_buddy, message="body must be a non-empty string")
 
     if "source_refs" in args or "read_claim" in args:
         read_claim = args.get("read_claim")

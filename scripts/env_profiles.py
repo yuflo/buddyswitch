@@ -260,9 +260,9 @@ def validate_env_profile(
     state_capability = _require_dict(profile.get("state_capability"), "state_capability")
     _require_enum(
         enums=enums,
-        key="state_capability.artifact_kinds",
-        value=state_capability.get("artifact_kinds"),
-        label="state_capability.artifact_kinds",
+        key="state_capability.artifact_templates",
+        value=state_capability.get("artifact_templates"),
+        label="state_capability.artifact_templates",
     )
     task_effects = _require_string_list(state_capability.get("task_effects"), "state_capability.task_effects")
     if task_effects != ["status", "summary"]:

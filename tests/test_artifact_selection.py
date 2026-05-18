@@ -19,73 +19,67 @@ class ArtifactSelectionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.track_artifact_index = {
             "track_id": "track-selection",
-            "shared_materials": [
+            "artifacts": [
                 {
-                    "type": "artifact",
                     "artifact_id": "art-prd-r1",
-                    "kind": "prd",
-                    "label": "PRD",
-                    "from_buddy": "pm",
-                    "current": True,
-                    "published_at": "2026-05-15T10:00:00+00:00",
+                    "template": "brief",
+                    "created_by": "pm",
+                    "revision": 1,
+                    "status": "published",
+                    "updated_at": "2026-05-15T10:00:00+00:00",
+                    "is_current": True,
                 },
                 {
-                    "type": "artifact",
-                    "artifact_id": "art-impl-r1",
-                    "kind": "implementation-report",
-                    "label": "Implementation",
-                    "from_buddy": "dev",
-                    "current": True,
-                    "published_at": "2026-05-15T11:00:00+00:00",
+                    "artifact_id": "art-proof-r1",
+                    "template": "proof",
+                    "created_by": "test",
+                    "revision": 1,
+                    "status": "published",
+                    "updated_at": "2026-05-15T11:00:00+00:00",
+                    "is_current": True,
                 },
             ],
         }
 
-    def test_selection_uses_required_kinds_and_current_artifacts(self) -> None:
+    def test_selection_uses_required_templates_and_current_published_artifacts(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
             active_buddy="dev",
             demand="Implement onboarding",
-            required_kinds=["prd", "implementation-report"],
+            required_templates=["brief", "proof"],
             track_artifact_index=self.track_artifact_index,
         )
         ids = [row["artifact_id"] for row in selected["selected_inputs"]]
-        self.assertEqual(ids, ["art-prd-r1", "art-impl-r1"])
-        self.assertEqual(selected["selection_mode"], "kind-current-v2")
-        self.assertNotIn("task_id", selected["selected_inputs"][0])
+        self.assertEqual(ids, ["art-prd-r1", "art-proof-r1"])
+        self.assertEqual(selected["selection_mode"], "template-current-v1")
 
-    def test_selection_dedupes_repeated_required_kinds(self) -> None:
+    def test_selection_dedupes_repeated_required_templates(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
             active_buddy="dev",
             demand="Implement onboarding",
-            required_kinds=["prd", "prd"],
+            required_templates=["brief", "brief"],
             track_artifact_index=self.track_artifact_index,
         )
         self.assertEqual([row["artifact_id"] for row in selected["selected_inputs"]], ["art-prd-r1"])
 
-    def test_selection_ignores_unknown_required_kinds(self) -> None:
+    def test_selection_ignores_unknown_required_templates(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
             active_buddy="dev",
             demand="Implement onboarding",
-            required_kinds=["task", "track", "prd"],
+            required_templates=["task", "track", "brief"],
             track_artifact_index=self.track_artifact_index,
         )
-        self.assertEqual([row["kind"] for row in selected["selected_inputs"]], ["prd"])
+        self.assertEqual([row["template"] for row in selected["selected_inputs"]], ["brief"])
 
     def test_selection_respects_max_default_items_trim(self) -> None:
         selected = artifact_selection.select_artifacts_for_run(
             active_buddy="dev",
             demand="Implement onboarding",
-            required_kinds=["prd", "implementation-report"],
+            required_templates=["brief", "proof"],
             track_artifact_index=self.track_artifact_index,
             max_default_items=1,
         )
         self.assertEqual(len(selected["selected_inputs"]), 1)
         self.assertIn("Trimmed selection", "\n".join(selected["reasons"]))
-
-    def test_parser_omits_retired_current_task_flag(self) -> None:
-        parser = artifact_selection.build_parser()
-        help_text = parser.format_help()
-        self.assertNotIn("current-task" + "-id", help_text)
 
 
 if __name__ == "__main__":

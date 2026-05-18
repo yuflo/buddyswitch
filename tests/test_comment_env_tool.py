@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Comment env.tool tests aligned with direct track publication boundaries."""
+"""Comment env.tool integration tests."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+import env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -22,14 +23,14 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(self, *, instance_id: str, buddy: str) -> Path:
-        path = self._runtime_path(f"instance-{instance_id}.json")
+    def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
+        path = self._runtime_path("instance.json")
         path.write_text(
             json.dumps(
                 {
                     "instance_id": instance_id,
                     "buddy": buddy,
-                    "status": "active",
+                    "status": status,
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
                     "updated_at": "2026-05-18T00:00:00Z",
@@ -63,6 +64,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertIsInstance(envelope, dict)
         assert isinstance(envelope, dict)
+        self.assertEqual(envelope.get("protocol"), PROTOCOL)
         if envelope.get("ok") is True:
             result = envelope.get("result")
             self.assertIsInstance(result, dict, msg=envelope)
@@ -83,143 +85,388 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
-    def _seed_track_and_material(self, track_id: str = "track-comment") -> tuple[Path, str]:
-        pm_instance = self._instance_json(instance_id="inst-pm-comment", buddy="pm")
-        created = self._dispatch(
-            instance_json=pm_instance,
-            instance_id="inst-pm-comment",
-            buddy="pm",
-            tool="track",
-            action="create",
-            args={
-                "track_id": track_id,
-                "title": "Comment track",
-                "outcome": "comment outcome",
-                "appetite": "1 day",
-                "now": {"next": "publish", "blocker": None},
-            },
+    def _seed_track(self, track_id: str = "track-comment") -> dict[str, object]:
+        return env_store.create_track(track_id, "Comment Track", owner_buddy="pm")
+
+    def _seed_published_artifact(self, *, artifact_id: str, track_id: str = "track-comment") -> str:
+        if env_store.get_track(track_id) is None:
+            self._seed_track(track_id)
+        artifact = env_store.create_artifact_revision(
+            artifact_id=artifact_id,
+            title=f"{artifact_id} title",
+            summary="seed summary",
+            body="Original body",
+            template="brief",
+            status="published",
+            published_to_track=track_id,
+            supersedes_artifact_id=None,
+            created_by="pm",
+            authors=["pm"],
+            source_refs=[{"type": "note", "label": "seed"}],
         )
-        self.assertTrue(created.get("ok"), msg=created)
+        return str(artifact["id"])
 
-        material = self._dispatch(
-            instance_json=pm_instance,
-            instance_id="inst-pm-comment",
-            buddy="pm",
-            tool="track",
-            action="add_material",
-            args={
-                "track_id": track_id,
-                "kind": "prd",
-                "label": "PRD",
-                "title": "PRD",
-                "summary": "summary",
-                "content": {"body": "body"},
-            },
-        )
-        self.assertTrue(material.get("ok"), msg=material)
-        return pm_instance, material["artifact_id"]
+    def test_add_and_list_track_comment_thread_without_target_mutation(self) -> None:
+        track = self._seed_track("track-cmt-thread")
+        before = env_store.get_track(track["id"])
 
-    def test_add_and_list_track_comment(self) -> None:
-        pm_instance, _ = self._seed_track_and_material(track_id="track-comment-track")
-
-        design_instance = self._instance_json(instance_id="inst-design-comment", buddy="design")
+        instance_json = self._instance_json(instance_id="inst-design-cmt", buddy="design")
         added = self._dispatch(
-            instance_json=design_instance,
-            instance_id="inst-design-comment",
+            instance_json=instance_json,
+            instance_id="inst-design-cmt",
             buddy="design",
             tool="comment",
             action="add",
-            args={"target_type": "track", "target_id": "track-comment-track", "content": "Looks good"},
+            args={"target_type": "track", "target_id": track["id"], "content": "Nice track."},
         )
         self.assertTrue(added.get("ok"), msg=added)
+        comment = added.get("comment")
+        self.assertIsInstance(comment, dict, msg=added)
+        assert isinstance(comment, dict)
+        self.assertEqual(comment.get("by_buddy"), "design")
+        self.assertEqual(comment.get("status"), "open")
+        self.assertEqual(comment.get("thread_id"), comment.get("id"))
 
         listed = self._dispatch(
-            instance_json=pm_instance,
-            instance_id="inst-pm-comment",
-            buddy="pm",
+            instance_json=instance_json,
+            instance_id="inst-design-cmt",
+            buddy="design",
             tool="comment",
             action="list",
-            args={"target_type": "track", "target_id": "track-comment-track"},
+            args={"target_type": "track", "target_id": track["id"], "status": "all"},
         )
         self.assertTrue(listed.get("ok"), msg=listed)
-        rows = listed.get("comments")
-        self.assertIsInstance(rows, list)
-        assert isinstance(rows, list)
-        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(listed.get("comments", [])), 1)
+        self.assertEqual(len(listed.get("threads", [])), 1)
+        self.assertEqual(env_store.get_track(track["id"]), before)
 
-    def test_comment_add_artifact_uses_direct_published_material_boundary(self) -> None:
-        _, artifact_id = self._seed_track_and_material(track_id="track-comment-art")
-        dev_instance = self._instance_json(instance_id="inst-dev-comment", buddy="dev")
+    def test_artifact_comment_is_separate_from_artifact_body(self) -> None:
+        artifact_id = self._seed_published_artifact(artifact_id="art-cmt-body-separate")
+        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
 
         added = self._dispatch(
-            instance_json=dev_instance,
-            instance_id="inst-dev-comment",
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
             buddy="dev",
             tool="comment",
             action="add",
-            args={"target_type": "artifact", "target_id": artifact_id, "content": "Can implement this"},
+            args={"target_type": "artifact", "target_id": artifact_id, "content": "Please revise this."},
         )
         self.assertTrue(added.get("ok"), msg=added)
 
-    def test_comment_add_rejects_private_draft_artifact(self) -> None:
-        pm_instance = self._instance_json(instance_id="inst-pm-comment", buddy="pm")
-        private = self._dispatch(
-            instance_json=pm_instance,
-            instance_id="inst-pm-comment",
-            buddy="pm",
-            tool="artifact",
-            action="create_revision",
-            args={
-                "kind": "prd",
-                "title": "Private",
-                "summary": "private",
-                "content": {"body": "private"},
-            },
-        )
-        self.assertTrue(private.get("ok"), msg=private)
+        artifact = env_store.get_artifact(artifact_id)
+        self.assertIsInstance(artifact, dict)
+        assert isinstance(artifact, dict)
+        self.assertEqual(artifact.get("body"), "Original body")
 
-        dev_instance = self._instance_json(instance_id="inst-dev-comment", buddy="dev")
-        denied = self._dispatch(
-            instance_json=dev_instance,
-            instance_id="inst-dev-comment",
+    def test_artifact_section_comment_requires_anchor(self) -> None:
+        artifact_id = self._seed_published_artifact(artifact_id="art-cmt-anchor")
+        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+
+        missing = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
             buddy="dev",
             tool="comment",
             action="add",
-            args={"target_type": "artifact", "target_id": private["artifact_id"], "content": "nope"},
+            args={"target_type": "artifact_section", "target_id": artifact_id, "content": "Missing anchor"},
         )
-        self.assertFalse(denied.get("ok"), msg=denied)
-        self.assertEqual(denied.get("permission_boundary"), "artifact.publication")
+        self.assertFalse(missing.get("ok"), msg=missing)
+        self.assertEqual((missing.get("error") or {}).get("code"), "E_COMMENT_PAYLOAD")
 
-    def test_comments_reject_archived_track_and_material(self) -> None:
-        pm_instance, artifact_id = self._seed_track_and_material(track_id="track-comment-archived")
-        archived = self._dispatch(
-            instance_json=pm_instance,
-            instance_id="inst-pm-comment",
-            buddy="pm",
-            tool="track",
-            action="archive",
-            args={"track_id": "track-comment-archived"},
+        added = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "artifact_section",
+                "target_id": artifact_id,
+                "anchor": "Current Conclusion",
+                "content": "Anchored",
+            },
         )
-        self.assertTrue(archived.get("ok"), msg=archived)
+        self.assertTrue(added.get("ok"), msg=added)
+        comment = added.get("comment")
+        self.assertEqual((comment or {}).get("anchor"), "Current Conclusion")
 
-        dev_instance = self._instance_json(instance_id="inst-dev-comment", buddy="dev")
-        for action, args in (
-            ("add", {"target_type": "track", "target_id": "track-comment-archived", "content": "x"}),
-            ("list", {"target_type": "track", "target_id": "track-comment-archived"}),
-            ("add", {"target_type": "artifact", "target_id": artifact_id, "content": "x"}),
-            ("list", {"target_type": "artifact", "target_id": artifact_id}),
-        ):
-            rejected = self._dispatch(
-                instance_json=dev_instance,
-                instance_id="inst-dev-comment",
-                buddy="dev",
-                tool="comment",
-                action=action,
-                args=args,
-            )
-            with self.subTest(action=action, args=args):
-                self.assertFalse(rejected.get("ok"), msg=rejected)
-                self.assertEqual(rejected.get("permission_boundary"), "track.lifecycle_status")
+    def test_artifact_section_revision_reference_must_belong_to_same_chain(self) -> None:
+        track_id = "track-cmt-revision-chain"
+        self._seed_track(track_id)
+        env_store.create_artifact_revision(
+            artifact_id="art-cmt-chain-r1",
+            title="r1",
+            summary="r1",
+            body="r1",
+            template="brief",
+            status="published",
+            published_to_track=track_id,
+            supersedes_artifact_id=None,
+            created_by="pm",
+            authors=["pm"],
+            source_refs=[{"type": "note", "label": "seed"}],
+        )
+        env_store.create_artifact_revision(
+            artifact_id="art-cmt-chain-r2",
+            title="r2",
+            summary="r2",
+            body="r2",
+            template="brief",
+            status=None,
+            published_to_track=None,
+            supersedes_artifact_id="art-cmt-chain-r1",
+            created_by="pm",
+            authors=None,
+            source_refs=[{"type": "note", "label": "seed"}],
+        )
+        self._seed_published_artifact(artifact_id="art-cmt-other-r1", track_id=track_id)
+
+        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+        valid = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "artifact_section",
+                "target_id": "art-cmt-chain-r2",
+                "artifact_revision_id": "art-cmt-chain-r1",
+                "anchor": "Goal",
+                "content": "valid ref",
+            },
+        )
+        self.assertTrue(valid.get("ok"), msg=valid)
+
+        invalid = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "artifact_section",
+                "target_id": "art-cmt-chain-r2",
+                "artifact_revision_id": "art-cmt-other-r1",
+                "anchor": "Goal",
+                "content": "invalid ref",
+            },
+        )
+        self.assertFalse(invalid.get("ok"), msg=invalid)
+        self.assertEqual(invalid.get("permission_boundary"), "comment.artifact_revision_scope")
+
+    def test_reply_to_must_stay_on_same_target_thread(self) -> None:
+        track_a = self._seed_track("track-cmt-a")
+        track_b = self._seed_track("track-cmt-b")
+        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+
+        root_a = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={"target_type": "track", "target_id": track_a["id"], "content": "root a"},
+        )
+        root_b = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={"target_type": "track", "target_id": track_b["id"], "content": "root b"},
+        )
+        self.assertTrue(root_a.get("ok"), msg=root_a)
+        self.assertTrue(root_b.get("ok"), msg=root_b)
+
+        ok_reply = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "track",
+                "target_id": track_a["id"],
+                "content": "reply a",
+                "reply_to": (root_a.get("comment") or {}).get("id"),
+            },
+        )
+        self.assertTrue(ok_reply.get("ok"), msg=ok_reply)
+        self.assertEqual((ok_reply.get("comment") or {}).get("thread_id"), (root_a.get("comment") or {}).get("id"))
+
+        bad_reply = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "track",
+                "target_id": track_a["id"],
+                "content": "bad reply",
+                "reply_to": (root_b.get("comment") or {}).get("id"),
+            },
+        )
+        self.assertFalse(bad_reply.get("ok"), msg=bad_reply)
+        self.assertEqual(bad_reply.get("permission_boundary"), "comment.reply_to_scope")
+
+    def test_resolve_and_reopen_thread_updates_thread_status(self) -> None:
+        track = self._seed_track("track-cmt-resolve")
+        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+
+        root = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={"target_type": "track", "target_id": track["id"], "content": "root"},
+        )
+        reply = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "track",
+                "target_id": track["id"],
+                "content": "reply",
+                "reply_to": (root.get("comment") or {}).get("id"),
+            },
+        )
+        self.assertTrue(root.get("ok"), msg=root)
+        self.assertTrue(reply.get("ok"), msg=reply)
+
+        resolved = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="resolve",
+            args={"comment_id": (reply.get("comment") or {}).get("id")},
+        )
+        self.assertTrue(resolved.get("ok"), msg=resolved)
+
+        after_resolve = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="list",
+            args={"target_type": "track", "target_id": track["id"], "status": "all"},
+        )
+        self.assertTrue(after_resolve.get("ok"), msg=after_resolve)
+        self.assertEqual((after_resolve.get("status_counts") or {}).get("open"), 0)
+
+        reopened = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="reopen",
+            args={"comment_id": (root.get("comment") or {}).get("id")},
+        )
+        self.assertTrue(reopened.get("ok"), msg=reopened)
+        after_reopen = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="list",
+            args={"target_type": "track", "target_id": track["id"], "status": "all"},
+        )
+        self.assertEqual((after_reopen.get("status_counts") or {}).get("open"), 2)
+
+    def test_mentions_must_reference_manifest_buddies(self) -> None:
+        track = self._seed_track("track-cmt-mentions")
+        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+        ok = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "track",
+                "target_id": track["id"],
+                "content": "with mentions",
+                "mentions": ["pm", "design"],
+            },
+        )
+        self.assertTrue(ok.get("ok"), msg=ok)
+        self.assertEqual((ok.get("comment") or {}).get("mentions"), ["pm", "design"])
+
+        bad = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "track",
+                "target_id": track["id"],
+                "content": "bad mention",
+                "mentions": ["ops"],
+            },
+        )
+        self.assertFalse(bad.get("ok"), msg=bad)
+        self.assertEqual((bad.get("error") or {}).get("code"), "E_COMMENT_PAYLOAD")
+
+    def test_comment_tool_reuses_artifact_read_boundary_for_drafts(self) -> None:
+        env_store.create_artifact_revision(
+            artifact_id="art-cmt-draft-private",
+            title="Draft",
+            summary="",
+            body="draft body",
+            template="note",
+            status="draft",
+            published_to_track=None,
+            supersedes_artifact_id=None,
+            created_by="pm",
+            authors=["pm"],
+            source_refs=[{"type": "note", "label": "seed"}],
+        )
+        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+        add = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={"target_type": "artifact", "target_id": "art-cmt-draft-private", "content": "no access"},
+        )
+        self.assertFalse(add.get("ok"), msg=add)
+        self.assertEqual(add.get("permission_boundary"), "artifact.status")
+
+        listed = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="list",
+            args={"target_type": "artifact", "target_id": "art-cmt-draft-private", "status": "all"},
+        )
+        self.assertFalse(listed.get("ok"), msg=listed)
+        self.assertEqual(listed.get("permission_boundary"), "artifact.status")
+
+    def test_archived_artifact_rejects_comment_add(self) -> None:
+        artifact_id = self._seed_published_artifact(artifact_id="art-cmt-archived")
+        env_store.archive_artifact(artifact_id, "pm")
+        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+
+        add = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={"target_type": "artifact", "target_id": artifact_id, "content": "no archived comments"},
+        )
+        self.assertFalse(add.get("ok"), msg=add)
+        self.assertEqual(add.get("permission_boundary"), "artifact.status")
 
 
 if __name__ == "__main__":

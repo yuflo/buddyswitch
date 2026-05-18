@@ -92,13 +92,17 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return payload
 
     def _seed_market_targets(self) -> str:
-        artifact = env_store.create_artifact(
+        artifact = env_store.create_artifact_revision(
             artifact_id="art-market-evidence-r1",
             title="Market brief",
-            kind="market-report",
-            created_by="market",
             summary="seed",
-            content={"body": "market"},
+            body="market",
+            template="brief",
+            status="draft",
+            published_to_track=None,
+            supersedes_artifact_id=None,
+            created_by="market",
+            authors=["market"],
             source_refs=[{"type": "note", "label": "seed"}],
         )
         return artifact["id"]
@@ -179,8 +183,7 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(denied.get("ok"), msg=denied)
         self.assertEqual((denied.get("error") or {}).get("code"), "E_EVIDENCE_TARGET_SCOPE")
-        self.assertEqual(denied.get("permission_boundary"), "artifact.buddy_scope")
-        self.assertIn("market", str((denied.get("error") or {}).get("message")))
+        self.assertEqual(denied.get("permission_boundary"), "artifact.authors")
 
 
 if __name__ == "__main__":

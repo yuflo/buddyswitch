@@ -193,6 +193,35 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("current_artifacts", encoded)
         self.assertNotIn("shared_materials", encoded)
 
+    def test_task_track_id_hint_does_not_mutate_track_state(self) -> None:
+        env_store.create_track("track-task-hint-envtool", "Track Hint Env Tool", owner_buddy="pm")
+        before_track = json.loads(env_store.track_file("track-task-hint-envtool").read_text(encoding="utf-8"))
+        instance_json = self._instance_json(instance_id="inst-dev-task", buddy="dev")
+
+        created = self._dispatch(
+            instance_json=instance_json,
+            tool="task",
+            action="create",
+            args={
+                "task_id": "task-dev-track-hint-envtool",
+                "title": "Track hint task",
+                "track_id": "track-task-hint-envtool",
+            },
+            instance_id="inst-dev-task",
+            buddy="dev",
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        after_track = json.loads(env_store.track_file("track-task-hint-envtool").read_text(encoding="utf-8"))
+        self.assertEqual(after_track, before_track)
+
+        stored_task = env_store.get_task("task-dev-track-hint-envtool")
+        self.assertIsInstance(stored_task, dict)
+        assert isinstance(stored_task, dict)
+        self.assertEqual(stored_task.get("track_id"), "track-task-hint-envtool")
+        self.assertNotIn("artifact_ids", stored_task)
+        self.assertNotIn("artifact_slots", stored_task)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Env store v2 contract tests for track-page collaboration model."""
+"""Env store V1 contract tests for artifact collaboration page model."""
 
 from __future__ import annotations
 
@@ -15,311 +15,215 @@ if str(SCRIPTS) not in sys.path:
 
 import env_store  # noqa: E402
 
-from env_store import (  # noqa: E402
-    create_artifact,
-    create_task,
-    create_track,
-    get_artifact,
-    get_track,
-    validate_artifact,
-    validate_task,
-    validate_track,
-)
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
-class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _track_payload(self, track_id: str = "track-landing-proof") -> dict[str, object]:
-        return {
-            "id": track_id,
-            "title": "Landing page first proof",
-            "outcome": "Validate whether the landing page explains the core value.",
-            "owner_buddy": "pm",
-            "state": "active",
-            "health": "ok",
-            "appetite": "2 days",
-            "now": {"next": "Design drafts first-screen structure.", "blocker": None},
-            "shared_materials": [],
-            "updates": [],
-            "close_proof": [],
-            "created_at": "2026-05-17T12:00:00+08:00",
-            "updated_at": "2026-05-17T12:00:00+08:00",
-            "archived_at": None,
-        }
+class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _artifact_path(self, artifact_id: str) -> Path:
+        return self._runtime_path(f"buddyswitch/objects/artifacts/{artifact_id}.json")
 
-    def test_validate_track_accepts_page_shape_and_rejects_relation_fields(self) -> None:
-        normalized = validate_track(self._track_payload())
-        self.assertEqual(normalized["state"], "active")
-        self.assertEqual(normalized["health"], "ok")
-        self.assertEqual(normalized["shared_materials"], [])
-        self.assertEqual(normalized["updates"], [])
-        self.assertEqual(normalized["close_proof"], [])
-
-        for field, value in (
-            ("task_ids", ["task-old"]),
-            ("status", "active"),
-            ("summary", "legacy summary"),
-            ("artifact_ids", ["art-old"]),
-            ("current_buddy", "pm"),
-            ("next_buddy", "dev"),
-        ):
-            payload = self._track_payload(track_id=f"track-bad-{field.replace('_', '-')}")
-            payload[field] = value
-            with self.subTest(field=field):
-                with self.assertRaises(ValueError):
-                    validate_track(payload)
-
-    def test_create_task_with_track_hint_does_not_mutate_track(self) -> None:
-        track = create_track(
-            "track-private-hint",
-            "Private hint track",
-            owner_buddy="pm",
-            outcome="Outcome",
-            appetite="1 day",
-            now={"next": "next", "blocker": None},
-        )
-        before = json.loads(json.dumps(get_track(track["id"])))
-
-        task = create_task(
-            "task-dev-private-hint",
-            "Dev private task",
-            buddy="dev",
-            track_id=track["id"],
-            summary="private hint",
-        )
-        self.assertEqual(task["track_id"], track["id"])
-
-        after = get_track(track["id"])
-        self.assertEqual(before, after)
-
-
-class ArtifactPublicationStoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def test_publish_material_writes_track_ref_and_artifact_metadata(self) -> None:
-        create_track(
-            "track-publish-material",
-            "Publish material",
-            owner_buddy="pm",
-            outcome="Outcome",
-            appetite="1 day",
-            now={"next": "publish", "blocker": None},
-        )
-
-        artifact = create_artifact(
-            artifact_id="art-pm-prd-r1",
-            title="PRD",
-            kind="prd",
-            created_by="pm",
+    def test_create_artifact_uses_canonical_markdown_page_shape(self) -> None:
+        artifact = env_store.create_artifact_revision(
+            artifact_id="art-pm-canonical-r1",
+            title="Artifact canonical contract",
+            summary="seed",
+            body="## Context\n\nSeed",
+            template="brief",
+            status="draft",
             published_to_track=None,
-            summary="PM PRD",
-            content={"body": "PRD body"},
+            supersedes_artifact_id=None,
+            created_by="pm",
+            authors=["pm"],
             source_refs=[{"type": "note", "label": "seed"}],
         )
 
-        env_store.publish_track_material(
-            track_id="track-publish-material",
-            artifact_id=artifact["id"],
-            label="PRD",
-            from_buddy="pm",
-            summary="PM PRD",
+        expected_keys = {
+            "id",
+            "title",
+            "summary",
+            "body",
+            "template",
+            "status",
+            "published_to_track",
+            "revision",
+            "is_current",
+            "supersedes_artifact_id",
+            "created_by",
+            "authors",
+            "source_refs",
+            "created_at",
+            "updated_at",
+        }
+        self.assertEqual(set(artifact.keys()), expected_keys)
+        self.assertEqual(artifact["template"], "brief")
+        self.assertEqual(artifact["status"], "draft")
+        self.assertIsNone(artifact["published_to_track"])
+        self.assertEqual(artifact["authors"], ["pm"])
+        self.assertEqual(artifact["body"], "## Context\n\nSeed")
+
+        stored = json.loads(self._artifact_path("art-pm-canonical-r1").read_text(encoding="utf-8"))
+        self.assertEqual(set(stored.keys()), expected_keys)
+        self.assertNotIn("kind", stored)
+        self.assertNotIn("content", stored)
+        self.assertNotIn("task_id", stored)
+
+    def test_new_artifact_shape_rejects_retired_fields(self) -> None:
+        base = {
+            "id": "art-pm-reject-r1",
+            "title": "Reject retired fields",
+            "summary": "x",
+            "body": "body",
+            "template": "note",
+            "status": "draft",
+            "published_to_track": None,
+            "revision": 1,
+            "is_current": True,
+            "supersedes_artifact_id": None,
+            "created_by": "pm",
+            "authors": ["pm"],
+            "source_refs": [{"type": "note", "label": "seed"}],
+            "created_at": "2026-05-18T10:00:00+08:00",
+            "updated_at": "2026-05-18T10:00:00+08:00",
+        }
+        for retired_field in ("task_id", "kind", "content", "asset", "media", "material", "blocks", "figma_file"):
+            payload = dict(base)
+            payload[retired_field] = "x"
+            with self.subTest(field=retired_field):
+                with self.assertRaises(ValueError):
+                    env_store.validate_artifact(payload)
+
+
+class ArtifactCompatibilityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_legacy_kind_content_task_artifact_normalizes_to_v1_draft(self) -> None:
+        legacy_payload = {
+            "id": "art-design-legacy-r1",
+            "title": "Legacy artifact",
+            "task_id": "task-design-old",
+            "buddy": "design",
+            "kind": "design-handoff",
+            "summary": "legacy",
+            "content": {"body": "legacy body"},
+            "revision": 1,
+            "is_current": True,
+            "supersedes_artifact_id": None,
+            "created_by": "design",
+            "created_at": "2026-05-18T10:00:00+08:00",
+            "updated_at": "2026-05-18T10:01:00+08:00",
+        }
+        env_store.artifact_file("art-design-legacy-r1").parent.mkdir(parents=True, exist_ok=True)
+        env_store.artifact_file("art-design-legacy-r1").write_text(
+            json.dumps(legacy_payload, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
         )
 
-        track = get_track("track-publish-material")
-        self.assertEqual(len(track["shared_materials"]), 1)
-        ref = track["shared_materials"][0]
-        self.assertEqual(ref["artifact_id"], artifact["id"])
-        self.assertTrue(ref["current"])
+        normalized = env_store.get_artifact("art-design-legacy-r1")
+        self.assertIsNotNone(normalized)
+        assert isinstance(normalized, dict)
+        self.assertEqual(normalized["template"], "design")
+        self.assertEqual(normalized["body"], "legacy body")
+        self.assertEqual(normalized["status"], "draft")
+        self.assertIsNone(normalized["published_to_track"])
+        self.assertIn("design", normalized["authors"])
 
-        stored_artifact = get_artifact(artifact["id"])
-        self.assertEqual(stored_artifact["published_to_track"], "track-publish-material")
-        self.assertEqual(stored_artifact["publication_role"], "material")
-        self.assertNotIn("task_id", stored_artifact)
+        saved = env_store.save_artifact(normalized)
+        self.assertEqual(saved["template"], "design")
+        raw = json.loads(env_store.artifact_file("art-design-legacy-r1").read_text(encoding="utf-8"))
+        self.assertNotIn("kind", raw)
+        self.assertNotIn("content", raw)
+        self.assertNotIn("task_id", raw)
 
-    def test_publish_proof_writes_exact_close_proof_ref(self) -> None:
-        create_track(
-            "track-proof",
-            "Proof track",
-            owner_buddy="pm",
-            outcome="Outcome",
-            appetite="1 day",
-            now={"next": "proof", "blocker": None},
-        )
-        artifact = create_artifact(
-            artifact_id="art-test-proof-r1",
-            title="Smoke",
-            kind="smoke-test",
-            created_by="test",
-            published_to_track=None,
-            summary="Smoke result",
-            content={"ok": True},
-            source_refs=[],
+
+class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_task_track_id_hint_does_not_mutate_track_state(self) -> None:
+        env_store.create_track("track-task-hint", "Task Hint", owner_buddy="pm")
+        before = json.loads(env_store.track_file("track-task-hint").read_text(encoding="utf-8"))
+
+        task = env_store.create_task(
+            "task-dev-track-hint",
+            "Task hint",
+            buddy="dev",
+            track_id="track-task-hint",
         )
 
-        env_store.publish_track_proof(
-            track_id="track-proof",
-            artifact_id=artifact["id"],
-            label="Smoke",
-            from_buddy="test",
-            summary="smoke ok",
-        )
+        after = json.loads(env_store.track_file("track-task-hint").read_text(encoding="utf-8"))
+        self.assertEqual(after, before)
+        self.assertEqual(task["track_id"], "track-task-hint")
+        self.assertNotIn("artifact_ids", task)
+        self.assertNotIn("artifact_slots", task)
 
-        track = get_track("track-proof")
-        self.assertEqual(len(track["close_proof"]), 1)
-        self.assertEqual(track["close_proof"][0]["artifact_id"], artifact["id"])
-        self.assertEqual(track["shared_materials"], [])
+        stored = env_store.get_task("task-dev-track-hint")
+        self.assertIsNotNone(stored)
+        assert isinstance(stored, dict)
+        self.assertNotIn("artifact_ids", stored)
+        self.assertNotIn("artifact_slots", stored)
 
-        stored_artifact = get_artifact(artifact["id"])
-        self.assertEqual(stored_artifact["publication_role"], "proof")
-
-    def test_publish_material_rejects_cross_track_republish_without_state_pollution(self) -> None:
-        create_track(
-            "track-material-a",
-            "Material A",
-            owner_buddy="pm",
-            outcome="Outcome",
-            appetite="1 day",
-            now={"next": "seed", "blocker": None},
-        )
-        create_track(
-            "track-material-b",
-            "Material B",
-            owner_buddy="pm",
-            outcome="Outcome",
-            appetite="1 day",
-            now={"next": "seed", "blocker": None},
-        )
-        artifact = create_artifact(
-            artifact_id="art-cross-material-r1",
-            title="Cross material",
-            kind="prd",
-            created_by="pm",
-            summary="cross",
-            content={"body": "cross"},
-        )
-
-        env_store.publish_track_material(
-            track_id="track-material-a",
-            artifact_id=artifact["id"],
-            label="PRD",
-            from_buddy="pm",
-            summary="published a",
-        )
-        before_target = json.loads(json.dumps(get_track("track-material-b")))
-
-        with self.assertRaises(ValueError):
-            env_store.publish_track_material(
-                track_id="track-material-b",
-                artifact_id=artifact["id"],
-                label="PRD",
-                from_buddy="pm",
-                summary="published b",
-            )
-
-        self.assertEqual(get_track("track-material-b"), before_target)
-        stored = get_artifact(artifact["id"])
-        self.assertEqual(stored["published_to_track"], "track-material-a")
-        self.assertEqual(stored["publication_role"], "material")
-
-    def test_publish_proof_rejects_cross_track_republish_without_state_pollution(self) -> None:
-        create_track(
-            "track-proof-a",
-            "Proof A",
-            owner_buddy="pm",
-            outcome="Outcome",
-            appetite="1 day",
-            now={"next": "seed", "blocker": None},
-        )
-        create_track(
-            "track-proof-b",
-            "Proof B",
-            owner_buddy="pm",
-            outcome="Outcome",
-            appetite="1 day",
-            now={"next": "seed", "blocker": None},
-        )
-        artifact = create_artifact(
-            artifact_id="art-cross-proof-r1",
-            title="Cross proof",
-            kind="smoke-test",
-            created_by="test",
-            summary="cross",
-            content={"body": "cross"},
-        )
-
-        env_store.publish_track_proof(
-            track_id="track-proof-a",
-            artifact_id=artifact["id"],
-            label="Smoke",
-            from_buddy="test",
-            summary="published a",
-        )
-        before_target = json.loads(json.dumps(get_track("track-proof-b")))
-
-        with self.assertRaises(ValueError):
-            env_store.publish_track_proof(
-                track_id="track-proof-b",
-                artifact_id=artifact["id"],
-                label="Smoke",
-                from_buddy="test",
-                summary="published b",
-            )
-
-        self.assertEqual(get_track("track-proof-b"), before_target)
-        stored = get_artifact(artifact["id"])
-        self.assertEqual(stored["published_to_track"], "track-proof-a")
-        self.assertEqual(stored["publication_role"], "proof")
-
-
-class TaskAndArtifactValidationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def test_validate_task_rejects_artifact_linkage_fields(self) -> None:
+    def test_validate_task_drops_legacy_artifact_linkage_fields(self) -> None:
         payload = {
-            "id": "task-dev-private",
+            "id": "task-dev-legacy-drop",
             "buddy": "dev",
-            "title": "Private task",
+            "title": "Legacy drop",
             "status": "active",
             "track_id": None,
+            "artifact_ids": ["art-old-r1"],
+            "artifact_slots": {
+                "legacy": {
+                    "current_artifact_id": "art-old-r1",
+                    "revision_count": 1,
+                }
+            },
             "summary": "",
-            "created_at": "2026-05-17T12:00:00+08:00",
-            "updated_at": "2026-05-17T12:00:00+08:00",
+            "created_at": "2026-05-18T10:00:00+08:00",
+            "updated_at": "2026-05-18T10:00:00+08:00",
         }
-        normalized = validate_task(payload)
+        normalized = env_store.validate_task(payload)
         self.assertNotIn("artifact_ids", normalized)
-        self.assertNotIn("artifact" + "_slots", normalized)
+        self.assertNotIn("artifact_slots", normalized)
 
-        with self.assertRaises(ValueError):
-            validate_task({**payload, "artifact_ids": ["art-old"]})
-        with self.assertRaises(ValueError):
-            validate_task({**payload, "artifact" + "_slots": {"prd": {"current_artifact_id": "art-old", "revision_count": 1}}})
 
-    def test_validate_artifact_accepts_published_to_track_and_rejects_task_id(self) -> None:
-        create_track(
-            "track-artifact-shape",
-            "Artifact shape",
-            owner_buddy="pm",
-            outcome="Outcome",
-            appetite="1 day",
-            now={"next": "shape", "blocker": None},
-        )
+class TrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_validate_track_drops_legacy_task_ids(self) -> None:
         payload = {
-            "id": "art-shape-r1",
-            "title": "Artifact",
-            "kind": "prd",
-            "created_by": "pm",
-            "published_to_track": "track-artifact-shape",
-            "publication_role": "material",
-            "summary": "summary",
-            "content": {"body": "..."},
-            "source_refs": [],
-            "revision": 1,
-            "supersedes_artifact_id": None,
-            "is_current": True,
-            "created_at": "2026-05-17T12:00:00+08:00",
-            "updated_at": "2026-05-17T12:00:00+08:00",
+            "id": "track-pm-legacy",
+            "title": "Legacy track",
+            "status": "active",
+            "owner_buddy": "pm",
+            "task_ids": ["task-pm-old"],
+            "summary": "",
+            "updated_at": "2026-05-18T10:00:00+08:00",
         }
-        normalized = validate_artifact(payload)
-        self.assertEqual(normalized["published_to_track"], "track-artifact-shape")
+        normalized = env_store.validate_track(payload)
+        self.assertNotIn("task_ids", normalized)
 
-        with self.assertRaises(ValueError):
-            validate_artifact({**payload, "task_id": "task-old"})
+
+class CommentStoreTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_legacy_author_buddy_comment_normalizes_to_by_buddy(self) -> None:
+        raw = {
+            "id": "comment-legacy-author",
+            "target_type": "track",
+            "target_id": "track-legacy-comments",
+            "author_buddy": "pm",
+            "content": "legacy",
+            "reply_to": None,
+            "created_at": "2026-05-18T10:00:00+08:00",
+        }
+        env_store.comment_file("comment-legacy-author").parent.mkdir(parents=True, exist_ok=True)
+        env_store.comment_file("comment-legacy-author").write_text(
+            json.dumps(raw, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        normalized = env_store.get_comment("comment-legacy-author")
+        self.assertIsNotNone(normalized)
+        assert isinstance(normalized, dict)
+        self.assertEqual(normalized["by_buddy"], "pm")
+        self.assertEqual(normalized["thread_id"], "comment-legacy-author")
+        self.assertEqual(normalized["status"], "open")
+        self.assertEqual(normalized["mentions"], [])
+
+        saved = env_store.save_comment(normalized)
+        self.assertEqual(saved["by_buddy"], "pm")
+        persisted = json.loads(env_store.comment_file("comment-legacy-author").read_text(encoding="utf-8"))
+        self.assertNotIn("author_buddy", persisted)
 
 
 if __name__ == "__main__":

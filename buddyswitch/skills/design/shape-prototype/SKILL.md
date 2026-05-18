@@ -35,7 +35,7 @@ description: Use when the task is shaping a visible UI/UX prototype and producin
 3. Decide the preview root and entry file for the first runnable artifact package.
 4. Capture PM, dev, and test artifact notes in separate lists.
 5. Record open questions that materially affect the next prototype pass.
-6. Package the result as the structured design-handoff artifact.
+6. Package the result as the structured `template="design"` artifact.
 
 ## Verification
 - Confirm the prototype direction stays aligned with the active task and does not silently rewrite product scope.
@@ -57,10 +57,10 @@ Required top-level field:
 - `execution_summary`
 
 Use `artifact-tool` when this skill produces a durable artifact:
-- `kind`: `design-handoff`
+- `template`: `design`
 - `title`: concise artifact title
 - `summary`: short downstream selection summary
-- `content`: include `design_goal`, `flow_or_screen_summary`, `interaction_notes`, `assets_or_preview_refs`, `artifact_notes`, and `open_questions`
+- `body`: include `design_goal`, `flow_or_screen_summary`, `interaction_notes`, `assets_or_preview_refs`, `artifact_notes`, and `open_questions` as markdown
 
 After `artifact.create_revision` returns `ok=true`, include the returned artifact id in optional `artifact_ids`.
 Use optional `working_notes` for concise reasoning or verification notes.

@@ -87,73 +87,50 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return payload
 
     def _seed_context_state(self) -> None:
-        env_store.create_track(
-            "track-context-active",
-            "Context Track",
-            owner_buddy="pm",
-            outcome="Context model coverage",
-            appetite="2 days",
-            now={"next": "seed materials", "blocker": None},
-        )
+        env_store.create_track("track-context-active", "Context Track", owner_buddy="pm")
         env_store.create_task("task-dev-context", "Context Task", buddy="dev", track_id="track-context-active", summary="seed")
-        env_store.create_artifact(
+        env_store.create_artifact_revision(
             artifact_id="art-task-dev-context-note-r1",
             title="Context Artifact v1",
-            kind="track-note",
             summary="artifact summary v1",
-            content={"body": "artifact body v1"},
+            body="artifact body v1",
+            template="note",
+            status="published",
+            published_to_track="track-context-active",
+            supersedes_artifact_id=None,
             created_by="dev",
+            authors=["dev"],
             source_refs=[{"type": "note", "label": "context"}],
         )
-        env_store.publish_track_material(
-            track_id="track-context-active",
-            artifact_id="art-task-dev-context-note-r1",
-            label="Context Note",
-            from_buddy="dev",
-            summary="artifact summary v1",
-        )
-        env_store.create_artifact(
+        env_store.create_artifact_revision(
             artifact_id="art-task-dev-context-note-r2",
             title="Context Artifact v2",
-            kind="track-note",
             summary="artifact summary v2",
-            content={"body": "artifact body v2"},
+            body="artifact body v2",
+            template="note",
+            status=None,
+            published_to_track=None,
+            supersedes_artifact_id="art-task-dev-context-note-r1",
             created_by="dev",
+            authors=None,
             source_refs=[{"type": "note", "label": "context"}],
-        )
-        env_store.publish_track_material(
-            track_id="track-context-active",
-            artifact_id="art-task-dev-context-note-r2",
-            label="Context Note",
-            from_buddy="dev",
-            summary="artifact summary v2",
         )
 
-        env_store.create_track(
-            "track-context-archived",
-            "Archived Track",
-            owner_buddy="pm",
-            outcome="Archived context",
-            appetite="1 day",
-            now={"next": "done", "blocker": None},
-        )
-        env_store.create_artifact(
+        env_store.create_track("track-context-archived", "Archived Track", owner_buddy="pm", status="archived")
+        env_store.create_task("task-dev-archived", "Archived task", buddy="dev", track_id="track-context-archived")
+        env_store.create_artifact_revision(
             artifact_id="art-task-dev-archived-r1",
             title="Archived Artifact",
-            kind="track-note",
             summary="archived",
-            content={"body": "archived"},
+            body="archived",
+            template="note",
+            status="published",
+            published_to_track="track-context-archived",
+            supersedes_artifact_id=None,
             created_by="dev",
+            authors=["dev"],
             source_refs=[{"type": "note", "label": "context"}],
         )
-        env_store.publish_track_material(
-            track_id="track-context-archived",
-            artifact_id="art-task-dev-archived-r1",
-            label="Archived",
-            from_buddy="dev",
-            summary="archived",
-        )
-        env_store.update_track("track-context-archived", {"archived_at": env_store.now_iso()})
 
     def test_context_summarize_exposes_compact_tool_affordances(self) -> None:
         instance_json = self._instance_json()
@@ -179,11 +156,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             if not isinstance(row, dict):
                 continue
             self.assertIn("owner_buddy", row)
-            self.assertIn(row.get("active_buddy_role"), {"owner", "collaborator"})
-            self.assertIn("outcome", row)
-            self.assertIn("state", row)
-            self.assertIn("health", row)
-            self.assertIn("now", row)
+            self.assertIn(row.get("active_buddy_role"), {"owner", "observer"})
             self.assertNotIn("current_buddy", row)
             self.assertNotIn("next_buddy", row)
             self.assertNotIn("participant", row)
@@ -222,7 +195,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             if not isinstance(row, dict):
                 continue
             self.assertIn("readable_by_active_buddy", row)
-            self.assertNotIn("readable_by_current" + "_buddy", row)
+            self.assertNotIn("readable_by_current_buddy", row)
 
     def test_context_list_sources_excludes_handoffs(self) -> None:
         instance_json = self._instance_json()

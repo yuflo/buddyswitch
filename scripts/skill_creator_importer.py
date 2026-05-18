@@ -31,7 +31,7 @@ class ImportResult:
     buddy_id: str
     package_path: str
     manifest_path: str
-    artifact_kind: str | None
+    artifact_template: str | None
 
 
 def _normalize_source(source: Path) -> tuple[Path, bool]:
@@ -86,14 +86,16 @@ def _validate_skill_id(skill_id: str) -> str:
     return normalized
 
 
-def _validate_artifact_kind(artifact_kind: str | None) -> str | None:
-    if artifact_kind is None:
+def _validate_artifact_template(artifact_template: str | None) -> str | None:
+    if artifact_template is None:
         return None
-    normalized = artifact_kind.strip()
+    normalized = artifact_template.strip()
     if not normalized:
-        raise SkillImportError("artifact kind must be a non-empty string when provided")
+        raise SkillImportError("artifact template must be a non-empty string when provided")
     if not SKILL_ID_RE.match(normalized):
-        raise SkillImportError(f"invalid artifact kind '{artifact_kind}': expected /^[a-z][a-z0-9-]*$/")
+        raise SkillImportError(
+            f"invalid artifact template '{artifact_template}': expected /^[a-z][a-z0-9-]*$/"
+        )
     return normalized
 
 
@@ -238,14 +240,14 @@ def _serialize_manifest(manifest: dict[str, Any]) -> str:
         label = buddy.get("label")
         scope = buddy.get("scope")
         skills_list = buddy.get("skills")
-        artifact_kinds = buddy.get("artifact_kinds")
+        artifact_templates = buddy.get("artifact_templates")
         permissions = buddy.get("permissions")
         if not isinstance(buddy_id, str) or not isinstance(label, str) or not isinstance(scope, str):
             raise SkillImportError("buddies entries must include id/label/scope strings")
         if not isinstance(skills_list, list) or not all(isinstance(item, str) for item in skills_list):
             raise SkillImportError(f"buddy '{buddy_id}' must include a string skills list")
-        if not isinstance(artifact_kinds, list) or not all(isinstance(item, str) for item in artifact_kinds):
-            raise SkillImportError(f"buddy '{buddy_id}' must include a string artifact_kinds list")
+        if not isinstance(artifact_templates, list) or not all(isinstance(item, str) for item in artifact_templates):
+            raise SkillImportError(f"buddy '{buddy_id}' must include a string artifact_templates list")
         if not isinstance(permissions, list) or not all(isinstance(item, str) for item in permissions):
             raise SkillImportError(f"buddy '{buddy_id}' must include a string permissions list")
 
@@ -266,12 +268,12 @@ def _serialize_manifest(manifest: dict[str, Any]) -> str:
         else:
             lines.append(f"skills = {skills_rendered}")
 
-        artifact_kinds_rendered = _format_string_list(artifact_kinds, multiline_threshold=3)
-        if "\n" in artifact_kinds_rendered:
-            lines.append("artifact_kinds = " + artifact_kinds_rendered.split("\n", 1)[0])
-            lines.extend(artifact_kinds_rendered.split("\n")[1:])
+        artifact_templates_rendered = _format_string_list(artifact_templates, multiline_threshold=3)
+        if "\n" in artifact_templates_rendered:
+            lines.append("artifact_templates = " + artifact_templates_rendered.split("\n", 1)[0])
+            lines.extend(artifact_templates_rendered.split("\n")[1:])
         else:
-            lines.append(f"artifact_kinds = {artifact_kinds_rendered}")
+            lines.append(f"artifact_templates = {artifact_templates_rendered}")
 
         permissions_rendered = _format_string_list(permissions, multiline_threshold=3)
         if "\n" in permissions_rendered:
@@ -288,7 +290,7 @@ def _register_skill(
     *,
     skill_id: str,
     buddy_id: str,
-    artifact_kind: str | None,
+    artifact_template: str | None,
 ) -> dict[str, Any]:
     require_buddy(manifest, buddy_id)
     skills = manifest.get("skills")
@@ -312,12 +314,12 @@ def _register_skill(
             raise SkillImportError(f"buddy '{buddy_id}' skills list is invalid")
         if skill_id not in raw_skills:
             raw_skills.append(skill_id)
-        if artifact_kind is not None:
-            raw_artifact_kinds = buddy.get("artifact_kinds")
-            if not isinstance(raw_artifact_kinds, list):
-                raise SkillImportError(f"buddy '{buddy_id}' artifact_kinds list is invalid")
-            if artifact_kind not in raw_artifact_kinds:
-                raw_artifact_kinds.append(artifact_kind)
+        if artifact_template is not None:
+            raw_artifact_templates = buddy.get("artifact_templates")
+            if not isinstance(raw_artifact_templates, list):
+                raise SkillImportError(f"buddy '{buddy_id}' artifact_templates list is invalid")
+            if artifact_template not in raw_artifact_templates:
+                raw_artifact_templates.append(artifact_template)
         break
     return manifest
 
@@ -334,6 +336,7 @@ def import_skill(
     source: Path,
     buddy_id: str,
     skill_id: str | None = None,
+    artifact_template: str | None = None,
     artifact_kind: str | None = None,
     repo_root: Path = ROOT,
     manifest_path: Path | None = None,
@@ -351,7 +354,19 @@ def import_skill(
     if not description:
         raise SkillImportError("source SKILL.md must include non-empty frontmatter description")
     derived_skill_id = _derive_skill_id(skill_id, source_skill_text, source_root)
-    normalized_artifact_kind = _validate_artifact_kind(artifact_kind)
+    if (
+        isinstance(artifact_template, str)
+        and isinstance(artifact_kind, str)
+        and artifact_template.strip()
+        and artifact_kind.strip()
+        and artifact_template.strip() != artifact_kind.strip()
+    ):
+        raise SkillImportError(
+            "artifact template conflict: --artifact-template and --artifact-kind must match when both provided"
+        )
+    normalized_artifact_template = _validate_artifact_template(
+        artifact_template if artifact_template is not None else artifact_kind
+    )
 
     manifest = load_manifest(resolved_manifest)
     require_buddy(manifest, buddy_id)
@@ -386,7 +401,7 @@ def import_skill(
             manifest_without_runtime,
             skill_id=derived_skill_id,
             buddy_id=buddy_id,
-            artifact_kind=normalized_artifact_kind,
+            artifact_template=normalized_artifact_template,
         )
         updated_text = _serialize_manifest(updated_manifest)
 
@@ -432,7 +447,7 @@ def import_skill(
         buddy_id=buddy_id,
         package_path=f"buddyswitch/skills/{buddy_id}/{derived_skill_id}",
         manifest_path=_relative_path_or_absolute(resolved_manifest, repo_root_resolved),
-        artifact_kind=normalized_artifact_kind,
+        artifact_template=normalized_artifact_template,
     )
 
 
@@ -441,7 +456,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source", type=Path, required=True, help="Source package directory or SKILL.md file")
     parser.add_argument("--buddy", required=True, help="Target buddy id")
     parser.add_argument("--skill-id", help="Optional explicit generated skill id")
-    parser.add_argument("--artifact-kind", help="Optional buddy artifact kind to append for this imported skill")
+    parser.add_argument(
+        "--artifact-template",
+        help="Optional buddy artifact template to append for this imported skill",
+    )
+    parser.add_argument(
+        "--artifact-kind",
+        help="Legacy alias for --artifact-template; written as artifact_templates",
+    )
     parser.add_argument("--manifest", type=Path, help="Manifest path (default: buddyswitch/manifest.toml under repo root)")
     parser.add_argument("--repo-root", type=Path, default=ROOT, help="Repo root containing buddyswitch/manifest.toml")
     return parser
@@ -455,6 +477,7 @@ def main(argv: list[str] | None = None) -> int:
             source=args.source,
             buddy_id=args.buddy,
             skill_id=args.skill_id,
+            artifact_template=args.artifact_template,
             artifact_kind=args.artifact_kind,
             repo_root=args.repo_root,
             manifest_path=args.manifest,
@@ -471,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
                 "buddy_id": result.buddy_id,
                 "package_path": result.package_path,
                 "manifest_path": result.manifest_path,
-                "artifact_kind": result.artifact_kind,
+                "artifact_template": result.artifact_template,
             },
             ensure_ascii=True,
             indent=2,

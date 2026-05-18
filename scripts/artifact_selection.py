@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic artifact selection for track-page BuddySwitch runs."""
+"""Deterministic artifact selection for track-published Artifact V1 inputs."""
 
 from __future__ import annotations
 
@@ -39,51 +39,54 @@ def _as_str(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _extract_shared_materials(track_artifact_index: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _as_int(value: Any) -> int | None:
+    return value if isinstance(value, int) else None
+
+
+def _extract_artifacts(track_artifact_index: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not isinstance(track_artifact_index, dict):
         return []
-    rows: list[dict[str, Any]] = []
-    for row in _as_list(track_artifact_index.get("shared_materials")):
-        if not isinstance(row, dict):
-            continue
-        if row.get("type") != "artifact":
-            continue
-        if not bool(row.get("current")):
-            continue
-        artifact_id = _as_str(row.get("artifact_id"))
-        kind = _as_str(row.get("kind"))
-        if not artifact_id or not kind:
-            continue
-        rows.append(row)
+    rows = []
+    for artifact in _as_list(track_artifact_index.get("artifacts")):
+        if isinstance(artifact, dict):
+            rows.append(artifact)
     rows.sort(
-        key=lambda item: (
-            _as_str(item.get("published_at")),
-            _as_str(item.get("artifact_id")),
-        ),
+        key=lambda row: (_as_str(row.get("updated_at")), _as_str(row.get("artifact_id"))),
         reverse=True,
     )
     return rows
 
 
-def _pick_current_material_by_kind(shared_materials: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    picked: dict[str, dict[str, Any]] = {}
-    for row in shared_materials:
-        kind = _as_str(row.get("kind"))
-        if kind and kind not in picked:
-            picked[kind] = row
-    return picked
+def _select_template_rows(
+    artifacts: list[dict[str, Any]],
+    required_templates: list[str],
+) -> dict[str, dict[str, Any]]:
+    selected: dict[str, dict[str, Any]] = {}
+    for template in required_templates:
+        for artifact in artifacts:
+            if _as_str(artifact.get("template")) != template:
+                continue
+            if not bool(artifact.get("is_current")):
+                continue
+            if _as_str(artifact.get("status")) != "published":
+                continue
+            selected[template] = artifact
+            break
+    return selected
 
 
 def select_artifacts_for_run(
     *,
     active_buddy: str,
     demand: str,
-    required_kinds: list[str],
+    required_templates: list[str],
     track_artifact_index: dict[str, Any] | None,
+    task_id_scope: str | None = None,
     max_default_items: int | None = None,
 ) -> dict[str, Any]:
     del active_buddy
     del demand
+    del task_id_scope
 
     config = _selection_config()
     selection_mode = str(config["selection_mode"])
@@ -91,38 +94,36 @@ def select_artifacts_for_run(
         config["max_default_items"]
     )
 
-    shared_materials = _extract_shared_materials(track_artifact_index)
-    if not shared_materials:
+    artifacts = _extract_artifacts(track_artifact_index)
+    if not artifacts:
         return {
             "selected_inputs": [],
-            "reasons": ["No current shared materials are available on this track."],
+            "reasons": ["No track artifacts available."],
             "selection_mode": selection_mode,
         }
 
-    material_by_kind = _pick_current_material_by_kind(shared_materials)
     selected_inputs: list[dict[str, Any]] = []
     reasons: list[str] = []
-    seen_kinds: set[str] = set()
+    normalized_templates = [template for template in required_templates if isinstance(template, str) and template]
+    selected_by_template = _select_template_rows(artifacts, normalized_templates)
 
-    for required_kind in required_kinds:
-        kind = _as_str(required_kind)
-        if not kind or kind in seen_kinds:
+    for template in normalized_templates:
+        artifact = selected_by_template.get(template)
+        if artifact is None:
             continue
-        seen_kinds.add(kind)
-        row = material_by_kind.get(kind)
-        if row is None:
+        artifact_id = _as_str(artifact.get("artifact_id"))
+        if any(item.get("artifact_id") == artifact_id for item in selected_inputs):
             continue
-        artifact_id = _as_str(row.get("artifact_id"))
         selected_inputs.append(
             {
+                "template": template,
                 "artifact_id": artifact_id,
-                "kind": kind,
-                "from_buddy": _as_str(row.get("from_buddy")),
-                "label": _as_str(row.get("label")),
-                "selection_reason": "current shared material for required kind",
+                "revision": _as_int(artifact.get("revision")),
+                "selection_reason": "current published artifact for required upstream template",
+                "created_by": _as_str(artifact.get("created_by")),
             }
         )
-        reasons.append(f"Selected current shared material for required kind '{kind}': {artifact_id}")
+        reasons.append(f"Selected current published artifact for required template '{template}': {artifact_id}")
 
     if len(selected_inputs) > max_items:
         selected_inputs = selected_inputs[:max_items]
@@ -147,7 +148,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--buddy", required=True, help="Current executing buddy id")
     parser.add_argument("--demand", required=True, help="Turn request text")
     parser.add_argument("--index-file", type=Path, required=True, help="Path to track_artifact_index JSON")
-    parser.add_argument("--required-kind", action="append", dest="required_kinds", default=[], help="Required input kind")
+    parser.add_argument(
+        "--required-template",
+        action="append",
+        dest="required_templates",
+        default=[],
+        help="Required input template",
+    )
+    parser.add_argument("--current-task-id", dest="task_id_scope", help="Task scope id when continuing an existing task")
     parser.add_argument("--max-default-items", type=int)
     return parser
 
@@ -158,8 +166,9 @@ def main() -> int:
     payload = select_artifacts_for_run(
         active_buddy=args.buddy,
         demand=args.demand,
-        required_kinds=args.required_kinds,
+        required_templates=args.required_templates,
         track_artifact_index=_load_json(args.index_file),
+        task_id_scope=args.task_id_scope,
         max_default_items=args.max_default_items,
     )
     print(json.dumps(payload, ensure_ascii=True, indent=2))

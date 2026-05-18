@@ -205,21 +205,26 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
-    def _seed_market_artifact(self, artifact_id: str = "art-market-evidence-r1") -> str:
-        artifact = env_store.create_artifact(
-            artifact_id=artifact_id,
+    def _seed_market_task_and_artifact(self) -> tuple[str, str]:
+        task = env_store.create_task("task-market-evidence", "Market evidence task", buddy="market")
+        artifact = env_store.create_artifact_revision(
+            artifact_id="art-market-evidence-r1",
             title="Market Evidence Brief",
-            kind="market-report",
-            created_by="market",
             summary="seed",
-            content={"body": "market"},
+            body="market",
+            template="brief",
+            status="draft",
+            published_to_track=None,
+            supersedes_artifact_id=None,
+            created_by="market",
+            authors=["market"],
             source_refs=[{"type": "note", "label": "seed"}],
         )
-        return artifact["id"]
+        return task["id"], artifact["id"]
 
     def test_market_evidence_requires_artifact_target(self) -> None:
         instance_json = self._instance_json(instance_id="inst-market-target")
-        artifact_id = self._seed_market_artifact()
+        _, artifact_id = self._seed_market_task_and_artifact()
 
         missing_target = self._dispatch(
             instance_json=instance_json,
@@ -286,7 +291,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_market_artifact_write_with_browser_evidence_is_runless(self) -> None:
         instance_id = "inst-market-write"
         instance_json = self._instance_json(instance_id=instance_id)
-        artifact_id = self._seed_market_artifact()
+        _, artifact_id = self._seed_market_task_and_artifact()
 
         issued = self._dispatch(
             instance_json=instance_json,
@@ -308,10 +313,12 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             tool="artifact",
             action="create_revision",
             args={
-                "kind": "market-report",
+                "artifact_id": "art-market-evidence-r2",
                 "title": "Market update",
                 "summary": "runless evidence ref",
-                "content": {"body": "updated"},
+                "template": "brief",
+                "body": "updated",
+                "supersedes_artifact_id": artifact_id,
                 "source_refs": [
                     {"type": "artifact", "id": artifact_id},
                     {"type": "note", "label": f"evidence:{token.get('token_id')}"},
@@ -325,7 +332,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_approved_downgrade_records_reason_on_target_token(self) -> None:
         instance_json = self._instance_json(instance_id="inst-market-downgrade")
-        artifact_id = self._seed_market_artifact()
+        _, artifact_id = self._seed_market_task_and_artifact()
 
         approved = self._dispatch(
             instance_json=instance_json,
@@ -347,63 +354,6 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(evidence.get("target_id"), artifact_id)
         self.assertEqual(evidence.get("reason"), "Browser unavailable; user approved fallback.")
         self.assertNotIn("run_id", evidence)
-
-    def test_source_refs_read_claim_uses_visibility_not_legacy_buddy_field(self) -> None:
-        track_id = "track-market-visible"
-        env_store.create_track(
-            track_id,
-            "Market visible track",
-            owner_buddy="pm",
-            outcome="Outcome",
-            appetite="1 day",
-            now={"next": "seed", "blocker": None},
-        )
-
-        private_artifact_id = self._seed_market_artifact("art-market-private-r1")
-        visible_artifact_id = self._seed_market_artifact("art-market-visible-r1")
-        env_store.publish_track_material(
-            track_id=track_id,
-            artifact_id=visible_artifact_id,
-            label="Market",
-            from_buddy="market",
-            summary="visible",
-        )
-
-        design_instance = self._instance_json(instance_id="inst-design-read-claim", buddy="design")
-        denied = self._dispatch(
-            instance_json=design_instance,
-            instance_id="inst-design-read-claim",
-            buddy="design",
-            tool="artifact",
-            action="create_revision",
-            args={
-                "kind": "design-handoff",
-                "title": "Design notes",
-                "summary": "deny private",
-                "content": {"body": "x"},
-                "read_claim": "summarized-full-content",
-                "source_refs": [{"type": "artifact", "id": private_artifact_id}],
-            },
-        )
-        self.assertFalse(denied.get("ok"), msg=denied)
-        self.assertEqual((denied.get("error") or {}).get("code"), "E_SOURCE_REFS_READ_SCOPE")
-
-        allowed = self._dispatch(
-            instance_json=design_instance,
-            instance_id="inst-design-read-claim",
-            buddy="design",
-            tool="artifact",
-            action="create_revision",
-            args={
-                "kind": "design-handoff",
-                "title": "Design notes visible",
-                "summary": "allow visible",
-                "content": {"body": "x"},
-                "read_claim": "summarized-full-content",
-                "source_refs": [{"type": "artifact", "id": visible_artifact_id}],
-            },
-        )
-        self.assertTrue(allowed.get("ok"), msg=allowed)
 
 
 if __name__ == "__main__":

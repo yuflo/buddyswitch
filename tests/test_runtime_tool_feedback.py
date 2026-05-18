@@ -67,13 +67,17 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(payload["state_changed"])
 
     def test_artifact_owner_scope_rejection_has_structured_feedback(self) -> None:
-        env_store.create_artifact(
+        env_store.create_artifact_revision(
             artifact_id="art-pm-owner-scope-r1",
             title="Owner scope",
-            kind="spec",
             summary="pm private",
-            content={"body": "private"},
+            body="private",
+            template="note",
+            status="draft",
+            published_to_track=None,
+            supersedes_artifact_id=None,
             created_by="pm",
+            authors=["pm"],
             source_refs=[{"type": "note", "label": "seed"}],
         )
         payload = self._dispatch(
@@ -83,7 +87,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"artifact_id": "art-pm-owner-scope-r1", "summary": "rewrite"},
         )
         self._assert_rejection_contract(payload)
-        self.assertEqual(payload["permission_boundary"], "artifact.buddy_scope")
+        self.assertEqual(payload["permission_boundary"], "artifact.authors")
 
     def test_evidence_target_rejection_has_structured_feedback(self) -> None:
         payload = self._dispatch(
@@ -142,47 +146,37 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     msg=payload,
                 )
 
-    def test_track_archived_scope_rejections_expose_recovery_contract(self) -> None:
+    def test_removed_track_relation_actions_expose_recovery_contract(self) -> None:
         env_store.create_track(
             "track-feedback-foreign",
             "Foreign scope track",
             owner_buddy="pm",
-            outcome="feedback scope",
-            appetite="1 day",
-            now={"next": "archive", "blocker": None},
+            summary="scope",
         )
-        env_store.update_track("track-feedback-foreign", {"archived_at": env_store.now_iso()})
-        for action in ("open", "update_now", "add_update", "add_material", "add_proof"):
-            args: dict[str, object] = {"track_id": "track-feedback-foreign"}
-            if action == "update_now":
-                args["state"] = "blocked"
-            elif action == "add_update":
-                args.update({"summary": "blocked", "kind": "blocker"})
-            elif action in {"add_material", "add_proof"}:
-                args.update(
-                    {
-                        "title": "Artifact",
-                        "kind": "track-note",
-                        "label": "Artifact",
-                        "summary": "seed",
-                        "content": {"body": "seed"},
-                    }
-                )
+        env_store.create_task(
+            "task-pm-feedback-foreign",
+            "PM foreign task",
+            buddy="pm",
+            track_id=None,
+            summary="scope",
+        )
+        for action in ("join", "attach_task", "detach_task"):
             payload = self._dispatch(
                 buddy="dev",
                 tool="track",
                 action=action,
-                args=args,
+                args={"track_id": "track-feedback-foreign", "task_id": "task-pm-feedback-foreign"},
             )
             with self.subTest(action=action):
                 self._assert_rejection_contract(payload)
-                self.assertEqual(payload.get("permission_boundary"), "track.lifecycle_status", msg=payload)
-                self.assertIn("track_id", payload.get("correctable_fields", []), msg=payload)
+                self.assertEqual(payload.get("permission_boundary"), "env.tool", msg=payload)
+                self.assertEqual((payload.get("error") or {}).get("code"), "E_ENV_TOOL", msg=payload)
+                self.assertIn("action", payload.get("correctable_fields", []), msg=payload)
                 next_actions = payload.get("allowed_next_actions")
                 self.assertIsInstance(next_actions, list, msg=payload)
                 assert isinstance(next_actions, list)
                 action_text = "\n".join(str(item).lower() for item in next_actions)
-                self.assertIn("track.list", action_text)
+                self.assertIn("supported action", action_text)
 
 
 if __name__ == "__main__":
