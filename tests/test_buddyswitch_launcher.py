@@ -7711,6 +7711,83 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
                     check=False,
                 )
 
+    def test_workspace_sync_runtime_surface_advances_execution_worktree_to_repo_head(self) -> None:
+        parent_head = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD~1"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if parent_head.returncode != 0:
+            self.skipTest("repository does not have HEAD~1 available for stale-worktree test")
+        stale_head = parent_head.stdout.strip()
+        repo_head = subprocess.check_output(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            cwd=ROOT,
+            text=True,
+        ).strip()
+        self.assertNotEqual(stale_head, repo_head, "precondition failed: stale head must differ from repo head")
+
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            workspace_dir = shared_root / "workspace"
+            shared_root.mkdir(parents=True, exist_ok=True)
+
+            add_worktree = subprocess.run(
+                ["git", "-C", str(ROOT), "worktree", "add", "--detach", str(workspace_dir), stale_head],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(add_worktree.returncode, 0, msg=add_worktree.stderr)
+
+            try:
+                shell = f"""
+set -euo pipefail
+source "tools/launcher/workspace.sh"
+export BUDDYSWITCH_SHARED_ROOT="{shared_root}"
+export BUDDYSWITCH_WORKSPACE_DIR="{workspace_dir}"
+buddyswitch_workspace_init_defaults
+buddyswitch_workspace_configure_execution_sparse_checkout "{workspace_dir}" existing
+echo "before=$(git -C "{workspace_dir}" rev-parse HEAD)"
+buddyswitch_workspace_sync_runtime_surface
+echo "after=$(git -C "{workspace_dir}" rev-parse HEAD)"
+"""
+                completed = subprocess.run(
+                    ["/bin/bash", "-lc", shell],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+                rows = {}
+                for line in completed.stdout.splitlines():
+                    if "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    rows[key.strip()] = value.strip()
+                self.assertEqual(rows.get("before"), stale_head)
+                self.assertEqual(rows.get("after"), repo_head)
+            finally:
+                subprocess.run(
+                    ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(workspace_dir)],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                subprocess.run(
+                    ["git", "-C", str(ROOT), "worktree", "prune"],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
     def test_workspace_sync_restores_runtime_agents_and_preserves_runtime_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)

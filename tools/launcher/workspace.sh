@@ -761,11 +761,18 @@ buddyswitch_workspace_install_runtime_skills() {
 }
 
 buddyswitch_workspace_sync_runtime_surface() {
+  local repo_root target_head current_head
   local workspace_dir
   local sparse_path
   local -a sparse_paths
 
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
+  repo_root="$(buddyswitch_workspace_repo_root)"
+  target_head="$(git -C "${repo_root}" rev-parse HEAD)"
+  current_head="$(git -C "${workspace_dir}" rev-parse HEAD)"
+  if [[ "${current_head}" != "${target_head}" ]]; then
+    git -C "${workspace_dir}" checkout --detach -f "${target_head}" >/dev/null
+  fi
 
   sparse_paths=()
   while IFS= read -r sparse_path; do
