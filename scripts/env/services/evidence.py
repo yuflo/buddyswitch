@@ -9,6 +9,7 @@ from typing import Any, TypedDict
 
 from env.repos import artifacts as artifact_repo
 from env.repos import runtime_files
+from env.tools import contracts as tool_contracts
 from env.tools import responses as tool_responses
 
 
@@ -19,10 +20,6 @@ class EvidenceServiceContext(TypedDict):
     instance_payload: dict[str, Any]
     manifest: dict[str, Any]
     manifest_path: Path | None
-
-
-_ISSUE_FIELDS = {"target_type", "target_id", "mode"}
-_APPROVE_FIELDS = {"target_type", "target_id", "reason"}
 
 
 def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
@@ -98,12 +95,10 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
     )
 
 
-def _allow(action: str) -> set[str]:
-    return _ISSUE_FIELDS if action == "evidence.issue_browser" else _APPROVE_FIELDS
-
-
 def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
-    unknown = sorted(key for key in args if key not in _allow(action))
+    tool, action_name = action.split(".", 1)
+    allowed = tool_contracts.payload_fields_for_action(tool, action_name)
+    unknown = sorted(key for key in args if key not in allowed)
     if unknown:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")
     return None

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from env.repos import buddybox_files as buddybox_repo
+from env.tools import contracts as tool_contracts
 from env.tools import responses as tool_responses
 
 
@@ -25,13 +26,6 @@ BUDDYBOX_PRIVACY_MESSAGE = (
     "Use artifact when content must become product-readable."
 )
 _PRIVATE_BOUNDARY = "active_buddy_private_file_capability"
-
-_DESC_FIELDS: set[str] = set()
-_LIST_FIELDS = {"logical_name", "recursive", "limit"}
-_READ_FIELDS = {"logical_name", "encoding"}
-_WRITE_FIELDS = {"logical_name", "content", "content_base64", "content_type"}
-_DELETE_FIELDS = {"logical_name"}
-
 
 def _manifest_buddy_ids(context: BuddyboxServiceContext) -> set[str]:
     buddies: set[str] = set()
@@ -369,16 +363,8 @@ def _reject_not_found(*, action: str, active_buddy: str, logical_name: str) -> d
 
 
 def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
-    if action == "buddybox.desc":
-        allowed = _DESC_FIELDS
-    elif action == "buddybox.list":
-        allowed = _LIST_FIELDS
-    elif action == "buddybox.read":
-        allowed = _READ_FIELDS
-    elif action == "buddybox.write":
-        allowed = _WRITE_FIELDS
-    else:
-        allowed = _DELETE_FIELDS
+    tool, action_name = action.split(".", 1)
+    allowed = tool_contracts.payload_fields_for_action(tool, action_name)
 
     if "path" in args:
         return _reject_payload(

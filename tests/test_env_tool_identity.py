@@ -43,7 +43,7 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest_path=self.manifest_path,
         )
 
-    def test_task_create_uses_runtime_active_buddy_not_payload_buddy(self) -> None:
+    def test_task_create_rejects_payload_owner_fields(self) -> None:
         payload = self._dispatch(
             active_buddy="pm",
             tool="task",
@@ -56,9 +56,10 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "active_buddy": "design",
             },
         )
-        self.assertTrue(payload["ok"], msg=payload)
-        self.assertEqual(payload["active_buddy"], "pm")
-        self.assertEqual(payload["task"]["buddy"], "pm")
+        self.assertFalse(payload["ok"], msg=payload)
+        self.assertEqual((payload.get("error") or {}).get("code"), "E_TASK_PAYLOAD")
+        self.assertEqual(payload.get("permission_boundary"), "request-payload")
+        self.assertIs(payload.get("state_changed"), False)
 
     def test_runtime_surface_has_no_run_or_binding_identity_tools(self) -> None:
         payload = self._dispatch(

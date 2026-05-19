@@ -8,6 +8,7 @@ from typing import Any, TypedDict
 
 from env.domain import comment_targets as comment_target_domain
 from env.repos import comments as comment_repo
+from env.tools import contracts as tool_contracts
 from env.tools import responses as tool_responses
 
 
@@ -19,16 +20,9 @@ class CommentServiceContext(TypedDict):
     manifest: dict[str, Any]
 
 
-_ADD_FIELDS = {"target_type", "target_id", "artifact_revision_id", "anchor", "content", "mentions", "reply_to"}
-_LIST_FIELDS = {"target_type", "target_id", "status"}
-
-
 def _allowed(action: str) -> set[str]:
-    if action == "comment.add":
-        return _ADD_FIELDS
-    if action == "comment.list":
-        return _LIST_FIELDS
-    return set()
+    tool, action_name = action.split(".", 1)
+    return tool_contracts.payload_fields_for_action(tool, action_name)
 
 
 def _reject_payload(

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, TypedDict
+from typing import Any, Callable, Optional, TypedDict
 
 
 class MessagePayloadError(ValueError):
@@ -43,10 +43,7 @@ class ListRequest(TypedDict):
     buddy: str | None
 
 
-GetMessage = Callable[[str], dict[str, Any] | None]
-
-_SEND_FIELDS = {"to_buddy", "content", "reply_to"}
-_LIST_FIELDS = {"buddy"}
+GetMessage = Callable[[str], Optional[dict[str, Any]]]
 
 
 def manifest_buddy_ids(manifest: dict[str, Any] | None) -> set[str]:
@@ -90,8 +87,9 @@ def prepare_send_request(
     active_buddy: str,
     manifest_buddy_ids: set[str],
     get_message: GetMessage,
+    allowed_fields: set[str],
 ) -> SendRequest:
-    unknown = sorted(key for key in args if key not in _SEND_FIELDS)
+    unknown = sorted(key for key in args if key not in allowed_fields)
     if unknown:
         raise MessagePayloadError(
             f"unsupported payload fields: {', '.join(unknown)}",
@@ -167,8 +165,8 @@ def prepare_send_request(
     }
 
 
-def prepare_list_request(*, args: dict[str, Any], manifest_buddy_ids: set[str]) -> ListRequest:
-    unknown = sorted(key for key in args if key not in _LIST_FIELDS)
+def prepare_list_request(*, args: dict[str, Any], manifest_buddy_ids: set[str], allowed_fields: set[str]) -> ListRequest:
+    unknown = sorted(key for key in args if key not in allowed_fields)
     if unknown:
         raise MessagePayloadError(
             f"unsupported payload fields: {', '.join(unknown)}",

@@ -134,6 +134,15 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertIn("returns", row)
                 self.assertIn("state_effect", row)
 
+    def test_comment_payload_fields_match_active_comment_capability(self) -> None:
+        desc = contracts.env_tools_description()
+        comment_fields = desc["comment"]["payload_fields"]
+        self.assertEqual(
+            comment_fields["add"],
+            ["target_type", "target_id", "content", "reply_to", "artifact_revision_id", "anchor", "mentions"],
+        )
+        self.assertEqual(comment_fields["list"], ["target_type", "target_id", "status"])
+
 
 if __name__ == "__main__":
     unittest.main()

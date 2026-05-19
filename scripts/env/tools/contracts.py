@@ -381,7 +381,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "actions": [
             {
                 "name": "add",
-                "payload_fields": ["target_type", "target_id", "content", "reply_to"],
+                "payload_fields": ["target_type", "target_id", "content", "reply_to", "artifact_revision_id", "anchor", "mentions"],
                 "kind": "write",
                 "mutates": MUTATES_RUNTIME_OBJECTS,
                 "required_permission": "comment.add",
@@ -391,7 +391,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             },
             {
                 "name": "list",
-                "payload_fields": ["target_type", "target_id"],
+                "payload_fields": ["target_type", "target_id", "status"],
                 "kind": "read",
                 "mutates": MUTATES_NONE,
                 "required_permission": "comment.list",
@@ -475,6 +475,17 @@ def supported_actions(tool: str) -> set[str]:
 
 def supported_tools() -> set[str]:
     return {row.get("tool") for row in TOOL_REGISTRY if isinstance(row.get("tool"), str)}
+
+
+def payload_fields_for_action(tool: str, action: str) -> set[str]:
+    spec = get_action_spec(tool, action)
+    if spec is None:
+        return set()
+    return {
+        field
+        for field in spec.get("payload_fields", [])
+        if isinstance(field, str)
+    }
 
 
 def semantic_contract_errors() -> list[str]:

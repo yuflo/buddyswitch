@@ -9,6 +9,7 @@ from typing import Any, TypedDict
 from env.domain import artifact_visibility as artifact_visibility_domain
 from env.repos import artifacts as artifact_repo
 from env.services import source_refs as source_ref_service
+from env.tools import contracts as tool_contracts
 from env.tools import responses as tool_responses
 
 
@@ -20,18 +21,6 @@ class ArtifactServiceContext(TypedDict):
     manifest: dict[str, Any]
 
 
-_GET_FIELDS = {"artifact_id"}
-_CREATE_FIELDS = {
-    "artifact_id",
-    "title",
-    "summary",
-    "body",
-    "template",
-    "supersedes_artifact_id",
-    "source_refs",
-    "read_claim",
-}
-_UPDATE_FIELDS = {"artifact_id", "title", "summary", "template", "body", "source_refs", "read_claim"}
 _LEGACY_SOURCE_RUN = "source" + "_run_id"
 
 
@@ -140,7 +129,8 @@ def _reject_revision_scope(*, action: str, active_buddy: str, message: str) -> d
 
 
 def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
-    allowed = _GET_FIELDS if action == "artifact.get" else _CREATE_FIELDS if action == "artifact.create_revision" else _UPDATE_FIELDS
+    tool, action_name = action.split(".", 1)
+    allowed = tool_contracts.payload_fields_for_action(tool, action_name)
     unknown = sorted(key for key in args if key not in allowed)
     if unknown:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")

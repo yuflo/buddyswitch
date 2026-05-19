@@ -9,6 +9,7 @@ from typing import Any, TypedDict
 from env.domain import artifact_visibility as artifact_visibility_domain
 from env.domain import publication as publication_domain
 from env.repos import tracks as track_repo
+from env.tools import contracts as tool_contracts
 from env.tools import responses as tool_responses
 
 
@@ -20,34 +21,9 @@ class TrackServiceContext(TypedDict):
     manifest: dict[str, Any]
 
 
-_LIST_FIELDS = {"state", "limit"}
-_OPEN_FIELDS = {"track_id"}
-_CREATE_FIELDS = {"track_id", "title", "outcome", "appetite", "now", "state", "health"}
-_UPDATE_NOW_FIELDS = {"track_id", "now", "state", "health", "owner_buddy"}
-_ADD_MATERIAL_FIELDS = {"track_id", "artifact_id", "label", "summary"}
-_ADD_UPDATE_FIELDS = {"track_id", "summary", "kind", "refs", "owner_buddy"}
-_ADD_PROOF_FIELDS = {"track_id", "artifact_id", "label", "summary"}
-_ARCHIVE_FIELDS = {"track_id"}
-
-
 def _allowed(action: str) -> set[str]:
-    if action == "track.list":
-        return _LIST_FIELDS
-    if action == "track.open":
-        return _OPEN_FIELDS
-    if action == "track.create":
-        return _CREATE_FIELDS
-    if action == "track.update_now":
-        return _UPDATE_NOW_FIELDS
-    if action == "track.add_material":
-        return _ADD_MATERIAL_FIELDS
-    if action == "track.add_update":
-        return _ADD_UPDATE_FIELDS
-    if action == "track.add_proof":
-        return _ADD_PROOF_FIELDS
-    if action == "track.archive":
-        return _ARCHIVE_FIELDS
-    return set()
+    tool, action_name = action.split(".", 1)
+    return tool_contracts.payload_fields_for_action(tool, action_name)
 
 
 def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
@@ -303,9 +279,6 @@ def create_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -
     if active_buddy != "pm":
         return _reject_authority(action=action, active_buddy=active_buddy, message="only pm can create tracks")
 
-    if "owner_buddy" in args:
-        return _reject_payload(action=action, active_buddy=active_buddy, message="owner_buddy is immutable and cannot be patched")
-
     track_id, error = _require_track_id(action, args, active_buddy)
     if error is not None:
         return error
@@ -386,9 +359,6 @@ def update_now_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCo
     payload_error = _require_fields(action, args, active_buddy)
     if payload_error is not None:
         return payload_error
-
-    if "owner_buddy" in args:
-        return _reject_payload(action=action, active_buddy=active_buddy, message="owner_buddy is immutable and cannot be patched")
 
     track_id, error = _require_track_id(action, args, active_buddy)
     if error is not None:
@@ -546,9 +516,6 @@ def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -
     payload_error = _require_fields(action, args, active_buddy)
     if payload_error is not None:
         return payload_error
-
-    if "owner_buddy" in args:
-        return _reject_payload(action=action, active_buddy=active_buddy, message="owner_buddy is immutable and cannot be patched")
 
     track_id, error = _require_track_id(action, args, active_buddy)
     if error is not None:

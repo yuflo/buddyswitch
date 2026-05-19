@@ -9,6 +9,7 @@ from typing import Any, TypedDict
 
 from env.domain import tasks as task_domain
 from env.repos import tasks as task_repo
+from env.tools import contracts as tool_contracts
 from env.tools import responses as tool_responses
 
 
@@ -20,25 +21,9 @@ class TaskServiceContext(TypedDict):
     manifest: dict[str, Any]
 
 
-_CREATE_FIELDS = {"task_id", "title", "summary", "status", "track_id", "buddy", "active_buddy"}
-_GET_FIELDS = {"task_id"}
-_LIST_FIELDS = {"status", "track_id", "limit"}
-_UPDATE_FIELDS = {"task_id", "title", "summary", "status", "track_id"}
-_ARCHIVE_FIELDS = {"task_id"}
-
-
 def _allowed_set(action: str) -> set[str]:
-    if action == "task.create":
-        return _CREATE_FIELDS
-    if action == "task.list":
-        return _LIST_FIELDS
-    if action == "task.get":
-        return _GET_FIELDS
-    if action == "task.update":
-        return _UPDATE_FIELDS
-    if action == "task.archive":
-        return _ARCHIVE_FIELDS
-    return set()
+    tool, action_name = action.split(".", 1)
+    return tool_contracts.payload_fields_for_action(tool, action_name)
 
 
 def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:

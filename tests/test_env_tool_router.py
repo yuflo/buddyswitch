@@ -75,6 +75,56 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest=manifest,
         )
 
+    def _run_router_subprocess_with_blocked_message_service(
+        self,
+        *,
+        instance_json: Path,
+        payload: dict[str, object],
+        buddy: str = "dev",
+    ) -> subprocess.CompletedProcess[str]:
+        payload_json = json.dumps(payload, ensure_ascii=True)
+        script = f"""
+import importlib.abc
+import json
+import sys
+from pathlib import Path
+
+root = Path({str(ROOT)!r})
+sys.path.insert(0, str(root / "scripts"))
+
+class BlockMessages(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "env.services.messages":
+            raise RuntimeError("blocked message service import")
+        return None
+
+sys.meta_path.insert(0, BlockMessages())
+
+import env_manifest
+from env.tools.router import dispatch_env_tool_request
+
+manifest_path = Path({str(MANIFEST)!r})
+instance_json = Path({str(instance_json)!r})
+instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
+response = dispatch_env_tool_request(
+    payload=json.loads({payload_json!r}),
+    active_buddy={buddy!r},
+    instance_id=instance_payload["instance_id"],
+    instance_json=instance_json,
+    instance_payload=instance_payload,
+    manifest=env_manifest.load_manifest(manifest_path),
+    manifest_path=manifest_path,
+)
+print(json.dumps(response, sort_keys=True))
+"""
+        return subprocess.run(
+            ["python3", "-c", script],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
     def _seed_task(self, *, task_id: str, buddy: str, title: str, summary: str = "") -> None:
         env_store.create_task(task_id, title, buddy=buddy, track_id=None, status="active", summary=summary, initial_run_id=None)
 
@@ -100,6 +150,88 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsNotNone(matched, msg=completed.stdout)
         raw = matched.group(1)
         return {token.strip() for token in raw.split(",") if token.strip()}
+
+    def test_python3_imports_env_tool_modules(self) -> None:
+        script = """
+import sys
+from pathlib import Path
+
+root = Path.cwd()
+sys.path.insert(0, str(root / "scripts"))
+
+import env.tools.contracts
+import env.tools.router
+import env.tools.dispatch
+
+print("ok")
+"""
+        completed = subprocess.run(
+            ["python3", "-c", script],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertEqual(completed.stdout.strip(), "ok")
+
+    def test_env_tool_imports_do_not_load_services(self) -> None:
+        script = """
+import json
+import sys
+from pathlib import Path
+
+root = Path.cwd()
+sys.path.insert(0, str(root / "scripts"))
+
+import env.tools.contracts
+import env.tools.router
+import env.tools.dispatch
+
+loaded = sorted(name for name in sys.modules if name.startswith("env.services."))
+print(json.dumps(loaded))
+"""
+        completed = subprocess.run(
+            ["python3", "-c", script],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertEqual(json.loads(completed.stdout), [])
+
+    def test_unrelated_service_import_failure_does_not_block_task_tool(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-isolation", buddy="dev")
+        completed = self._run_router_subprocess_with_blocked_message_service(
+            instance_json=instance_json,
+            payload={"tool": "task", "action": "list", "args": {}},
+            buddy="dev",
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        response = json.loads(completed.stdout)
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("tool"), "task")
+        self.assertEqual(response.get("action"), "task.list")
+        self.assertIs(response.get("state_changed"), False)
+
+    def test_selected_service_import_failure_returns_structured_feedback(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-selected-failure", buddy="dev")
+        completed = self._run_router_subprocess_with_blocked_message_service(
+            instance_json=instance_json,
+            payload={"tool": "message", "action": "list", "args": {}},
+            buddy="dev",
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        response = json.loads(completed.stdout)
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual(response.get("tool"), "message")
+        self.assertEqual(response.get("action"), "message.list")
+        self.assertEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL_DISPATCH")
+        self.assertEqual(response.get("permission_boundary"), "env.tool.dispatch")
+        self.assertIs(response.get("state_changed"), False)
+        self.assertIs(response.get("retryable"), False)
+        self.assertIn("blocked message service import", str(response.get("why_blocked")))
 
     def test_active_env_tool_surface_excludes_handoff(self) -> None:
         contracts = importlib.import_module("env.tools.contracts")
@@ -180,6 +312,17 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             normalized = {name.replace("-", "_") for name in cli_ops}
             with self.subTest(tool=tool):
                 self.assertEqual(normalized, expected_actions)
+
+    def test_comment_list_cli_help_includes_status_filter(self) -> None:
+        completed = subprocess.run(
+            ["python3", "scripts/env/client.py", "comment", "list", "--help"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertIn("--status", completed.stdout)
 
     def test_artifact_router_surface_uses_revision_actions(self) -> None:
         contracts = importlib.import_module("env.tools.contracts")

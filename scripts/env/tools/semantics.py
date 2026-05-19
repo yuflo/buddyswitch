@@ -108,7 +108,7 @@ _CAPABILITIES: dict[str, dict[str, Any]] = {
         ],
         "do_not_use_when": [
             "You need task comments; only track and artifact targets are supported.",
-            "You need comment resolution/status/edit/delete.",
+            "You need comment resolution/edit/delete lifecycle mutation.",
         ],
         "capability_boundary": "Comments require active-buddy read access to the target track or artifact.",
     },
@@ -389,6 +389,70 @@ def _action_rows() -> dict[tuple[str, str], dict[str, Any]]:
                 "artifact_id missing or not found",
                 "artifact is private draft owned by another buddy",
                 "artifact publication track is archived",
+            ],
+        }
+    )
+
+    rows[("comment", "add")].update(
+        {
+            "use_when": [
+                "You need to add one plain-text comment to a readable track/artifact target.",
+                "You need optional thread reply, anchor, mention, or artifact revision-chain context.",
+            ],
+            "do_not_use_when": [
+                "You need to mutate comment lifecycle status (resolve/reopen/edit/delete).",
+            ],
+            "inputs_explained": {
+                "target_type": "track, artifact, or artifact_section target scope.",
+                "target_id": "Readable target object id.",
+                "content": "Non-empty plain-text comment body.",
+                "reply_to": "Optional parent comment id on the same target thread.",
+                "artifact_revision_id": "Optional artifact revision id in the same revision chain as target.",
+                "anchor": "Required for artifact_section targets; optional anchor text otherwise.",
+                "mentions": "Optional list of manifest-declared buddy ids to mention.",
+            },
+            "side_effects": _side_effects(
+                mutates="runtime_objects",
+                writes=["buddyswitch/objects/comments/<comment-id>.json"],
+                does_not_write=["tracks", "artifacts", "tasks"],
+                durability="durable",
+                idempotency="non-idempotent create",
+            ),
+            "success_means": "Created one durable comment row attached to the selected readable target thread.",
+            "common_failures": [
+                "target is unreadable or unsupported",
+                "reply_to is missing, cross-target, or out of scope",
+                "artifact_revision_id is outside target revision chain",
+                "anchor/mentions/content payload validation failed",
+            ],
+        }
+    )
+
+    rows[("comment", "list")].update(
+        {
+            "use_when": [
+                "You need comment rows and thread view for one readable target.",
+                "You need optional status filter with open/resolved/all.",
+            ],
+            "do_not_use_when": [
+                "You need to mutate comment lifecycle status.",
+            ],
+            "inputs_explained": {
+                "target_type": "track, artifact, or artifact_section target scope.",
+                "target_id": "Readable target object id.",
+                "status": "Optional filter: open, resolved, or all (default all).",
+            },
+            "side_effects": _side_effects(
+                mutates="none",
+                writes=[],
+                does_not_write=["comments", "tracks", "artifacts", "tasks"],
+                durability="none",
+                idempotency="idempotent read",
+            ),
+            "success_means": "Returned comment rows, grouped threads, and status counts for the target.",
+            "common_failures": [
+                "target is unreadable or unsupported",
+                "status filter is not one of open|resolved|all",
             ],
         }
     )

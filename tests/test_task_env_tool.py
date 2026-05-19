@@ -221,6 +221,54 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(denied.get("ok"), msg=denied)
         self.assertEqual(denied.get("permission_boundary"), "task.buddy_scope")
 
+    def test_task_create_rejects_buddy_field_without_state_mutation(self) -> None:
+        before_tasks = self._snapshot_json_dir("buddyswitch/objects/tasks")
+        instance_json = self._instance_json(instance_id="inst-dev-task-buddy-field", buddy="dev")
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-task-buddy-field",
+            buddy="dev",
+            tool="task",
+            action="create",
+            args={
+                "task_id": "task-dev-reject-buddy",
+                "title": "Reject buddy field",
+                "summary": "should not create",
+                "buddy": "design",
+            },
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TASK_PAYLOAD")
+        self.assertEqual(rejected.get("permission_boundary"), "request-payload")
+        self.assertIs(rejected.get("state_changed"), False)
+        self.assertIn("buddy", str(rejected.get("why_blocked")))
+        self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/tasks"), before_tasks)
+        self.assertFalse(self._runtime_path("buddyswitch/objects/tasks/task-dev-reject-buddy.json").exists())
+
+    def test_task_create_rejects_active_buddy_field_without_state_mutation(self) -> None:
+        before_tasks = self._snapshot_json_dir("buddyswitch/objects/tasks")
+        instance_json = self._instance_json(instance_id="inst-dev-task-active-buddy-field", buddy="dev")
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-task-active-buddy-field",
+            buddy="dev",
+            tool="task",
+            action="create",
+            args={
+                "task_id": "task-dev-reject-active-buddy",
+                "title": "Reject active buddy field",
+                "summary": "should not create",
+                "active_buddy": "pm",
+            },
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TASK_PAYLOAD")
+        self.assertEqual(rejected.get("permission_boundary"), "request-payload")
+        self.assertIs(rejected.get("state_changed"), False)
+        self.assertIn("active_buddy", str(rejected.get("why_blocked")))
+        self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/tasks"), before_tasks)
+        self.assertFalse(self._runtime_path("buddyswitch/objects/tasks/task-dev-reject-active-buddy.json").exists())
+
     def test_task_rows_omit_artifact_linkage_fields(self) -> None:
         dev_instance = self._instance_json(instance_id="inst-dev-task", buddy="dev")
         created = self._dispatch(

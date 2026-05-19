@@ -179,6 +179,56 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((denied.get("error") or {}).get("code"), "E_TRACK_AUTHORITY")
         self.assertEqual(denied.get("permission_boundary"), "track.lifecycle_authority")
 
+    def test_update_now_rejects_owner_buddy_without_state_mutation(self) -> None:
+        pm_instance = self._pm_instance()
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-owner-buddy-now").get("ok"))
+        before = env_store.track_file("track-owner-buddy-now").read_text(encoding="utf-8")
+
+        design_instance = self._instance_json(instance_id="inst-design-owner-now", buddy="design")
+        rejected = self._dispatch(
+            instance_json=design_instance,
+            instance_id="inst-design-owner-now",
+            buddy="design",
+            tool="track",
+            action="update_now",
+            args={
+                "track_id": "track-owner-buddy-now",
+                "now": {"next": "x", "blocker": None},
+                "owner_buddy": "design",
+            },
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TRACK_PAYLOAD")
+        self.assertEqual(rejected.get("permission_boundary"), "request-payload")
+        self.assertIs(rejected.get("state_changed"), False)
+        self.assertIn("unsupported payload fields: owner_buddy", str(rejected.get("why_blocked")))
+        self.assertEqual(env_store.track_file("track-owner-buddy-now").read_text(encoding="utf-8"), before)
+
+    def test_add_update_rejects_owner_buddy_without_state_mutation(self) -> None:
+        pm_instance = self._pm_instance()
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-owner-buddy-update").get("ok"))
+        before = env_store.track_file("track-owner-buddy-update").read_text(encoding="utf-8")
+
+        design_instance = self._instance_json(instance_id="inst-design-owner-update", buddy="design")
+        rejected = self._dispatch(
+            instance_json=design_instance,
+            instance_id="inst-design-owner-update",
+            buddy="design",
+            tool="track",
+            action="add_update",
+            args={
+                "track_id": "track-owner-buddy-update",
+                "summary": "x",
+                "owner_buddy": "design",
+            },
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TRACK_PAYLOAD")
+        self.assertEqual(rejected.get("permission_boundary"), "request-payload")
+        self.assertIs(rejected.get("state_changed"), False)
+        self.assertIn("unsupported payload fields: owner_buddy", str(rejected.get("why_blocked")))
+        self.assertEqual(env_store.track_file("track-owner-buddy-update").read_text(encoding="utf-8"), before)
+
     def test_all_buddies_can_list_and_open_non_archived_tracks(self) -> None:
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-shared-open").get("ok"))

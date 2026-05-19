@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 import env_profiles
 from env_manifest import DEFAULT_MANIFEST
+from env.tools import contracts as tool_contracts
 from env.tools import responses as tool_responses
 
 ALLOWED_BACKENDS = ("browser", "search_api")
@@ -77,6 +78,32 @@ def _normalize_backend(args: dict[str, Any]) -> str | None:
         return None
     backend = backend.strip()
     return backend or None
+
+
+def _require_allowed_fields(action: str, args: dict[str, Any], context: SearchServiceContext) -> dict[str, Any] | None:
+    tool, action_name = action.split(".", 1)
+    allowed = tool_contracts.payload_fields_for_action(tool, action_name)
+    unknown = sorted(key for key in args if key not in allowed)
+    if not unknown:
+        return None
+    return tool_responses.rejection(
+        tool="search",
+        action=action,
+        active_buddy=context["active_buddy"],
+        code="E_SEARCH_PAYLOAD",
+        message=f"unsupported payload fields: {', '.join(unknown)}",
+        permission_boundary="request-payload",
+        human_summary="Search payload contains unsupported fields.",
+        why_blocked=f"unsupported payload fields: {', '.join(unknown)}",
+        impact="No search request was executed and no runtime state changed.",
+        state_changed=False,
+        retryable=True,
+        retry_guidance="Remove unsupported payload fields and retry.",
+        allowed_next_actions=[
+            "Use search.status to inspect supported payload fields and capability boundary.",
+        ],
+        correctable_fields=unknown,
+    )
 
 
 def _build_search_url(query: str, engine: str) -> str:
@@ -399,6 +426,9 @@ def _status_payload(context: SearchServiceContext, boundary: dict[str, Any]) -> 
 
 
 def status_for_active_instance(*, args: dict[str, Any], context: SearchServiceContext) -> dict[str, Any]:
+    payload_error = _require_allowed_fields("search.status", args, context)
+    if payload_error is not None:
+        return payload_error
     boundary = _load_search_boundary(context)
     return tool_responses.success(
         tool="search",
@@ -420,6 +450,9 @@ def status_for_active_instance(*, args: dict[str, Any], context: SearchServiceCo
 
 
 def request_for_active_instance(*, args: dict[str, Any], context: SearchServiceContext) -> dict[str, Any]:
+    payload_error = _require_allowed_fields("search.request", args, context)
+    if payload_error is not None:
+        return payload_error
     boundary = _load_search_boundary(context)
     backend = _normalize_backend(args)
     if backend not in ALLOWED_BACKENDS:
@@ -482,6 +515,9 @@ def request_for_active_instance(*, args: dict[str, Any], context: SearchServiceC
 
 
 def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchServiceContext) -> dict[str, Any]:
+    payload_error = _require_allowed_fields("search.open_browser", args, context)
+    if payload_error is not None:
+        return payload_error
     boundary = _load_search_boundary(context)
     query = _normalize_query(args)
     if query is None:

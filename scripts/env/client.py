@@ -165,6 +165,7 @@ def _parse_args() -> argparse.Namespace:
     comment_list = comment_sub.add_parser("list", help="List comments on a target")
     comment_list.add_argument("--target-type", required=True)
     comment_list.add_argument("--target-id", required=True)
+    comment_list.add_argument("--status")
 
     search = sub.add_parser(
         "search",
@@ -318,11 +319,10 @@ def _dispatch_comment(args: argparse.Namespace) -> dict[str, Any]:
     if args.operation == "add":
         return _dispatch_env_tool("comment", action, _load_json_object(args.payload))
     if args.operation == "list":
-        return _dispatch_env_tool(
-            "comment",
-            action,
-            {"target_type": args.target_type, "target_id": args.target_id},
-        )
+        payload = {"target_type": args.target_type, "target_id": args.target_id}
+        if isinstance(args.status, str) and args.status.strip():
+            payload["status"] = args.status.strip()
+        return _dispatch_env_tool("comment", action, payload)
     raise ValueError(f"unsupported comment operation: {args.operation}")
 
 

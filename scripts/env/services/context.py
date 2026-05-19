@@ -22,11 +22,6 @@ class ContextServiceContext(TypedDict):
     manifest: dict[str, Any]
 
 
-_GET_FIELDS = {"track_id", "task_id", "limit"}
-_SUMMARIZE_FIELDS = {"track_id", "task_id", "limit"}
-_LIST_SOURCES_FIELDS: set[str] = set()
-
-
 def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
     correctable_fields: list[str] | None = None
     if "unsupported payload fields:" in message:
@@ -60,7 +55,8 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
 
 
 def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
-    allowed = _GET_FIELDS if action == "context.get" else _SUMMARIZE_FIELDS if action == "context.summarize" else _LIST_SOURCES_FIELDS
+    tool, action_name = action.split(".", 1)
+    allowed = tool_contracts.payload_fields_for_action(tool, action_name)
     unknown = sorted(key for key in args if key not in allowed)
     if unknown:
         return _reject_payload(

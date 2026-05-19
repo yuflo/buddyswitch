@@ -1,6 +1,6 @@
 ---
 name: task-tool
-description: Use when you need to create, list, read, update, or archive explicit buddy-owned tasks through runtime env tools.
+description: Use when you need to create, list, read, update, or archive explicit active-buddy-owned tasks through runtime env tools.
 ---
 
 # task-tool
@@ -9,7 +9,7 @@ description: Use when you need to create, list, read, update, or archive explici
 - Manage active-buddy private task work items.
 
 ## Runtime Route
-- CLI: `python3 scripts/env/client.py task create --payload '{"task_id":"task-alpha","title":"Review design direction","buddy":"design","summary":"Review shared material."}'`
+- CLI: `python3 scripts/env/client.py task create --payload '{"task_id":"task-alpha","title":"Review design direction","summary":"Review shared material."}'`
 - Broker method: `env.tool`
 - Discover current operations, payload keys, effects, and recovery guidance with `context.get.tool_catalog['task']` or `python3 scripts/turn_runtime.py status`.
 
@@ -19,7 +19,7 @@ description: Use when you need to create, list, read, update, or archive explici
 - For long markdown bodies, generate JSON with `python3 - <<'PY'` and pass it via command substitution.
 
 ```bash
-python3 scripts/env/client.py task create --payload '{"task_id":"task-alpha","title":"Review design direction","buddy":"design","summary":"Review shared material."}'
+python3 scripts/env/client.py task create --payload '{"task_id":"task-alpha","title":"Review design direction","summary":"Review shared material."}'
 ```
 
 ## Workflow Notes
