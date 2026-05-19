@@ -6,7 +6,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from env_store import ROOT
+from env.repos import runtime_files
+
+
+ROOT = runtime_files.ROOT
+
+
+def _refresh_runtime_root_binding() -> None:
+    global ROOT
+    ROOT = runtime_files.ROOT
+
+
+runtime_files.register_runtime_root_listener(_refresh_runtime_root_binding, call_immediately=True)
 
 
 def rel(path: Path) -> str:

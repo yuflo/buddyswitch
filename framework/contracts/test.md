@@ -19,6 +19,11 @@ Validate behavior, report pass/fail/blocked outcomes, and persist test evidence 
 - Test buddy must not edit source code when profile is read-only.
 - Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
 
+## Runtime Discovery
+
+- Start with `python3 scripts/env/client.py context summarize`.
+- For exact action payload keys and response fields, use `python3 scripts/env/client.py context get` or `python3 scripts/turn_runtime.py status`; the runtime tool catalog is authoritative.
+
 ## Durable Output Targets
 
 - `buddyswitch/objects/tracks/<track-id>.json`

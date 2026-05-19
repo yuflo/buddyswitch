@@ -14,7 +14,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_store  # noqa: E402
+import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -111,9 +111,21 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return str(artifact["id"])
 
+    def _snapshot_track_json(self, track_id: str) -> str:
+        track = env_store.get_track(track_id)
+        self.assertIsInstance(track, dict)
+        assert isinstance(track, dict)
+        return json.dumps(track, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+    def _snapshot_artifact_json(self, artifact_id: str) -> str:
+        artifact = env_store.get_artifact(artifact_id)
+        self.assertIsInstance(artifact, dict)
+        assert isinstance(artifact, dict)
+        return json.dumps(artifact, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
     def test_add_and_list_track_comment_thread_without_target_mutation(self) -> None:
         track = self._seed_track("track-cmt-thread")
-        before = env_store.get_track(track["id"])
+        before = self._snapshot_track_json(str(track["id"]))
 
         instance_json = self._instance_json(instance_id="inst-design-cmt", buddy="design")
         added = self._dispatch(
@@ -131,6 +143,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(comment.get("by_buddy"), "design")
         self.assertEqual(comment.get("status"), "open")
         self.assertEqual(comment.get("thread_id"), comment.get("id"))
+        self.assertEqual(self._snapshot_track_json(str(track["id"])), before)
 
         listed = self._dispatch(
             instance_json=instance_json,
@@ -143,10 +156,11 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(listed.get("ok"), msg=listed)
         self.assertEqual(len(listed.get("comments", [])), 1)
         self.assertEqual(len(listed.get("threads", [])), 1)
-        self.assertEqual(env_store.get_track(track["id"]), before)
+        self.assertEqual(self._snapshot_track_json(str(track["id"])), before)
 
     def test_artifact_comment_is_separate_from_artifact_body(self) -> None:
         artifact_id = self._seed_published_artifact(artifact_id="art-cmt-body-separate")
+        before = self._snapshot_artifact_json(artifact_id)
         instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
 
         added = self._dispatch(
@@ -158,11 +172,55 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"target_type": "artifact", "target_id": artifact_id, "content": "Please revise this."},
         )
         self.assertTrue(added.get("ok"), msg=added)
+        self.assertEqual(self._snapshot_artifact_json(artifact_id), before)
+
+        listed = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="list",
+            args={"target_type": "artifact", "target_id": artifact_id, "status": "all"},
+        )
+        self.assertTrue(listed.get("ok"), msg=listed)
+        self.assertEqual(self._snapshot_artifact_json(artifact_id), before)
 
         artifact = env_store.get_artifact(artifact_id)
         self.assertIsInstance(artifact, dict)
         assert isinstance(artifact, dict)
         self.assertEqual(artifact.get("body"), "Original body")
+
+    def test_unsupported_target_type_rejects_before_write_without_target_mutation(self) -> None:
+        track = self._seed_track("track-cmt-unsupported-target")
+        before_track = self._snapshot_track_json(str(track["id"]))
+        before_comment_count = len(env_store.list_comments())
+        instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
+
+        add = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="add",
+            args={"target_type": "task", "target_id": str(track["id"]), "content": "nope"},
+        )
+        self.assertFalse(add.get("ok"), msg=add)
+        self.assertEqual((add.get("error") or {}).get("code"), "E_COMMENT_PAYLOAD")
+        self.assertEqual(self._snapshot_track_json(str(track["id"])), before_track)
+        self.assertEqual(len(env_store.list_comments()), before_comment_count)
+
+        listed = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-cmt",
+            buddy="dev",
+            tool="comment",
+            action="list",
+            args={"target_type": "task", "target_id": str(track["id"]), "status": "all"},
+        )
+        self.assertFalse(listed.get("ok"), msg=listed)
+        self.assertEqual((listed.get("error") or {}).get("code"), "E_COMMENT_PAYLOAD")
+        self.assertEqual(self._snapshot_track_json(str(track["id"])), before_track)
+        self.assertEqual(len(env_store.list_comments()), before_comment_count)
 
     def test_artifact_section_comment_requires_anchor(self) -> None:
         artifact_id = self._seed_published_artifact(artifact_id="art-cmt-anchor")
@@ -434,6 +492,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             authors=["pm"],
             source_refs=[{"type": "note", "label": "seed"}],
         )
+        before = self._snapshot_artifact_json("art-cmt-draft-private")
         instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
         add = self._dispatch(
             instance_json=instance_json,
@@ -445,6 +504,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(add.get("ok"), msg=add)
         self.assertEqual(add.get("permission_boundary"), "artifact.status")
+        self.assertEqual(self._snapshot_artifact_json("art-cmt-draft-private"), before)
 
         listed = self._dispatch(
             instance_json=instance_json,
@@ -456,10 +516,13 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(listed.get("ok"), msg=listed)
         self.assertEqual(listed.get("permission_boundary"), "artifact.status")
+        self.assertEqual(self._snapshot_artifact_json("art-cmt-draft-private"), before)
 
     def test_archived_artifact_rejects_comment_add(self) -> None:
         artifact_id = self._seed_published_artifact(artifact_id="art-cmt-archived")
         env_store.update_track("track-comment", {"archived_at": "2026-05-18T10:00:00+08:00"})
+        before_artifact = self._snapshot_artifact_json(artifact_id)
+        before_track = self._snapshot_track_json("track-comment")
         instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
 
         add = self._dispatch(
@@ -472,6 +535,8 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(add.get("ok"), msg=add)
         self.assertEqual(add.get("permission_boundary"), "track.lifecycle_status")
+        self.assertEqual(self._snapshot_artifact_json(artifact_id), before_artifact)
+        self.assertEqual(self._snapshot_track_json("track-comment"), before_track)
 
 
 if __name__ == "__main__":

@@ -33,51 +33,10 @@ python3 scripts/env/client.py comment add --payload '{"target_type":"track","tar
 
 ## Operations
 
-### comment.add
-
-Add a comment to a readable track or artifact.
-
-**Payload:**
-
-```json
-{
-  "target_type": "artifact",
-  "target_id": "art-dev-example",
-  "content": "Plain text comment body",
-  "reply_to": "comment-abc123def456"
-}
-```
-
-**Rules:**
-- `target_type` must be exactly `track` or `artifact`. Task targets are rejected.
-- `target_id` is required.
-- `content` is required, plain text, non-empty after trimming.
-- `reply_to` is optional. When present, it must reference an existing comment on the same target (same `target_type` and `target_id`).
-- The active buddy must have read access to the target:
-  - Tracks: track must exist and not be archived.
-  - Artifacts: reuse existing artifact visibility rules (ownership, track relation, currentness).
-
-**Returns:** `comment_id`, full `comment` object, `target_type`, `target_id`.
-
-### comment.list
-
-List comments attached to a readable track or artifact.
-
-**Payload:**
-
-```json
-{
-  "target_type": "track",
-  "target_id": "track-alpha"
-}
-```
-
-**Rules:**
-- Same target type and read access rules as `comment.add`.
-- Returns only comments whose stored `target_type` and `target_id` match the target.
-- Read-only: does not mutate comment or target state.
-
-**Returns:** `comments` list, `target_type`, `target_id`, `discovery_summary`.
+- `comment.add` writes one plain-text comment on a readable `track` or `artifact` target.
+- `comment.list` reads comments on the same readable target classes.
+- For exact payload keys, optional keys, and response fields, inspect `context.get.tool_catalog['comment']` or `python3 scripts/turn_runtime.py status`.
+- Start with `python3 scripts/env/client.py context summarize` so comment operations run against current runtime-visible ids and state.
 
 ## Key Boundary Rules
 
@@ -103,4 +62,4 @@ python3 scripts/env/client.py comment list --target-type track --target-id <trac
 - Do not attempt to edit or delete comments.
 - Do not use for direct buddy messaging; use `message.send` instead.
 - Do not use for review or approval workflows.
-- Do not include `resolved`, `resolved_at`, `status`, `edit_history`, `attachment`, or `task_id` fields in add payloads.
+- Do not assume non-comment workflow fields are accepted by comment payloads; confirm allowed keys through runtime discovery first.

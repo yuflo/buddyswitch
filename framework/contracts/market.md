@@ -20,6 +20,11 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 - Do not fabricate evidence tokens.
 - Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
 
+## Runtime Discovery
+
+- Start with `python3 scripts/env/client.py context summarize`.
+- For exact action payload keys and response fields, use `python3 scripts/env/client.py context get` or `python3 scripts/turn_runtime.py status`; the runtime tool catalog is authoritative.
+
 ## Durable Output Targets
 
 - `buddyswitch/objects/tasks/<task-id>.json`

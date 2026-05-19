@@ -22,7 +22,8 @@ import env_cleanup  # noqa: E402
 class CleanupSystemTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(dir=ROOT)
-        self.repo_root = Path(self._tmp.name) / "state"
+        self.shared_root = Path(self._tmp.name)
+        self.repo_root = self.shared_root / "state"
         self.repo_root.mkdir(parents=True, exist_ok=True)
         self.manifest_path = self.repo_root / "buddyswitch" / "manifest.toml"
         self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,6 +131,28 @@ class CleanupSystemTests(unittest.TestCase):
         path = self._path(rel)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+    def _instance_workspace(self, *, instance_id: str, buddy: str) -> Path:
+        instance_root = self.shared_root / "instances" / instance_id
+        workspace = instance_root / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+        (instance_root / "instance.json").write_text(
+            json.dumps(
+                {
+                    "instance_id": instance_id,
+                    "buddy": buddy,
+                    "status": "active",
+                    "workspace_dir": str(workspace),
+                    "browser_port": None,
+                    "updated_at": "2026-05-19T00:00:00Z",
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return workspace
 
     def test_cleanup_plan_excludes_handoff_indexing(self) -> None:
         plan = env_cleanup.build_cleanup_plan(
@@ -264,6 +287,43 @@ class CleanupSystemTests(unittest.TestCase):
         payload = json.loads(completed.stdout)
         self.assertNotIn("handoff_object_ids", payload)
         self.assertNotIn("handoff_records", payload)
+
+    def test_buddy_cleanup_uses_instance_buddybox_owner_boundary(self) -> None:
+        pm_workspace = self._instance_workspace(instance_id="inst-pm-cleanup", buddy="pm")
+        dev_workspace = self._instance_workspace(instance_id="inst-dev-cleanup", buddy="dev")
+
+        pm_owned = pm_workspace / "buddyswitch" / "local" / "buddybox" / "pm" / "notes" / "draft.md"
+        pm_owned.parent.mkdir(parents=True, exist_ok=True)
+        pm_owned.write_text("pm-owned", encoding="utf-8")
+
+        pm_workspace_dev_file = pm_workspace / "buddyswitch" / "local" / "buddybox" / "dev" / "notes" / "keep.md"
+        pm_workspace_dev_file.parent.mkdir(parents=True, exist_ok=True)
+        pm_workspace_dev_file.write_text("dev-owned", encoding="utf-8")
+
+        dev_workspace_pm_file = dev_workspace / "buddyswitch" / "local" / "buddybox" / "pm" / "notes" / "keep.md"
+        dev_workspace_pm_file.parent.mkdir(parents=True, exist_ok=True)
+        dev_workspace_pm_file.write_text("pm-in-dev-workspace", encoding="utf-8")
+
+        plan = env_cleanup.build_cleanup_plan(
+            scope="buddy",
+            buddy="pm",
+            repo_root=self.repo_root,
+            manifest_path=self.manifest_path,
+            shared_root=self.shared_root,
+        )
+        self.assertIn("path_categories", plan)
+        self.assertTrue(
+            any(
+                category == "buddybox_private_files"
+                for category in plan["path_categories"].values()
+            ),
+            msg=plan,
+        )
+        result = env_cleanup.execute_cleanup_plan(plan)
+        self.assertTrue(result["ok"], msg=result)
+        self.assertFalse(pm_owned.exists())
+        self.assertTrue(pm_workspace_dev_file.exists())
+        self.assertTrue(dev_workspace_pm_file.exists())
 
 
 if __name__ == "__main__":

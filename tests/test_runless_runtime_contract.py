@@ -16,7 +16,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_store  # noqa: E402
+import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from env.tools import contracts as tool_contracts  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
@@ -26,6 +26,11 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_runtime_dispatcher_integration_surface_avoids_env_store_import(self) -> None:
+        dispatcher_source = (ROOT / "scripts" / "runtime_kernel" / "dispatcher.py").read_text(encoding="utf-8")
+        self.assertNotIn("import env_store", dispatcher_source)
+        self.assertNotIn("from env_store import", dispatcher_source)
+
     def _instance_json(
         self,
         *,
@@ -193,6 +198,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(env_tools, dict, msg=payload)
         assert isinstance(env_tools, dict)
         self.assertIn("buddybox", env_tools)
+        self.assertIn("context", env_tools)
         buddybox = env_tools["buddybox"]
         self.assertIsInstance(buddybox, dict, msg=payload)
         assert isinstance(buddybox, dict)
@@ -203,6 +209,22 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(operations, list, msg=buddybox)
         assert isinstance(operations, list)
         self.assertNotIn("search", operations)
+        context_catalog = env_tools["context"]
+        self.assertIsInstance(context_catalog, dict, msg=payload)
+        assert isinstance(context_catalog, dict)
+        context_ops = context_catalog.get("operations")
+        self.assertIsInstance(context_ops, list, msg=context_catalog)
+        assert isinstance(context_ops, list)
+        self.assertEqual(set(context_ops), {"get", "summarize", "list_sources"})
+        context_semantics = context_catalog.get("action_semantics")
+        self.assertIsInstance(context_semantics, dict, msg=context_catalog)
+        assert isinstance(context_semantics, dict)
+        self.assertIn("summarize", context_semantics)
+        summarize_semantics = context_semantics["summarize"]
+        self.assertIsInstance(summarize_semantics, dict, msg=context_semantics)
+        assert isinstance(summarize_semantics, dict)
+        self.assertIn("inputs_explained", summarize_semantics)
+        self.assertIn("success_means", summarize_semantics)
 
     def test_task_artifact_records_reject_run_fields(self) -> None:
         with self.assertRaises(ValueError):

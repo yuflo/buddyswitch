@@ -11,6 +11,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from env.repos import buddybox_files as buddybox_repo
+from env.repos import runtime_files
+
 try:
     from env_manifest import ManifestError, load_manifest as _load_manifest_full
 except ModuleNotFoundError:  # pragma: no cover - exercised in shell integration fixture
@@ -26,7 +29,20 @@ CATEGORY_ORDER = (
     "track_objects",
     "message_objects",
     "comment_objects",
+    "buddybox_private_files",
 )
+
+
+def _runtime_relative_path(path: Path) -> str:
+    return path.relative_to(runtime_files.STATE_ROOT).as_posix()
+
+
+TRACK_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.TRACKS_DIR)
+TASK_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.TASKS_DIR)
+ARTIFACT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.ARTIFACT_OBJECTS_DIR)
+MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.MESSAGES_DIR)
+COMMENT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.COMMENTS_DIR)
+BUDDYBOX_RELATIVE_DIR = _runtime_relative_path(runtime_files.BUDDYBOX_LOCAL_DIR)
 
 
 def _strip_toml_comment(line: str) -> str:
@@ -282,7 +298,7 @@ def add_external_path(plan: dict[str, Any], *, display_path: str, absolute_path:
 def discover_artifact_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     valid: list[dict[str, Any]] = []
     invalid: list[dict[str, Any]] = []
-    for path in iter_files(root, "buddyswitch/objects/artifacts"):
+    for path in iter_files(root, ARTIFACT_OBJECTS_RELATIVE_DIR):
         relative = rel(root, path)
         try:
             payload = read_json(path)
@@ -311,7 +327,7 @@ def discover_artifact_objects(root: Path) -> tuple[list[dict[str, Any]], list[di
 def discover_task_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     valid: list[dict[str, Any]] = []
     invalid: list[dict[str, Any]] = []
-    for path in iter_files(root, "buddyswitch/objects/tasks"):
+    for path in iter_files(root, TASK_OBJECTS_RELATIVE_DIR):
         relative = rel(root, path)
         try:
             payload = read_json(path)
@@ -342,7 +358,7 @@ def discover_task_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[s
 def discover_message_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     valid: list[dict[str, Any]] = []
     invalid: list[dict[str, Any]] = []
-    for path in iter_files(root, "buddyswitch/objects/messages"):
+    for path in iter_files(root, MESSAGE_OBJECTS_RELATIVE_DIR):
         relative = rel(root, path)
         try:
             payload = read_json(path)
@@ -372,7 +388,7 @@ def discover_message_objects(root: Path) -> tuple[list[dict[str, Any]], list[dic
 def discover_comment_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     valid: list[dict[str, Any]] = []
     invalid: list[dict[str, Any]] = []
-    for path in iter_files(root, "buddyswitch/objects/comments"):
+    for path in iter_files(root, COMMENT_OBJECTS_RELATIVE_DIR):
         relative = rel(root, path)
         try:
             payload = read_json(path)
@@ -556,13 +572,72 @@ def add_instance_workspace_dir_files(
         add_external_path(plan, display_path=display_path, absolute_path=path, category=category)
 
 
+def object_category_relative_dir(category: str) -> str:
+    if category == "artifact_objects":
+        return ARTIFACT_OBJECTS_RELATIVE_DIR
+    if category == "task_objects":
+        return TASK_OBJECTS_RELATIVE_DIR
+    if category == "message_objects":
+        return MESSAGE_OBJECTS_RELATIVE_DIR
+    if category == "comment_objects":
+        return COMMENT_OBJECTS_RELATIVE_DIR
+    if category == "track_objects":
+        return TRACK_OBJECTS_RELATIVE_DIR
+    raise ValueError(f"Unsupported object category: {category}")
+
+
+def owner_object_json_path(root: Path, *, category: str, object_id: str) -> tuple[Path | None, str | None]:
+    return resolve_guarded_object_json_path(
+        root,
+        relative_dir=object_category_relative_dir(category),
+        object_id=object_id,
+    )
+
+
+def _parse_buddybox_owner_path(path: Path) -> tuple[Path, str] | None:
+    parts = path.resolve(strict=False).parts
+    marker = tuple(Path(BUDDYBOX_RELATIVE_DIR).parts)
+    if not marker:
+        return None
+    window = len(marker)
+    for index in range(0, len(parts) - window):
+        if tuple(parts[index : index + window]) != marker:
+            continue
+        buddy_index = index + window
+        if buddy_index >= len(parts):
+            return None
+        logical_parts = parts[buddy_index + 1 :]
+        if not logical_parts:
+            return None
+        buddy_root = Path(*parts[: buddy_index + 1])
+        logical_name = "/".join(logical_parts)
+        return buddy_root, logical_name
+    return None
+
+
+def delete_buddybox_path(path: Path) -> bool:
+    owner = _parse_buddybox_owner_path(path)
+    if owner is None:
+        return False
+    buddy_root, logical_name = owner
+    try:
+        buddybox_repo.delete_private_file(root=buddy_root, logical_name=logical_name)
+    except (buddybox_repo.BuddyboxBoundaryError, IsADirectoryError, OSError):
+        return False
+    return True
+
+
 def add_indexed_artifact(plan: dict[str, Any], record: dict[str, Any]) -> None:
     root = Path(plan["repo_root"])
     if record["id"] not in plan["artifact_object_ids"]:
         plan["artifact_object_ids"].append(record["id"])
         plan["artifact_records"].append(record)
 
-    object_path = root / record["object_path"]
+    object_path, blocked_reason = owner_object_json_path(root, category="artifact_objects", object_id=str(record["id"]))
+    if object_path is None:
+        if blocked_reason is not None:
+            add_warning(plan, f"Skipping artifact cleanup for '{record['id']}': {blocked_reason}")
+        return
     add_path(plan, object_path, "artifact_objects")
 
 
@@ -572,8 +647,40 @@ def add_indexed_task(plan: dict[str, Any], record: dict[str, Any]) -> None:
         plan["task_object_ids"].append(record["id"])
         plan["task_records"].append(record)
 
-    object_path = root / record["object_path"]
+    object_path, blocked_reason = owner_object_json_path(root, category="task_objects", object_id=str(record["id"]))
+    if object_path is None:
+        if blocked_reason is not None:
+            add_warning(plan, f"Skipping task cleanup for '{record['id']}': {blocked_reason}")
+        return
     add_path(plan, object_path, "task_objects")
+
+
+def add_indexed_message(plan: dict[str, Any], record: dict[str, Any]) -> None:
+    root = Path(plan["repo_root"])
+    if record["id"] not in plan["message_object_ids"]:
+        plan["message_object_ids"].append(record["id"])
+        plan["message_records"].append(record)
+
+    object_path, blocked_reason = owner_object_json_path(root, category="message_objects", object_id=str(record["id"]))
+    if object_path is None:
+        if blocked_reason is not None:
+            add_warning(plan, f"Skipping message cleanup for '{record['id']}': {blocked_reason}")
+        return
+    add_path(plan, object_path, "message_objects")
+
+
+def add_indexed_comment(plan: dict[str, Any], record: dict[str, Any]) -> None:
+    root = Path(plan["repo_root"])
+    if record["id"] not in plan["comment_object_ids"]:
+        plan["comment_object_ids"].append(record["id"])
+        plan["comment_records"].append(record)
+
+    object_path, blocked_reason = owner_object_json_path(root, category="comment_objects", object_id=str(record["id"]))
+    if object_path is None:
+        if blocked_reason is not None:
+            add_warning(plan, f"Skipping comment cleanup for '{record['id']}': {blocked_reason}")
+        return
+    add_path(plan, object_path, "comment_objects")
 
 
 def delete_relative_path(root: Path, relative_path: str) -> None:
@@ -597,11 +704,11 @@ def delete_absolute_path(path: Path) -> None:
 
 def ensure_required_skeleton(root: Path, *, warnings: list[str] | None = None) -> None:
     for relative_dir in (
-        "buddyswitch/objects/tracks",
-        "buddyswitch/objects/tasks",
-        "buddyswitch/objects/artifacts",
-        "buddyswitch/objects/messages",
-        "buddyswitch/objects/comments",
+        TRACK_OBJECTS_RELATIVE_DIR,
+        TASK_OBJECTS_RELATIVE_DIR,
+        ARTIFACT_OBJECTS_RELATIVE_DIR,
+        MESSAGE_OBJECTS_RELATIVE_DIR,
+        COMMENT_OBJECTS_RELATIVE_DIR,
     ):
         directory, blocked_reason = resolve_guarded_relative_dir(root, relative_dir, allow_missing=True)
         if directory is None:
@@ -663,18 +770,27 @@ def build_cleanup_plan(
                 add_indexed_task(plan, record)
         for record in message_objects:
             if record.get("from_buddy") == buddy or record.get("to_buddy") == buddy:
-                if record["id"] not in plan["message_object_ids"]:
-                    plan["message_object_ids"].append(record["id"])
-                    plan["message_records"].append(record)
-                object_path = repo_root / record["object_path"]
-                add_path(plan, object_path, "message_objects")
+                add_indexed_message(plan, record)
         for record in comment_objects:
             if record.get("author_buddy") == buddy:
-                if record["id"] not in plan["comment_object_ids"]:
-                    plan["comment_object_ids"].append(record["id"])
-                    plan["comment_records"].append(record)
-                object_path = repo_root / record["object_path"]
-                add_path(plan, object_path, "comment_objects")
+                add_indexed_comment(plan, record)
+        buddybox_relative_dir = f"{BUDDYBOX_RELATIVE_DIR}/{buddy}" if isinstance(buddy, str) and buddy else BUDDYBOX_RELATIVE_DIR
+        if shared_root is not None:
+            resolved_shared_root = shared_root.resolve(strict=False)
+            for workspace_dir in discover_instance_workspaces(
+                plan,
+                shared_root=resolved_shared_root,
+                buddy_filter=buddy,
+            ):
+                add_instance_workspace_dir_files(
+                    plan,
+                    shared_root=resolved_shared_root,
+                    workspace_dir=workspace_dir,
+                    relative_dir=buddybox_relative_dir,
+                    category="buddybox_private_files",
+                )
+        else:
+            add_dir_files(plan, buddybox_relative_dir, "buddybox_private_files")
         for item in invalid_artifact_objects:
             add_warning(
                 plan,
@@ -697,11 +813,27 @@ def build_cleanup_plan(
             )
 
     elif scope == "all-data":
-        add_dir_files(plan, "buddyswitch/objects/tracks", "track_objects")
-        add_dir_files(plan, "buddyswitch/objects/tasks", "task_objects")
-        add_dir_files(plan, "buddyswitch/objects/artifacts", "artifact_objects")
-        add_dir_files(plan, "buddyswitch/objects/messages", "message_objects")
-        add_dir_files(plan, "buddyswitch/objects/comments", "comment_objects")
+        add_dir_files(plan, TRACK_OBJECTS_RELATIVE_DIR, "track_objects")
+        add_dir_files(plan, TASK_OBJECTS_RELATIVE_DIR, "task_objects")
+        add_dir_files(plan, ARTIFACT_OBJECTS_RELATIVE_DIR, "artifact_objects")
+        add_dir_files(plan, MESSAGE_OBJECTS_RELATIVE_DIR, "message_objects")
+        add_dir_files(plan, COMMENT_OBJECTS_RELATIVE_DIR, "comment_objects")
+        if shared_root is not None:
+            resolved_shared_root = shared_root.resolve(strict=False)
+            for workspace_dir in discover_instance_workspaces(
+                plan,
+                shared_root=resolved_shared_root,
+                buddy_filter=None,
+            ):
+                add_instance_workspace_dir_files(
+                    plan,
+                    shared_root=resolved_shared_root,
+                    workspace_dir=workspace_dir,
+                    relative_dir=BUDDYBOX_RELATIVE_DIR,
+                    category="buddybox_private_files",
+                )
+        else:
+            add_dir_files(plan, BUDDYBOX_RELATIVE_DIR, "buddybox_private_files")
         for record in artifact_objects:
             if record["id"] not in plan["artifact_object_ids"]:
                 plan["artifact_object_ids"].append(record["id"])
@@ -738,6 +870,9 @@ def build_cleanup_plan(
     plan["external_delete_paths"] = {
         key: plan["external_delete_paths"][key] for key in sorted(plan["external_delete_paths"])
     }
+    plan["path_categories"] = {
+        key: plan["_path_categories"][key] for key in sorted(plan["_path_categories"])
+    }
     plan["warnings"].sort()
     plan.pop("_path_categories", None)
     return plan
@@ -750,37 +885,56 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(warnings, list):
         warnings = None
 
-    indexed_artifact_paths = set()
-    for record in plan["artifact_records"]:
-        indexed_artifact_paths.add(record["object_path"])
+    path_categories = plan.get("path_categories", {})
+    if not isinstance(path_categories, dict):
+        path_categories = {}
+    deleted_set: set[str] = set()
 
-    indexed_task_paths = set()
-    for record in plan["task_records"]:
-        indexed_task_paths.add(record["object_path"])
-
-    indexed_message_paths = set()
-    for record in plan["message_records"]:
-        indexed_message_paths.add(record["object_path"])
-
-    indexed_comment_paths = set()
-    for record in plan["comment_records"]:
-        indexed_comment_paths.add(record["object_path"])
-
-    indexed_all_paths = indexed_artifact_paths | indexed_task_paths | indexed_message_paths | indexed_comment_paths
-
-    for relative_path in sorted(indexed_all_paths):
-        delete_relative_path(root, relative_path)
-        deleted_paths.append(relative_path)
+    indexed_sets: tuple[tuple[str, str], ...] = (
+        ("artifact_objects", "artifact_records"),
+        ("task_objects", "task_records"),
+        ("message_objects", "message_records"),
+        ("comment_objects", "comment_records"),
+    )
+    for category, records_key in indexed_sets:
+        records = plan.get(records_key, [])
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            object_id = record.get("id")
+            if not isinstance(object_id, str) or not object_id:
+                continue
+            owner_path, _ = owner_object_json_path(root, category=category, object_id=object_id)
+            if owner_path is None:
+                continue
+            relative_path = rel(root, owner_path)
+            if relative_path in deleted_set:
+                continue
+            delete_relative_path(root, relative_path)
+            deleted_paths.append(relative_path)
+            deleted_set.add(relative_path)
 
     for relative_path in plan["direct_delete_paths"]:
-        if relative_path in indexed_all_paths:
+        if relative_path in deleted_set:
             continue
+        category = path_categories.get(relative_path)
         external_path = plan.get("external_delete_paths", {}).get(relative_path)
         if external_path is not None:
-            delete_absolute_path(Path(external_path))
+            target_path = Path(external_path)
+            if category == "buddybox_private_files" and delete_buddybox_path(target_path):
+                pass
+            else:
+                delete_absolute_path(target_path)
         else:
-            delete_relative_path(root, relative_path)
+            target_path = root / relative_path
+            if category == "buddybox_private_files" and delete_buddybox_path(target_path):
+                pass
+            else:
+                delete_relative_path(root, relative_path)
         deleted_paths.append(relative_path)
+        deleted_set.add(relative_path)
 
     ensure_required_skeleton(root, warnings=warnings)
     if isinstance(warnings, list):

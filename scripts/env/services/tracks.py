@@ -6,8 +6,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, TypedDict
 
-import env_store
-from env.services import artifact_visibility
+from env.domain import artifact_visibility as artifact_visibility_domain
+from env.domain import publication as publication_domain
+from env.repos import tracks as track_repo
 from env.tools import responses as tool_responses
 
 
@@ -232,7 +233,7 @@ def list_tracks_for_active_buddy(*, args: dict[str, Any], context: TrackServiceC
     if payload_error is not None:
         return payload_error
 
-    rows = [row for row in env_store.list_tracks() if row.get("archived_at") is None]
+    rows = [row for row in track_repo.list_tracks() if row.get("archived_at") is None]
     state = args.get("state")
     if isinstance(state, str) and state.strip():
         rows = [row for row in rows if row.get("state") == state.strip()]
@@ -270,7 +271,7 @@ def open_track_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCo
         return error
     assert isinstance(track_id, str)
 
-    track = env_store.get_track(track_id)
+    track = track_repo.get_track(track_id)
     if track is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"track not found: {track_id}")
     if track.get("archived_at") is not None:
@@ -325,21 +326,21 @@ def create_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -
 
     state = args.get("state", "active")
     health = args.get("health", "ok")
-    if state not in env_store.VALID_TRACK_STATE:
+    if state not in track_repo.VALID_TRACK_STATE:
         return _reject_payload(
             action=action,
             active_buddy=active_buddy,
-            message=f"state must be one of {', '.join(env_store.VALID_TRACK_STATE)}",
+            message=f"state must be one of {', '.join(track_repo.VALID_TRACK_STATE)}",
         )
-    if health not in env_store.VALID_TRACK_HEALTH:
+    if health not in track_repo.VALID_TRACK_HEALTH:
         return _reject_payload(
             action=action,
             active_buddy=active_buddy,
-            message=f"health must be one of {', '.join(env_store.VALID_TRACK_HEALTH)}",
+            message=f"health must be one of {', '.join(track_repo.VALID_TRACK_HEALTH)}",
         )
 
     try:
-        track = env_store.create_track(
+        track = track_repo.create_track(
             track_id,
             title.strip(),
             owner_buddy="pm",
@@ -371,7 +372,7 @@ def create_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -
 
 
 def _load_non_archived_track(*, action: str, active_buddy: str, track_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    track = env_store.get_track(track_id)
+    track = track_repo.get_track(track_id)
     if track is None:
         return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"track not found: {track_id}")
     if track.get("archived_at") is not None:
@@ -402,20 +403,20 @@ def update_now_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCo
     patch: dict[str, Any] = {}
     if "state" in args:
         state = args.get("state")
-        if state not in env_store.VALID_TRACK_STATE:
+        if state not in track_repo.VALID_TRACK_STATE:
             return _reject_payload(
                 action=action,
                 active_buddy=active_buddy,
-                message=f"state must be one of {', '.join(env_store.VALID_TRACK_STATE)}",
+                message=f"state must be one of {', '.join(track_repo.VALID_TRACK_STATE)}",
             )
         patch["state"] = state
     if "health" in args:
         health = args.get("health")
-        if health not in env_store.VALID_TRACK_HEALTH:
+        if health not in track_repo.VALID_TRACK_HEALTH:
             return _reject_payload(
                 action=action,
                 active_buddy=active_buddy,
-                message=f"health must be one of {', '.join(env_store.VALID_TRACK_HEALTH)}",
+                message=f"health must be one of {', '.join(track_repo.VALID_TRACK_HEALTH)}",
             )
         patch["health"] = health
     if "now" in args:
@@ -427,19 +428,19 @@ def update_now_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCo
         return _reject_payload(action=action, active_buddy=active_buddy, message="at least one of now/state/health is required")
 
     try:
-        updated = env_store.update_track(track_id, patch)
+        updated = track_repo.update_track(track_id, patch)
     except ValueError as exc:
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
     summary = f"{active_buddy} updated now-state"
-    env_store.append_track_update(
+    track_repo.append_track_update(
         track_id=track_id,
         by_buddy=active_buddy,
         kind="progress",
         summary=summary,
         refs=[],
     )
-    updated = env_store.get_track(track_id)
+    updated = track_repo.get_track(track_id)
     assert isinstance(updated, dict)
 
     return tool_responses.success(
@@ -454,140 +455,6 @@ def update_now_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCo
         allowed_next_actions=["Use track.open to verify now-state and timeline updates."],
         extra={"track_id": track_id, "track": _track_page(updated)},
     )
-
-
-def _load_publishable_artifact_for_material(
-    *,
-    active_buddy: str,
-    action: str,
-    track: dict[str, Any],
-    artifact_id: str,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    artifact = env_store.get_artifact(artifact_id)
-    if artifact is None:
-        return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {artifact_id}")
-    if artifact.get("created_by") != active_buddy:
-        return None, _reject_artifact_scope(
-            action=action,
-            active_buddy=active_buddy,
-            message=f"artifact '{artifact_id}' is owned by buddy '{artifact.get('created_by')}'",
-        )
-    status = artifact.get("status")
-    published_to_track = artifact.get("published_to_track")
-    track_id = str(track.get("id") or "")
-    if status != "draft":
-        if published_to_track == track_id:
-            if any(
-                isinstance(row, dict)
-                and row.get("type") == "artifact"
-                and row.get("artifact_id") == artifact_id
-                and bool(row.get("current"))
-                for row in track.get("shared_materials", [])
-            ):
-                return None, _reject_payload(
-                    action=action,
-                    active_buddy=active_buddy,
-                    message=f"artifact '{artifact_id}' is already current material on track '{track_id}'",
-                )
-            if any(
-                isinstance(row, dict)
-                and row.get("type") == "artifact"
-                and row.get("artifact_id") == artifact_id
-                and bool(row.get("current", True))
-                for row in track.get("close_proof", [])
-            ):
-                return None, _reject_payload(
-                    action=action,
-                    active_buddy=active_buddy,
-                    message=f"artifact '{artifact_id}' is already bound as close proof on track '{track_id}'",
-                )
-            return None, _reject_payload(
-                action=action,
-                active_buddy=active_buddy,
-                message=f"artifact '{artifact_id}' is already bound to track '{track_id}' but not as current material",
-            )
-        if isinstance(published_to_track, str) and published_to_track.strip():
-            return None, _reject_payload(
-                action=action,
-                active_buddy=active_buddy,
-                message=(
-                    f"artifact '{artifact_id}' is already published to track '{published_to_track}' "
-                    f"and cannot be republished to '{track_id}'"
-                ),
-            )
-        return None, _reject_payload(
-            action=action,
-            active_buddy=active_buddy,
-            message=f"artifact '{artifact_id}' must be draft before track publication",
-        )
-    return artifact, None
-
-
-def _load_publishable_artifact_for_proof(
-    *,
-    active_buddy: str,
-    action: str,
-    track: dict[str, Any],
-    artifact_id: str,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    artifact = env_store.get_artifact(artifact_id)
-    if artifact is None:
-        return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {artifact_id}")
-    if artifact.get("created_by") != active_buddy:
-        return None, _reject_artifact_scope(
-            action=action,
-            active_buddy=active_buddy,
-            message=f"artifact '{artifact_id}' is owned by buddy '{artifact.get('created_by')}'",
-        )
-    status = artifact.get("status")
-    published_to_track = artifact.get("published_to_track")
-    track_id = str(track.get("id") or "")
-    if status != "draft":
-        if published_to_track == track_id:
-            if any(
-                isinstance(row, dict)
-                and row.get("type") == "artifact"
-                and row.get("artifact_id") == artifact_id
-                and bool(row.get("current", True))
-                for row in track.get("close_proof", [])
-            ):
-                return None, _reject_payload(
-                    action=action,
-                    active_buddy=active_buddy,
-                    message=f"artifact '{artifact_id}' is already current close proof on track '{track_id}'",
-                )
-            if any(
-                isinstance(row, dict)
-                and row.get("type") == "artifact"
-                and row.get("artifact_id") == artifact_id
-                and bool(row.get("current"))
-                for row in track.get("shared_materials", [])
-            ):
-                return None, _reject_payload(
-                    action=action,
-                    active_buddy=active_buddy,
-                    message=f"artifact '{artifact_id}' is already bound as shared material on track '{track_id}'",
-                )
-            return None, _reject_payload(
-                action=action,
-                active_buddy=active_buddy,
-                message=f"artifact '{artifact_id}' is already bound to track '{track_id}' but not as current close proof",
-            )
-        if isinstance(published_to_track, str) and published_to_track.strip():
-            return None, _reject_payload(
-                action=action,
-                active_buddy=active_buddy,
-                message=(
-                    f"artifact '{artifact_id}' is already published to track '{published_to_track}' "
-                    f"and cannot be republished to '{track_id}'"
-                ),
-            )
-        return None, _reject_payload(
-            action=action,
-            active_buddy=active_buddy,
-            message=f"artifact '{artifact_id}' must be draft before track publication",
-        )
-    return artifact, None
 
 
 def add_material_to_track(*, args: dict[str, Any], context: TrackServiceContext) -> dict[str, Any]:
@@ -622,26 +489,22 @@ def add_material_to_track(*, args: dict[str, Any], context: TrackServiceContext)
     if not isinstance(summary, str):
         return _reject_payload(action=action, active_buddy=active_buddy, message="summary must be a string")
 
-    artifact, artifact_error = _load_publishable_artifact_for_material(
-        active_buddy=active_buddy,
-        action=action,
-        track=track,
-        artifact_id=artifact_id.strip(),
-    )
-    if artifact_error is not None:
-        return artifact_error
-    assert isinstance(artifact, dict)
-
     try:
-        updated_track, updated_artifact, superseded_artifact_id = env_store.publish_track_material(
+        publication = publication_domain.publish_material(
             track_id=track_id,
-            artifact_id=str(artifact["id"]),
+            artifact_id=artifact_id.strip(),
             label=label.strip(),
             from_buddy=active_buddy,
             summary=summary,
         )
     except ValueError as exc:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
+        message = str(exc)
+        if "is owned by buddy" in message:
+            return _reject_artifact_scope(action=action, active_buddy=active_buddy, message=message)
+        return _reject_payload(action=action, active_buddy=active_buddy, message=message)
+    updated_track = publication["track"]
+    updated_artifact = publication["artifact"]
+    superseded_artifact_id = publication["superseded_artifact_id"]
 
     changes: list[dict[str, Any]] = [
         {"object_type": "artifact", "change": "published_material", "artifact_id": updated_artifact["id"], "track_id": track_id},
@@ -698,11 +561,11 @@ def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -
 
     kind = args.get("kind")
     summary = args.get("summary")
-    if kind not in env_store.VALID_UPDATE_KIND:
+    if kind not in track_repo.VALID_UPDATE_KIND:
         return _reject_payload(
             action=action,
             active_buddy=active_buddy,
-            message=f"kind must be one of {', '.join(env_store.VALID_UPDATE_KIND)}",
+            message=f"kind must be one of {', '.join(track_repo.VALID_UPDATE_KIND)}",
         )
     if not isinstance(summary, str) or not summary.strip():
         return _reject_payload(action=action, active_buddy=active_buddy, message="summary is required")
@@ -717,36 +580,22 @@ def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -
         ref_id = row.get("id")
         if not isinstance(ref_id, str) or not ref_id.strip():
             return _reject_refs(action=action, active_buddy=active_buddy, message="artifact ref id is required")
-        artifact = env_store.get_artifact(ref_id.strip())
-        if artifact is None:
-            return _reject_refs(action=action, active_buddy=active_buddy, message=f"artifact not found: {ref_id.strip()}")
-        decision = artifact_visibility.artifact_read_decision(artifact, active_buddy)
-        if not bool(decision.get("allowed")):
-            why = str(decision.get("why") or "artifact is not readable for track updates")
+        normalized_ref_id = ref_id.strip()
+        decision = artifact_visibility_domain.artifact_ref_decision_for_track_update(
+            artifact_id=normalized_ref_id,
+            active_buddy=active_buddy,
+            track_id=track_id,
+        )
+        if not bool(decision.get("ok")):
             return _reject_refs(
                 action=action,
                 active_buddy=active_buddy,
-                message=f"artifact '{ref_id.strip()}' cannot be used in refs: {why}",
+                message=str(decision.get("message") or "artifact ref failed track update scope checks"),
             )
-        if decision.get("track_id") != track_id:
-            return _reject_refs(
-                action=action,
-                active_buddy=active_buddy,
-                message=(
-                    f"artifact '{ref_id.strip()}' belongs to track '{decision.get('track_id')}' "
-                    f"and cannot be referenced from track '{track_id}'"
-                ),
-            )
-        if decision.get("relation") not in {"track_material", "track_proof"}:
-            return _reject_refs(
-                action=action,
-                active_buddy=active_buddy,
-                message=f"artifact '{ref_id.strip()}' is not a current material or close proof on track '{track_id}'",
-            )
-        refs.append({"type": "artifact", "id": ref_id.strip()})
+        refs.append({"type": "artifact", "id": normalized_ref_id})
 
     try:
-        track, update = env_store.append_track_update(
+        track, update = track_repo.append_track_update(
             track_id=track_id,
             by_buddy=active_buddy,
             kind=kind,
@@ -802,33 +651,24 @@ def add_proof_to_track(*, args: dict[str, Any], context: TrackServiceContext) ->
     if not isinstance(summary, str):
         return _reject_payload(action=action, active_buddy=active_buddy, message="summary must be a string")
 
-    artifact, artifact_error = _load_publishable_artifact_for_proof(
-        active_buddy=active_buddy,
-        action=action,
-        track=track,
-        artifact_id=artifact_id.strip(),
-    )
-    if artifact_error is not None:
-        return artifact_error
-    assert isinstance(artifact, dict)
-
     try:
-        updated_track, updated_artifact, superseded_artifact_id = env_store.publish_track_proof(
+        publication = publication_domain.publish_proof(
             track_id=track_id,
-            artifact_id=str(artifact["id"]),
+            artifact_id=artifact_id.strip(),
             label=label.strip(),
             from_buddy=active_buddy,
             summary=summary,
-        )
-        updated_track, update = env_store.append_track_update(
-            track_id=track_id,
-            by_buddy=active_buddy,
-            kind="proof",
-            summary=summary or f"{active_buddy} published proof",
-            refs=[{"type": "artifact", "id": updated_artifact["id"]}],
+            update_summary=summary or f"{active_buddy} published proof",
         )
     except ValueError as exc:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
+        message = str(exc)
+        if "is owned by buddy" in message:
+            return _reject_artifact_scope(action=action, active_buddy=active_buddy, message=message)
+        return _reject_payload(action=action, active_buddy=active_buddy, message=message)
+    updated_track = publication["track"]
+    updated_artifact = publication["artifact"]
+    superseded_artifact_id = publication["superseded_artifact_id"]
+    update = publication["update"]
 
     changes: list[dict[str, Any]] = [
         {"object_type": "artifact", "change": "published_proof", "artifact_id": updated_artifact["id"], "track_id": track_id},
@@ -880,13 +720,13 @@ def archive_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) 
         return error
     assert isinstance(track_id, str)
 
-    track = env_store.get_track(track_id)
+    track = track_repo.get_track(track_id)
     if track is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"track not found: {track_id}")
 
     state_changed = False
     if track.get("archived_at") is None:
-        track = env_store.update_track(track_id, {"archived_at": env_store.now_iso()})
+        track = track_repo.update_track(track_id, {"archived_at": track_repo.now_iso()})
         state_changed = True
 
     return tool_responses.success(

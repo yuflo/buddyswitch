@@ -15,7 +15,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_store  # noqa: E402
+import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -349,6 +349,26 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((rejected_write.get("error") or {}).get("code"), "E_BUDDYBOX_BOUNDARY")
         self.assertFalse((dev_escape_dir / "new.txt").exists())
 
+    def test_buddybox_rejects_active_root_symlink_escape(self) -> None:
+        dev_private_target = self._runtime_path("buddyswitch/local/buddybox/dev/private-target")
+        dev_private_target.mkdir(parents=True, exist_ok=True)
+        pm_root = self._runtime_path("buddyswitch/local/buddybox/pm")
+        pm_root.parent.mkdir(parents=True, exist_ok=True)
+        pm_root.symlink_to(dev_private_target, target_is_directory=True)
+
+        instance_id = "inst-pm-box-root-symlink"
+        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            action="write",
+            args={"logical_name": "leak.txt", "content": "private"},
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_BUDDYBOX_BOUNDARY")
+        self.assertFalse((dev_private_target / "leak.txt").exists())
+
     def test_old_content_buddybox_root_is_not_active_storage(self) -> None:
         old_path = self._runtime_path(f"{_OLD_BUDDYBOX_ROOT}/pm/legacy.txt")
         old_path.parent.mkdir(parents=True, exist_ok=True)
@@ -486,6 +506,21 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 if isinstance(attempted_name, str) and attempted_name and ".." not in attempted_name and not attempted_name.startswith("/"):
                     self.assertFalse(self._runtime_path(f"buddyswitch/local/buddybox/pm/{attempted_name}").exists())
 
+        invalid_logical_names = ["/tmp/x", "../x", "notes/../../x"]
+        for action in ("read", "delete"):
+            for logical_name in invalid_logical_names:
+                with self.subTest(action=action, logical_name=logical_name):
+                    rejected = self._dispatch(
+                        instance_json=instance_json,
+                        instance_id=instance_id,
+                        buddy="pm",
+                        action=action,
+                        args={"logical_name": logical_name},
+                    )
+                    self.assertFalse(rejected.get("ok"), msg=rejected)
+                    self.assertEqual((rejected.get("error") or {}).get("code"), "E_BUDDYBOX_LOGICAL_NAME")
+                    self.assertIs(rejected.get("state_changed"), False, msg=rejected)
+
         invalid_read = self._dispatch(
             instance_json=instance_json,
             instance_id=instance_id,
@@ -564,6 +599,31 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(delete_payload.get("cross_buddy_readable"))
         self.assertFalse(delete_payload.get("mutates_product_state"))
         self.assertEqual(delete_payload.get("mutated_product_objects"), [])
+
+    def test_buddybox_operations_do_not_create_product_object_files(self) -> None:
+        objects_root = self._runtime_path("buddyswitch/objects")
+        self.assertFalse(objects_root.exists())
+
+        instance_id = "inst-pm-box-no-objects-created"
+        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        for action, payload in (
+            ("write", {"logical_name": "private/run.txt", "content": "ok"}),
+            ("read", {"logical_name": "private/run.txt"}),
+            ("list", {"recursive": True}),
+            ("delete", {"logical_name": "private/run.txt"}),
+        ):
+            with self.subTest(action=action):
+                response = self._dispatch(
+                    instance_json=instance_json,
+                    instance_id=instance_id,
+                    buddy="pm",
+                    action=action,
+                    args=payload,
+                )
+                self.assertTrue(response.get("ok"), msg=response)
+                self.assertFalse(response.get("mutates_product_state"), msg=response)
+                self.assertEqual(response.get("mutated_product_objects"), [], msg=response)
+        self.assertFalse(objects_root.exists())
 
     def test_buddybox_operations_do_not_mutate_product_objects(self) -> None:
         track = env_store.create_track(

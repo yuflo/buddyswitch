@@ -16,7 +16,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Windows fallback
     fcntl = None  # type: ignore[assignment]
 
-import env_store
+from env.repos import artifacts as artifact_repo
+from env.repos import comments as comment_repo
+from env.repos import runtime_files
+from env.repos import tasks as task_repo
+from env.repos import tracks as track_repo
 from env_manifest import DEFAULT_MANIFEST, load_manifest
 
 
@@ -33,7 +37,7 @@ class RuntimeSnapshotLockError(RuntimeError):
 
 def rel(path: Path) -> str:
     candidate = path.absolute()
-    for base in (env_store.ROOT.absolute(), PROJECT_ROOT.absolute()):
+    for base in (runtime_files.ROOT.absolute(), PROJECT_ROOT.absolute()):
         try:
             return candidate.relative_to(base).as_posix()
         except ValueError:
@@ -86,7 +90,7 @@ def _runtime_lock_path() -> Path | None:
             return None
         return Path(shared_root) / "run" / "locks" / "runtime.lock"
 
-    workspace_root = env_store.ROOT
+    workspace_root = runtime_files.ROOT
     derived_shared_root = _shared_root_from_workspace_root(workspace_root)
     if derived_shared_root is not None:
         return derived_shared_root / "run" / "locks" / "runtime.lock"
@@ -320,15 +324,15 @@ def build_track_views(
 
 def build_workspace_projection() -> dict[str, Any]:
     manifest = load_manifest(DEFAULT_MANIFEST)
-    comments = env_store.list_comments()
+    comments = comment_repo.list_comments()
     comment_ids_by_target = build_comment_ids_by_target(comments)
     comment_status_by_target = build_comment_status_counts_by_target(comments)
     artifacts = [
         build_artifact_view(artifact, comment_ids_by_target, comment_status_by_target)
-        for artifact in env_store.list_artifacts()
+        for artifact in artifact_repo.list_artifacts()
     ]
-    tasks = [build_task_view(task) for task in env_store.list_tasks()]
-    tracks = build_track_views(env_store.list_tracks(), artifacts, comment_ids_by_target, comment_status_by_target)
+    tasks = [build_task_view(task) for task in task_repo.list_tasks()]
+    tracks = build_track_views(track_repo.list_tracks(), artifacts, comment_ids_by_target, comment_status_by_target)
     standalone_tasks = [task for task in tasks if not task.get("track_id")]
     standalone_tasks.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
 

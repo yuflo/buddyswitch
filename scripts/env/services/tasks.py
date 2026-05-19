@@ -7,7 +7,8 @@ import uuid
 from pathlib import Path
 from typing import Any, TypedDict
 
-import env_store
+from env.domain import tasks as task_domain
+from env.repos import tasks as task_repo
 from env.tools import responses as tool_responses
 
 
@@ -66,6 +67,10 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         suffix = message.split("unsupported payload fields:", 1)[1].strip()
         if suffix:
             correctable_fields = [row.strip() for row in suffix.split(",") if row.strip()]
+    elif "publication-style payload fields:" in message:
+        suffix = message.split("publication-style payload fields:", 1)[1].strip()
+        if suffix:
+            correctable_fields = [row.strip() for row in suffix.split(",") if row.strip()]
     return tool_responses.rejection(
         tool="task",
         action=action,
@@ -75,7 +80,7 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         permission_boundary="request-payload",
         human_summary="Task request payload is invalid.",
         why_blocked=message,
-        impact="No task or track state changed.",
+        impact="No task, track, or artifact state changed.",
         state_changed=False,
         retryable=True,
         retry_guidance="Fix task payload fields and retry.",
@@ -132,6 +137,13 @@ def _normalize_task_summary(task: dict[str, Any]) -> dict[str, Any]:
 
 
 def _require_allowed_fields(*, action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
+    publication_fields = task_domain.publication_style_fields(args)
+    if publication_fields:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=f"publication-style payload fields: {', '.join(publication_fields)}",
+        )
     allowed = _allowed_set(action)
     unknown = sorted(key for key in args if key not in allowed)
     if unknown:
@@ -150,48 +162,27 @@ def create_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCo
     if payload_error is not None:
         return payload_error
 
-    title = args.get("title")
-    if not isinstance(title, str) or not title.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="title is required")
+    try:
+        title = task_domain.require_title(args.get("title"))
+        task_id = task_domain.optional_task_id(args.get("task_id"))
+        summary = task_domain.require_summary(args.get("summary"))
+        status = task_domain.optional_status(args.get("status"))
+        track_id = task_domain.optional_track_context(args.get("track_id"))
+    except task_domain.TaskPayloadError as exc:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
-    task_id = args.get("task_id")
     if task_id is None:
-        slug = env_store.slugify(title)
+        slug = task_repo.slugify(title)
         task_id = f"task-{active_buddy}-{slug}-{uuid.uuid4().hex[:8]}"
-    elif not isinstance(task_id, str) or not task_id.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="task_id must be a non-empty string")
-
-    summary = args.get("summary")
-    if summary is None:
-        summary = ""
-    if not isinstance(summary, str):
-        return _reject_payload(action=action, active_buddy=active_buddy, message="summary must be a string")
-
-    status = args.get("status")
-    if status is None:
-        status = "active"
-    if status not in env_store.VALID_TASK_STATUS:
-        return _reject_payload(
-            action=action,
-            active_buddy=active_buddy,
-            message=f"status must be one of {', '.join(env_store.VALID_TASK_STATUS)}",
-        )
-
-    track_id = args.get("track_id")
-    if track_id is not None and not isinstance(track_id, str):
-        return _reject_payload(action=action, active_buddy=active_buddy, message="track_id must be a string or null")
-    if isinstance(track_id, str) and env_store.get_track(track_id) is None:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=f"track not found: {track_id}")
 
     try:
-        task = env_store.create_task(
-            task_id.strip(),
-            title.strip(),
+        task = task_repo.create_task(
+            task_id=task_id,
+            title=title,
             buddy=active_buddy,
             track_id=track_id,
             status=status,
             summary=summary,
-            initial_run_id=None,
         )
     except ValueError as exc:
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
@@ -221,7 +212,7 @@ def list_tasks_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCon
     if payload_error is not None:
         return payload_error
 
-    rows = [task for task in env_store.list_tasks() if task.get("buddy") == active_buddy]
+    rows = [task for task in task_repo.list_tasks() if task.get("buddy") == active_buddy]
 
     status = args.get("status")
     if isinstance(status, str) and status:
@@ -259,20 +250,22 @@ def get_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceConte
     if payload_error is not None:
         return payload_error
 
-    task_id = args.get("task_id")
-    if not isinstance(task_id, str) or not task_id.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="task_id is required")
-    task_id = task_id.strip()
+    try:
+        task_id = task_domain.require_task_id(args.get("task_id"))
+    except task_domain.TaskPayloadError as exc:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
-    task = env_store.get_task(task_id)
+    task = task_repo.get_task(task_id)
     if task is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"task not found: {task_id}")
-    if task.get("buddy") != active_buddy:
+    try:
+        task_domain.ensure_active_buddy_ownership(task=task, task_id=task_id, active_buddy=active_buddy)
+    except task_domain.TaskScopeError as exc:
         return _reject_scope(
             action=action,
             active_buddy=active_buddy,
             task_id=task_id,
-            message=f"task '{task_id}' is owned by buddy '{task.get('buddy')}'",
+            message=str(exc),
         )
 
     return tool_responses.success(
@@ -298,48 +291,31 @@ def update_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCo
     if payload_error is not None:
         return payload_error
 
-    task_id = args.get("task_id")
-    if not isinstance(task_id, str) or not task_id.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="task_id is required")
-    task_id = task_id.strip()
+    try:
+        task_id = task_domain.require_task_id(args.get("task_id"))
+    except task_domain.TaskPayloadError as exc:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
-    task = env_store.get_task(task_id)
+    task = task_repo.get_task(task_id)
     if task is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"task not found: {task_id}")
-    if task.get("buddy") != active_buddy:
+    try:
+        task_domain.ensure_active_buddy_ownership(task=task, task_id=task_id, active_buddy=active_buddy)
+    except task_domain.TaskScopeError as exc:
         return _reject_scope(
             action=action,
             active_buddy=active_buddy,
             task_id=task_id,
-            message=f"task '{task_id}' is owned by buddy '{task.get('buddy')}'",
+            message=str(exc),
         )
-
-    patch: dict[str, Any] = {}
-    for field in ("title", "summary", "status", "track_id"):
-        if field in args:
-            patch[field] = args[field]
-    if not patch:
-        return _reject_payload(action=action, active_buddy=active_buddy, message="at least one patch field is required")
-
-    if "title" in patch and (not isinstance(patch["title"], str) or not patch["title"].strip()):
-        return _reject_payload(action=action, active_buddy=active_buddy, message="title must be a non-empty string")
-    if "summary" in patch and not isinstance(patch["summary"], str):
-        return _reject_payload(action=action, active_buddy=active_buddy, message="summary must be a string")
-    if "status" in patch and patch["status"] not in env_store.VALID_TASK_STATUS:
-        return _reject_payload(
-            action=action,
-            active_buddy=active_buddy,
-            message=f"status must be one of {', '.join(env_store.VALID_TASK_STATUS)}",
-        )
-    if "track_id" in patch:
-        track_id = patch["track_id"]
-        if track_id is not None and not isinstance(track_id, str):
-            return _reject_payload(action=action, active_buddy=active_buddy, message="track_id must be a string or null")
-        if isinstance(track_id, str) and env_store.get_track(track_id) is None:
-            return _reject_payload(action=action, active_buddy=active_buddy, message=f"track not found: {track_id}")
 
     try:
-        updated = env_store.update_task(task_id, patch)
+        patch = task_domain.update_patch(args)
+    except task_domain.TaskPayloadError as exc:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
+
+    try:
+        updated = task_repo.update_task(task_id, patch)
     except ValueError as exc:
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
@@ -367,20 +343,22 @@ def archive_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceC
     if payload_error is not None:
         return payload_error
 
-    task_id = args.get("task_id")
-    if not isinstance(task_id, str) or not task_id.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="task_id is required")
-    task_id = task_id.strip()
+    try:
+        task_id = task_domain.require_task_id(args.get("task_id"))
+    except task_domain.TaskPayloadError as exc:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
-    task = env_store.get_task(task_id)
+    task = task_repo.get_task(task_id)
     if task is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"task not found: {task_id}")
-    if task.get("buddy") != active_buddy:
+    try:
+        task_domain.ensure_active_buddy_ownership(task=task, task_id=task_id, active_buddy=active_buddy)
+    except task_domain.TaskScopeError as exc:
         return _reject_scope(
             action=action,
             active_buddy=active_buddy,
             task_id=task_id,
-            message=f"task '{task_id}' is owned by buddy '{task.get('buddy')}'",
+            message=str(exc),
         )
 
     if task.get("status") == "archived":
@@ -396,7 +374,7 @@ def archive_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceC
             extra={"task_id": task_id, "task": _normalize_task_summary(task)},
         )
 
-    updated = env_store.update_task(task_id, {"status": "archived"})
+    updated = task_repo.update_task(task_id, {"status": "archived"})
     return tool_responses.success(
         tool="task",
         action=action,

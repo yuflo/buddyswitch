@@ -6,6 +6,8 @@ from __future__ import annotations
 import copy
 import importlib
 import json
+import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -16,7 +18,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_manifest  # noqa: E402
-import env_store  # noqa: E402
+import env_legacy_store as env_store  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -85,6 +87,20 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             rows[path.name] = json.loads(path.read_text(encoding="utf-8"))
         return rows
 
+    def _cli_operations_for_resource(self, resource: str) -> set[str]:
+        completed = subprocess.run(
+            ["python3", "scripts/env/client.py", resource, "--help"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        matched = re.search(r"\{([^}]*)\}", completed.stdout, flags=re.DOTALL)
+        self.assertIsNotNone(matched, msg=completed.stdout)
+        raw = matched.group(1)
+        return {token.strip() for token in raw.split(",") if token.strip()}
+
     def test_active_env_tool_surface_excludes_handoff(self) -> None:
         contracts = importlib.import_module("env.tools.contracts")
         router = importlib.import_module("env.tools.router")
@@ -136,6 +152,7 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         contracts = importlib.import_module("env.tools.contracts")
         dispatch = importlib.import_module("env.tools.dispatch")
         router = importlib.import_module("env.tools.router")
+        turn_runtime = importlib.import_module("turn_runtime")
 
         expected: dict[str, set[str]] = {}
         for spec in contracts.TOOL_REGISTRY:
@@ -144,7 +161,25 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         dispatch_actions = dispatch.dispatch_handler_actions()
         self.assertEqual(dispatch_actions, expected)
         self.assertEqual({tool: set(actions) for tool, actions in router._TOOL_ACTIONS.items()}, expected)
+        runtime_desc = turn_runtime._build_env_tools_desc()
+        self.assertEqual(set(runtime_desc), set(expected))
+        for tool, actions in expected.items():
+            with self.subTest(tool=tool):
+                self.assertEqual(set(runtime_desc[tool]["operations"]), actions)
+                self.assertEqual(set(runtime_desc[tool]["payload_fields"]), actions)
+                self.assertEqual(set(runtime_desc[tool]["action_semantics"]), actions)
         self.assertNotIn("handoff", dispatch_actions)
+
+    def test_cli_operation_maps_align_with_registry_actions(self) -> None:
+        contracts = importlib.import_module("env.tools.contracts")
+        for spec in contracts.TOOL_REGISTRY:
+            tool = spec["tool"]
+            cli_resource = spec["cli_resource"]
+            expected_actions = {action["name"] for action in spec["actions"]}
+            cli_ops = self._cli_operations_for_resource(cli_resource)
+            normalized = {name.replace("-", "_") for name in cli_ops}
+            with self.subTest(tool=tool):
+                self.assertEqual(normalized, expected_actions)
 
     def test_artifact_router_surface_uses_revision_actions(self) -> None:
         contracts = importlib.import_module("env.tools.contracts")
@@ -167,8 +202,6 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("content", payload_fields["create_revision"])
 
     def test_cli_exposes_final_track_operations_without_handoff(self) -> None:
-        import subprocess
-
         handoff = subprocess.run(
             ["python3", "scripts/env/client.py", "handoff", "list"],
             cwd=ROOT,
@@ -211,6 +244,29 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(artifact_help.returncode, 0, msg=artifact_help.stderr)
         self.assertNotIn("publish", artifact_help.stdout)
         self.assertNotIn("archive", artifact_help.stdout)
+
+    def test_comment_resolve_and_reopen_are_absent_from_active_surfaces(self) -> None:
+        contracts = importlib.import_module("env.tools.contracts")
+        dispatch = importlib.import_module("env.tools.dispatch")
+        router = importlib.import_module("env.tools.router")
+
+        self.assertEqual(contracts.supported_actions("comment"), {"add", "list"})
+        self.assertEqual(dispatch.dispatch_handler_actions().get("comment"), {"add", "list"})
+        self.assertEqual(set(router._TOOL_ACTIONS.get("comment", set())), {"add", "list"})
+        self.assertNotIn("resolve", self._cli_operations_for_resource("comment"))
+        self.assertNotIn("reopen", self._cli_operations_for_resource("comment"))
+
+        instance_json = self._instance_json(buddy="pm")
+        for action in ("resolve", "reopen"):
+            payload = self._dispatch_env_tool(
+                payload={"tool": "comment", "action": action, "args": {"thread_id": "thread-1"}},
+                instance_json=instance_json,
+                buddy="pm",
+            )
+            with self.subTest(action=action):
+                self.assertFalse(payload.get("ok"), msg=payload)
+                self.assertEqual((payload.get("error") or {}).get("code"), "E_ENV_TOOL")
+                self.assertEqual(payload.get("permission_boundary"), "env.tool")
 
     def test_cli_payload_help_requires_inline_json_object_string(self) -> None:
         import subprocess

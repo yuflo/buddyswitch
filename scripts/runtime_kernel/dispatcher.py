@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-import env_store
+from env.repos import runtime_files
 from env.tools import responses as tool_responses
 from env.tools.router import dispatch_env_tool_request
 from env_manifest import ManifestError, load_manifest
@@ -167,7 +167,7 @@ def _ping_dispatch(*, session: RuntimeBrokerSession, instance_record: dict[str, 
     instance_id = str(instance_record["instance_id"]).strip()
     active_buddy = str(instance_record["buddy"]).strip()
     runtime_root = Path.cwd().resolve(strict=False)
-    env_store_root = env_store.ROOT.resolve(strict=False)
+    runtime_state_root = runtime_files.ROOT.resolve(strict=False)
     return {
         "ok": True,
         "protocol": "buddyswitch-runtime-broker/v2",
@@ -177,8 +177,8 @@ def _ping_dispatch(*, session: RuntimeBrokerSession, instance_record: dict[str, 
         "socket_path": str(session.socket_path) if session.socket_path is not None else None,
         "runtime_root": str(runtime_root),
         "cwd": str(runtime_root),
-        "env_store_root": str(env_store_root),
-        "runtime_workspace": env_store.is_runtime_workspace(env_store.ROOT),
+        "env_store_root": str(runtime_state_root),
+        "runtime_workspace": runtime_files.is_runtime_workspace(runtime_files.ROOT),
         "runtime_mode": "runless",
     }
 

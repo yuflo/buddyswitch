@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,7 +14,8 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_store  # noqa: E402
+import env_legacy_store as env_store  # noqa: E402
+from env.repos import runtime_files  # noqa: E402
 
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -89,6 +91,67 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             with self.subTest(field=retired_field):
                 with self.assertRaises(ValueError):
                     env_store.validate_artifact(payload)
+
+
+class RuntimeRootFoundationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_runtime_root_override_routes_object_writes_to_runtime_workspace(self) -> None:
+        runtime_root = self.runtime_root.resolve(strict=False)
+        self.assertEqual(env_store.ROOT, runtime_root)
+        self.assertEqual(env_store.STATE_ROOT, runtime_root)
+        self.assertEqual(env_store.runtime_workspace_root(), runtime_root)
+
+        artifact_id = f"art-pm-runtime-root-{uuid.uuid4().hex[:8]}-r1"
+        env_store.create_artifact_revision(
+            artifact_id=artifact_id,
+            title="Runtime Root",
+            summary="root override proof",
+            body="runtime root write path",
+            template="note",
+            supersedes_artifact_id=None,
+            created_by="pm",
+            authors=["pm"],
+            source_refs=[{"type": "note", "label": "seed"}],
+        )
+
+        runtime_path = self._runtime_path(f"buddyswitch/objects/artifacts/{artifact_id}.json")
+        source_checkout_path = ROOT / "buddyswitch" / "objects" / "artifacts" / f"{artifact_id}.json"
+        self.assertTrue(runtime_path.exists())
+        self.assertFalse(source_checkout_path.exists())
+
+    def test_runtime_root_override_auto_syncs_env_store_without_manual_refresh(self) -> None:
+        original_runtime_root = self.runtime_root.resolve(strict=False)
+        alternate_runtime_root = self._runtime_path("runtime-root-auto-sync")
+        alternate_runtime_root.mkdir(parents=True, exist_ok=True)
+        (alternate_runtime_root / "AGENTS.md").write_text(
+            runtime_files.RUNTIME_WORKSPACE_AGENTS_HEADER + "\n",
+            encoding="utf-8",
+        )
+
+        try:
+            runtime_files.set_runtime_root_override(alternate_runtime_root)
+            self.assertEqual(env_store.ROOT, alternate_runtime_root.resolve(strict=False))
+            self.assertEqual(env_store.STATE_ROOT, alternate_runtime_root.resolve(strict=False))
+            self.assertEqual(env_store.runtime_workspace_root(), alternate_runtime_root.resolve(strict=False))
+
+            artifact_id = f"art-pm-auto-sync-{uuid.uuid4().hex[:8]}-r1"
+            env_store.create_artifact_revision(
+                artifact_id=artifact_id,
+                title="Auto Sync Runtime Root",
+                summary="listener proof",
+                body="runtime root listener write path",
+                template="note",
+                supersedes_artifact_id=None,
+                created_by="pm",
+                authors=["pm"],
+                source_refs=[{"type": "note", "label": "seed"}],
+            )
+
+            alternate_path = alternate_runtime_root / "buddyswitch" / "objects" / "artifacts" / f"{artifact_id}.json"
+            original_path = original_runtime_root / "buddyswitch" / "objects" / "artifacts" / f"{artifact_id}.json"
+            self.assertTrue(alternate_path.exists())
+            self.assertFalse(original_path.exists())
+        finally:
+            runtime_files.set_runtime_root_override(original_runtime_root)
 
 
 class ArtifactCompatibilityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):

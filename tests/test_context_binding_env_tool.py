@@ -14,7 +14,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_store  # noqa: E402
+import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -167,6 +167,16 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(affordances, dict)
         self.assertEqual(set(affordances), _EXPECTED_TOOLS)
         self.assertNotIn("handoff", affordances)
+        for tool_name in ("track", "artifact", "task", "buddybox", "context"):
+            with self.subTest(tool=tool_name):
+                compact = affordances.get(tool_name)
+                self.assertIsInstance(compact, dict, msg=summary)
+                assert isinstance(compact, dict)
+                self.assertIsInstance(compact.get("capability"), str, msg=compact)
+                self.assertIsInstance(compact.get("returns"), str, msg=compact)
+                self.assertIsInstance(compact.get("state_effect"), str, msg=compact)
+                self.assertIsInstance(compact.get("when_to_use"), list, msg=compact)
+                self.assertIsInstance(compact.get("when_not_to_use"), list, msg=compact)
 
     def test_context_candidate_tracks_use_owner_buddy_only(self) -> None:
         self._seed_context_state()

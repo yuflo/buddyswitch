@@ -110,6 +110,19 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("published_material", changes)
         self.assertIn("material_added", changes)
 
+        context_summary = self._dispatch(
+            buddy="pm",
+            tool="context",
+            action="summarize",
+            args={"track_id": "track-runless-flow", "limit": 5},
+        )
+        self.assertTrue(context_summary.get("ok"), msg=context_summary)
+        affordances = context_summary.get("tool_affordances")
+        self.assertIsInstance(affordances, dict, msg=context_summary)
+        assert isinstance(affordances, dict)
+        for tool_name in ("track", "artifact", "buddybox", "context"):
+            self.assertIn(tool_name, affordances)
+
         opened = self._dispatch(
             buddy="pm",
             tool="track",

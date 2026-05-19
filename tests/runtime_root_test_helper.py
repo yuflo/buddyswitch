@@ -14,9 +14,10 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_store  # noqa: E402
+import env_legacy_store as env_store  # noqa: E402
 import turn_runtime  # noqa: E402
 import workspace_data  # noqa: E402
+from env.repos import runtime_files  # noqa: E402
 
 
 RUNTIME_WORKSPACE_HEADER = "# BuddySwitch Runtime Workspace\n"
@@ -49,35 +50,9 @@ class RuntimeWorkspaceSandbox:
             encoding="utf-8",
         )
 
-        objects_root = self.root / "buddyswitch" / "objects"
-        content_root = self.root / "buddyswitch" / "content"
-        local_root = self.root / "buddyswitch" / "local"
-        workspace_root = self.root
-
-        def _runtime_workspace_root(instance_payload=None):  # type: ignore[no-untyped-def]
-            if isinstance(instance_payload, dict):
-                candidate = instance_payload.get("workspace_dir")
-                if isinstance(candidate, str) and candidate.strip():
-                    return Path(candidate.strip()).expanduser().resolve(strict=False)
-            return workspace_root
-
-        def _buddybox_local_dir(instance_payload=None):  # type: ignore[no-untyped-def]
-            return _runtime_workspace_root(instance_payload) / "buddyswitch" / "local" / "buddybox"
+        runtime_files.set_runtime_root_override(self.root)
 
         patches = [
-            patch.object(env_store, "ROOT", self.root),
-            patch.object(env_store, "STATE_ROOT", self.root),
-            patch.object(env_store, "OBJECTS_ROOT", objects_root),
-            patch.object(env_store, "TRACKS_DIR", objects_root / "tracks"),
-            patch.object(env_store, "TASKS_DIR", objects_root / "tasks"),
-            patch.object(env_store, "ARTIFACT_OBJECTS_DIR", objects_root / "artifacts"),
-            patch.object(env_store, "MESSAGES_DIR", objects_root / "messages"),
-            patch.object(env_store, "COMMENTS_DIR", objects_root / "comments"),
-            patch.object(env_store, "CONTENT_ROOT", content_root),
-            patch.object(env_store, "LOCAL_ROOT", local_root),
-            patch.object(env_store, "BUDDYBOX_LOCAL_DIR", local_root / "buddybox"),
-            patch.object(env_store, "runtime_workspace_root", _runtime_workspace_root),
-            patch.object(env_store, "buddybox_local_dir", _buddybox_local_dir),
             patch.object(turn_runtime, "ROOT", self.root),
             patch.object(workspace_data, "ROOT", self.root),
             patch.object(workspace_data, "rel", _relative_to_runtime_or_repo),
@@ -91,6 +66,7 @@ class RuntimeWorkspaceSandbox:
         for patcher in reversed(self._patchers):
             patcher.stop()
         self._patchers = []
+        runtime_files.reset_runtime_root_override()
         if self._tmp_dir is not None:
             self._tmp_dir.cleanup()
         self._tmp_dir = None

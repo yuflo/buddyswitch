@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import sys
@@ -31,6 +32,8 @@ PERMISSION_PROFILE = "buddyswitch-runtime"
 
 
 class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    _DOMAIN_CROSS_OBJECT_ALLOWLIST = {"publication", "comment_targets", "artifact_visibility"}
+
     def _patch_config(
         self,
         *,
@@ -222,6 +225,111 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("permission_boundary"), "request-payload")
         self.assertFalse(project_probe.exists())
         self.assertFalse(raw_probe.exists())
+
+    def test_env_services_direct_file_writes_are_explicitly_allowlisted(self) -> None:
+        completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                r"\.mkdir\(|\.write_text\(|\.write_bytes\(|\.unlink\(|os\.replace\(|NamedTemporaryFile\(",
+                "scripts/env/services",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        allowed_snippets = {
+            "scripts/env/services/buddybox.py": [
+                "root.mkdir(parents=True, exist_ok=True)",
+                "resolved.parent.mkdir(parents=True, exist_ok=True)",
+                "NamedTemporaryFile(\"wb\", delete=False, dir=resolved.parent)",
+                "os.replace(temp_name, resolved)",
+                "resolved.unlink()",
+            ]
+        }
+        disallowed: list[str] = []
+        for line in hits:
+            path = line.split(":", 1)[0]
+            snippets = allowed_snippets.get(path, [])
+            if any(snippet in line for snippet in snippets):
+                continue
+            disallowed.append(line)
+        self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+
+    def test_object_repo_sibling_imports_are_restricted_to_runtime_files(self) -> None:
+        repo_files = sorted(path for path in ROOT.glob("scripts/**/repos/*.py") if path.name != "__init__.py")
+        if not repo_files:
+            self.skipTest("No scripts/**/repos/*.py modules exist in this migration stage; repo boundary scan deferred.")
+        violations: list[str] = []
+        for path in repo_files:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ImportFrom) or node.level <= 0:
+                    continue
+                if node.module is None:
+                    imported_roots = {alias.name.split(".", 1)[0] for alias in node.names}
+                    if imported_roots != {"runtime_files"}:
+                        violations.append(
+                            f"{path.relative_to(ROOT)}:{node.lineno}: sibling import must target runtime_files only"
+                        )
+                    continue
+                target = node.module.split(".", 1)[0]
+                if target != "runtime_files":
+                    violations.append(
+                        f"{path.relative_to(ROOT)}:{node.lineno}: sibling import '{node.module}' is not runtime_files"
+                    )
+        self.assertEqual(violations, [], msg="\n".join(violations))
+
+    def test_domain_cross_object_imports_are_allowlisted(self) -> None:
+        domain_files = sorted(path for path in ROOT.glob("scripts/**/domain/*.py") if path.name != "__init__.py")
+        if not domain_files:
+            self.skipTest("No scripts/**/domain/*.py modules exist in this migration stage; domain boundary scan deferred.")
+        violations: list[str] = []
+        for path in domain_files:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ImportFrom):
+                    continue
+                module = node.module or ""
+                if "domain." not in module:
+                    continue
+                target = module.split("domain.", 1)[1].split(".", 1)[0]
+                if target and target not in self._DOMAIN_CROSS_OBJECT_ALLOWLIST:
+                    violations.append(
+                        f"{path.relative_to(ROOT)}:{node.lineno}: domain cross-object import '{target}' is not allowlisted"
+                    )
+        self.assertEqual(violations, [], msg="\n".join(violations))
+
+    def test_skills_and_boundary_guides_do_not_copy_payload_or_schema_tables(self) -> None:
+        completed = subprocess.run(
+            [
+                "rg",
+                "-uuu",
+                "-n",
+                "--glob",
+                "*.md",
+                (
+                    "payload_fields"
+                    + "|action_semantics"
+                    + "|operation_semantics"
+                    + "|\\|\\s*tool\\s*\\|\\s*action\\s*\\|\\s*payload"
+                    + "|\\|\\s*action\\s*\\|\\s*payload"
+                ),
+                "buddyswitch/skills",
+                "framework/contracts",
+                "tools/launcher/assets/buddies",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(hits, [], msg="\n".join(hits))
 
 
 if __name__ == "__main__":

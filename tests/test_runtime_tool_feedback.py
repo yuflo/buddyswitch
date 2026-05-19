@@ -15,12 +15,53 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_manifest  # noqa: E402
-import env_store  # noqa: E402
+import env_legacy_store as env_store  # noqa: E402
 from env.tools import router as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 
 class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    _ACTION_PLACEHOLDERS = {
+        "tbd",
+        "todo",
+        "n/a",
+        "na",
+        "none",
+        "unknown",
+        "placeholder",
+    }
+
+    @staticmethod
+    def _meaningful_text_entries(value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        rows: list[str] = []
+        for entry in value:
+            if not isinstance(entry, str):
+                continue
+            normalized = entry.strip()
+            if not normalized:
+                continue
+            lowered = normalized.lower()
+            if lowered in RuntimeToolFeedbackTests._ACTION_PLACEHOLDERS:
+                continue
+            rows.append(normalized)
+        return rows
+
+    @staticmethod
+    def _meaningful_tool_action_options(value: object) -> list[dict[str, str]]:
+        if not isinstance(value, list):
+            return []
+        rows: list[dict[str, str]] = []
+        for entry in value:
+            if not isinstance(entry, dict):
+                continue
+            tool = entry.get("tool")
+            action = entry.get("action")
+            if isinstance(tool, str) and tool.strip() and isinstance(action, str) and action.strip():
+                rows.append({"tool": tool.strip(), "action": action.strip()})
+        return rows
+
     def setUp(self) -> None:
         super().setUp()
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
@@ -53,9 +94,33 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("impact", payload)
         self.assertIn("retryable", payload)
         self.assertIn("retry_guidance", payload)
-        self.assertIn("allowed_next_actions", payload)
+        self.assertTrue(str(payload.get("permission_boundary", "")).strip(), msg=payload)
+        self.assertTrue(str(payload.get("why_blocked", "")).strip(), msg=payload)
+        self.assertTrue(str(payload.get("impact", "")).strip(), msg=payload)
+        self.assertTrue(str(payload.get("retry_guidance", "")).strip(), msg=payload)
+        self.assertIn("allowed_next_actions", payload, msg=payload)
+        self.assertIsInstance(payload.get("allowed_next_actions"), list, msg=payload)
+        if "allowed_next_action_options" in payload:
+            self.assertIsInstance(payload.get("allowed_next_action_options"), list, msg=payload)
+        next_actions = self._meaningful_text_entries(payload.get("allowed_next_actions"))
+        next_options = self._meaningful_tool_action_options(payload.get("allowed_next_action_options"))
+        self.assertTrue(
+            bool(next_actions) or bool(next_options),
+            msg=payload,
+        )
         self.assertFalse(payload.get("state_changed"), msg=payload)
         self.assertEqual(payload.get("durability"), "none", msg=payload)
+
+    def _assert_write_success_contract(self, payload: dict[str, object]) -> None:
+        self.assertTrue(payload.get("ok"), msg=payload)
+        self.assertTrue(payload.get("state_changed"), msg=payload)
+        self.assertIsInstance(payload.get("durability"), str, msg=payload)
+        self.assertNotEqual(payload.get("durability"), "none", msg=payload)
+        self.assertIsInstance(payload.get("state_changes"), list, msg=payload)
+        self.assertGreater(len(payload.get("state_changes", [])), 0, msg=payload)
+        has_next_actions = isinstance(payload.get("allowed_next_actions"), list) and len(payload["allowed_next_actions"]) > 0
+        has_next_options = isinstance(payload.get("allowed_next_action_options"), list) and len(payload["allowed_next_action_options"]) > 0
+        self.assertTrue(has_next_actions or has_next_options, msg=payload)
 
     def test_buddybox_traversal_rejection_has_structured_feedback(self) -> None:
         payload = self._dispatch(
@@ -64,7 +129,15 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="write",
             args={"logical_name": "../escape.txt", "content": "x"},
         )
-        self._assert_rejection_contract(payload)
+        self.assertFalse(payload.get("ok"), msg=payload)
+        self.assertEqual(payload.get("permission_boundary"), "logical-name")
+        self.assertTrue(str(payload.get("why_blocked", "")).strip(), msg=payload)
+        self.assertTrue(str(payload.get("impact", "")).strip(), msg=payload)
+        self.assertTrue(str(payload.get("retry_guidance", "")).strip(), msg=payload)
+        self.assertIs(payload.get("state_changed"), False, msg=payload)
+        self.assertEqual(payload.get("durability"), "none", msg=payload)
+        self.assertIsInstance(payload.get("allowed_next_actions"), list, msg=payload)
+        self.assertEqual(payload.get("allowed_next_actions"), [], msg=payload)
         self.assertEqual(payload["permission_boundary"], "logical-name")
         self.assertFalse(payload["state_changed"])
 
@@ -226,6 +299,48 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(env_store.get_track("track-feedback-a"), before_track_a)
         self.assertEqual(env_store.get_track("track-feedback-b"), before_track_b)
         self.assertEqual(env_store.get_artifact("art-feedback-r1"), before_artifact)
+
+    def test_write_actions_report_state_change_durability_state_changes_and_next_steps(self) -> None:
+        track = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="create",
+            args={
+                "track_id": "track-feedback-write-contract",
+                "title": "write contract",
+                "outcome": "verify write response fields",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
+            },
+        )
+        self._assert_write_success_contract(track)
+
+        artifact = self._dispatch(
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-feedback-write-contract-r1",
+                "title": "write contract",
+                "summary": "verify",
+                "template": "brief",
+                "body": "verify",
+            },
+        )
+        self._assert_write_success_contract(artifact)
+
+        publish = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": "track-feedback-write-contract",
+                "artifact_id": "art-feedback-write-contract-r1",
+                "label": "brief",
+                "summary": "publish",
+            },
+        )
+        self._assert_write_success_contract(publish)
 
     def test_rejections_expose_impact_retry_and_recovery_fields_across_boundaries(self) -> None:
         payload_cases = [

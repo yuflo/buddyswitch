@@ -6,8 +6,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, TypedDict
 
-import env_store
-from env.services import artifact_visibility
+from env.domain import artifact_visibility as artifact_visibility_domain
+from env.repos import artifacts as artifact_repo
 from env.services import source_refs as source_ref_service
 from env.tools import responses as tool_responses
 
@@ -128,7 +128,7 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str
 
 
 def _artifact_response_row(artifact: dict[str, Any], active_buddy: str) -> dict[str, Any]:
-    return artifact_visibility.artifact_summary_row(artifact, active_buddy)
+    return artifact_visibility_domain.artifact_summary_row(artifact, active_buddy)
 
 
 def get_artifact_for_active_buddy(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
@@ -143,11 +143,11 @@ def get_artifact_for_active_buddy(*, args: dict[str, Any], context: ArtifactServ
         return _reject_payload(action=action, active_buddy=active_buddy, message="artifact_id is required")
     artifact_id = artifact_id.strip()
 
-    artifact = env_store.get_artifact(artifact_id)
+    artifact = artifact_repo.get_artifact(artifact_id)
     if artifact is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {artifact_id}")
 
-    decision = artifact_visibility.artifact_read_decision(artifact, active_buddy)
+    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_buddy)
     if not bool(decision.get("allowed")):
         return _reject_scope(
             action=action,
@@ -207,11 +207,11 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
         return _reject_payload(action=action, active_buddy=active_buddy, message="summary must be a string")
     if not isinstance(body, str) or not body.strip():
         return _reject_payload(action=action, active_buddy=active_buddy, message="body is required")
-    if not isinstance(template, str) or template not in env_store.VALID_ARTIFACT_TEMPLATES:
+    if not isinstance(template, str) or template not in artifact_repo.VALID_ARTIFACT_TEMPLATES:
         return _reject_payload(
             action=action,
             active_buddy=active_buddy,
-            message=f"template must be one of {', '.join(env_store.VALID_ARTIFACT_TEMPLATES)}",
+            message=f"template must be one of {', '.join(artifact_repo.VALID_ARTIFACT_TEMPLATES)}",
         )
     if supersedes_artifact_id is not None and (not isinstance(supersedes_artifact_id, str) or not supersedes_artifact_id.strip()):
         return _reject_payload(
@@ -253,7 +253,7 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
         return _reject_payload(action=action, active_buddy=active_buddy, message="artifact_id must be a non-empty string")
 
     try:
-        artifact = env_store.create_artifact_revision(
+        artifact = artifact_repo.create_artifact_revision(
             artifact_id=artifact_id.strip() if isinstance(artifact_id, str) and artifact_id.strip() else None,
             title=title.strip(),
             created_by=active_buddy,
@@ -319,7 +319,7 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
         return _reject_payload(action=action, active_buddy=active_buddy, message="artifact_id is required")
     artifact_id = artifact_id.strip()
 
-    artifact = env_store.get_artifact(artifact_id)
+    artifact = artifact_repo.get_artifact(artifact_id)
     if artifact is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {artifact_id}")
     if artifact.get("created_by") != active_buddy:
@@ -339,11 +339,11 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
         return _reject_payload(action=action, active_buddy=active_buddy, message="title must be a non-empty string")
     if "summary" in patch and not isinstance(patch["summary"], str):
         return _reject_payload(action=action, active_buddy=active_buddy, message="summary must be a string")
-    if "template" in patch and (not isinstance(patch["template"], str) or patch["template"] not in env_store.VALID_ARTIFACT_TEMPLATES):
+    if "template" in patch and (not isinstance(patch["template"], str) or patch["template"] not in artifact_repo.VALID_ARTIFACT_TEMPLATES):
         return _reject_payload(
             action=action,
             active_buddy=active_buddy,
-            message=f"template must be one of {', '.join(env_store.VALID_ARTIFACT_TEMPLATES)}",
+            message=f"template must be one of {', '.join(artifact_repo.VALID_ARTIFACT_TEMPLATES)}",
         )
     if "body" in patch and (not isinstance(patch["body"], str) or not patch["body"].strip()):
         return _reject_payload(action=action, active_buddy=active_buddy, message="body must be a non-empty string")
@@ -381,7 +381,7 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
         return _reject_payload(action=action, active_buddy=active_buddy, message="at least one metadata field is required")
 
     try:
-        updated = env_store.update_artifact(artifact_id, patch)
+        updated = artifact_repo.update_artifact(artifact_id, patch)
     except ValueError as exc:
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 

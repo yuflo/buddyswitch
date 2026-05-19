@@ -74,6 +74,34 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("payload file path", text)
                 self.assertNotIn("payload file", text)
 
+    def test_shared_tool_skills_route_exact_fields_to_runtime_discovery(self) -> None:
+        skill_paths = [
+            ROOT / "buddyswitch/skills/shared/task-tool/SKILL.md",
+            ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
+            ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
+            ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md",
+            ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
+            ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
+        ]
+        for path in skill_paths:
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertIn("context.get.tool_catalog", text)
+                self.assertIn("turn_runtime.py status", text)
+
+    def test_shared_tool_skills_do_not_embed_payload_or_return_schema_blocks(self) -> None:
+        skill_paths = [
+            ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
+            ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
+            ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md",
+        ]
+        for path in skill_paths:
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertNotIn("**payload:**", text)
+                self.assertNotIn("**returns:**", text)
+                self.assertNotIn("## payload examples", text)
+
     def test_message_comment_shared_tool_skills_stay_atomic(self) -> None:
         """MCT-SURF-006: Message/comment skills don't teach non-goal features."""
         msg_skill = (ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md").read_text(encoding="utf-8").lower()

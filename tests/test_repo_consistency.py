@@ -14,6 +14,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+import env_store  # noqa: E402
 import turn_runtime  # noqa: E402
 from env.tools import contracts as tool_contracts  # noqa: E402
 
@@ -42,6 +43,52 @@ class RepoConsistencyTests(unittest.TestCase):
         )
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         return [line for line in completed.stdout.splitlines() if line.strip()]
+
+    def test_active_runtime_modules_do_not_import_env_store(self) -> None:
+        completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                r"(^|\\s)(import\\s+env_store|from\\s+env_store\\s+import)",
+                "scripts/turn_runtime.py",
+                "scripts/env/repos",
+                "scripts/env/services",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_env_store_module_is_runtime_root_compat_only(self) -> None:
+        retired_api = (
+            "create_track",
+            "update_track",
+            "create_task",
+            "update_task",
+            "create_artifact_revision",
+            "update_artifact",
+            "publish_track_material",
+            "publish_track_proof",
+            "append_track_update",
+            "create_message",
+            "create_comment",
+            "list_tracks",
+            "list_tasks",
+            "list_artifacts",
+            "get_track",
+            "get_task",
+            "get_artifact",
+            "save_track",
+            "save_task",
+            "save_artifact",
+        )
+        for symbol in retired_api:
+            with self.subTest(symbol=symbol):
+                self.assertFalse(hasattr(env_store, symbol), msg=f"env_store unexpectedly exposes {symbol}")
 
     def test_env_tool_surface_uses_track_page_actions(self) -> None:
         env_tools = turn_runtime._build_env_tools_desc()
@@ -202,6 +249,55 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         hits = [line for line in completed.stdout.splitlines() if line.strip()]
         self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_skill_and_contract_texts_do_not_copy_payload_field_or_schema_tables(self) -> None:
+        targets = [
+            "buddyswitch/skills",
+            "framework/contracts",
+            "tools/launcher/assets/buddies",
+        ]
+        completed = subprocess.run(
+            [
+                "rg",
+                "-uuu",
+                "-n",
+                "--glob",
+                "*.md",
+                (
+                    "payload_fields"
+                    + "|action_semantics"
+                    + "|operation_semantics"
+                    + "|\\|\\s*tool\\s*\\|\\s*action\\s*\\|\\s*payload"
+                    + "|\\|\\s*action\\s*\\|\\s*payload"
+                    + "|\\*\\*payload:\\*\\*"
+                    + "|\\*\\*returns:\\*\\*"
+                    + "|##\\s*payload\\s+examples"
+                ),
+                *targets,
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_contracts_and_buddy_agents_point_to_runtime_discovery(self) -> None:
+        for name in ("pm", "design", "dev", "market", "test"):
+            path = ROOT / "framework" / "contracts" / f"{name}.md"
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(contract=name):
+                self.assertIn("context summarize", text)
+                self.assertIn("context get", text)
+
+        for buddy in ("market", "pm", "design", "dev", "test"):
+            path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(buddy=buddy):
+                self.assertIn("context summarize", text)
+                self.assertIn("context get", text)
 
 
 if __name__ == "__main__":

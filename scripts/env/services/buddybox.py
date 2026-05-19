@@ -4,14 +4,10 @@
 from __future__ import annotations
 
 import base64
-import mimetypes
-import os
-import tempfile
-from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
-import env_store
+from env.repos import buddybox_files as buddybox_repo
 from env.tools import responses as tool_responses
 
 
@@ -48,126 +44,8 @@ def _manifest_buddy_ids(context: BuddyboxServiceContext) -> set[str]:
     return buddies
 
 
-def normalize_logical_name(value: Any, *, active_buddy: str, buddy_ids: set[str]) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError("logical_name must be a non-empty string")
-    normalized = value.replace("\\", "/").strip()
-    if normalized.startswith("/"):
-        raise ValueError("logical_name must be relative")
-    parts = [part for part in normalized.split("/") if part not in {"", "."}]
-    if not parts:
-        raise ValueError("logical_name must be non-empty")
-    if any(part == ".." for part in parts):
-        raise ValueError("logical_name must not include '..' traversal")
-    if parts[0] in buddy_ids:
-        raise ValueError(
-            "logical_name must be relative to the active buddy private file capability and must not include a buddy prefix"
-        )
-    return "/".join(parts)
-
-
-def normalize_logical_prefix(value: Any, *, active_buddy: str, buddy_ids: set[str]) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError("logical_name must be a string when provided")
-    if not value.strip():
-        return None
-    return normalize_logical_name(value, active_buddy=active_buddy, buddy_ids=buddy_ids)
-
-
-def buddybox_base_dir(context: BuddyboxServiceContext) -> Path:
-    return env_store.buddybox_local_dir(context["instance_payload"])
-
-
-def buddybox_root(context: BuddyboxServiceContext) -> Path:
-    return buddybox_base_dir(context) / context["active_buddy"]
-
-
-def _resolve_path(logical_name: str, context: BuddyboxServiceContext) -> Path:
-    return buddybox_root(context) / logical_name
-
-
-def _path_is_within(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return False
-    return True
-
-
-def _resolved_active_root(context: BuddyboxServiceContext) -> Path:
-    return buddybox_root(context).resolve(strict=False)
-
-
-def _resolved_path_stays_in_active_root(path: Path, *, context: BuddyboxServiceContext) -> bool:
-    try:
-        resolved = path.resolve(strict=True)
-    except FileNotFoundError:
-        return False
-    return _path_is_within(resolved, _resolved_active_root(context))
-
-
-def _write_parent_stays_in_active_root(path: Path, *, context: BuddyboxServiceContext) -> bool:
-    parent = path.parent.resolve(strict=False)
-    return _path_is_within(parent, _resolved_active_root(context))
-
-
-def _updated_at_from_stat(path: Path) -> str:
-    stat = path.stat()
-    return datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds")
-
-
-def _file_summary(path: Path, *, logical_name: str, active_buddy: str) -> dict[str, Any]:
-    stat = path.stat()
-    content_type, _ = mimetypes.guess_type(path.name)
-    return {
-        "logical_name": logical_name,
-        "size_bytes": stat.st_size,
-        "updated_at": _updated_at_from_stat(path),
-        "content_type": content_type or "application/octet-stream",
-        "visibility": "active_buddy_private",
-        "private_to_buddy": active_buddy,
-    }
-
-
-def _buddybox_state_summary(root: Path, *, context: BuddyboxServiceContext) -> dict[str, Any]:
-    file_count = 0
-    total_bytes = 0
-    latest_mtime: float | None = None
-    if root.exists():
-        for path in root.rglob("*"):
-            if not path.is_file():
-                continue
-            if not _resolved_path_stays_in_active_root(path, context=context):
-                continue
-            stat = path.stat()
-            file_count += 1
-            total_bytes += stat.st_size
-            if latest_mtime is None or stat.st_mtime > latest_mtime:
-                latest_mtime = stat.st_mtime
-    latest_update_at = (
-        datetime.fromtimestamp(latest_mtime).astimezone().isoformat(timespec="seconds")
-        if latest_mtime is not None
-        else None
-    )
-    return {
-        "file_count": file_count,
-        "total_bytes": total_bytes,
-        "latest_update_at": latest_update_at,
-    }
-
-
 def build_buddybox_desc(active_buddy: str, *, instance_payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    root = env_store.buddybox_local_dir(instance_payload) / active_buddy
-    root.mkdir(parents=True, exist_ok=True)
-    context: BuddyboxServiceContext = {
-        "active_buddy": active_buddy,
-        "instance_id": "",
-        "instance_json": Path("."),
-        "instance_payload": dict(instance_payload or {}),
-        "manifest": {},
-    }
+    root = buddybox_repo.ensure_active_buddy_root(active_buddy=active_buddy, instance_payload=instance_payload)
     return {
         "capability": "private_file_workspace",
         "owner_scope": "active_buddy",
@@ -185,7 +63,7 @@ def build_buddybox_desc(active_buddy: str, *, instance_payload: dict[str, Any] |
             "write_private_binary",
             "delete_private_file",
         ],
-        "state_summary": _buddybox_state_summary(root, context=context),
+        "state_summary": buddybox_repo.state_summary(root=root),
     }
 
 
@@ -521,6 +399,19 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str
     return None
 
 
+def _active_root_for_request(
+    *, action: str, active_buddy: str, context: BuddyboxServiceContext
+) -> tuple[Path | None, dict[str, Any] | None]:
+    try:
+        root = buddybox_repo.ensure_active_buddy_root(
+            active_buddy=active_buddy,
+            instance_payload=context["instance_payload"],
+        )
+    except buddybox_repo.BuddyboxBoundaryError as exc:
+        return None, _reject_boundary(action=action, active_buddy=active_buddy, message=str(exc))
+    return root, None
+
+
 def describe_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxServiceContext) -> dict[str, Any]:
     action = "buddybox.desc"
     active_buddy = context["active_buddy"]
@@ -528,7 +419,10 @@ def describe_buddybox_for_active_buddy(*, args: dict[str, Any], context: Buddybo
     if payload_error is not None:
         return payload_error
 
-    desc = build_buddybox_desc(active_buddy, instance_payload=context["instance_payload"])
+    try:
+        desc = build_buddybox_desc(active_buddy, instance_payload=context["instance_payload"])
+    except buddybox_repo.BuddyboxBoundaryError as exc:
+        return _reject_boundary(action=action, active_buddy=active_buddy, message=str(exc))
     return tool_responses.success(
         tool="buddybox",
         action=action,
@@ -554,33 +448,32 @@ def list_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
     if payload_error is not None:
         return payload_error
 
-    root = buddybox_root(context)
-    root.mkdir(parents=True, exist_ok=True)
+    root, boundary_error = _active_root_for_request(action=action, active_buddy=active_buddy, context=context)
+    if boundary_error is not None:
+        return boundary_error
+    assert root is not None
     buddy_ids = _manifest_buddy_ids(context)
 
     try:
-        prefix = normalize_logical_prefix(args.get("logical_name"), active_buddy=active_buddy, buddy_ids=buddy_ids)
-    except ValueError as exc:
+        prefix = buddybox_repo.normalize_logical_prefix(
+            args.get("logical_name"),
+            active_buddy=active_buddy,
+            buddy_ids=buddy_ids,
+        )
+    except buddybox_repo.BuddyboxLogicalNameError as exc:
         return _reject_logical_name(action=action, active_buddy=active_buddy, message=str(exc))
 
     recursive = bool(args.get("recursive", False))
     limit = args.get("limit")
     limit_value = limit if isinstance(limit, int) and limit > 0 else 200
 
-    files: list[dict[str, Any]] = []
-    walker = root.rglob("*") if recursive else root.glob("*")
-    for path in walker:
-        if not path.is_file():
-            continue
-        if not _resolved_path_stays_in_active_root(path, context=context):
-            continue
-        logical_name = path.relative_to(root).as_posix()
-        if isinstance(prefix, str) and not logical_name.startswith(prefix):
-            continue
-        files.append(_file_summary(path, logical_name=logical_name, active_buddy=active_buddy))
-
-    files.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("logical_name") or "")), reverse=True)
-    files = files[:limit_value]
+    files = buddybox_repo.list_private_file_summaries(
+        root=root,
+        active_buddy=active_buddy,
+        recursive=recursive,
+        limit=limit_value,
+        logical_prefix=prefix,
+    )
 
     return tool_responses.success(
         tool="buddybox",
@@ -607,10 +500,19 @@ def read_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
     if payload_error is not None:
         return payload_error
 
+    root, boundary_error = _active_root_for_request(action=action, active_buddy=active_buddy, context=context)
+    if boundary_error is not None:
+        return boundary_error
+    assert root is not None
+
     buddy_ids = _manifest_buddy_ids(context)
     try:
-        logical_name = normalize_logical_name(args.get("logical_name"), active_buddy=active_buddy, buddy_ids=buddy_ids)
-    except ValueError as exc:
+        logical_name = buddybox_repo.normalize_logical_name(
+            args.get("logical_name"),
+            active_buddy=active_buddy,
+            buddy_ids=buddy_ids,
+        )
+    except buddybox_repo.BuddyboxLogicalNameError as exc:
         return _reject_logical_name(action=action, active_buddy=active_buddy, message=str(exc))
 
     preferred = args.get("encoding")
@@ -625,21 +527,20 @@ def read_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
                 correctable_fields=["encoding"],
             )
 
-    resolved = _resolve_path(logical_name, context)
-    if not resolved.exists() or not resolved.is_file():
+    try:
+        raw, content_type = buddybox_repo.read_private_file(root=root, logical_name=logical_name)
+    except FileNotFoundError:
         return _reject_not_found(action=action, active_buddy=active_buddy, logical_name=logical_name)
-    if not _resolved_path_stays_in_active_root(resolved, context=context):
+    except buddybox_repo.BuddyboxBoundaryError as exc:
         return _reject_boundary(
             action=action,
             active_buddy=active_buddy,
-            message="logical_name resolves outside the active buddy private file root",
+            message=str(exc),
         )
-
-    raw = resolved.read_bytes()
     payload: dict[str, Any] = {
         **_private_file_state_fields(logical_name),
         "size_bytes": len(raw),
-        "content_type": mimetypes.guess_type(resolved.name)[0] or "application/octet-stream",
+        "content_type": content_type,
         "private_to_buddy": active_buddy,
     }
 
@@ -677,10 +578,19 @@ def write_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSe
     if payload_error is not None:
         return payload_error
 
+    root, boundary_error = _active_root_for_request(action=action, active_buddy=active_buddy, context=context)
+    if boundary_error is not None:
+        return boundary_error
+    assert root is not None
+
     buddy_ids = _manifest_buddy_ids(context)
     try:
-        logical_name = normalize_logical_name(args.get("logical_name"), active_buddy=active_buddy, buddy_ids=buddy_ids)
-    except ValueError as exc:
+        logical_name = buddybox_repo.normalize_logical_name(
+            args.get("logical_name"),
+            active_buddy=active_buddy,
+            buddy_ids=buddy_ids,
+        )
+    except buddybox_repo.BuddyboxLogicalNameError as exc:
         return _reject_logical_name(action=action, active_buddy=active_buddy, message=str(exc))
 
     content = args.get("content")
@@ -720,38 +630,29 @@ def write_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSe
                 correctable_fields=["content_base64"],
             )
 
-    resolved = _resolve_path(logical_name, context)
-    if not _write_parent_stays_in_active_root(resolved, context=context):
-        return _reject_boundary(
-            action=action,
-            active_buddy=active_buddy,
-            message="logical_name parent resolves outside the active buddy private file root",
+    try:
+        existed, inferred_content_type = buddybox_repo.write_private_file(
+            root=root,
+            logical_name=logical_name,
+            content=raw,
         )
-
-    resolved.parent.mkdir(parents=True, exist_ok=True)
-    if resolved.exists() and resolved.is_dir():
+    except IsADirectoryError:
         return _reject_payload(
             action=action,
             active_buddy=active_buddy,
             message="logical_name points to a directory, not a file",
             correctable_fields=["logical_name"],
         )
-    if resolved.exists() and not _resolved_path_stays_in_active_root(resolved, context=context):
+    except buddybox_repo.BuddyboxBoundaryError as exc:
         return _reject_boundary(
             action=action,
             active_buddy=active_buddy,
-            message="logical_name resolves outside the active buddy private file root",
+            message=str(exc),
         )
-
-    existed = resolved.exists() and resolved.is_file()
-    with tempfile.NamedTemporaryFile("wb", delete=False, dir=resolved.parent) as handle:
-        handle.write(raw)
-        temp_name = handle.name
-    os.replace(temp_name, resolved)
 
     content_type = args.get("content_type")
     if not isinstance(content_type, str) or not content_type.strip():
-        content_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+        content_type = inferred_content_type
 
     payload = {
         **_private_file_state_fields(logical_name),
@@ -793,31 +694,36 @@ def delete_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxS
     if payload_error is not None:
         return payload_error
 
+    root, boundary_error = _active_root_for_request(action=action, active_buddy=active_buddy, context=context)
+    if boundary_error is not None:
+        return boundary_error
+    assert root is not None
+
     buddy_ids = _manifest_buddy_ids(context)
     try:
-        logical_name = normalize_logical_name(args.get("logical_name"), active_buddy=active_buddy, buddy_ids=buddy_ids)
-    except ValueError as exc:
+        logical_name = buddybox_repo.normalize_logical_name(
+            args.get("logical_name"),
+            active_buddy=active_buddy,
+            buddy_ids=buddy_ids,
+        )
+    except buddybox_repo.BuddyboxLogicalNameError as exc:
         return _reject_logical_name(action=action, active_buddy=active_buddy, message=str(exc))
 
-    resolved = _resolve_path(logical_name, context)
-    if resolved.exists() and resolved.is_dir():
+    try:
+        deleted = buddybox_repo.delete_private_file(root=root, logical_name=logical_name)
+    except IsADirectoryError:
         return _reject_payload(
             action=action,
             active_buddy=active_buddy,
             message="logical_name points to a directory, not a file",
             correctable_fields=["logical_name"],
         )
-    if resolved.exists() and not _resolved_path_stays_in_active_root(resolved, context=context):
+    except buddybox_repo.BuddyboxBoundaryError as exc:
         return _reject_boundary(
             action=action,
             active_buddy=active_buddy,
-            message="logical_name resolves outside the active buddy private file root",
+            message=str(exc),
         )
-
-    deleted = False
-    if resolved.exists() and resolved.is_file():
-        resolved.unlink()
-        deleted = True
 
     payload = {
         **_private_file_state_fields(logical_name),

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import env_store
+import env_legacy_store as env_store
 
 _ALLOWED_TYPES = {
     "artifact",

@@ -13,9 +13,9 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_store  # noqa: E402
+import env_legacy_store as env_store  # noqa: E402
 import workspace_data  # noqa: E402
-from env_store import create_artifact_revision, create_task, create_track  # noqa: E402
+from env_legacy_store import create_artifact_revision, create_task, create_track  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 CONTRACT = ROOT / "framework" / "contracts" / "workspace-projection.json"
@@ -26,6 +26,12 @@ def _load_json(path: Path) -> dict[str, object]:
 
 
 class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def test_projection_integration_surfaces_avoid_env_store_import(self) -> None:
+        for relative in ("scripts/runtime_store/projections.py", "scripts/workspace_data.py"):
+            source = (ROOT / relative).read_text(encoding="utf-8")
+            self.assertNotIn("import env_store", source, msg=relative)
+            self.assertNotIn("from env_store import", source, msg=relative)
+
     def test_workspace_projection_contract_excludes_handoffs(self) -> None:
         contract = _load_json(CONTRACT)
         top_keys = set(contract["top_level_key_order"])

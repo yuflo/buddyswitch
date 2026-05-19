@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, TypedDict
 
-import env_store
+import env_legacy_store as env_store
 from env.services import artifact_visibility
 from env.services import buddybox as buddybox_service
 from env.tools import contracts as tool_contracts

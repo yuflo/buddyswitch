@@ -14,7 +14,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_manifest  # noqa: E402
-import env_store  # noqa: E402
+import env_legacy_store as env_store  # noqa: E402
 from env.tools import router as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -234,6 +234,29 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         current_map = {str(row.get("artifact_id")): bool(row.get("current")) for row in persisted_rows}
         self.assertFalse(current_map["art-pm-brief-r1"])
         self.assertTrue(current_map["art-pm-brief-r2"])
+
+        context_full = self._dispatch(
+            buddy="dev",
+            tool="context",
+            action="get",
+            args={"track_id": track_id, "limit": 5},
+        )
+        self.assertTrue(context_full.get("ok"), msg=context_full)
+        tool_catalog = context_full.get("tool_catalog")
+        self.assertIsInstance(tool_catalog, dict, msg=context_full)
+        assert isinstance(tool_catalog, dict)
+        track_catalog = tool_catalog.get("track")
+        self.assertIsInstance(track_catalog, dict, msg=tool_catalog)
+        assert isinstance(track_catalog, dict)
+        track_ops = track_catalog.get("operations")
+        self.assertIsInstance(track_ops, list, msg=track_catalog)
+        assert isinstance(track_ops, list)
+        self.assertIn("add_material", track_ops)
+        op_semantics = context_full.get("operation_semantics")
+        self.assertIsInstance(op_semantics, dict, msg=context_full)
+        assert isinstance(op_semantics, dict)
+        self.assertIn("track.add_material", op_semantics)
+        self.assertIn("artifact.get", op_semantics)
 
         for artifact_id in ("art-pm-brief-r1", "art-pm-brief-r2", "art-design-r1", "art-dev-r1", "art-test-proof-r1"):
             read = self._dispatch(buddy="dev", tool="artifact", action="get", args={"artifact_id": artifact_id})

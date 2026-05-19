@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import env_store
+import env_legacy_store as env_store
 
 
 def _track_current_material_ref(track: dict[str, Any], artifact_id: str) -> dict[str, Any] | None:

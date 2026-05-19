@@ -14,7 +14,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_store  # noqa: E402
+import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -23,6 +23,30 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    _OBJECT_DIRS = ("tracks", "tasks", "artifacts", "comments", "messages")
+
+    def _objects_state(self) -> dict[str, dict[str, object]]:
+        snapshot: dict[str, dict[str, object]] = {}
+        for object_dir in self._OBJECT_DIRS:
+            root = self._runtime_path(f"buddyswitch/objects/{object_dir}")
+            files: dict[str, str] = {}
+            if root.is_dir():
+                for path in sorted(root.glob("*.json")):
+                    files[path.name] = path.read_text(encoding="utf-8")
+            snapshot[object_dir] = {
+                "exists": root.exists(),
+                "files": files,
+            }
+        return snapshot
+
+    def _assert_non_message_dirs_unchanged(
+        self,
+        before: dict[str, dict[str, object]],
+        after: dict[str, dict[str, object]],
+    ) -> None:
+        for object_dir in ("tracks", "tasks", "artifacts", "comments"):
+            self.assertEqual(before[object_dir], after[object_dir], msg=object_dir)
+
     def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
         path = self._runtime_path("instance.json")
         path.write_text(
@@ -87,6 +111,7 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_send_message_creates_inbox_message_for_target_buddy(self):
         instance_json = self._instance_json(instance_id="inst-design-msg", buddy="design")
+        before_state = self._objects_state()
         response = self._dispatch(
             instance_json=instance_json,
             instance_id="inst-design-msg",
@@ -95,7 +120,10 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="send",
             args={"to_buddy": "dev", "content": "Please inspect the prototype."},
         )
+        after_state = self._objects_state()
         self.assertTrue(response.get("ok"), msg=response)
+        self._assert_non_message_dirs_unchanged(before_state, after_state)
+        self.assertNotEqual(before_state["messages"], after_state["messages"])
         self.assertIn("message_id", response)
         self.assertIn("message", response)
         msg = response["message"]
@@ -168,6 +196,7 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_message_list_is_read_only(self):
         env_store.create_message(from_buddy="design", to_buddy="dev", content="Design to Dev")
         instance_json = self._instance_json(instance_id="inst-dev-ro", buddy="dev")
+        before_state = self._objects_state()
 
         # List twice and verify no state change
         response1 = self._dispatch(
@@ -186,12 +215,18 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="list",
             args={},
         )
+        after_state = self._objects_state()
         self.assertTrue(response1.get("ok"), msg=response1)
         self.assertTrue(response2.get("ok"), msg=response2)
         self.assertIs(response1.get("state_changed"), False)
+        self.assertEqual(before_state, after_state)
+        for row in response1.get("messages", []):
+            self.assertNotIn("status", row)
+            self.assertNotIn("read_at", row)
 
     def test_message_send_rejects_self_send(self):
         instance_json = self._instance_json(instance_id="inst-dev-self", buddy="dev")
+        before_state = self._objects_state()
         response = self._dispatch(
             instance_json=instance_json,
             instance_id="inst-dev-self",
@@ -200,9 +235,11 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             action="send",
             args={"to_buddy": "dev", "content": "self"},
         )
+        after_state = self._objects_state()
         self.assertFalse(response.get("ok"), msg=response)
         boundary = response.get("permission_boundary")
         self.assertEqual(boundary, "message.self_send")
+        self.assertEqual(before_state, after_state)
 
     def test_message_send_rejects_unknown_target_buddy(self):
         instance_json = self._instance_json(instance_id="inst-dev-unknown", buddy="dev")

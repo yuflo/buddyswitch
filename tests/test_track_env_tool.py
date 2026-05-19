@@ -9,13 +9,14 @@ import unittest
 import uuid
 from copy import deepcopy
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import env_store  # noqa: E402
+import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -514,6 +515,54 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(env_store.get_track("track-material-a"), before_track_a)
         self.assertEqual(env_store.get_track("track-material-b"), before_track_b)
         self.assertEqual(env_store.get_artifact("art-cross-track-material-r1"), before_artifact)
+
+    def test_add_material_write_failure_rejects_without_track_or_artifact_mutation(self) -> None:
+        pm_instance = self._pm_instance()
+        track_id = "track-atomic-material"
+        artifact_id = "art-atomic-material-r1"
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id=track_id).get("ok"))
+        draft = self._create_draft(
+            instance_json=pm_instance,
+            instance_id="inst-pm-track",
+            buddy="pm",
+            artifact_id=artifact_id,
+            template="brief",
+            body="atomic body",
+        )
+        self.assertTrue(draft.get("ok"), msg=draft)
+
+        before_track = deepcopy(env_store.get_track(track_id))
+        before_artifact = deepcopy(env_store.get_artifact(artifact_id))
+        self.assertIsInstance(before_track, dict)
+        self.assertIsInstance(before_artifact, dict)
+        assert isinstance(before_track, dict)
+        assert isinstance(before_artifact, dict)
+
+        original_save_track = env_store.save_track
+        call_count = {"count": 0}
+
+        def _fail_first_track_save(track: dict[str, object]) -> dict[str, object]:
+            if track.get("id") == track_id:
+                call_count["count"] += 1
+                if call_count["count"] == 1:
+                    raise ValueError("simulated track save failure")
+            return original_save_track(track)
+
+        with mock.patch("env_legacy_store.save_track", side_effect=_fail_first_track_save):
+            rejected = self._dispatch(
+                instance_json=pm_instance,
+                instance_id="inst-pm-track",
+                buddy="pm",
+                tool="track",
+                action="add_material",
+                args={"track_id": track_id, "artifact_id": artifact_id, "label": "Brief", "summary": "publish"},
+            )
+
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
+        self.assertEqual(rejected.get("durability"), "none")
+        self.assertEqual(env_store.get_track(track_id), before_track)
+        self.assertEqual(env_store.get_artifact(artifact_id), before_artifact)
 
     def test_add_proof_publishes_existing_draft_updates_close_proof_and_update(self) -> None:
         pm_instance = self._pm_instance()

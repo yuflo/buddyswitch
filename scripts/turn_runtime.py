@@ -17,11 +17,11 @@ import time
 from pathlib import Path
 from typing import Any, Iterator
 
-import env_store
 from env_manifest import DEFAULT_MANIFEST
+from env.repos import runtime_files
 from env.tools import contracts as tool_contracts
 
-ROOT = env_store.ROOT
+ROOT = runtime_files.ROOT
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _RUNTIME_LOCK_TIMEOUT_ENV = "BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"

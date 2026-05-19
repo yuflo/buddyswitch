@@ -6,8 +6,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, TypedDict
 
-import env_store
-from env.services import artifact_visibility
+from env.domain import comment_targets as comment_target_domain
+from env.repos import comments as comment_repo
 from env.tools import responses as tool_responses
 
 
@@ -21,9 +21,6 @@ class CommentServiceContext(TypedDict):
 
 _ADD_FIELDS = {"target_type", "target_id", "artifact_revision_id", "anchor", "content", "mentions", "reply_to"}
 _LIST_FIELDS = {"target_type", "target_id", "status"}
-_RESOLVE_FIELDS = {"comment_id", "reason"}
-_REOPEN_FIELDS = {"comment_id", "reason"}
-_TARGET_TYPES = {"track", "artifact", "artifact_section"}
 
 
 def _allowed(action: str) -> set[str]:
@@ -31,14 +28,16 @@ def _allowed(action: str) -> set[str]:
         return _ADD_FIELDS
     if action == "comment.list":
         return _LIST_FIELDS
-    if action == "comment.resolve":
-        return _RESOLVE_FIELDS
-    if action == "comment.reopen":
-        return _REOPEN_FIELDS
     return set()
 
 
-def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+def _reject_payload(
+    *,
+    action: str,
+    active_buddy: str,
+    message: str,
+    correctable_fields: list[str] | None = None,
+) -> dict[str, Any]:
     return tool_responses.rejection(
         tool="comment",
         action=action,
@@ -53,6 +52,7 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         retryable=True,
         retry_guidance="Fix comment payload fields and retry.",
         allowed_next_actions=["Use comment.list to inspect current threads on the target."],
+        correctable_fields=correctable_fields,
     )
 
 
@@ -64,6 +64,7 @@ def _reject_scope(
     boundary: str,
     message: str,
     retryable: bool = False,
+    correctable_fields: list[str] | None = None,
 ) -> dict[str, Any]:
     return tool_responses.rejection(
         tool="comment",
@@ -79,6 +80,7 @@ def _reject_scope(
         retryable=retryable,
         retry_guidance="Fix target scope and retry." if retryable else "This action cannot be retried as-is.",
         allowed_next_actions=["Use track.get or artifact.get to verify target readability first."],
+        correctable_fields=correctable_fields,
     )
 
 
@@ -99,63 +101,43 @@ def _manifest_buddies(manifest: dict[str, Any]) -> set[str]:
 
 
 def _normalize_target(args: dict[str, Any], active_buddy: str, action: str) -> tuple[str, str] | dict[str, Any]:
-    target_type = args.get("target_type")
-    if not isinstance(target_type, str) or not target_type.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="target_type is required")
-    target_type = target_type.strip()
-    if target_type not in _TARGET_TYPES:
+    try:
+        return comment_target_domain.normalize_target(args)
+    except comment_target_domain.CommentTargetPayloadError as exc:
         return _reject_payload(
             action=action,
             active_buddy=active_buddy,
-            message=f"unsupported target_type: {target_type}; must be track/artifact/artifact_section",
+            message=str(exc),
+            correctable_fields=exc.correctable_fields,
         )
 
-    target_id = args.get("target_id")
-    if not isinstance(target_id, str) or not target_id.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="target_id is required")
-    target_id = target_id.strip()
-    return (target_type, target_id)
 
-
-def _readable_target(target_type: str, target_id: str, active_buddy: str, action: str) -> dict[str, Any] | dict[str, Any]:
-    if target_type == "track":
-        result = artifact_visibility.assert_track_readable(target_id, active_buddy=active_buddy, action=action)
-        if not bool(result.get("ok")):
-            return _reject_scope(
-                action=action,
-                active_buddy=active_buddy,
-                code=str(result.get("code", "E_COMMENT_TARGET_SCOPE")),
-                boundary=str(result.get("permission_boundary", "track.lifecycle_status")),
-                message=str(result.get("why", "track read denied")),
-                retryable=False,
-            )
-        return result["track"]
-
-    artifact = env_store.get_artifact(target_id)
-    if artifact is None:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {target_id}")
-
-    decision = artifact_visibility.artifact_read_decision(artifact, active_buddy)
-    if not bool(decision.get("allowed")):
+def _ensure_target_readable(target_type: str, target_id: str, active_buddy: str, action: str) -> dict[str, Any] | None:
+    try:
+        comment_target_domain.assert_target_readable(
+            target_type=target_type,
+            target_id=target_id,
+            active_buddy=active_buddy,
+            action=action,
+        )
+    except comment_target_domain.CommentTargetPayloadError as exc:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=str(exc),
+            correctable_fields=exc.correctable_fields,
+        )
+    except comment_target_domain.CommentTargetScopeError as exc:
         return _reject_scope(
             action=action,
             active_buddy=active_buddy,
-            code="E_COMMENT_TARGET_SCOPE",
-            boundary=str(decision.get("permission_boundary", "artifact.read_scope")),
-            message=str(decision.get("why", "artifact read denied")),
-            retryable=False,
+            code=exc.code,
+            boundary=exc.permission_boundary,
+            message=str(exc),
+            retryable=exc.retryable,
+            correctable_fields=exc.correctable_fields,
         )
-
-    if artifact.get("status") == "archived":
-        return _reject_scope(
-            action=action,
-            active_buddy=active_buddy,
-            code="E_COMMENT_TARGET_SCOPE",
-            boundary="artifact.status",
-            message=f"artifact '{target_id}' is archived and does not accept new comments",
-            retryable=False,
-        )
-    return artifact
+    return None
 
 
 def _normalize_mentions(
@@ -168,22 +150,36 @@ def _normalize_mentions(
     if mentions is None:
         return []
     if not isinstance(mentions, list):
-        return _reject_payload(action=action, active_buddy=active_buddy, message="mentions must be a list")
+        return _reject_payload(action=action, active_buddy=active_buddy, message="mentions must be a list", correctable_fields=["mentions"])
     buddies = _manifest_buddies(manifest)
     normalized: list[str] = []
     for row in mentions:
         if not isinstance(row, str) or not row.strip():
-            return _reject_payload(action=action, active_buddy=active_buddy, message="mentions entries must be non-empty strings")
+            return _reject_payload(
+                action=action,
+                active_buddy=active_buddy,
+                message="mentions entries must be non-empty strings",
+                correctable_fields=["mentions"],
+            )
         buddy = row.strip()
         if buddy not in buddies:
-            return _reject_payload(action=action, active_buddy=active_buddy, message=f"unknown mention buddy: {buddy}")
+            return _reject_payload(
+                action=action,
+                active_buddy=active_buddy,
+                message=f"unknown mention buddy: {buddy}",
+                correctable_fields=["mentions"],
+            )
         if buddy not in normalized:
             normalized.append(buddy)
     return normalized
 
 
 def _revision_chain_ids(artifact_id: str) -> set[str]:
-    return {row.get("id") for row in env_store.artifact_revision_chain(artifact_id) if isinstance(row, dict) and isinstance(row.get("id"), str)}
+    return {
+        row.get("id")
+        for row in comment_repo.artifact_revision_chain(artifact_id)
+        if isinstance(row, dict) and isinstance(row.get("id"), str)
+    }
 
 
 def _validate_reply_to(
@@ -197,9 +193,14 @@ def _validate_reply_to(
     if reply_to is None:
         return None
     if not isinstance(reply_to, str) or not reply_to.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="reply_to must be a non-empty string when provided")
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="reply_to must be a non-empty string when provided",
+            correctable_fields=["reply_to"],
+        )
     reply_id = reply_to.strip()
-    parent = env_store.get_comment(reply_id)
+    parent = comment_repo.get_comment(reply_id)
     if parent is None:
         return _reject_scope(
             action=action,
@@ -208,6 +209,7 @@ def _validate_reply_to(
             boundary="comment.reply_to_scope",
             message=f"reply_to comment not found: {reply_id}",
             retryable=True,
+            correctable_fields=["reply_to"],
         )
     if parent.get("target_type") != target_type or parent.get("target_id") != target_id:
         return _reject_scope(
@@ -217,6 +219,7 @@ def _validate_reply_to(
             boundary="comment.reply_to_scope",
             message=f"reply_to comment '{reply_id}' belongs to a different target",
             retryable=True,
+            correctable_fields=["reply_to"],
         )
     return reply_id
 
@@ -228,29 +231,49 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
 
     unknown = sorted(key for key in args if key not in _allowed(action))
     if unknown:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=f"unsupported payload fields: {', '.join(unknown)}",
+            correctable_fields=unknown,
+        )
 
     target = _normalize_target(args, active_buddy, action)
     if isinstance(target, dict):
         return target
     target_type, target_id = target
 
-    readable = _readable_target(target_type, target_id, active_buddy, action)
-    if isinstance(readable, dict) and readable.get("ok") is False:
-        return readable
+    target_error = _ensure_target_readable(target_type, target_id, active_buddy, action)
+    if isinstance(target_error, dict):
+        return target_error
 
     content = args.get("content")
     if not isinstance(content, str) or not content.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="content must be a non-empty string")
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="content must be a non-empty string",
+            correctable_fields=["content"],
+        )
 
     anchor = args.get("anchor")
     if target_type == "artifact_section":
         if not isinstance(anchor, str) or not anchor.strip():
-            return _reject_payload(action=action, active_buddy=active_buddy, message="anchor is required for target_type='artifact_section'")
+            return _reject_payload(
+                action=action,
+                active_buddy=active_buddy,
+                message="anchor is required for target_type='artifact_section'",
+                correctable_fields=["anchor"],
+            )
         anchor = anchor.strip()
     elif anchor is not None:
         if not isinstance(anchor, str) or not anchor.strip():
-            return _reject_payload(action=action, active_buddy=active_buddy, message="anchor must be a non-empty string when provided")
+            return _reject_payload(
+                action=action,
+                active_buddy=active_buddy,
+                message="anchor must be a non-empty string when provided",
+                correctable_fields=["anchor"],
+            )
         anchor = anchor.strip()
 
     mentions = _normalize_mentions(
@@ -265,10 +288,15 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
     artifact_revision_id = args.get("artifact_revision_id")
     if artifact_revision_id is not None:
         if not isinstance(artifact_revision_id, str) or not artifact_revision_id.strip():
-            return _reject_payload(action=action, active_buddy=active_buddy, message="artifact_revision_id must be a non-empty string when provided")
+            return _reject_payload(
+                action=action,
+                active_buddy=active_buddy,
+                message="artifact_revision_id must be a non-empty string when provided",
+                correctable_fields=["artifact_revision_id"],
+            )
         artifact_revision_id = artifact_revision_id.strip()
-        referenced = env_store.get_artifact(artifact_revision_id)
-        if referenced is None:
+        revision_chain = _revision_chain_ids(artifact_revision_id)
+        if not revision_chain:
             return _reject_scope(
                 action=action,
                 active_buddy=active_buddy,
@@ -276,9 +304,9 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
                 boundary="comment.artifact_revision_scope",
                 message=f"artifact revision not found: {artifact_revision_id}",
                 retryable=False,
+                correctable_fields=["artifact_revision_id"],
             )
         target_chain = _revision_chain_ids(target_id)
-        revision_chain = _revision_chain_ids(artifact_revision_id)
         if not target_chain.intersection(revision_chain):
             return _reject_scope(
                 action=action,
@@ -287,6 +315,7 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
                 boundary="comment.artifact_revision_scope",
                 message=f"artifact revision '{artifact_revision_id}' is not in the target revision chain",
                 retryable=False,
+                correctable_fields=["artifact_revision_id"],
             )
 
     reply_to = _validate_reply_to(
@@ -301,14 +330,14 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
 
     thread_id: str | None = None
     if isinstance(reply_to, str):
-        parent = env_store.get_comment(reply_to)
+        parent = comment_repo.get_comment(reply_to)
         if isinstance(parent, dict):
             parent_thread = parent.get("thread_id")
             if isinstance(parent_thread, str):
                 thread_id = parent_thread
 
     try:
-        comment = env_store.create_comment(
+        comment = comment_repo.create_comment(
             target_type=target_type,
             target_id=target_id,
             by_buddy=active_buddy,
@@ -332,7 +361,7 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
         durability="durable",
         created_ids=[comment["id"]],
         state_changes=[{"object_type": "comment", "change": "added", "comment_id": comment["id"]}],
-        allowed_next_actions=["Use comment.list for thread view.", "Use comment.resolve when a thread is settled."],
+        allowed_next_actions=["Use comment.list for thread view.", "Use comment.add to continue the thread."],
         extra={"comment_id": comment["id"], "comment": comment, "target_type": target_type, "target_id": target_id},
     )
 
@@ -343,22 +372,32 @@ def list_comments(*, args: dict[str, Any], context: CommentServiceContext) -> di
 
     unknown = sorted(key for key in args if key not in _allowed(action))
     if unknown:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=f"unsupported payload fields: {', '.join(unknown)}",
+            correctable_fields=unknown,
+        )
 
     target = _normalize_target(args, active_buddy, action)
     if isinstance(target, dict):
         return target
     target_type, target_id = target
 
-    readable = _readable_target(target_type, target_id, active_buddy, action)
-    if isinstance(readable, dict) and readable.get("ok") is False:
-        return readable
+    target_error = _ensure_target_readable(target_type, target_id, active_buddy, action)
+    if isinstance(target_error, dict):
+        return target_error
 
     status_filter = args.get("status", "all")
     if not isinstance(status_filter, str) or status_filter not in {"open", "resolved", "all"}:
-        return _reject_payload(action=action, active_buddy=active_buddy, message="status must be one of open|resolved|all")
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="status must be one of open|resolved|all",
+            correctable_fields=["status"],
+        )
 
-    matched = env_store.comments_for_target(target_type, target_id)
+    matched = comment_repo.comments_for_target(target_type, target_id)
     if status_filter != "all":
         matched = [row for row in matched if row.get("status") == status_filter]
     matched.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
@@ -400,7 +439,7 @@ def list_comments(*, args: dict[str, Any], context: CommentServiceContext) -> di
         state_changed=False,
         durability="none",
         read_scope=f"comment threads for {target_type} target",
-        allowed_next_actions=["Use comment.add to continue discussion.", "Use comment.resolve to close an open thread."],
+        allowed_next_actions=["Use comment.add to continue discussion."],
         extra={
             "comments": matched,
             "threads": threads,
@@ -409,68 +448,3 @@ def list_comments(*, args: dict[str, Any], context: CommentServiceContext) -> di
             "target_id": target_id,
         },
     )
-
-
-def _mutate_thread_status(
-    *,
-    action: str,
-    args: dict[str, Any],
-    context: CommentServiceContext,
-    next_status: str,
-) -> dict[str, Any]:
-    active_buddy = context["active_buddy"]
-    unknown = sorted(key for key in args if key not in _allowed(action))
-    if unknown:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")
-
-    comment_id = args.get("comment_id")
-    if not isinstance(comment_id, str) or not comment_id.strip():
-        return _reject_payload(action=action, active_buddy=active_buddy, message="comment_id is required")
-    comment_id = comment_id.strip()
-
-    comment = env_store.get_comment(comment_id)
-    if comment is None:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=f"comment not found: {comment_id}")
-
-    target_type = comment.get("target_type")
-    target_id = comment.get("target_id")
-    if not isinstance(target_type, str) or not isinstance(target_id, str):
-        return _reject_scope(
-            action=action,
-            active_buddy=active_buddy,
-            code="E_COMMENT_SCOPE",
-            boundary="comment.target_scope",
-            message=f"comment '{comment_id}' has invalid target metadata",
-            retryable=False,
-        )
-
-    readable = _readable_target(target_type, target_id, active_buddy, action)
-    if isinstance(readable, dict) and readable.get("ok") is False:
-        return readable
-
-    thread_id = comment.get("thread_id")
-    if not isinstance(thread_id, str) or not thread_id:
-        thread_id = comment_id
-    updated_rows = env_store.update_comment_thread_status(thread_id, next_status)
-    updated_ids = [row["id"] for row in updated_rows if isinstance(row, dict) and isinstance(row.get("id"), str)]
-
-    return tool_responses.success(
-        tool="comment",
-        action=action,
-        active_buddy=active_buddy,
-        effect_summary=f"Set thread '{thread_id}' status to '{next_status}'.",
-        state_changed=True,
-        durability="durable",
-        updated_ids=updated_ids,
-        state_changes=[{"object_type": "comment", "change": f"thread_{next_status}", "thread_id": thread_id}],
-        allowed_next_actions=["Use comment.list to verify thread status."],
-        extra={"thread_id": thread_id, "updated_comment_ids": updated_ids},
-    )
-
-
-def resolve_comment_thread(*, args: dict[str, Any], context: CommentServiceContext) -> dict[str, Any]:
-    return _mutate_thread_status(action="comment.resolve", args=args, context=context, next_status="resolved")
-
-
-def reopen_comment_thread(*, args: dict[str, Any], context: CommentServiceContext) -> dict[str, Any]:
-    return _mutate_thread_status(action="comment.reopen", args=args, context=context, next_status="open")

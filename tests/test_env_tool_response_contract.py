@@ -16,6 +16,7 @@ if str(SCRIPTS) not in sys.path:
 
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from env.tools import contracts as tool_contracts  # noqa: E402
+import turn_runtime  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -23,6 +24,54 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    _ACTION_PLACEHOLDERS = {
+        "tbd",
+        "todo",
+        "n/a",
+        "na",
+        "none",
+        "unknown",
+        "placeholder",
+    }
+
+    @staticmethod
+    def _meaningful_text_entries(value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        rows: list[str] = []
+        for entry in value:
+            if not isinstance(entry, str):
+                continue
+            normalized = entry.strip()
+            if not normalized:
+                continue
+            lowered = normalized.lower()
+            if lowered in EnvToolResponseContractTests._ACTION_PLACEHOLDERS:
+                continue
+            rows.append(normalized)
+        return rows
+
+    @staticmethod
+    def _meaningful_tool_action_options(value: object) -> list[dict[str, str]]:
+        if not isinstance(value, list):
+            return []
+        rows: list[dict[str, str]] = []
+        for entry in value:
+            if not isinstance(entry, dict):
+                continue
+            tool = entry.get("tool")
+            action = entry.get("action")
+            if isinstance(tool, str) and tool.strip() and isinstance(action, str) and action.strip():
+                rows.append({"tool": tool.strip(), "action": action.strip()})
+        return rows
+
+    def _assert_actionable_next_guidance(self, payload: dict[str, object]) -> None:
+        meaningful_next_actions = self._meaningful_text_entries(payload.get("allowed_next_actions"))
+        meaningful_next_options = self._meaningful_tool_action_options(payload.get("allowed_next_action_options"))
+        has_next_actions = len(meaningful_next_actions) > 0
+        has_next_options = len(meaningful_next_options) > 0
+        self.assertTrue(has_next_actions or has_next_options, msg=payload)
+
     def _instance_json(self, *, buddy: str, instance_id: str) -> Path:
         path = self._runtime_path(f"instances/{instance_id}/instance.json")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,11 +144,24 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
     def _assert_rejection_contract(self, payload: dict[str, object]) -> None:
         self.assertFalse(payload.get("ok"), msg=payload)
         self.assertIsInstance(payload.get("permission_boundary"), str, msg=payload)
+        self.assertTrue(str(payload.get("permission_boundary", "")).strip(), msg=payload)
         self.assertIsInstance(payload.get("why_blocked"), str, msg=payload)
+        self.assertTrue(str(payload.get("why_blocked", "")).strip(), msg=payload)
         self.assertIsInstance(payload.get("impact"), str, msg=payload)
+        self.assertTrue(str(payload.get("impact", "")).strip(), msg=payload)
         self.assertIsInstance(payload.get("retryable"), bool, msg=payload)
         self.assertIsInstance(payload.get("retry_guidance"), str, msg=payload)
+        self.assertTrue(str(payload.get("retry_guidance", "")).strip(), msg=payload)
+        self.assertIn("allowed_next_actions", payload, msg=payload)
         self.assertIsInstance(payload.get("allowed_next_actions"), list, msg=payload)
+        if "allowed_next_action_options" in payload:
+            self.assertIsInstance(payload.get("allowed_next_action_options"), list, msg=payload)
+        next_actions = self._meaningful_text_entries(payload.get("allowed_next_actions"))
+        next_options = self._meaningful_tool_action_options(payload.get("allowed_next_action_options"))
+        self.assertTrue(
+            bool(next_actions) or bool(next_options),
+            msg=payload,
+        )
         self.assertEqual(payload.get("state_changed"), False, msg=payload)
         self.assertEqual(payload.get("durability"), "none", msg=payload)
 
@@ -108,6 +170,14 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertIsInstance(payload.get("effect_summary"), str, msg=payload)
         self.assertIsInstance(payload.get("state_changed"), bool, msg=payload)
         self.assertIsInstance(payload.get("durability"), str, msg=payload)
+
+    def _assert_write_success_contract(self, payload: dict[str, object]) -> None:
+        self._assert_success_contract(payload)
+        self.assertTrue(payload.get("state_changed"), msg=payload)
+        self.assertIsInstance(payload.get("state_changes"), list, msg=payload)
+        self.assertGreater(len(payload.get("state_changes", [])), 0, msg=payload)
+        self.assertNotEqual(payload.get("durability"), "none", msg=payload)
+        self._assert_actionable_next_guidance(payload)
 
     def test_registry_excludes_removed_surfaces(self) -> None:
         tools = {row["tool"] for row in tool_contracts.TOOL_REGISTRY}
@@ -124,10 +194,17 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         self._assert_success_contract(full)
         self._assert_success_contract(summary)
+        expected_tool_catalog = tool_contracts.env_tools_description()
+        expected_operation_semantics = tool_contracts.operation_semantics()
         self.assertIn("tool_catalog", full)
         self.assertIn("operation_semantics", full)
+        self.assertEqual(full.get("tool_catalog"), expected_tool_catalog)
+        self.assertEqual(full.get("tool_catalog"), turn_runtime._build_env_tools_desc())
+        self.assertEqual(full.get("operation_semantics"), expected_operation_semantics)
         self.assertNotIn("tool_catalog", summary)
         self.assertNotIn("operation_semantics", summary)
+        self.assertNotIn("comment.resolve", full.get("operation_semantics", {}))
+        self.assertNotIn("comment.reopen", full.get("operation_semantics", {}))
 
     def test_unknown_tool_rejection_contract(self) -> None:
         instance_id = "inst-pm-reject"
@@ -161,7 +238,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "now": {"next": "seed", "blocker": None},
             },
         )
-        self._assert_success_contract(track)
+        self._assert_write_success_contract(track)
 
         artifact = self._dispatch(
             instance_json=instance_json,
@@ -177,7 +254,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "body": "x",
             },
         )
-        self._assert_success_contract(artifact)
+        self._assert_write_success_contract(artifact)
         self.assertTrue((artifact.get("artifact") or {}).get("id"))
         self.assertEqual((artifact.get("artifact") or {}).get("status"), "draft")
         self.assertIsNone((artifact.get("artifact") or {}).get("published_to_track"))
@@ -198,8 +275,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "summary": "published",
             },
         )
-        self._assert_success_contract(published)
-        self.assertTrue(bool(published.get("state_changed")), msg=published)
+        self._assert_write_success_contract(published)
         self.assertEqual(set(published.get("updated_ids", [])), {"track-response", "art-response-r1"})
         changes = {row.get("change") for row in published.get("state_changes", []) if isinstance(row, dict)}
         self.assertIn("published_material", changes)
@@ -253,8 +329,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "summary": "pass",
             },
         )
-        self._assert_success_contract(proof)
-        self.assertTrue(bool(proof.get("state_changed")), msg=proof)
+        self._assert_write_success_contract(proof)
         self.assertEqual(set(proof.get("updated_ids", [])), {"track-mutation-response", "art-proof-response-r1"})
         changes = {row.get("change") for row in proof.get("state_changes", []) if isinstance(row, dict)}
         self.assertIn("published_proof", changes)

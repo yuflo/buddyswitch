@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from env.tools import responses as tool_responses
-import env_store
+import env_legacy_store as env_store
 
 
 class EvidenceServiceContext(TypedDict):

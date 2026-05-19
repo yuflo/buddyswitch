@@ -15,6 +15,17 @@ if str(SCRIPTS) not in sys.path:
 from env.tools import contracts  # noqa: E402
 
 _EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment"}
+_EXPECTED_ACTIONS_BY_TOOL = {
+    "task": {"create", "list", "get", "update", "archive"},
+    "track": {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
+    "artifact": {"get", "create_revision", "update_metadata"},
+    "buddybox": {"desc", "list", "read", "write", "delete"},
+    "context": {"get", "summarize", "list_sources"},
+    "evidence": {"issue_browser", "approve_downgrade"},
+    "search": {"status", "request", "open_browser"},
+    "message": {"send", "list"},
+    "comment": {"add", "list"},
+}
 
 
 class EnvToolSemanticContractTests(unittest.TestCase):
@@ -29,6 +40,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         for spec in contracts.TOOL_REGISTRY:
             tool = spec["tool"]
             expected_actions = {row["name"] for row in spec["actions"]}
+            self.assertEqual(expected_actions, _EXPECTED_ACTIONS_BY_TOOL[tool])
             self.assertEqual(set(desc[tool]["operations"]), expected_actions)
             self.assertEqual(set(desc[tool]["payload_fields"]), expected_actions)
             self.assertEqual(set(desc[tool]["action_semantics"]), expected_actions)
@@ -37,10 +49,14 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         by_tool = {row["tool"]: row for row in contracts.TOOL_REGISTRY}
         self.assertNotIn("handoff", by_tool)
         self.assertNotIn("advance", {row["name"] for row in by_tool["track"]["actions"]})
+        self.assertNotIn("resolve", {row["name"] for row in by_tool["comment"]["actions"]})
+        self.assertNotIn("reopen", {row["name"] for row in by_tool["comment"]["actions"]})
 
         op = contracts.operation_semantics()
         self.assertNotIn("track.advance", op)
         self.assertFalse(any(key.startswith("handoff.") for key in op))
+        self.assertNotIn("comment.resolve", op)
+        self.assertNotIn("comment.reopen", op)
 
     def test_operation_semantics_machine_contract_is_preserved(self) -> None:
         op = contracts.operation_semantics()
@@ -50,6 +66,10 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             for action_spec in tool_spec["actions"]
         }
         self.assertEqual(set(op), expected_keys)
+        self.assertEqual(
+            expected_keys,
+            {f"{tool}.{action}" for tool, actions in _EXPECTED_ACTIONS_BY_TOOL.items() for action in actions},
+        )
 
         for key, row in op.items():
             with self.subTest(action=key):
