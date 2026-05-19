@@ -197,16 +197,26 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
             project_workspace_dir = shared_root / "project" / "workspace"
+            runtime_workspace_dir = shared_root / "instances" / "inst-dev-boundary" / "workspace"
             config_text = self._patch_config(temp_root=temp_root, buddy="dev", shared_root=shared_root)
             writable_paths = self._writable_paths(config_text)
             filesystem = self._filesystem_entries(config_text)
-            project_roots = filesystem[":project_roots"]
-            self.assertIsInstance(project_roots, dict)
-            assert isinstance(project_roots, dict)
             self.assertIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
-            self.assertEqual(project_roots["."], "read")
-            self.assertEqual(project_roots["buddyswitch/skills/**"], "none")
-            self.assertEqual(project_roots["tools/**"], "none")
+            self.assertNotIn(":project_roots", filesystem)
+            for key, value in filesystem.items():
+                self.assertIsInstance(key, str)
+                self.assertIsInstance(value, str, msg=key)
+                self.assertNotIn("*", key)
+                if key != "/":
+                    self.assertTrue(Path(key).is_absolute(), msg=key)
+            self.assertEqual(
+                filesystem[str((runtime_workspace_dir / "buddyswitch" / "skills").resolve(strict=False))],
+                "none",
+            )
+            self.assertEqual(
+                filesystem[str((runtime_workspace_dir / "tools").resolve(strict=False))],
+                "none",
+            )
 
     def test_env_tool_rejects_payload_paths_instead_of_bypassing_project_or_raw_state_boundaries(self) -> None:
         project_probe = self._runtime_path("projects/app/env-tool-bypass.txt")

@@ -93,23 +93,14 @@ writable_roots = [
 
 
 def render_permission_profile_block(
-    filesystem_entries: dict[str, object],
+    filesystem_entries: dict[str, str],
     unix_sockets: list[Path] | None = None,
 ) -> str:
     rendered_filesystem_rows: list[str] = []
     for key, value in filesystem_entries.items():
-        if isinstance(value, str):
-            rendered_filesystem_rows.append(f"{toml_string(str(key))} = {toml_string(value)}")
-            continue
-        if isinstance(value, dict):
-            rendered_pairs: list[str] = []
-            for nested_key, nested_value in value.items():
-                if not isinstance(nested_key, str) or not isinstance(nested_value, str):
-                    raise ValueError("permission profile filesystem nested table must use string keys and values")
-                rendered_pairs.append(f"{toml_string(nested_key)} = {toml_string(nested_value)}")
-            rendered_filesystem_rows.append(f"{toml_string(str(key))} = {{ {', '.join(rendered_pairs)} }}")
-            continue
-        raise ValueError("permission profile filesystem entries must be string or inline-table values")
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise ValueError("permission profile filesystem entries must use string keys and values")
+        rendered_filesystem_rows.append(f"{toml_string(str(key))} = {toml_string(value)}")
 
     filesystem_block = "\n".join(rendered_filesystem_rows)
     unix_socket_entries = ""
@@ -386,21 +377,20 @@ def _safe_temp_roots(
 
 
 def _profile_mode_workspace_deny_rules(workspace_dir: Path) -> dict[str, str]:
-    # Project-root-relative deny rules block stale source-only surfaces if they ever appear in runtime workspaces.
-    _ = workspace_dir
-    return {
-        "buddyswitch/skills/**": "none",
-        "scripts/**": "none",
-        "tools/**": "none",
-        "tests/**": "none",
-        "docs/**": "none",
-        "buddyswitch/objects/**": "none",
-        "README.md": "none",
-        "buddyswitch-codex": "none",
-    }
+    denied_paths = [
+        workspace_dir / "buddyswitch" / "skills",
+        workspace_dir / "scripts",
+        workspace_dir / "tools",
+        workspace_dir / "tests",
+        workspace_dir / "docs",
+        workspace_dir / "buddyswitch" / "objects",
+        workspace_dir / "README.md",
+        workspace_dir / "buddyswitch-codex",
+    ]
+    return {str(canonical(str(path))): "none" for path in denied_paths}
 
 
-def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, object]:
+def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, str]:
     _require_profile_mode_args(args)
 
     canonical_repo_root = canonical(args.repo_root)
@@ -435,15 +425,13 @@ def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, object
     )
     buddybox_root = workspace_dir / buddybox_root_relative
 
-    filesystem_entries: dict[str, object] = {}
-    project_roots: dict[str, str] = {".": "read"}
-    project_roots.update(_profile_mode_workspace_deny_rules(workspace_dir))
-    filesystem_entries[":project_roots"] = project_roots
+    filesystem_entries: dict[str, str] = {}
+    filesystem_entries["/"] = "read"
+    filesystem_entries[str(canonical_repo_root)] = "none"
     filesystem_entries[str(project_workspace_dir)] = (
         "write" if profile.get("project", {}).get("access") == "write" else "read"
     )
-    filesystem_entries["/"] = "read"
-    filesystem_entries[str(canonical_repo_root)] = "none"
+    filesystem_entries.update(_profile_mode_workspace_deny_rules(workspace_dir))
 
     writable_roots: list[Path] = [home, codex_home, xdg_config_home, buddybox_root]
     forbidden_temp = [
@@ -515,7 +503,7 @@ def patched_config_text(
     roots: list[Path],
     *,
     profile_mode: bool = False,
-    profile_filesystem_entries: dict[str, object] | None = None,
+    profile_filesystem_entries: dict[str, str] | None = None,
     unix_sockets: list[Path] | None = None,
 ) -> str:
     preserved = patch_mcp_server_approvals(strip_managed_sections(existing_text)).rstrip("\n")
@@ -538,7 +526,7 @@ def main() -> int:
     existing_text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
     profile_mode = _profile_mode(args)
     roots: list[Path] = []
-    profile_filesystem_entries: dict[str, object] | None = None
+    profile_filesystem_entries: dict[str, str] | None = None
     try:
         if profile_mode:
             profile_filesystem_entries = _build_profile_mode_filesystem(args)

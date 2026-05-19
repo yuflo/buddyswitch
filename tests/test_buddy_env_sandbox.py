@@ -55,6 +55,32 @@ def _parse_profile_network(config_text: str) -> dict[str, object]:
     return parsed["permissions"][PERMISSION_PROFILE]["network"]
 
 
+def _runtime_workspace_denied_paths(workspace_dir: Path) -> set[str]:
+    return {
+        str((workspace_dir / "buddyswitch" / "skills").resolve(strict=False)),
+        str((workspace_dir / "scripts").resolve(strict=False)),
+        str((workspace_dir / "tools").resolve(strict=False)),
+        str((workspace_dir / "tests").resolve(strict=False)),
+        str((workspace_dir / "docs").resolve(strict=False)),
+        str((workspace_dir / "buddyswitch" / "objects").resolve(strict=False)),
+        str((workspace_dir / "README.md").resolve(strict=False)),
+        str((workspace_dir / "buddyswitch-codex").resolve(strict=False)),
+    }
+
+
+def _assert_codex_filesystem_profile_is_flat(
+    test: unittest.TestCase,
+    filesystem: dict[str, object],
+) -> None:
+    test.assertNotIn(":project_roots", filesystem)
+    for key, value in filesystem.items():
+        test.assertIsInstance(key, str)
+        test.assertIsInstance(value, str, msg=key)
+        test.assertNotIn("*", key)
+        if key != "/":
+            test.assertTrue(Path(key).is_absolute(), msg=key)
+
+
 class BuddyEnvSandboxTests(unittest.TestCase):
     def _run_patch(
         self,
@@ -133,20 +159,13 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             filesystem = _profile_filesystem_entries(config_text)
             writable_paths = {key for key, value in filesystem.items() if value == "write"}
             filesystem_keys = set(filesystem.keys())
-            project_roots = filesystem[":project_roots"]
-            self.assertIsInstance(project_roots, dict)
-            assert isinstance(project_roots, dict)
+            _assert_codex_filesystem_profile_is_flat(self, filesystem)
 
             self.assertNotIn('sandbox_mode = "workspace-write"', config_text)
             self.assertNotIn("[sandbox_workspace_write]", config_text)
             self.assertEqual(filesystem["/"], "read")
-            self.assertEqual(project_roots["."], "read")
-            self.assertEqual(project_roots["buddyswitch/skills/**"], "none")
-            self.assertEqual(project_roots["tools/**"], "none")
-            self.assertEqual(project_roots["tests/**"], "none")
-            self.assertEqual(project_roots["docs/**"], "none")
-            self.assertEqual(project_roots["README.md"], "none")
-            self.assertEqual(project_roots["buddyswitch-codex"], "none")
+            for denied_path in _runtime_workspace_denied_paths(workspace_dir):
+                self.assertEqual(filesystem[denied_path], "none")
             self.assertEqual(filesystem[str(project_workspace_dir.resolve(strict=False))], "read")
             self.assertEqual(filesystem[str(ROOT.resolve(strict=False))], "none")
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
@@ -237,13 +256,11 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             config_text = config_path.read_text(encoding="utf-8")
             filesystem = _profile_filesystem_entries(config_text)
             writable_paths = {key for key, value in filesystem.items() if value == "write"}
-            project_roots = filesystem[":project_roots"]
-            self.assertIsInstance(project_roots, dict)
-            assert isinstance(project_roots, dict)
+            _assert_codex_filesystem_profile_is_flat(self, filesystem)
 
             self.assertEqual(filesystem["/"], "read")
-            self.assertEqual(project_roots["."], "read")
-            self.assertEqual(project_roots["buddyswitch/skills/**"], "none")
+            for denied_path in _runtime_workspace_denied_paths(workspace_dir):
+                self.assertEqual(filesystem[denied_path], "none")
             self.assertIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
             self.assertIn(str((workspace_dir / "buddyswitch/local/buddybox/dev").resolve(strict=False)), writable_paths)
             self.assertNotIn(str((shared_root / "state").resolve(strict=False)), writable_paths)
@@ -276,15 +293,9 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             filesystem = _profile_filesystem_entries(config_path.read_text(encoding="utf-8"))
             writable_paths = {key for key, value in filesystem.items() if value == "write"}
-            project_roots = filesystem[":project_roots"]
-            self.assertIsInstance(project_roots, dict)
-            assert isinstance(project_roots, dict)
-
-            self.assertEqual(project_roots["scripts/**"], "none")
-            self.assertEqual(project_roots["tools/**"], "none")
-            self.assertEqual(project_roots["tests/**"], "none")
-            self.assertEqual(project_roots["docs/**"], "none")
-            self.assertEqual(project_roots["buddyswitch/objects/**"], "none")
+            _assert_codex_filesystem_profile_is_flat(self, filesystem)
+            for denied_path in _runtime_workspace_denied_paths(workspace_dir):
+                self.assertEqual(filesystem[denied_path], "none")
             self.assertNotIn(str(workspace_dir.resolve(strict=False)), writable_paths)
             self.assertNotIn(
                 str((workspace_dir / "buddyswitch/local/buddybox/pm").resolve(strict=False)),
@@ -320,16 +331,9 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             filesystem = _profile_filesystem_entries(config_path.read_text(encoding="utf-8"))
-            project_roots = filesystem[":project_roots"]
-            self.assertIsInstance(project_roots, dict)
-            assert isinstance(project_roots, dict)
-            self.assertEqual(project_roots["buddyswitch/skills/**"], "none")
-            self.assertEqual(project_roots["tools/**"], "none")
-            self.assertEqual(project_roots["tests/**"], "none")
-            self.assertEqual(project_roots["docs/**"], "none")
-            self.assertEqual(project_roots["README.md"], "none")
-            self.assertEqual(project_roots["buddyswitch-codex"], "none")
-            self.assertNotIn(".agents/skills/**", project_roots)
+            _assert_codex_filesystem_profile_is_flat(self, filesystem)
+            for denied_path in _runtime_workspace_denied_paths(workspace_dir):
+                self.assertEqual(filesystem[denied_path], "none")
 
     def test_patch_keeps_mcp_sections_and_forces_approve(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

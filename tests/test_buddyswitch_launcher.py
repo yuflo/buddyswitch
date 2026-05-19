@@ -129,18 +129,30 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             self.assertIn("[permissions.buddyswitch-runtime.filesystem]", config_text)
             parsed = tomllib.loads(config_text)
             filesystem = parsed["permissions"]["buddyswitch-runtime"]["filesystem"]
-            project_roots = filesystem[":project_roots"]
             self.assertEqual(filesystem["/"], "read")
             self.assertEqual(filesystem[repo_root_resolved], "none")
-            self.assertIsInstance(project_roots, dict)
-            assert isinstance(project_roots, dict)
-            self.assertEqual(project_roots["."], "read")
-            self.assertEqual(project_roots["buddyswitch/skills/**"], "none")
-            self.assertEqual(project_roots["tools/**"], "none")
-            self.assertEqual(project_roots["tests/**"], "none")
-            self.assertEqual(project_roots["docs/**"], "none")
-            self.assertEqual(project_roots["README.md"], "none")
-            self.assertEqual(project_roots["buddyswitch-codex"], "none")
+            self.assertNotIn(":project_roots", filesystem)
+            for key, value in filesystem.items():
+                self.assertIsInstance(key, str)
+                self.assertIsInstance(value, str, msg=key)
+                self.assertNotIn("*", key)
+                if key != "/":
+                    self.assertTrue(Path(key).is_absolute(), msg=key)
+            denied_relative_paths = (
+                "buddyswitch/skills",
+                "scripts",
+                "tools",
+                "tests",
+                "docs",
+                "buddyswitch/objects",
+                "README.md",
+                "buddyswitch-codex",
+            )
+            for relative_path in denied_relative_paths:
+                suffix = f"/workspace/{relative_path}"
+                matches = [path for path in filesystem if path.endswith(suffix)]
+                self.assertEqual(len(matches), 1, msg=f"{relative_path}: {matches}")
+                self.assertEqual(filesystem[matches[0]], "none")
             self.assertIn("[permissions.buddyswitch-runtime.network]", config_text)
             self.assertIn("enabled = true", config_text)
             self.assertIn('mode = "full"', config_text)
