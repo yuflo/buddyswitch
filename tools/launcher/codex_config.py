@@ -390,9 +390,11 @@ def _profile_mode_workspace_deny_rules(workspace_dir: Path) -> dict[str, str]:
     _ = workspace_dir
     return {
         "buddyswitch/skills/**": "none",
+        "scripts/**": "none",
         "tools/**": "none",
         "tests/**": "none",
         "docs/**": "none",
+        "buddyswitch/objects/**": "none",
         "README.md": "none",
         "buddyswitch-codex": "none",
     }

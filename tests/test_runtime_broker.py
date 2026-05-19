@@ -970,6 +970,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
         runtime_surface = (
             "scripts/turn_runtime.py",
             "scripts/env_store.py",
+            "scripts/env_legacy_store.py",
             "scripts/env",
             "scripts/env_profiles.py",
             "scripts/env_manifest.py",

@@ -185,6 +185,7 @@ scripts/env/
 scripts/runtime_kernel/
 scripts/turn_runtime.py
 scripts/env_store.py
+scripts/env_legacy_store.py
 scripts/env_manifest.py
 scripts/env_profiles.py
 scripts/browser_evidence.py
@@ -231,6 +232,7 @@ EOF
 
 buddyswitch_workspace_execution_worktree_has_sparse_boundary() {
   local workspace_dir="$1"
+  local require_runtime_files="${2:-1}"
   local sparse_paths expected forbidden_entry required_runtime_file
 
   git -C "${workspace_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
@@ -245,14 +247,17 @@ buddyswitch_workspace_execution_worktree_has_sparse_boundary() {
     fi
   done < <(buddyswitch_workspace_execution_forbidden_entries)
 
-  for required_runtime_file in \
-    scripts/env/client.py \
-    scripts/runtime_kernel/broker.py \
-    scripts/turn_runtime.py \
-    buddyswitch/manifest.toml \
-    framework/contracts/pm.md; do
-    [[ -e "${workspace_dir}/${required_runtime_file}" ]] || return 1
-  done
+  if [[ "${require_runtime_files}" != "0" ]]; then
+    for required_runtime_file in \
+      scripts/env/client.py \
+      scripts/runtime_kernel/broker.py \
+      scripts/turn_runtime.py \
+      scripts/env_legacy_store.py \
+      buddyswitch/manifest.toml \
+      framework/contracts/pm.md; do
+      [[ -e "${workspace_dir}/${required_runtime_file}" ]] || return 1
+    done
+  fi
 }
 
 buddyswitch_workspace_execution_worktree_has_dirty_unmanaged_changes() {
@@ -293,6 +298,8 @@ buddyswitch_workspace_configure_execution_sparse_checkout() {
   local workspace_dir="$1"
   local mode="${2:-existing}"
   local sparse_path
+  local repo_root target_head current_head
+  local require_runtime_files=1
   local -a sparse_paths
 
   if [[ "${mode}" != "fresh" && "${mode}" != "existing" ]]; then
@@ -310,11 +317,23 @@ buddyswitch_workspace_configure_execution_sparse_checkout() {
     [[ -n "${sparse_path}" ]] || continue
     sparse_paths+=("${sparse_path}")
   done < <(buddyswitch_workspace_execution_sparse_paths)
+
+  if [[ "${mode}" == "existing" ]]; then
+    repo_root="$(buddyswitch_workspace_repo_root)"
+    target_head="$(git -C "${repo_root}" rev-parse HEAD 2>/dev/null || true)"
+    current_head="$(git -C "${workspace_dir}" rev-parse HEAD 2>/dev/null || true)"
+    # Allow stale detached worktrees to adopt sparse rules first; sync step will
+    # advance to repo HEAD and then satisfy required runtime file sentinels.
+    if [[ -n "${target_head}" && -n "${current_head}" && "${current_head}" != "${target_head}" ]]; then
+      require_runtime_files=0
+    fi
+  fi
+
   git -C "${workspace_dir}" sparse-checkout init --no-cone >/dev/null
   git -C "${workspace_dir}" sparse-checkout set --no-cone "${sparse_paths[@]}" >/dev/null
   git -C "${workspace_dir}" checkout HEAD >/dev/null
 
-  if ! buddyswitch_workspace_execution_worktree_has_sparse_boundary "${workspace_dir}"; then
+  if ! buddyswitch_workspace_execution_worktree_has_sparse_boundary "${workspace_dir}" "${require_runtime_files}"; then
     echo "execution workspace sparse checkout did not reach expected runtime boundary" >&2
     echo "execution workspace: ${workspace_dir}" >&2
     return 1

@@ -253,6 +253,51 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertNotIn(str(workspace_dir.resolve(strict=False)), writable_paths)
             self.assertEqual(filesystem[str(ROOT.resolve(strict=False))], "none")
 
+    def test_dev_permission_profile_denies_runtime_workspace_launcher_surfaces(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            shared_root = temp_root / "shared"
+            instance_root = shared_root / "instances" / "inst-dev-hardening"
+            workspace_dir = instance_root / "workspace"
+            project_workspace_dir = shared_root / "project" / "workspace"
+            config_path = temp_root / "config.toml"
+
+            completed = self._run_patch(
+                config_path=config_path,
+                shared_root=shared_root,
+                buddy="dev",
+                instance_root=instance_root,
+                workspace_dir=workspace_dir,
+                project_workspace_dir=project_workspace_dir,
+                home=instance_root / "home",
+                codex_home=instance_root / "codex-home",
+                xdg_config_home=instance_root / "xdg-config",
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            filesystem = _profile_filesystem_entries(config_path.read_text(encoding="utf-8"))
+            writable_paths = {key for key, value in filesystem.items() if value == "write"}
+            project_roots = filesystem[":project_roots"]
+            self.assertIsInstance(project_roots, dict)
+            assert isinstance(project_roots, dict)
+
+            self.assertEqual(project_roots["scripts/**"], "none")
+            self.assertEqual(project_roots["tools/**"], "none")
+            self.assertEqual(project_roots["tests/**"], "none")
+            self.assertEqual(project_roots["docs/**"], "none")
+            self.assertEqual(project_roots["buddyswitch/objects/**"], "none")
+            self.assertNotIn(str(workspace_dir.resolve(strict=False)), writable_paths)
+            self.assertNotIn(
+                str((workspace_dir / "buddyswitch/local/buddybox/pm").resolve(strict=False)),
+                writable_paths,
+            )
+
+            self.assertIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
+            self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
+            self.assertIn(str((instance_root / "codex-home").resolve(strict=False)), writable_paths)
+            self.assertIn(str((instance_root / "xdg-config").resolve(strict=False)), writable_paths)
+            self.assertIn(str((workspace_dir / "buddyswitch/local/buddybox/dev").resolve(strict=False)), writable_paths)
+            self.assertIn(str(Path("/tmp").resolve(strict=False)), writable_paths)
+
     def test_permission_profile_denies_stale_runtime_source_surfaces(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

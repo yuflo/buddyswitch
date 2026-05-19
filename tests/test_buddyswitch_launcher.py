@@ -65,6 +65,7 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         "scripts/runtime_kernel/",
         "scripts/turn_runtime.py",
         "scripts/env_store.py",
+        "scripts/env_legacy_store.py",
         "scripts/env_manifest.py",
         "scripts/env_profiles.py",
         "scripts/browser_evidence.py",
@@ -960,6 +961,7 @@ exec "$real_git" "$@"
             "scripts/runtime_kernel/broker.py",
             "scripts/turn_runtime.py",
             "scripts/env_store.py",
+            "scripts/env_legacy_store.py",
             "scripts/env_manifest.py",
             "scripts/env_profiles.py",
             "scripts/browser_evidence.py",
@@ -2257,6 +2259,7 @@ exec "$real_git" "$@"
                 source_turn_runtime.read_text(encoding="utf-8"),
             )
             for relative in (
+                "scripts/env_legacy_store.py",
                 "scripts/env/tools/dispatch.py",
                 "scripts/env/tools/router.py",
                 "scripts/env/services/tasks.py",
