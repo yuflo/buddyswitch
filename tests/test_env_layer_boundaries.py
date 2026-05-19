@@ -34,6 +34,25 @@ PERMISSION_PROFILE = "buddyswitch-runtime"
 class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     _DOMAIN_CROSS_OBJECT_ALLOWLIST = {"publication", "comment_targets", "artifact_visibility"}
 
+    def _legacy_store_import_violations(self, roots: list[Path]) -> list[str]:
+        violations: list[str] = []
+        for root in roots:
+            if not root.exists():
+                continue
+            for path in sorted(root.rglob("*.py")):
+                source = path.read_text(encoding="utf-8")
+                tree = ast.parse(source, filename=str(path))
+                rel = path.relative_to(ROOT).as_posix()
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            if alias.name == "env_legacy_store":
+                                violations.append(f"{rel}:{node.lineno}: import env_legacy_store")
+                    elif isinstance(node, ast.ImportFrom):
+                        if node.module == "env_legacy_store":
+                            violations.append(f"{rel}:{node.lineno}: from env_legacy_store import ...")
+        return violations
+
     def _patch_config(
         self,
         *,
@@ -319,6 +338,16 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 violations.append(path.relative_to(ROOT).as_posix())
         self.assertEqual(violations, [], msg="\n".join(violations))
 
+    def test_active_runtime_modules_do_not_import_env_legacy_store(self) -> None:
+        roots = [
+            ROOT / "scripts/env/services",
+            ROOT / "scripts/env/domain",
+            ROOT / "scripts/env/repos",
+            ROOT / "scripts/env/tools",
+        ]
+        violations = self._legacy_store_import_violations(roots)
+        self.assertEqual(violations, [], msg="\n".join(violations))
+
     def test_track_artifact_publication_writes_only_live_in_publication_domain(self) -> None:
         publication_terms = (
             "published_to_track",
@@ -332,7 +361,6 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "scripts/env/repos/artifacts.py",
             "scripts/env/repos/tracks.py",
             "scripts/env/domain/artifact_visibility.py",
-            "scripts/env/services/artifact_visibility.py",
             "scripts/env/services/artifacts.py",
             "scripts/env/services/tracks.py",
             "scripts/env/domain/tasks.py",

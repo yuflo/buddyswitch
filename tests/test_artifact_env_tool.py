@@ -449,6 +449,138 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(artifact.get("published_to_track"), "track-art-pub")
         self.assertEqual(artifact.get("currentness"), "current")
 
+    def test_source_ref_invalid_artifact_id_rejects_without_artifact(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-pm-art-source-invalid", buddy="pm")
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-art-source-invalid",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-source-invalid-r1",
+                "title": "Invalid source id",
+                "summary": "",
+                "template": "note",
+                "body": "invalid source refs",
+                "source_refs": [{"type": "artifact", "id": "Bad.ID"}],
+            },
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_SOURCE_REFS")
+        self.assertEqual(rejected.get("permission_boundary"), "source_refs.required_fields")
+        self.assertFalse(env_store.artifact_file("art-source-invalid-r1").exists())
+
+    def test_source_ref_full_read_claim_accepts_readable_published_artifact(self) -> None:
+        instance_pm = self._instance_json(instance_id="inst-pm-art-source-read", buddy="pm")
+        self.assertTrue(
+            self._create_track(
+                instance_json=instance_pm,
+                instance_id="inst-pm-art-source-read",
+                track_id="track-source-ref-readable",
+            ).get("ok")
+        )
+
+        created = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art-source-read",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-source-readable-r1",
+                "title": "Readable source artifact",
+                "summary": "seed",
+                "template": "brief",
+                "body": "readable shared body",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        published = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art-source-read",
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": "track-source-ref-readable",
+                "artifact_id": "art-source-readable-r1",
+                "label": "Readable source artifact",
+                "summary": "seed",
+            },
+        )
+        self.assertTrue(published.get("ok"), msg=published)
+
+        instance_dev = self._instance_json(instance_id="inst-dev-art-source-read", buddy="dev")
+        derived = self._dispatch(
+            instance_json=instance_dev,
+            instance_id="inst-dev-art-source-read",
+            buddy="dev",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-source-derived-r1",
+                "title": "Derived from readable source",
+                "summary": "derived",
+                "template": "proposal",
+                "body": "derived body",
+                "source_refs": [{"type": "artifact", "id": "art-source-readable-r1"}],
+                "read_claim": "summarized-full-content",
+            },
+        )
+        self.assertTrue(derived.get("ok"), msg=derived)
+        artifact = derived.get("artifact")
+        self.assertIsInstance(artifact, dict, msg=derived)
+        assert isinstance(artifact, dict)
+        self.assertEqual(artifact.get("status"), "draft")
+        self.assertIn({"type": "artifact", "id": "art-source-readable-r1"}, artifact.get("source_refs") or [])
+
+        persisted = env_store.get_artifact("art-source-derived-r1")
+        self.assertIsInstance(persisted, dict)
+        assert isinstance(persisted, dict)
+        self.assertNotIn("source_run_id", persisted)
+
+    def test_source_ref_full_read_claim_rejects_unreadable_private_draft(self) -> None:
+        instance_pm = self._instance_json(instance_id="inst-pm-art-source-private", buddy="pm")
+        created = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art-source-private",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-source-private-r1",
+                "title": "Private source artifact",
+                "summary": "",
+                "template": "brief",
+                "body": "private draft source",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        instance_dev = self._instance_json(instance_id="inst-dev-art-source-private", buddy="dev")
+        rejected = self._dispatch(
+            instance_json=instance_dev,
+            instance_id="inst-dev-art-source-private",
+            buddy="dev",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-source-private-denied-r1",
+                "title": "Should reject unreadable source",
+                "summary": "",
+                "template": "note",
+                "body": "no access",
+                "source_refs": [{"type": "artifact", "id": "art-source-private-r1"}],
+                "read_claim": "summarized-full-content",
+            },
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_SOURCE_REFS_READ_SCOPE")
+        self.assertEqual(rejected.get("permission_boundary"), "source_refs.read_scope")
+        self.assertFalse(env_store.artifact_file("art-source-private-denied-r1").exists())
+
     def test_superseded_published_artifact_remains_readable_and_traceable(self) -> None:
         instance_pm = self._instance_json(instance_id="inst-pm-art", buddy="pm")
         self.assertTrue(self._create_track(instance_json=instance_pm, instance_id="inst-pm-art", track_id="track-revision-trace").get("ok"))

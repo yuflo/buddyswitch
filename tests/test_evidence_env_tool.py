@@ -183,6 +183,43 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((denied.get("error") or {}).get("code"), "E_EVIDENCE_TARGET_SCOPE")
         self.assertEqual(denied.get("permission_boundary"), "artifact.authors")
 
+    def test_missing_artifact_target_is_rejected_without_token(self) -> None:
+        instance_json = self._instance_json(buddy="market", instance_id="inst-market-missing-target")
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-market-missing-target",
+            buddy="market",
+            action="issue_browser",
+            args={"target_type": "artifact", "target_id": "art-market-missing-target"},
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_EVIDENCE_PAYLOAD")
+        self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
+        self.assertNotIn("tool_evidence", rejected)
+
+    def test_readable_but_not_authored_target_is_rejected(self) -> None:
+        artifact_id = self._seed_market_targets()
+        env_store.create_track("track-market-readable", "Readable Market Track", owner_buddy="market")
+        env_store.publish_track_material(
+            track_id="track-market-readable",
+            artifact_id=artifact_id,
+            label="Market published artifact",
+            from_buddy="market",
+            summary="readable publication",
+        )
+        design_instance = self._instance_json(buddy="design", instance_id="inst-design-readable-target")
+        rejected = self._dispatch(
+            instance_json=design_instance,
+            instance_id="inst-design-readable-target",
+            buddy="design",
+            action="issue_browser",
+            args={"target_type": "artifact", "target_id": artifact_id},
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_EVIDENCE_TARGET_SCOPE")
+        self.assertEqual(rejected.get("permission_boundary"), "artifact.authors")
+        self.assertNotIn("tool_evidence", rejected)
+
 
 if __name__ == "__main__":
     unittest.main()

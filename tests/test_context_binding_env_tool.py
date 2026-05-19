@@ -207,11 +207,14 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         candidate_ids = {row.get("track_id") for row in summary.get("candidate_tracks", []) if isinstance(row, dict)}
         track_ids = {row.get("id") for row in full.get("tracks", []) if isinstance(row, dict)}
+        task_ids = {row.get("id") for row in full.get("tasks", []) if isinstance(row, dict)}
 
         self.assertIn("track-context-active", candidate_ids)
         self.assertIn("track-context-active", track_ids)
         self.assertNotIn("track-context-archived", candidate_ids)
         self.assertNotIn("track-context-archived", track_ids)
+        self.assertIn("task-dev-context", task_ids)
+        self.assertNotIn("task-dev-archived", task_ids)
 
     def test_context_artifact_summaries_are_current_only(self) -> None:
         self._seed_context_state()
@@ -255,9 +258,17 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(filtered.get("ok"), msg=filtered)
         tasks = filtered.get("tasks")
+        tracks = filtered.get("tracks")
+        artifacts = filtered.get("artifact_summaries")
         self.assertIsInstance(tasks, list, msg=filtered)
+        self.assertIsInstance(tracks, list, msg=filtered)
+        self.assertIsInstance(artifacts, list, msg=filtered)
         assert isinstance(tasks, list)
+        assert isinstance(tracks, list)
+        assert isinstance(artifacts, list)
         self.assertEqual({row.get("id") for row in tasks if isinstance(row, dict)}, {"task-dev-context"})
+        self.assertEqual({row.get("id") for row in tracks if isinstance(row, dict)}, {"track-context-active"})
+        self.assertEqual({row.get("artifact_id") for row in artifacts if isinstance(row, dict)}, {"art-task-dev-context-note-r2"})
 
     def test_context_rejects_unknown_payload_field(self) -> None:
         instance_json = self._instance_json()

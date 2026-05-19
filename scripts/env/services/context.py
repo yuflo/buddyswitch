@@ -6,8 +6,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, TypedDict
 
-import env_legacy_store as env_store
-from env.services import artifact_visibility
+from env.domain import artifact_visibility as artifact_visibility_domain
+from env.repos import tasks as task_repo
+from env.repos import tracks as track_repo
 from env.services import buddybox as buddybox_service
 from env.tools import contracts as tool_contracts
 from env.tools import responses as tool_responses
@@ -86,7 +87,7 @@ def _candidate_track_row(*, track: dict[str, Any], active_buddy: str) -> dict[st
 
 
 def _visible_tracks(*, track_filter: str | None, limit_value: int) -> list[dict[str, Any]]:
-    tracks = [row for row in env_store.list_tracks() if row.get("archived_at") is None]
+    tracks = [row for row in track_repo.list_tracks() if row.get("archived_at") is None]
     if isinstance(track_filter, str) and track_filter.strip():
         tracks = [row for row in tracks if row.get("id") == track_filter.strip()]
     return tracks[:limit_value]
@@ -99,7 +100,7 @@ def _visible_tasks(
     visible_track_ids: set[str],
     limit_value: int,
 ) -> list[dict[str, Any]]:
-    tasks = [row for row in env_store.list_tasks() if row.get("buddy") == active_buddy]
+    tasks = [row for row in task_repo.list_tasks() if row.get("buddy") == active_buddy]
     if isinstance(task_filter, str) and task_filter.strip():
         tasks = [row for row in tasks if row.get("id") == task_filter.strip()]
     rows: list[dict[str, Any]] = []
@@ -125,7 +126,7 @@ def _current_material_rows(
         track_id = track.get("id")
         if not isinstance(track_id, str) or not track_id:
             continue
-        for row in artifact_visibility.current_material_rows_for_track(track_id, active_buddy):
+        for row in artifact_visibility_domain.current_material_rows_for_track(track_id, active_buddy):
             artifact_id = row.get("artifact_id")
             if not isinstance(artifact_id, str) or not artifact_id or artifact_id in seen_material_ref_ids:
                 continue

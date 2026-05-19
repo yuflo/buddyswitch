@@ -7,8 +7,9 @@ import uuid
 from pathlib import Path
 from typing import Any, TypedDict
 
+from env.repos import artifacts as artifact_repo
+from env.repos import runtime_files
 from env.tools import responses as tool_responses
-import env_legacy_store as env_store
 
 
 class EvidenceServiceContext(TypedDict):
@@ -110,7 +111,7 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str
 
 def _resolve_target(*, target_type: str, target_id: str, active_buddy: str, action: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if target_type == "artifact":
-        artifact = env_store.get_artifact(target_id)
+        artifact = artifact_repo.get_artifact(target_id)
         if artifact is None:
             return None, _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {target_id}")
         authors = artifact.get("authors") if isinstance(artifact.get("authors"), list) else []
@@ -141,7 +142,7 @@ def _issue_token(*, target_type: str, target_id: str, mode: str | None, kind: st
         "active_buddy": active_buddy,
         "mode": mode or "default",
         "evidence_kind": kind,
-        "issued_at": env_store.now_iso(),
+        "issued_at": runtime_files.now_iso(),
     }
 
 

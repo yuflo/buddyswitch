@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import env_legacy_store as env_store
+from env.domain import artifact_visibility as artifact_visibility_domain
+from env.repos import artifacts as artifact_repo
+from env.repos import runtime_files
 
 _ALLOWED_TYPES = {
     "artifact",
@@ -64,7 +66,7 @@ def normalize_source_refs(
 
         item: dict[str, Any] = {"type": ref_type}
         if ref_type in {"artifact", "track", "task"}:
-            item["id"] = env_store.require_id(raw.get("id"), f"source_refs.{ref_type}.id")
+            item["id"] = runtime_files.require_id(raw.get("id"), f"source_refs.{ref_type}.id")
         elif ref_type == "buddybox":
             if not allow_buddybox:
                 raise ValueError(
@@ -100,7 +102,7 @@ def normalize_source_refs(
             ref_type = row["type"]
             if ref_type == "artifact":
                 ref_id = row["id"]
-                artifact = env_store.get_artifact(ref_id)
+                artifact = artifact_repo.get_artifact(ref_id)
                 if artifact is None:
                     scope_error = {
                         "permission_boundary": "source_refs.read_scope",
@@ -110,8 +112,8 @@ def normalize_source_refs(
                         ),
                     }
                     break
-                authors = artifact.get("authors") if isinstance(artifact.get("authors"), list) else []
-                if active_buddy not in {row for row in authors if isinstance(row, str)}:
+                decision = artifact_visibility_domain.artifact_read_decision(artifact, active_buddy)
+                if not bool(decision.get("allowed")):
                     scope_error = {
                         "permission_boundary": "source_refs.read_scope",
                         "why_blocked": (
