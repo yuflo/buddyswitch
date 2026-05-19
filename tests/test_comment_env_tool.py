@@ -294,6 +294,8 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             summary="r2",
         )
         self._seed_published_artifact(artifact_id="art-cmt-other-r1", track_id=track_id)
+        before_target = self._snapshot_artifact_json("art-cmt-chain-r2")
+        before_other = self._snapshot_artifact_json("art-cmt-other-r1")
 
         instance_json = self._instance_json(instance_id="inst-dev-cmt", buddy="dev")
         valid = self._dispatch(
@@ -311,6 +313,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         self.assertTrue(valid.get("ok"), msg=valid)
+        self.assertEqual(self._snapshot_artifact_json("art-cmt-chain-r2"), before_target)
+        self.assertEqual(self._snapshot_artifact_json("art-cmt-other-r1"), before_other)
+        before_comment_count = len(env_store.list_comments())
 
         invalid = self._dispatch(
             instance_json=instance_json,
@@ -328,6 +333,9 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertFalse(invalid.get("ok"), msg=invalid)
         self.assertEqual(invalid.get("permission_boundary"), "comment.artifact_revision_scope")
+        self.assertEqual(self._snapshot_artifact_json("art-cmt-chain-r2"), before_target)
+        self.assertEqual(self._snapshot_artifact_json("art-cmt-other-r1"), before_other)
+        self.assertEqual(len(env_store.list_comments()), before_comment_count)
 
     def test_reply_to_must_stay_on_same_target_thread(self) -> None:
         track_a = self._seed_track("track-cmt-a")

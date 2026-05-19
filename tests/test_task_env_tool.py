@@ -162,6 +162,35 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         after = env_store.get_track("track-task-private")
         self.assertEqual(before, after)
 
+    def test_task_track_context_validates_read_only_track_state(self) -> None:
+        track = env_store.create_track(
+            "track-task-context-readonly",
+            "Task Context",
+            owner_buddy="pm",
+            outcome="Track remains unchanged",
+            appetite="1 day",
+            now={"next": "seed", "blocker": None},
+        )
+        before_track = json.dumps(env_store.get_track(str(track["id"])), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        instance_json = self._instance_json(buddy="dev", instance_id="inst-dev-task-context-readonly")
+
+        created = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-task-context-readonly",
+            buddy="dev",
+            tool="task",
+            action="create",
+            args={
+                "task_id": "task-dev-track-context-readonly",
+                "title": "Use track as private context",
+                "summary": "Task only",
+                "track_id": str(track["id"]),
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+        after_track = json.dumps(env_store.get_track(str(track["id"])), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        self.assertEqual(after_track, before_track)
+
     def test_task_get_rejects_foreign_private_task(self) -> None:
         self._create_track()
         dev_instance = self._instance_json(instance_id="inst-dev-task", buddy="dev")

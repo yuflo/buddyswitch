@@ -99,3 +99,32 @@ def assert_target_readable(
         )
 
     return artifact
+
+
+def artifact_revision_chain_ids(artifact_id: str) -> set[str]:
+    current = artifact_repo.get_artifact(artifact_id)
+    if current is None:
+        return set()
+    by_id = {
+        row.get("id"): row
+        for row in artifact_repo.list_artifacts()
+        if isinstance(row, dict) and isinstance(row.get("id"), str)
+    }
+    ids: set[str] = set()
+    visited: set[str] = set()
+    while isinstance(current, dict):
+        current_id = current.get("id")
+        if not isinstance(current_id, str) or not current_id or current_id in visited:
+            break
+        ids.add(current_id)
+        visited.add(current_id)
+        supersedes_id = current.get("supersedes_artifact_id")
+        if not isinstance(supersedes_id, str) or not supersedes_id:
+            break
+        previous = by_id.get(supersedes_id)
+        if not isinstance(previous, dict):
+            previous = artifact_repo.get_artifact(supersedes_id)
+        if not isinstance(previous, dict):
+            break
+        current = previous
+    return ids

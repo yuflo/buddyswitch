@@ -283,6 +283,62 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     )
         self.assertEqual(violations, [], msg="\n".join(violations))
 
+    def test_comment_repo_owns_only_comment_storage(self) -> None:
+        path = ROOT / "scripts/env/repos/comments.py"
+        source = path.read_text(encoding="utf-8")
+        self.assertNotIn("env_legacy_store", source)
+        self.assertNotIn("artifact_revision_chain", source)
+        tree = ast.parse(source, filename=str(path))
+        imported_modules: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_modules.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported_modules.append(node.module)
+        forbidden = [name for name in imported_modules if "artifacts" in name or "tracks" in name or "tasks" in name]
+        self.assertEqual(forbidden, [], msg=", ".join(forbidden))
+
+    def test_active_object_repos_do_not_import_env_legacy_store(self) -> None:
+        repo_files = sorted(path for path in (ROOT / "scripts/env/repos").glob("*.py") if path.name != "__init__.py")
+        violations: list[str] = []
+        for path in repo_files:
+            if path.name == "runtime_files.py":
+                continue
+            source = path.read_text(encoding="utf-8")
+            if "env_legacy_store" in source:
+                violations.append(path.relative_to(ROOT).as_posix())
+        self.assertEqual(violations, [], msg="\n".join(violations))
+
+    def test_track_artifact_publication_writes_only_live_in_publication_domain(self) -> None:
+        publication_terms = (
+            "published_to_track",
+            '"status": "published"',
+            "'status': 'published'",
+            "shared_materials",
+            "close_proof",
+        )
+        allowed_paths = {
+            "scripts/env/domain/publication.py",
+            "scripts/env/repos/artifacts.py",
+            "scripts/env/repos/tracks.py",
+            "scripts/env/domain/artifact_visibility.py",
+            "scripts/env/services/artifact_visibility.py",
+            "scripts/env/services/artifacts.py",
+            "scripts/env/services/tracks.py",
+            "scripts/env/domain/tasks.py",
+        }
+        scanned_roots = [ROOT / "scripts/env/services", ROOT / "scripts/env/domain"]
+        violations: list[str] = []
+        for root in scanned_roots:
+            for path in sorted(root.glob("*.py")):
+                rel = path.relative_to(ROOT).as_posix()
+                source = path.read_text(encoding="utf-8")
+                if rel in allowed_paths:
+                    continue
+                if any(term in source for term in publication_terms):
+                    violations.append(rel)
+        self.assertEqual(violations, [], msg="\n".join(violations))
+
     def test_domain_cross_object_imports_are_allowlisted(self) -> None:
         domain_files = sorted(path for path in ROOT.glob("scripts/**/domain/*.py") if path.name != "__init__.py")
         if not domain_files:

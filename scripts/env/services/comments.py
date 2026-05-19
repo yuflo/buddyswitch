@@ -175,11 +175,7 @@ def _normalize_mentions(
 
 
 def _revision_chain_ids(artifact_id: str) -> set[str]:
-    return {
-        row.get("id")
-        for row in comment_repo.artifact_revision_chain(artifact_id)
-        if isinstance(row, dict) and isinstance(row.get("id"), str)
-    }
+    return comment_target_domain.artifact_revision_chain_ids(artifact_id)
 
 
 def _validate_reply_to(

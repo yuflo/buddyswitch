@@ -10,16 +10,9 @@ description: Use when sending and reading direct buddy-to-buddy inbox messages t
 Send and read direct buddy-to-buddy inbox messages through the runtime env.tool layer.
 
 ## Runtime Route
-
-```
-env.tool → message.send | message.list
-```
-
-The CLI entry point is:
-
-```bash
-python3 scripts/env/client.py message <operation>
-```
+- CLI: `python3 scripts/env/client.py message send --payload '{"to_buddy":"design","content":"Please review track-alpha."}'`
+- Broker method: `env.tool`
+- Discover current operations, payload keys, effects, and recovery guidance with `context.get.tool_catalog['message']` or `python3 scripts/turn_runtime.py status`.
 
 ## CLI Payload Rule
 
@@ -31,12 +24,11 @@ python3 scripts/env/client.py message <operation>
 python3 scripts/env/client.py message send --payload '{"to_buddy":"design","content":"Please review the PRD on track-alpha."}'
 ```
 
-## Operations
+## Workflow Notes
 
-- `message.send` creates one direct message from the active buddy to another declared manifest buddy.
-- `message.list` reads inbox messages addressed to the active buddy (no outbox mutation).
-- For exact payload keys, optional keys, and response fields, inspect `context.get.tool_catalog['message']` or `python3 scripts/turn_runtime.py status`.
-- Start with `python3 scripts/env/client.py context summarize` so sends/lists run against current runtime-visible ids and state.
+- Use this tool for direct buddy-to-buddy inbox communication.
+- Start with `python3 scripts/env/client.py context summarize` so message actions run against current runtime-visible buddy ids and state.
+- For exact operations, payload keys, optional keys, and response fields, inspect `context.get.tool_catalog['message']` or `python3 scripts/turn_runtime.py status`.
 
 ## Key Boundary Rules
 

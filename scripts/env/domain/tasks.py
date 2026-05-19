@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from env.repos import tasks as task_repo
+from env.repos import tracks as track_repo
 
 _PUBLICATION_STYLE_FIELDS = {
     "artifact_id",
@@ -90,7 +91,7 @@ def optional_track_context(track_id: Any) -> str | None:
     normalized = track_id.strip()
     if not normalized:
         raise TaskPayloadError("track_id must be a string or null")
-    if not task_repo.track_exists(normalized):
+    if track_repo.get_track(normalized) is None:
         raise TaskPayloadError(f"track not found: {normalized}")
     return normalized
 

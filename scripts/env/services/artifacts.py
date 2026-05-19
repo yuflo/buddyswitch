@@ -117,6 +117,28 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
     )
 
 
+def _reject_revision_scope(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+    return tool_responses.rejection(
+        tool="artifact",
+        action=action,
+        active_buddy=active_buddy,
+        code="E_ARTIFACT_SCOPE",
+        message=message,
+        permission_boundary="artifact.revision_scope",
+        human_summary="Supersede target is not publishable in the requested draft path.",
+        why_blocked=message,
+        impact="No artifact or track state changed.",
+        state_changed=False,
+        retryable=True,
+        retry_guidance="Use a current readable supersedes_artifact_id or omit supersedes_artifact_id.",
+        allowed_next_actions=[
+            "Use track.open to inspect current shared material/proof ids.",
+            "Retry artifact.create_revision with a valid supersedes_artifact_id.",
+        ],
+        correctable_fields=["supersedes_artifact_id"],
+    )
+
+
 def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
     allowed = _GET_FIELDS if action == "artifact.get" else _CREATE_FIELDS if action == "artifact.create_revision" else _UPDATE_FIELDS
     unknown = sorted(key for key in args if key not in allowed)
@@ -219,6 +241,9 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
             active_buddy=active_buddy,
             message="supersedes_artifact_id must be a non-empty string",
         )
+    normalized_supersedes_artifact_id = (
+        supersedes_artifact_id.strip() if isinstance(supersedes_artifact_id, str) and supersedes_artifact_id.strip() else None
+    )
 
     read_claim = args.get("read_claim")
     if read_claim is not None and not isinstance(read_claim, str):
@@ -252,6 +277,19 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
     if artifact_id is not None and (not isinstance(artifact_id, str) or not artifact_id.strip()):
         return _reject_payload(action=action, active_buddy=active_buddy, message="artifact_id must be a non-empty string")
 
+    if normalized_supersedes_artifact_id is not None:
+        try:
+            artifact_visibility_domain.assert_supersedes_target_for_revision(
+                supersedes_artifact_id=normalized_supersedes_artifact_id,
+                active_buddy=active_buddy,
+            )
+        except ValueError as exc:
+            return _reject_revision_scope(
+                action=action,
+                active_buddy=active_buddy,
+                message=str(exc),
+            )
+
     try:
         artifact = artifact_repo.create_artifact_revision(
             artifact_id=artifact_id.strip() if isinstance(artifact_id, str) and artifact_id.strip() else None,
@@ -261,30 +299,16 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
             body=body,
             template=template,
             source_refs=normalized_refs,
-            supersedes_artifact_id=supersedes_artifact_id.strip() if isinstance(supersedes_artifact_id, str) else None,
+            supersedes_artifact_id=normalized_supersedes_artifact_id,
             authors=[active_buddy],
         )
     except ValueError as exc:
         message = str(exc)
         if "supersedes_artifact_id" in message or "superseded" in message:
-            return tool_responses.rejection(
-                tool="artifact",
+            return _reject_revision_scope(
                 action=action,
                 active_buddy=active_buddy,
-                code="E_ARTIFACT_SCOPE",
                 message=message,
-                permission_boundary="artifact.revision_scope",
-                human_summary="Supersede target is not publishable in the requested draft path.",
-                why_blocked=message,
-                impact="No artifact or track state changed.",
-                state_changed=False,
-                retryable=True,
-                retry_guidance="Use a current readable supersedes_artifact_id or omit supersedes_artifact_id.",
-                allowed_next_actions=[
-                    "Use track.open to inspect current shared material/proof ids.",
-                    "Retry artifact.create_revision with a valid supersedes_artifact_id.",
-                ],
-                correctable_fields=["supersedes_artifact_id"],
             )
         return _reject_payload(action=action, active_buddy=active_buddy, message=message)
 

@@ -89,12 +89,12 @@ def now_iso() -> str:
 
 
 def runtime_workspace_root(instance_payload: dict[str, Any] | None = None) -> Path:
-    if _RUNTIME_ROOT_OVERRIDE is not None:
-        return ROOT
     if isinstance(instance_payload, dict):
         candidate = instance_payload.get("workspace_dir")
         if isinstance(candidate, str) and candidate.strip():
             return Path(candidate.strip()).expanduser().resolve(strict=False)
+    if _RUNTIME_ROOT_OVERRIDE is not None:
+        return ROOT
     for env_key in ("BUDDYSWITCH_WORKSPACE_DIR", "BUDDYSWITCH_RUNTIME_WORKSPACE_ROOT"):
         raw = os.environ.get(env_key)
         if isinstance(raw, str) and raw.strip():

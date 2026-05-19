@@ -47,6 +47,49 @@ def _track_history_ref(track: dict[str, Any], artifact_id: str) -> dict[str, Any
     return None
 
 
+def assert_supersedes_target_for_revision(
+    *,
+    supersedes_artifact_id: str,
+    active_buddy: str,
+) -> dict[str, Any]:
+    artifact = artifact_repo.get_artifact(supersedes_artifact_id)
+    if artifact is None:
+        raise ValueError(f"artifact not found: {supersedes_artifact_id}")
+    if not bool(artifact.get("is_current")):
+        raise ValueError(f"artifact '{supersedes_artifact_id}' is not current and cannot be superseded")
+    if artifact.get("status") == "draft":
+        if artifact.get("created_by") != active_buddy:
+            raise ValueError("supersedes_artifact_id must reference an active-buddy-owned current draft")
+        return artifact
+    if artifact.get("status") != "published":
+        raise ValueError("supersedes_artifact_id must reference a current draft or published artifact")
+    track_id = artifact.get("published_to_track")
+    if not isinstance(track_id, str) or not track_id:
+        raise ValueError("supersedes published artifact is missing track publication id")
+    track = track_repo.get_track(track_id)
+    if track is None:
+        raise ValueError(f"track not found: {track_id}")
+    if track.get("archived_at") is not None:
+        raise ValueError("supersedes published artifact belongs to an archived track")
+    in_shared = any(
+        isinstance(row, dict)
+        and row.get("type") == "artifact"
+        and row.get("artifact_id") == supersedes_artifact_id
+        and bool(row.get("current"))
+        for row in track.get("shared_materials", [])
+    )
+    in_proof = any(
+        isinstance(row, dict)
+        and row.get("type") == "artifact"
+        and row.get("artifact_id") == supersedes_artifact_id
+        and bool(row.get("current", True))
+        for row in track.get("close_proof", [])
+    )
+    if not (in_shared or in_proof):
+        raise ValueError("supersedes_artifact_id must reference current published material/proof on a readable track")
+    return artifact
+
+
 def artifact_read_decision(artifact: dict[str, Any], active_buddy: str) -> dict[str, Any]:
     artifact_id = artifact.get("id") if isinstance(artifact.get("id"), str) else None
     owner = artifact.get("created_by")

@@ -9,9 +9,9 @@ description: Use when you need artifact summaries, full artifact reads by id, ar
 - Manage product-readable artifact summaries, full-body reads, and durable artifact writes.
 
 ## Runtime Route
-- CLI: `python3 scripts/env/client.py artifact <operation>`
+- CLI: `python3 scripts/env/client.py artifact create-revision --payload '{"title":"Design Direction","summary":"Draft","template":"design","body":"# Design Direction\\n\\nLong markdown body."}'`
 - Broker method: `env.tool`
-- Operations: `get`, `create-revision`, `update-metadata`
+- Discover current operations, payload keys, effects, and recovery guidance with `context.get.tool_catalog['artifact']` or `python3 scripts/turn_runtime.py status`.
 
 ## CLI Payload Rule
 - `--payload` takes one JSON object string.

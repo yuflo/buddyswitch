@@ -558,6 +558,48 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual((r2_read.get("artifact") or {}).get("body"), "v2")
         self.assertEqual((r2_read.get("artifact") or {}).get("currentness"), "current")
 
+    def test_create_revision_from_archived_published_artifact_rejects_without_new_artifact(self) -> None:
+        track = env_store.create_track("track-art-revision-archived", "Archived Revision", owner_buddy="pm")
+        artifact = env_store.create_artifact_revision(
+            artifact_id="art-revision-archived-r1",
+            title="Archived source",
+            summary="source",
+            body="source body",
+            template="brief",
+            supersedes_artifact_id=None,
+            created_by="pm",
+            authors=["pm"],
+            source_refs=[{"type": "note", "label": "seed"}],
+        )
+        env_store.publish_track_material(
+            track_id=str(track["id"]),
+            artifact_id=str(artifact["id"]),
+            label="Archived source",
+            from_buddy="pm",
+            summary="source",
+        )
+        env_store.update_track(str(track["id"]), {"archived_at": "2026-05-19T00:00:00Z"})
+        before_artifacts = {row["id"] for row in env_store.list_artifacts()}
+        instance_json = self._instance_json(instance_id="inst-pm-art-archived-revision", buddy="pm")
+
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-art-archived-revision",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-revision-archived-r2",
+                "title": "New archived revision",
+                "summary": "new",
+                "template": "brief",
+                "body": "new body",
+                "supersedes_artifact_id": str(artifact["id"]),
+            },
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual(set(row["id"] for row in env_store.list_artifacts()), before_artifacts)
+
     def test_archive_track_blocks_track_open_and_published_artifact_reads(self) -> None:
         instance_pm = self._instance_json(instance_id="inst-pm-art", buddy="pm")
         self.assertTrue(self._create_track(instance_json=instance_pm, instance_id="inst-pm-art", track_id="track-art-archive").get("ok"))

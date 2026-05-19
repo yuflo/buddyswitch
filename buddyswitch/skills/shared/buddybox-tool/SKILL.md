@@ -11,15 +11,9 @@ description: Use when the active buddy needs private files such as drafts, proto
 - Other buddies cannot list/read/write/delete these files.
 
 ## Runtime Route
-- CLI:
-
-```bash
-python3 scripts/env/client.py buddybox desc
-python3 scripts/env/client.py buddybox list --logical-name prototypes --recursive
-python3 scripts/env/client.py buddybox read --logical-name prototypes/landing.html
-python3 scripts/env/client.py buddybox write --payload '{"logical_name":"prototypes/landing.html","content":"<!doctype html>","content_type":"text/html"}'
-python3 scripts/env/client.py buddybox delete --logical-name tmp/obsolete.txt
-```
+- CLI: `python3 scripts/env/client.py buddybox write --payload '{"logical_name":"prototypes/landing.html","content":"<!doctype html>","content_type":"text/html"}'`
+- Broker method: `env.tool`
+- Discover current operations, payload keys, effects, and recovery guidance with `context.get.tool_catalog['buddybox']` or `python3 scripts/turn_runtime.py status`.
 
 ## CLI Payload Rule
 - `--payload` takes one JSON object string.

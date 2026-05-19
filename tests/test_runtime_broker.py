@@ -221,6 +221,96 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(self._runtime_path("buddyswitch/local/buddybox/pm/broker/out.txt").exists())
         self.assertFalse(self._runtime_path("state/buddyswitch/local/buddybox/pm/broker/out.txt").exists())
 
+    def test_env_tool_buddybox_lifecycle_uses_instance_workspace_local_root(self) -> None:
+        workspace_dir = self._runtime_path("alt-workspace-lifecycle")
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        (workspace_dir / "AGENTS.md").write_text("# BuddySwitch Runtime Workspace\n", encoding="utf-8")
+        instance_json = self._runtime_path("instance-alt-workspace-lifecycle.json")
+        instance_json.write_text(
+            json.dumps(
+                {
+                    "instance_id": "inst-pm-alt-workspace-lifecycle",
+                    "buddy": "pm",
+                    "status": "active",
+                    "current_task_id": None,
+                    "current_track_id": None,
+                    "workspace_dir": str(workspace_dir),
+                    "browser_port": None,
+                    "created_at": "2026-05-19T00:00:00Z",
+                    "updated_at": "2026-05-19T00:00:00Z",
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        write_payload = self._dispatch(
+            method="env.tool",
+            params={
+                "tool": "buddybox",
+                "action": "write",
+                "args": {"logical_name": "broker/lifecycle.txt", "content": "lifecycle\n"},
+            },
+            instance_id="inst-pm-alt-workspace-lifecycle",
+            buddy="pm",
+            instance_json=instance_json,
+        )
+        self.assertTrue(write_payload.get("ok"), msg=write_payload)
+
+        target = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm" / "broker" / "lifecycle.txt"
+        wrong_runtime_root = self._runtime_path("buddyswitch/local/buddybox/pm/broker/lifecycle.txt")
+        wrong_state_root = self._runtime_path("state/buddyswitch/local/buddybox/pm/broker/lifecycle.txt")
+        self.assertTrue(target.exists(), msg=target)
+        self.assertFalse(wrong_runtime_root.exists(), msg=wrong_runtime_root)
+        self.assertFalse(wrong_state_root.exists(), msg=wrong_state_root)
+
+        read_payload = self._dispatch(
+            method="env.tool",
+            params={
+                "tool": "buddybox",
+                "action": "read",
+                "args": {"logical_name": "broker/lifecycle.txt"},
+            },
+            instance_id="inst-pm-alt-workspace-lifecycle",
+            buddy="pm",
+            instance_json=instance_json,
+        )
+        self.assertTrue(read_payload.get("ok"), msg=read_payload)
+        self.assertEqual(read_payload.get("content"), "lifecycle\n")
+
+        list_payload = self._dispatch(
+            method="env.tool",
+            params={
+                "tool": "buddybox",
+                "action": "list",
+                "args": {"recursive": True},
+            },
+            instance_id="inst-pm-alt-workspace-lifecycle",
+            buddy="pm",
+            instance_json=instance_json,
+        )
+        self.assertTrue(list_payload.get("ok"), msg=list_payload)
+        files = list_payload.get("files")
+        self.assertIsInstance(files, list, msg=list_payload)
+        assert isinstance(files, list)
+        self.assertIn("broker/lifecycle.txt", {row.get("logical_name") for row in files if isinstance(row, dict)})
+
+        delete_payload = self._dispatch(
+            method="env.tool",
+            params={
+                "tool": "buddybox",
+                "action": "delete",
+                "args": {"logical_name": "broker/lifecycle.txt"},
+            },
+            instance_id="inst-pm-alt-workspace-lifecycle",
+            buddy="pm",
+            instance_json=instance_json,
+        )
+        self.assertTrue(delete_payload.get("ok"), msg=delete_payload)
+        self.assertFalse(target.exists(), msg=target)
+
     def test_env_tool_requests_enter_shared_runtime_lock(self) -> None:
         instance_json = self._instance_json()
         lock_sessions: list[dict[str, object]] = []

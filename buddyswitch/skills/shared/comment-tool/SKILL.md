@@ -10,16 +10,9 @@ description: Use when adding and listing comments on readable track and artifact
 Add and list plain-text comments on readable track and artifact targets through the runtime env.tool layer.
 
 ## Runtime Route
-
-```
-env.tool → comment.add | comment.list
-```
-
-The CLI entry point is:
-
-```bash
-python3 scripts/env/client.py comment <operation>
-```
+- CLI: `python3 scripts/env/client.py comment add --payload '{"target_type":"track","target_id":"track-alpha","content":"Design direction is ready."}'`
+- Broker method: `env.tool`
+- Discover current operations, payload keys, effects, and recovery guidance with `context.get.tool_catalog['comment']` or `python3 scripts/turn_runtime.py status`.
 
 ## CLI Payload Rule
 
@@ -31,12 +24,11 @@ python3 scripts/env/client.py comment <operation>
 python3 scripts/env/client.py comment add --payload '{"target_type":"track","target_id":"track-alpha","content":"Design direction is ready."}'
 ```
 
-## Operations
+## Workflow Notes
 
-- `comment.add` writes one plain-text comment on a readable `track` or `artifact` target.
-- `comment.list` reads comments on the same readable target classes.
-- For exact payload keys, optional keys, and response fields, inspect `context.get.tool_catalog['comment']` or `python3 scripts/turn_runtime.py status`.
-- Start with `python3 scripts/env/client.py context summarize` so comment operations run against current runtime-visible ids and state.
+- Use this tool for plain-text discussion on readable track and artifact targets.
+- Start with `python3 scripts/env/client.py context summarize` so comment actions run against current runtime-visible ids and state.
+- For exact operations, payload keys, optional keys, and response fields, inspect `context.get.tool_catalog['comment']` or `python3 scripts/turn_runtime.py status`.
 
 ## Key Boundary Rules
 

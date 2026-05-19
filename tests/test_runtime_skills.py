@@ -2,8 +2,6 @@
 """Runtime skill contract tests."""
 
 from __future__ import annotations
-
-import re
 import sys
 import tomllib
 import unittest
@@ -110,7 +108,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         for skill_text, label in [(msg_skill, "message-tool"), (cmt_skill, "comment-tool")]:
             with self.subTest(skill=label):
                 self.assertIn("env.tool", skill_text)
-                self.assertIn("message.send" if "message" in label else "comment.add", skill_text)
+                self.assertIn("context.get.tool_catalog", skill_text)
                 # Non-goals should only appear in "Do not" context
                 for term in non_goals:
                     if term in skill_text:
@@ -164,22 +162,30 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("kind=prd", track_skill)
         self.assertNotIn("published_to_track", track_skill)
 
-    def test_track_tool_operation_set_excludes_advance(self) -> None:
-        track_skill = (ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md").read_text(encoding="utf-8")
-        operations_line = ""
-        for line in track_skill.splitlines():
-            if line.strip().startswith("- Operations:"):
-                operations_line = line
-                break
-        self.assertTrue(operations_line, msg="track-tool SKILL.md must define an Operations line")
-        operations = set(re.findall(r"`([^`]+)`", operations_line))
-        self.assertEqual(
-            operations,
-            {"create", "list", "open", "update-now", "add-material", "add-update", "add-proof", "archive"},
-        )
-        self.assertNotIn("join", operations)
-        self.assertNotIn("attach-task", operations)
-        self.assertNotIn("detach-task", operations)
+    def test_shared_tool_skills_do_not_duplicate_runtime_action_catalogs(self) -> None:
+        skill_paths = {
+            "task": ROOT / "buddyswitch/skills/shared/task-tool/SKILL.md",
+            "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
+            "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
+            "buddybox": ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md",
+            "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
+            "comment": ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
+        }
+        for tool, path in skill_paths.items():
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(tool=tool):
+                self.assertNotIn("## operations", text)
+                self.assertNotRegex(text, r"(?m)^- operations:")
+                self.assertNotRegex(text, rf"env\.tool\s*[→>\-]+\s*{tool}\.")
+                self.assertIn(f"context.get.tool_catalog['{tool}']", text)
+                self.assertIn("python3 scripts/turn_runtime.py status", text)
+
+    def test_runtime_contract_not_shared_skill_owns_inactive_actions(self) -> None:
+        from env.tools import contracts
+
+        self.assertNotIn("advance", contracts.supported_actions("track"))
+        self.assertNotIn("resolve", contracts.supported_actions("comment"))
+        self.assertNotIn("reopen", contracts.supported_actions("comment"))
 
 
 if __name__ == "__main__":

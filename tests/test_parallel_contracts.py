@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -133,6 +134,29 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         # Task views must NOT have comment_ids
         task_row = next(r for r in tasks if isinstance(r, dict) and r.get("id") == task["id"])
         self.assertNotIn("comment_ids", task_row, msg="task view must not expose comment_ids")
+
+    def test_message_comment_buddybox_focused_tests_run_as_independent_loop(self) -> None:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "tests/test_message_env_tool.py",
+                "tests/test_comment_env_tool.py",
+                "tests/test_buddybox_env_tool.py",
+                "-q",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stdout + completed.stderr)
+        output = completed.stdout + completed.stderr
+        self.assertIn("passed", output)
+        self.assertNotIn("tests/test_track_env_tool.py", output)
+        self.assertNotIn("tests/test_artifact_env_tool.py", output)
+        self.assertNotIn("tests/test_task_env_tool.py", output)
 
 
 if __name__ == "__main__":
