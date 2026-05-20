@@ -19,7 +19,7 @@ from typing import Any, Iterator
 
 from env_manifest import DEFAULT_MANIFEST
 from env.repos import runtime_files
-from env.tools import catalog as tool_catalog
+from env.tool_runtime import registry as tool_registry
 
 ROOT = runtime_files.ROOT
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -110,7 +110,7 @@ def _hold_product_runtime_lock(
 def _build_env_tools_desc() -> dict[str, Any]:
     """Expose canonical env tool contract and semantics map for runtime consumers."""
 
-    return tool_catalog.env_tools_description()
+    return tool_registry.env_tools_description()
 
 
 def _runtime_status_payload() -> dict[str, Any]:

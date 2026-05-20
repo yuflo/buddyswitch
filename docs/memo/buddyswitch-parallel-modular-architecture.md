@@ -107,21 +107,20 @@ runtime env.tool response fields
 
 - action / payload / return schema 表；
 - per-tool package 内部路径；
-- dispatch、handler、service 入口；
+- `tool.py` / `_impl.py` 私有实现细节；
 - object repo 路径或 JSON 存储结构；
 - 与 runtime catalog 不一致的 payload 示例。
 
 每个 tool 的契约来源是：
 
 ```text
-scripts/env/tools/<tool>/contract.py
-scripts/env/tools/<tool>/semantics.py
-scripts/env/tools/<tool>/cli.py
-scripts/env/tools/<tool>/handlers.py
-scripts/env/tools/<tool>/service.py
+scripts/env/tool_runtime/definition.py
+scripts/env/tool_runtime/registry.py
+scripts/env/tools/<tool>/tool.py
+scripts/env/tools/<tool>/_impl.py
 ```
 
-shared runtime 只负责发现、投影、路由、dispatch、response formatting。SKILL 通过 catalog 消费能力，不复制能力。
+shared runtime 只负责发现、投影、路由、dispatch、response formatting。SKILL 通过 runtime discovery 消费能力，不复制能力。
 
 ## 外部实践依据
 
@@ -166,28 +165,30 @@ artifact.create_revision -> track.add_material / track.add_proof -> track.open -
 
 | Work | Should touch | Should not touch |
 | --- | --- | --- |
-| 新增 tool action | tool contract、对应 service、对应 domain/repo | 无关 SKILL、无关 tool |
+| 新增 tool action | `tool.py` definition、对应 `_impl.py`、对应 domain/repo | 无关 SKILL、无关 tool |
 | 修改 buddy SKILL | 对应 SKILL 文件 | Python runtime |
 | 修改 shared SKILL | shared SKILL 文件 | dispatch、object repo |
-| 修改 message | message service/domain/repo/test | track、artifact、comment |
-| 修改 comment | comment service/domain/repo/test | target object mutation |
-| 修改 buddybox | buddybox service/file repo/test | product object repos |
-| 修改 track/artifact 发布 | publication domain、track/artifact repo、相关 service | message、comment、buddybox、task |
+| 修改 message | message `_impl.py`/domain/repo/test | track、artifact、comment |
+| 修改 comment | comment `_impl.py`/domain/repo/test | target object mutation |
+| 修改 buddybox | buddybox `_impl.py`/file repo/test | product object repos |
+| 修改 track/artifact 发布 | publication domain、track/artifact repo、相关 `_impl.py` | message、comment、buddybox、task |
 
 ## 已落地基础
 
-`per-tool independence rebuild` 完成后，tool-specific ownership 已收敛到：
+`black-box runtime` 完成后，tool-specific ownership 已收敛到：
 
 ```text
+scripts/env/tool_runtime/
+  definition.py
+  context.py
+  results.py
+  registry.py
 scripts/env/tools/<tool>/
-  contract.py
-  semantics.py
-  cli.py
-  handlers.py
-  service.py
+  tool.py
+  _impl.py
 ```
 
-central `TOOL_REGISTRY`、central semantics table、central handler map、central per-tool CLI dispatch branch、`env.services` tool entrypoint 都不再是 runtime API。
+host runtime 只依赖 `env.tool_runtime.registry` 和 `env.tools.<tool>.tool`，不依赖 per-tool 私有实现文件结构。
 
 接下来维护的边界是：
 
@@ -204,9 +205,9 @@ central `TOOL_REGISTRY`、central semantics table、central handler map、centra
 2. 修改一个 buddy-specific 或 shared SKILL，不需要改 Python runtime。
 3. shared tool skills 都指向 `context.get.tool_catalog['<tool>']` 或 `python3 scripts/turn_runtime.py status` 获取精确 payload / action / response guidance。
 4. prose 文档和 SKILL 不复制 `payload_fields`、`action_semantics`、`operation_semantics`、action/payload 表。
-5. `context.get` 返回的 `tool_catalog` 和 `operation_semantics` 等于 `env.tools.catalog` 的投影；`operation_semantics` 只作为 runtime discovery/result surface，不作为 skill prose mirror。
-6. catalog projection 不 import service、domain、repo。
-7. selected dispatch 不 import sibling tool service。
+5. `context.get` 返回的 `tool_catalog` 和 `operation_semantics` 等于 `env.tool_runtime.registry` 的投影；`operation_semantics` 只作为 runtime discovery/result surface，不作为 skill prose mirror。
+6. catalog projection 不 import tool 私有实现、domain、repo。
+7. selected dispatch 不 import sibling tool `_impl.py`。
 8. object repo 没有 sibling repo import。
 9. `track/artifact/comment` 的真实产品耦合保留在 explicit domain modules。
 10. `python3 -m pytest tests/test_runtime_skills.py tests/test_repo_consistency.py tests/test_env_tool_response_contract.py -q` 通过。

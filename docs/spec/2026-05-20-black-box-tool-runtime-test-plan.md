@@ -39,9 +39,12 @@ The required forward repair is a one-time direct replacement:
 ## Test Design Rules
 
 - Tests start from functional and architecture requirements, not from current helper functions.
-- Behavior tests must exercise public runtime paths: broker dispatch, env.tool router dispatch,
+- Behavior tests must exercise public runtime paths: broker dispatch, env.tool registry dispatch,
   generic CLI payload dispatch, runtime catalog projection, and persisted state where mutation is
   expected.
+- Behavior tests must preserve the completed clean runtime environment contract: runtime object and
+  buddybox writes land under broker-owned state roots, while host-visible workspaces remain safe to
+  search and do not expose runtime-state storage projections.
 - Architecture tests may inspect files and AST because "single public tool entrypoint", "no direct
   runtime internals", and "legacy surfaces absent" are explicit requirements.
 - A temporary probe tool is allowed only when it uses the same public discovery, catalog, CLI, and
@@ -110,6 +113,10 @@ discovery for exact action and payload knowledge.
 R14. Final active code and active architecture docs contain no current-runtime references to old
 per-tool public modules or old shared env.tools runtime modules.
 
+R15. The black-box runtime preserves the clean runtime environment baseline: `dispatcher` keeps
+state-root refresh and status fields, `ToolContext` owns all access to `shared/state`, and tool
+packages never derive object or buddybox storage paths from the host-visible workspace.
+
 ## Test Matrix
 
 | ID | Requirement | File | Scenario | Main assertions |
@@ -125,11 +132,12 @@ per-tool public modules or old shared env.tools runtime modules.
 | CAT1 | R7/R8 | `tests/test_env_tool_response_contract.py` | `context.get` and `turn_runtime status` use the registry | returned `tool_catalog` and `operation_semantics` equal `env.tool_runtime.registry` projections |
 | CAT2 | R7/R11 | `tests/test_env_tool_payload_contract.py` | Runtime rejects fields outside input schema | every action rejects an unregistered field without state change |
 | CLI1 | R8/R9 | `tests/test_env_client_payload_cli.py` | Generic CLI payload dispatch | every action can be converted into an env.tool envelope through `<tool> <action> --payload` without per-tool CLI modules |
-| ROUTE1 | R10/R11 | `tests/test_env_tool_router.py` | Router selected-tool isolation | dispatching one tool imports only selected private implementation and never sibling implementations |
+| ROUTE1 | R10/R11 | `tests/test_env_tool_router.py` | Registry selected-tool isolation | dispatching one tool imports only selected private implementation and never sibling implementations |
 | REG1 | R12 | Existing `tests/test_*_env_tool.py` suites | Shipped behavior remains intact | task, track, artifact, buddybox, context, evidence, message, comment, and search main paths still pass |
 | SKILL1 | R13 | `tests/test_runtime_skills.py` | Skills stay runtime-discovery based | shared skills mention runtime discovery surfaces and do not name `tool.py`, private implementation files, or old module names |
 | DOC1 | R14 | `tests/test_repo_consistency.py` | Active docs match black-box runtime | README/current architecture docs describe `env.tool_runtime` and `tool.py`, not old per-tool public module layout |
-| FULL1 | R1-R14 | full relevant suite | Complete regression | focused architecture, CLI, broker, behavior, skill, and consistency tests pass together |
+| CLEAN1 | R15 | `tests/test_clean_runtime_environment.py`, `tests/test_buddy_env_sandbox.py`, `tests/test_env_layer_boundaries.py`, `tests/test_env_layer_end_to_end.py`, `tests/test_runtime_broker.py` | Clean runtime baseline survives black-box replacement | workspace exploration stays clean; generated product config still protects source/state roots; broker status still reports workspace/state roots; env.tool writes still use shared state |
+| FULL1 | R1-R15 | full relevant suite | Complete regression | focused architecture, CLI, broker, clean-runtime, behavior, skill, and consistency tests pass together |
 
 ## Detailed Test Designs
 
@@ -234,10 +242,14 @@ Forbidden patterns:
 - `Path.unlink()`
 - `open()` calls whose mode includes `w`, `a`, or `x`
 - importing any repo module to call write helpers directly
+- reading `workspace_dir`, `BUDDYSWITCH_STATE_ROOT`, or hard-coded
+  `buddyswitch/objects` / `buddyswitch/local/buddybox` storage paths from tool implementation files
 
 Allowed mutation route:
 
 - methods called on `context.objects`, `context.buddybox`, or `context.browser`.
+- host-owned `ToolContext` capability code may call `env.repos`, `env.domain`, and
+  `runtime_files` to enforce the state-root-backed clean runtime contract.
 
 Focused command:
 
@@ -409,7 +421,36 @@ python3 -m pytest \
   -q
 ```
 
-Expected final result: all pass through the new `env.tool_runtime` router and `ToolContext`.
+Expected final result: all pass through the new `env.tool_runtime.registry` dispatch path and
+`ToolContext`.
+
+### CLEAN1: Clean Runtime Baseline Survives
+
+Run the clean-runtime regression suites after the dispatcher, context, and buddybox migrations.
+
+Assertions:
+
+- broker `ping` and `status` still expose `runtime_workspace_root`, `runtime_state_root`, and
+  `env_store_root`;
+- `BUDDYSWITCH_STATE_ROOT` still refreshes `runtime_files` roots inside broker dispatch and is
+  restored after dispatch;
+- runtime object and buddybox writes through env.tool create files under `shared/state`, not under
+  the host-visible workspace;
+- host-visible workspaces still omit `buddyswitch/objects/**` and active buddybox storage
+  projections;
+- context and buddybox responses do not guide users to direct storage paths.
+
+Focused command:
+
+```bash
+python3 -m pytest \
+  tests/test_clean_runtime_environment.py \
+  tests/test_buddy_env_sandbox.py \
+  tests/test_env_layer_boundaries.py \
+  tests/test_env_layer_end_to_end.py \
+  tests/test_runtime_broker.py \
+  -q
+```
 
 ### SKILL1 and DOC1: Active Guidance Has No Runtime Residue
 
@@ -467,6 +508,10 @@ python3 -m pytest \
   tests/test_runtime_broker.py \
   tests/test_turn_runtime.py \
   tests/test_runless_runtime_contract.py \
+  tests/test_clean_runtime_environment.py \
+  tests/test_buddy_env_sandbox.py \
+  tests/test_env_layer_boundaries.py \
+  tests/test_env_layer_end_to_end.py \
   tests/test_runtime_skills.py \
   tests/test_repo_consistency.py \
   -q
@@ -476,11 +521,13 @@ Repository hygiene:
 
 ```bash
 git diff --check
-rg -n 'env\.tools\.(catalog|cli_helpers|discovery|dispatch|model|responses|router)|TOOL_SPEC|ACTION_SEMANTICS|HANDLER_SPECS|scripts/env/tools/.*/(contract|semantics|handlers|cli|service)\.py' scripts tests README.md docs/spec docs/memo -S
+rg -n 'env\.tools\.(catalog|cli_helpers|discovery|dispatch|model|responses|router)|TOOL_SPEC|ACTION_SEMANTICS|HANDLER_SPECS|scripts/env/tools/.*/(contract|semantics|handlers|cli|service)\.py' \
+  scripts tests README.md docs/memo/buddyswitch-parallel-modular-architecture.md -S
 ```
 
-Expected final hygiene result: no active code references the old runtime modules. Historical memo
-references are allowed only when the text clearly marks them as old context, not current runtime.
+Expected final hygiene result: no active code or active architecture guide references the old
+runtime modules. Historical specs and memos may mention old files as source context or deletion
+targets, but they must not be imported as active runtime guidance.
 
 ## Completion Gate
 
@@ -489,5 +536,6 @@ The task is not complete until:
 - the new architecture tests pass;
 - every shipped tool behavior suite passes through the new runtime;
 - active docs and skills describe only the black-box runtime;
+- clean runtime environment regressions still pass;
 - deleted old module names are rejected by tests;
 - no compatibility import alias, fallback registry, or old/new dual path remains.

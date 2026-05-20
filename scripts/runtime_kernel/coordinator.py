@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Any, Callable
 
 import turn_runtime
-from env.tools import catalog as tool_catalog
+from env.tool_runtime import registry as tool_registry
 
 
 class LockMode(str, Enum):
@@ -71,10 +71,10 @@ def lock_mode_for_request(method: str, params: dict[str, Any]) -> LockMode:
         return LockMode.WRITE
 
     action = action_raw.strip().replace("-", "_")
-    spec = tool_catalog.get_action_spec(tool.strip(), action)
-    if not isinstance(spec, dict):
+    mutates = tool_registry.action_mutates(tool.strip(), action)
+    if not isinstance(mutates, str):
         return LockMode.WRITE
-    if spec.get("mutates") == "none":
+    if mutates == "none":
         return LockMode.READ
     return LockMode.WRITE
 

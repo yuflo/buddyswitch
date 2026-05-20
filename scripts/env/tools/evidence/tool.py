@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Black-box protocol entrypoint for env.tools.evidence."""
+
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from env.tool_runtime.context import ToolContext
+from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition
+
+
+def _build_definition() -> ToolDefinition:
+    return ToolDefinition(
+        id='evidence',
+        title='Market Evidence',
+        description='Issue target-scoped transient evidence token metadata for artifact quality gates.',
+        cli_resource='evidence',
+        command="python3 scripts/env/client.py evidence <action> --payload '<json-object>'",
+        scope='target-scoped browser evidence for market quality gates',
+        capability_boundary='Evidence actions are target-scoped and return transient token metadata.',
+        use_when=(
+            'You need artifact-scoped evidence token metadata.',
+        ),
+        do_not_use_when=(
+            'You need durable runtime object mutation.',
+        ),
+        actions=(
+            ActionDefinition(
+                name='issue_browser',
+                title='evidence.issue_browser',
+                description='Issue one browser evidence token metadata row.',
+                input_schema={
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'properties': {
+                        'target_type': {
+                            'type': 'string',
+                        },
+                        'target_id': {
+                            'type': 'string',
+                        },
+                        'mode': {
+                            'type': 'string',
+                        },
+                    },
+                },
+                output_schema={
+                    '$ref': 'ToolResult',
+                },
+                kind='issue',
+                mutates='broker_token',
+                required_permission='evidence.issue',
+                authority='market.evidence_scope',
+                preconditions=(
+                    'target_type is artifact',
+                    'target_id references readable target',
+                ),
+                returns=(
+                    'tool_evidence',
+                ),
+                risk_hints={
+                    'read_only': False,
+                    'destructive': False,
+                    'idempotent': False,
+                    'open_world': False,
+                    'requires_human_approval': False,
+                    'external_effect': False,
+                },
+            ),
+            ActionDefinition(
+                name='approve_downgrade',
+                title='evidence.approve_downgrade',
+                description='Issue one downgrade approval token metadata row.',
+                input_schema={
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'properties': {
+                        'target_type': {
+                            'type': 'string',
+                        },
+                        'target_id': {
+                            'type': 'string',
+                        },
+                        'reason': {
+                            'type': 'string',
+                        },
+                    },
+                },
+                output_schema={
+                    '$ref': 'ToolResult',
+                },
+                kind='issue',
+                mutates='broker_token',
+                required_permission='evidence.approve',
+                authority='market.evidence_scope',
+                preconditions=(
+                    'target_type is artifact',
+                    'reason is non-empty',
+                ),
+                returns=(
+                    'tool_evidence',
+                ),
+                risk_hints={
+                    'read_only': False,
+                    'destructive': False,
+                    'idempotent': False,
+                    'open_world': False,
+                    'requires_human_approval': False,
+                    'external_effect': False,
+                },
+            ),
+        ),
+    )
+
+
+DEFINITION = _build_definition()
+validate_definition(DEFINITION)
+
+
+def invoke(*, action: str, args: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+    from . import _impl
+
+    return _impl.invoke(action=action, args=args, context=context)

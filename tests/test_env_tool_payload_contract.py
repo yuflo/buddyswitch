@@ -15,8 +15,8 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_manifest  # noqa: E402
-from env.tools import catalog  # noqa: E402
-from env.tools.router import dispatch_env_tool_request  # noqa: E402
+from env.tool_runtime import registry as catalog  # noqa: E402
+from env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -58,33 +58,31 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
     def test_payload_field_helper_matches_registry(self) -> None:
-        for tool_spec in catalog.tool_specs():
-            tool = tool_spec["tool"]
-            for action_spec in tool_spec["actions"]:
-                action = action_spec["name"]
+        for tool in sorted(catalog.supported_tools()):
+            for action in sorted(catalog.supported_actions(tool)):
                 with self.subTest(tool=tool, action=action):
+                    action_def = catalog.get_action_definition(tool, action)
+                    expected = sorted((action_def.input_schema.get("properties") or {}).keys())
                     self.assertEqual(
-                        catalog.payload_fields_for_action(tool, action),
-                        set(action_spec.get("payload_fields", [])),
+                        set(catalog.payload_fields_for_action(tool, action)),
+                        set(expected),
                     )
 
     def test_runtime_catalog_payload_fields_match_registry_order(self) -> None:
         desc = catalog.env_tools_description()
-        for tool_spec in catalog.tool_specs():
-            tool = tool_spec["tool"]
-            for action_spec in tool_spec["actions"]:
-                action = action_spec["name"]
+        for tool in sorted(catalog.supported_tools()):
+            for action in sorted(catalog.supported_actions(tool)):
                 with self.subTest(tool=tool, action=action):
+                    action_def = catalog.get_action_definition(tool, action)
+                    expected = [name for name in (action_def.input_schema.get("properties") or {}) if isinstance(name, str)]
                     self.assertEqual(
                         desc[tool]["payload_fields"][action],
-                        list(action_spec.get("payload_fields", [])),
+                        expected,
                     )
 
     def test_every_action_rejects_unregistered_payload_field_without_state_change(self) -> None:
-        for tool_spec in catalog.tool_specs():
-            tool = tool_spec["tool"]
-            for action_spec in tool_spec["actions"]:
-                action = action_spec["name"]
+        for tool in sorted(catalog.supported_tools()):
+            for action in sorted(catalog.supported_actions(tool)):
                 with self.subTest(tool=tool, action=action):
                     response = self._dispatch(
                         tool=tool,

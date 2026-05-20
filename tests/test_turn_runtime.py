@@ -14,7 +14,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from env.tools import catalog as tool_catalog  # noqa: E402
+from env.tool_runtime import registry as tool_catalog  # noqa: E402
 
 
 class TurnRuntimeRunlessTests(unittest.TestCase):

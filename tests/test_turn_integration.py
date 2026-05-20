@@ -14,7 +14,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_manifest  # noqa: E402
-from env.tools import router as tool_router  # noqa: E402
+from env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 

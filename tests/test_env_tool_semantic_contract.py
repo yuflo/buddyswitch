@@ -12,7 +12,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from env.tools import catalog  # noqa: E402
+from env.tool_runtime import registry as catalog  # noqa: E402
 
 _EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment"}
 _EXPECTED_ACTIONS_BY_TOOL = {
@@ -31,27 +31,25 @@ _EXPECTED_ACTIONS_BY_TOOL = {
 class EnvToolSemanticContractTests(unittest.TestCase):
     def test_registry_semantics_cover_every_registered_tool_and_action(self) -> None:
         desc = catalog.env_tools_description()
-        tool_specs = catalog.tool_specs()
-        registry_tools = {row["tool"] for row in tool_specs}
+        registry_tools = set(catalog.supported_tools())
 
         self.assertEqual(registry_tools, _EXPECTED_TOOLS)
         self.assertEqual(set(desc), _EXPECTED_TOOLS)
         self.assertEqual(catalog.semantic_contract_errors(), [])
 
-        for spec in tool_specs:
-            tool = spec["tool"]
-            expected_actions = {row["name"] for row in spec["actions"]}
+        for tool in sorted(registry_tools):
+            expected_actions = set(catalog.supported_actions(tool))
             self.assertEqual(expected_actions, _EXPECTED_ACTIONS_BY_TOOL[tool])
             self.assertEqual(set(desc[tool]["operations"]), expected_actions)
             self.assertEqual(set(desc[tool]["payload_fields"]), expected_actions)
             self.assertEqual(set(desc[tool]["action_semantics"]), expected_actions)
 
     def test_handoff_and_track_advance_are_absent(self) -> None:
-        by_tool = {row["tool"]: row for row in catalog.tool_specs()}
+        by_tool = {tool: set(catalog.supported_actions(tool)) for tool in catalog.supported_tools()}
         self.assertNotIn("handoff", by_tool)
-        self.assertNotIn("advance", {row["name"] for row in by_tool["track"]["actions"]})
-        self.assertNotIn("resolve", {row["name"] for row in by_tool["comment"]["actions"]})
-        self.assertNotIn("reopen", {row["name"] for row in by_tool["comment"]["actions"]})
+        self.assertNotIn("advance", by_tool["track"])
+        self.assertNotIn("resolve", by_tool["comment"])
+        self.assertNotIn("reopen", by_tool["comment"])
 
         op = catalog.operation_semantics()
         self.assertNotIn("track.advance", op)
@@ -62,9 +60,9 @@ class EnvToolSemanticContractTests(unittest.TestCase):
     def test_operation_semantics_machine_contract_is_preserved(self) -> None:
         op = catalog.operation_semantics()
         expected_keys = {
-            f"{tool_spec['tool']}.{action_spec['name']}"
-            for tool_spec in catalog.tool_specs()
-            for action_spec in tool_spec["actions"]
+            f"{tool}.{action}"
+            for tool in catalog.supported_tools()
+            for action in catalog.supported_actions(tool)
         }
         self.assertEqual(set(op), expected_keys)
         self.assertEqual(

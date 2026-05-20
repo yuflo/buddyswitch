@@ -75,10 +75,12 @@ Open `http://127.0.0.1:8765/` and click `Refresh workspace`.
 
 ## Canonical Runtime Sources
 
-- `scripts/env/tools/<tool>/contract.py` for per-tool action names, payload fields, permissions, and return metadata.
-- `scripts/env/tools/<tool>/semantics.py` for per-tool machine-readable capability and action semantics.
-- `scripts/env/tools/<tool>/cli.py`, `scripts/env/tools/<tool>/handlers.py`, and `scripts/env/tools/<tool>/service.py` for per-tool CLI registration, selected dispatch mapping, and service execution.
-- `scripts/env/tools/catalog.py` for service-light env tool discovery, status/catalog projection, and operation semantics projection.
+- `scripts/env/tool_runtime/definition.py` for `ToolDefinition` / `ActionDefinition` protocol and schema validation.
+- `scripts/env/tool_runtime/context.py` for host-owned `ToolContext` capabilities that gate runtime-state access.
+- `scripts/env/tool_runtime/results.py` for canonical env.tool result/rejection shaping.
+- `scripts/env/tool_runtime/registry.py` for runtime discovery, catalog/semantics projection, and selected tool dispatch.
+- `scripts/env/tools/<tool>/tool.py` as each tool's only public runtime entrypoint (`DEFINITION` + `invoke`).
+- `scripts/env/tools/<tool>/_impl.py` for selected private implementation invoked by `tool.py`.
 - `scripts/runtime_kernel/protocol.py` for runtime broker protocol envelope.
 - `scripts/runtime_kernel/dispatcher.py` for supported broker methods: `env.tool`, `ping`, `status`.
 - `framework/contracts/prepare-turn-context.json` for context payload contract compatibility.

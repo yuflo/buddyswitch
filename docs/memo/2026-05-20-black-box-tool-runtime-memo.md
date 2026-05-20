@@ -51,6 +51,23 @@ The design is acceptable only if it stays repo-local, in-process, and protocol-d
 remote plugin loading, a marketplace, subprocess sandboxes, version negotiation, workflow engines,
 event buses, generic DSLs, or a compatibility framework.
 
+## Clean Runtime Baseline
+
+This memo assumes the clean runtime environment repair has already landed.
+
+The host-visible runtime workspace and broker-owned state root are now separate concerns:
+
+```text
+runtime workspace -> safe, searchable host surface
+runtime state     -> shared/state, broker-owned, env-tool-backed
+```
+
+Black-box tool runtime work must preserve that contract. `ToolContext` may call host-owned
+`env.repos`, `env.domain`, manifest, browser, and runtime file helpers internally, but tool packages
+must not derive storage paths from `workspace_dir`, read or write `buddyswitch/objects/**`, or expose
+`buddyswitch/local/buddybox/**` as ordinary workspace storage. Buddybox and runtime object access
+must remain capability calls backed by the state root selected by the broker environment.
+
 ## Architecture Target
 
 Introduce one small host-owned runtime package:
@@ -107,11 +124,15 @@ actually need:
 
 ```text
 context.active_buddy
-context.instance
+context.instance_id
+context.instance_json
+context.instance_payload
 context.manifest
+context.manifest_path
 context.objects
 context.buddybox
 context.browser
+context.catalog
 context.now()
 context.new_id(prefix)
 ```
@@ -122,9 +143,10 @@ repos or runtime files.
 The first implementation should keep capabilities blunt:
 
 - `objects`: explicit methods for current runtime object reads/writes used by existing tools.
-- `buddybox`: active-buddy-private file methods.
+- `buddybox`: active-buddy-private file methods backed by the broker-owned state root.
 - `browser`: search/browser session methods needed by `search`.
 - `manifest`: read-only buddy and permission facts.
+- `catalog`: registry projections needed by `context.get` and `context.summarize`.
 
 Do not introduce a generic object query language. Do not introduce a permission framework beyond
 what existing runtime behavior needs.
@@ -292,6 +314,8 @@ Required assertions:
   `why_blocked`, and actionable next steps;
 - focused behavior tests pass for every shipped tool;
 - broad runtime broker and turn integration tests pass.
+- clean runtime environment regression tests still pass, including workspace/state separation and
+  host-visible exploration without denied runtime-state projections.
 
 ## Decision
 

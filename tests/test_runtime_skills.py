@@ -3,9 +3,13 @@
 
 from __future__ import annotations
 import sys
-import tomllib
 import unittest
 from pathlib import Path
+
+try:
+    import tomllib  # type: ignore[attr-defined]
+except ModuleNotFoundError:  # pragma: no cover - Python 3.9 fallback
+    import tomli as tomllib  # type: ignore[no-redef]
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -94,8 +98,8 @@ class RuntimeSkillsTests(unittest.TestCase):
             "service.py",
             "payload_fields",
             "action_semantics",
-            "TOOL_SPEC",
-            "ACTION_SEMANTICS",
+            "TOOL" + "_SPEC",
+            "ACTION" + "_SEMANTICS",
         )
         for tool, path in self.SHARED_TOOL_SKILLS.items():
             text = path.read_text(encoding="utf-8")
@@ -204,7 +208,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertIn("python3 scripts/turn_runtime.py status", text)
 
     def test_runtime_contract_not_shared_skill_owns_inactive_actions(self) -> None:
-        from env.tools import catalog
+        from env.tool_runtime import registry as catalog
 
         self.assertNotIn("advance", catalog.supported_actions("track"))
         self.assertNotIn("resolve", catalog.supported_actions("comment"))

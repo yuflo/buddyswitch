@@ -18,7 +18,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_manifest  # noqa: E402
-from env.tools.router import dispatch_env_tool_request  # noqa: E402
+from env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -103,31 +103,43 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return server, thread, int(server.server_port)
 
     def test_search_cli_help_exposes_status_request_and_open_browser(self) -> None:
-        completed = subprocess.run(
+        resource_help = subprocess.run(
             ["python3", "scripts/env/client.py", "search", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
             check=False,
         )
-        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-        self.assertIn("status", completed.stdout)
-        self.assertIn("request", completed.stdout)
-        self.assertIn("open-browser", completed.stdout)
-        self.assertIn("--query", completed.stdout)
-        self.assertIn("--backend", completed.stdout)
-        self.assertIn("--engine", completed.stdout)
+        self.assertEqual(resource_help.returncode, 0, msg=resource_help.stderr)
+        self.assertIn("status", resource_help.stdout)
+        self.assertIn("request", resource_help.stdout)
+        self.assertIn("open-browser", resource_help.stdout)
+        self.assertNotIn("--query", resource_help.stdout)
+        self.assertNotIn("--backend", resource_help.stdout)
+        self.assertNotIn("--engine", resource_help.stdout)
 
-    def test_search_cli_rejects_missing_backend_and_unknown_engine(self) -> None:
-        missing_backend = subprocess.run(
-            ["python3", "scripts/env/client.py", "search", "request", "--query", "x"],
+        action_help = subprocess.run(
+            ["python3", "scripts/env/client.py", "search", "request", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
             check=False,
         )
-        self.assertEqual(missing_backend.returncode, 2)
-        self.assertIn("--backend", missing_backend.stderr)
+        self.assertEqual(action_help.returncode, 0, msg=action_help.stderr)
+        self.assertIn("--payload", action_help.stdout)
+
+    def test_search_cli_rejects_missing_backend_and_unknown_engine(self) -> None:
+        missing_backend = subprocess.run(
+            ["python3", "scripts/env/client.py", "search", "request", "--payload", '{"query":"x"}'],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(missing_backend.returncode, 1)
+        missing_backend_payload = json.loads(missing_backend.stdout)
+        self.assertFalse(missing_backend_payload.get("ok"), msg=missing_backend_payload)
+        self.assertEqual((missing_backend_payload.get("error") or {}).get("code"), "E_RUNTIME_BROKER_UNAVAILABLE")
 
         unknown_engine = subprocess.run(
             [
@@ -135,18 +147,18 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "scripts/env/client.py",
                 "search",
                 "open-browser",
-                "--query",
-                "x",
-                "--engine",
-                "unknown",
+                "--payload",
+                '{"query":"x","engine":"unknown"}',
             ],
             cwd=ROOT,
             text=True,
             capture_output=True,
             check=False,
         )
-        self.assertEqual(unknown_engine.returncode, 2)
-        self.assertIn("invalid choice", unknown_engine.stderr)
+        self.assertEqual(unknown_engine.returncode, 1)
+        unknown_engine_payload = json.loads(unknown_engine.stdout)
+        self.assertFalse(unknown_engine_payload.get("ok"), msg=unknown_engine_payload)
+        self.assertEqual((unknown_engine_payload.get("error") or {}).get("code"), "E_RUNTIME_BROKER_UNAVAILABLE")
 
     def test_search_status_reports_market_profile_backend_and_native_search_boundary(self) -> None:
         instance_json = self._instance_json(buddy="market", browser_port=9222)
@@ -224,8 +236,9 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         command_hint = response.get("command_hint")
         self.assertIsInstance(command_hint, str, msg=response)
         assert isinstance(command_hint, str)
-        self.assertIn("--query '<query>'", command_hint)
-        self.assertIn("--engine google", command_hint)
+        self.assertIn("--payload", command_hint)
+        self.assertIn('"query":"<query>"', command_hint)
+        self.assertIn('"engine":"google"', command_hint)
         self.assertNotIn(query, command_hint)
         self.assertNotIn("&&", command_hint)
 
@@ -285,7 +298,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(response.get("ok"), msg=response)
         self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BACKEND_APPROVAL_REQUIRED")
         self.assertEqual(response.get("permission_boundary"), "search.search_api.user_approved_only")
-        self.assertIn("search open-browser", str(response.get("command_hint")))
+        self.assertIn("search open_browser", str(response.get("command_hint")))
 
     def test_search_request_search_api_returns_non_market_provider_unavailable(self) -> None:
         instance_json = self._instance_json(buddy="dev")

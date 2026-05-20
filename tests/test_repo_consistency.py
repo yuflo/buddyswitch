@@ -16,7 +16,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_store  # noqa: E402
 import turn_runtime  # noqa: E402
-from env.tools import catalog as tool_catalog  # noqa: E402
+from env.tool_runtime import registry as tool_catalog  # noqa: E402
 
 _EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment"}
 
@@ -257,6 +257,11 @@ class RepoConsistencyTests(unittest.TestCase):
             "framework/contracts",
             "tools/launcher/assets/buddies",
         ]
+        legacy_runtime_tool_path = "scripts/env/tools/.*/"
+        legacy_contract_file = "contract" + "\\.py"
+        legacy_semantics_file = "semantics" + "\\.py"
+        legacy_handlers_file = "handlers" + "\\.py"
+        legacy_service_file = "service" + "\\.py"
         completed = subprocess.run(
             [
                 "rg",
@@ -268,13 +273,13 @@ class RepoConsistencyTests(unittest.TestCase):
                     "payload_fields"
                     + "|action_semantics"
                     + "|operation_semantics"
-                    + "|TOOL_SPEC"
-                    + "|ACTION_SEMANTICS"
-                    + "|HANDLER_SPECS"
-                    + "|scripts/env/tools/.*/contract\\.py"
-                    + "|scripts/env/tools/.*/semantics\\.py"
-                    + "|scripts/env/tools/.*/handlers\\.py"
-                    + "|scripts/env/tools/.*/service\\.py"
+                    + "|" + ("TOOL" + "_SPEC")
+                    + "|" + ("ACTION" + "_SEMANTICS")
+                    + "|" + ("HANDLER" + "_SPECS")
+                    + "|" + legacy_runtime_tool_path + legacy_contract_file
+                    + "|" + legacy_runtime_tool_path + legacy_semantics_file
+                    + "|" + legacy_runtime_tool_path + legacy_handlers_file
+                    + "|" + legacy_runtime_tool_path + legacy_service_file
                     + "|\\|\\s*tool\\s*\\|\\s*action\\s*\\|\\s*payload"
                     + "|\\|\\s*action\\s*\\|\\s*payload"
                     + "|\\*\\*payload:\\*\\*"
@@ -302,12 +307,11 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn("## skill / tool contract 衔接规则", lowered)
         self.assertIn("context.get.tool_catalog", text)
         self.assertIn("python3 scripts/turn_runtime.py status", text)
-        self.assertIn("scripts/env/tools/<tool>/contract.py", text)
-        self.assertIn("scripts/env/tools/<tool>/semantics.py", text)
-        self.assertIn("scripts/env/tools/<tool>/cli.py", text)
-        self.assertIn("scripts/env/tools/<tool>/handlers.py", text)
-        self.assertIn("scripts/env/tools/<tool>/service.py", text)
-        self.assertIn("skill 通过 catalog 消费能力，不复制能力", lowered)
+        self.assertIn("scripts/env/tool_runtime/definition.py", text)
+        self.assertIn("scripts/env/tool_runtime/registry.py", text)
+        self.assertIn("scripts/env/tools/<tool>/tool.py", text)
+        self.assertIn("scripts/env/tools/<tool>/_impl.py", text)
+        self.assertIn("skill 通过 runtime discovery 消费能力，不复制能力", lowered)
         self.assertNotIn("## 第一阶段落地", text)
         self.assertIn("## 已落地基础", text)
         self.assertIn("workflow engine", lowered)
@@ -317,15 +321,25 @@ class RepoConsistencyTests(unittest.TestCase):
     def test_readme_runtime_sources_match_per_tool_runtime(self) -> None:
         text = (ROOT / "README.md").read_text(encoding="utf-8")
 
-        self.assertIn("scripts/env/tools/catalog.py", text)
-        self.assertIn("scripts/env/tools/<tool>/contract.py", text)
-        self.assertIn("scripts/env/tools/<tool>/semantics.py", text)
-        self.assertIn("scripts/env/tools/<tool>/cli.py", text)
-        self.assertIn("scripts/env/tools/<tool>/handlers.py", text)
-        self.assertIn("scripts/env/tools/<tool>/service.py", text)
+        self.assertIn("scripts/env/tool_runtime/definition.py", text)
+        self.assertIn("scripts/env/tool_runtime/context.py", text)
+        self.assertIn("scripts/env/tool_runtime/results.py", text)
+        self.assertIn("scripts/env/tool_runtime/registry.py", text)
+        self.assertIn("scripts/env/tools/<tool>/tool.py", text)
+        self.assertIn("scripts/env/tools/<tool>/_impl.py", text)
 
-        self.assertNotIn("scripts/env/tools/contracts.py", text)
-        self.assertNotIn("scripts/env/tools/semantics.py` for machine-readable operation semantics", text)
+        legacy_catalog_path = "scripts/env/tools/" + "catalog.py"
+        legacy_contract_path = "scripts/env/tools/<tool>/" + "contract.py"
+        legacy_semantics_path = "scripts/env/tools/<tool>/" + "semantics.py"
+        legacy_cli_path = "scripts/env/tools/<tool>/" + "cli.py"
+        legacy_handlers_path = "scripts/env/tools/<tool>/" + "handlers.py"
+        legacy_service_path = "scripts/env/tools/<tool>/" + "service.py"
+        self.assertNotIn(legacy_catalog_path, text)
+        self.assertNotIn(legacy_contract_path, text)
+        self.assertNotIn(legacy_semantics_path, text)
+        self.assertNotIn(legacy_cli_path, text)
+        self.assertNotIn(legacy_handlers_path, text)
+        self.assertNotIn(legacy_service_path, text)
 
     def test_contracts_and_buddy_agents_point_to_runtime_discovery(self) -> None:
         for name in ("pm", "design", "dev", "market", "test"):

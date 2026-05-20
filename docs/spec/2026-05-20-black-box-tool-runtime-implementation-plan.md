@@ -32,8 +32,17 @@ Read before editing:
 - `scripts/runtime_kernel/dispatcher.py`
 - `scripts/runtime_kernel/client.py`
 - `scripts/runtime_kernel/coordinator.py`
+- `scripts/runtime_kernel/lifecycle.py`
 - `scripts/turn_runtime.py`
+- `scripts/env/repos/runtime_files.py`
+- `scripts/env_store.py`
+- `scripts/env_legacy_store.py`
+- `tests/runtime_root_test_helper.py`
+- `tests/test_clean_runtime_environment.py`
 - existing env.tool behavior tests under `tests/test_*_env_tool.py`
+
+Also inspect the clean runtime environment commit currently on this branch. This plan is a second
+stage after that repair, not an alternative to it.
 
 ## Objective And Key Problems
 
@@ -52,6 +61,30 @@ reach BuddySwitch runtime internals directly. The repair must make these boundar
 5. Old per-tool public modules and old shared env.tools runtime modules are deleted in the final
    state.
 
+## Clean Runtime Baseline
+
+The clean runtime environment repair is now the implementation baseline:
+
+```text
+runtime workspace root = host-visible, safe-to-search workspace
+runtime state root     = broker-owned shared/state
+```
+
+Black-box runtime changes must preserve these contracts:
+
+- `scripts/runtime_kernel/dispatcher.py` keeps `BUDDYSWITCH_STATE_ROOT`,
+  `runtime_files.refresh_runtime_roots_from_env()`, and `runtime_workspace_root` /
+  `runtime_state_root` / `env_store_root` status fields while switching env.tool dispatch to
+  `env.tool_runtime.registry`.
+- `ToolContext` is the only layer that may call host-owned `env.repos`, `env.domain`,
+  `env_manifest`, browser state helpers, or `runtime_files`.
+- Tool `_impl.py` files must not derive storage from `workspace_dir`, `BUDDYSWITCH_STATE_ROOT`,
+  `buddyswitch/objects/**`, or `buddyswitch/local/buddybox/**`.
+- Runtime objects and buddybox private files remain state-root-backed through capability methods,
+  not normal workspace file paths.
+- `context` and `buddybox` migrations must preserve the clean-runtime behavior that host-facing
+  guidance points to env tools and logical names, not direct runtime storage paths.
+
 ## Forward Rules
 
 - Do not build a plugin platform, marketplace, remote loader, subprocess sandbox, event bus,
@@ -60,6 +93,9 @@ reach BuddySwitch runtime internals directly. The repair must make these boundar
 - Do not keep old and new tool systems as supported side-by-side paths.
 - Do not preserve per-tool `cli.py` flag builders. The final CLI is generic:
   `python3 scripts/env/client.py <tool> <action> --payload '<json-object>'`.
+- Do not regress the clean runtime environment contract: no workspace state projections, no direct
+  buddybox storage guidance, no sandbox escalation prompt dependency, and no writes through the
+  host-visible workspace.
 - During local implementation, an intermediate commit may be temporarily red. The final branch must
   have one active runtime path and passing verification.
 
@@ -91,11 +127,16 @@ scripts/runtime_kernel/dispatcher.py
 scripts/runtime_kernel/client.py
 scripts/runtime_kernel/coordinator.py
 scripts/turn_runtime.py
+scripts/runtime_kernel/lifecycle.py
 tests/test_env_tool_package_independence.py
 tests/test_env_tool_payload_contract.py
 tests/test_env_tool_response_contract.py
 tests/test_env_client_payload_cli.py
 tests/test_env_tool_router.py
+tests/test_clean_runtime_environment.py
+tests/test_buddy_env_sandbox.py
+tests/test_env_layer_boundaries.py
+tests/test_env_layer_end_to_end.py
 tests/test_runtime_skills.py
 tests/test_repo_consistency.py
 README.md
@@ -326,6 +367,12 @@ tool_catalog_errors()
 These methods may call `env.repos`, `env.domain`, `env_manifest`, browser state helpers, and runtime
 files internally. Tool packages may not import those internals directly.
 
+`ToolContext` must use the clean runtime root model already implemented in
+`scripts/env/repos/runtime_files.py`: runtime object writes and buddybox private files are backed by
+`STATE_ROOT`, while `runtime_workspace_root(instance_payload)` remains a host-visible reporting and
+context surface. Do not pass filesystem roots into tool `_impl.py` files. Tool code receives
+capabilities, logical ids, and logical buddybox names only.
+
 ## Tool Migration Map
 
 Move each current service handler into the selected tool's `_impl.invoke` switch:
@@ -345,6 +392,11 @@ Move each current service handler into the selected tool's `_impl.invoke` switch
 During migration, replace direct repo/domain calls inside these functions with the matching
 `ToolContext` capability method. Keep tool-specific payload normalization and response wording local
 to `_impl.py`.
+
+Use the current clean-runtime versions of the old service files as migration sources. In particular,
+preserve `context` guidance that avoids direct `buddyswitch/objects/**` and
+`buddyswitch/local/buddybox/**` path instructions, and preserve buddybox behavior that stores by
+logical name through the state-root-backed repository helpers.
 
 ## Task 1: Add Failing Black-Box Architecture Tests
 
@@ -440,11 +492,14 @@ tool_catalog_errors()
 env_tools_description()
 operation_semantics()
 compact_tool_affordances()
+action_mutates(tool, action)
 dispatch_env_tool_request(payload, active_buddy, instance_id, instance_json, instance_payload, manifest, manifest_path=None)
 ```
 
 `dispatch_env_tool_request(payload, active_buddy, instance_id, instance_json, instance_payload,
 manifest, manifest_path=None)` replaces `env.tools.router.dispatch_env_tool_request`.
+`action_mutates(tool, action)` returns the action mutation constant or `None` for unknown tools or
+actions; retry and lock callers must treat `None` as write-risky.
 
 - [ ] **Step 5: Verify SDK import without loading tools**
 
@@ -483,7 +538,19 @@ Replace `from env.tools.router import dispatch_env_tool_request` with:
 from env.tool_runtime.registry import dispatch_env_tool_request
 ```
 
-Keep the broker method name `env.tool` unchanged.
+Replace `from env.tools import responses as tool_responses` with:
+
+```python
+from env.tool_runtime import results as tool_results
+```
+
+Keep the broker method name `env.tool` unchanged. Preserve the clean-runtime dispatcher behavior:
+
+- `_runtime_server_env()` still exports `BUDDYSWITCH_STATE_ROOT`;
+- `runtime_files.refresh_runtime_roots_from_env()` still runs after environment updates and after
+  restoration;
+- `ping` and `status` still include `runtime_workspace_root`, `runtime_state_root`, and
+  `env_store_root`.
 
 - [ ] **Step 2: Update runtime catalog callers**
 
@@ -495,6 +562,14 @@ from env.tool_runtime import registry as tool_registry
 
 Use `tool_registry.env_tools_description()`, `tool_registry.operation_semantics()`, and
 `tool_registry.compact_tool_affordances()`.
+
+For retry and coordination policy, replace old `get_action_spec(...).get("mutates")` lookups with:
+
+```python
+tool_registry.action_mutates(tool.strip(), action) == "none"
+```
+
+Do not keep a `get_action_spec` compatibility helper just to preserve the old contract shape.
 
 - [ ] **Step 3: Replace CLI registration**
 
@@ -518,11 +593,17 @@ Rules:
 Run:
 
 ```bash
-python3 -m pytest tests/test_runtime_broker.py tests/test_turn_runtime.py tests/test_env_client_payload_cli.py -q
+python3 -m pytest \
+  tests/test_runtime_broker.py \
+  tests/test_turn_runtime.py \
+  tests/test_env_client_payload_cli.py \
+  tests/test_clean_runtime_environment.py \
+  -q
 ```
 
 Expected at this checkpoint: failures may remain until tools are migrated, but imports must no
-longer fail because of missing `env.tools.router` or `env.tools.catalog`.
+longer fail because of missing `env.tools.router` or `env.tools.catalog`, and clean-runtime status
+fields/root refresh behavior must remain intact.
 
 ## Task 4: Migrate `message` And `task` First
 
@@ -653,6 +734,11 @@ list_sources: none
 ```
 
 Use `context.catalog`, `context.objects.runtime_sources()`, and read-only `context.objects` methods.
+The migrated context implementation must preserve the clean-runtime contract: host-facing source
+descriptions point to env tool routes such as `track.open`, `task.get/list`, `artifact.get`,
+`message.list`, `comment.list`, and `buddybox.read/list/write/delete` by `logical_name`; they must
+not instruct the host to read or edit `buddyswitch/objects/**` or
+`buddyswitch/local/buddybox/**`.
 
 - [ ] **Step 5: Verify object and collaboration tools**
 
@@ -694,7 +780,9 @@ write: logical_name, content, content_base64, content_type
 delete: logical_name
 ```
 
-Use `context.buddybox`.
+Use `context.buddybox`. The implementation must keep buddybox storage state-root-backed through the
+host capability and expose only logical names to tool callers. Do not pass workspace paths, state
+paths, or active buddybox filesystem roots into `scripts/env/tools/buddybox/_impl.py`.
 
 - [ ] **Step 2: Migrate `evidence`**
 
@@ -730,6 +818,7 @@ python3 -m pytest \
   tests/test_buddybox_env_tool.py \
   tests/test_evidence_env_tool.py \
   tests/test_search_env_tool.py \
+  tests/test_clean_runtime_environment.py \
   tests/test_runless_runtime_contract.py \
   -q
 ```
@@ -784,11 +873,13 @@ from env.tool_runtime import results as tool_results
 Run:
 
 ```bash
-rg -n 'env\.tools\.(catalog|cli_helpers|discovery|dispatch|model|responses|router)|TOOL_SPEC|ACTION_SEMANTICS|HANDLER_SPECS|scripts/env/tools/.*/(contract|semantics|handlers|cli|service)\.py' scripts tests README.md docs/spec docs/memo -S
+rg -n 'env\.tools\.(catalog|cli_helpers|discovery|dispatch|model|responses|router)|TOOL_SPEC|ACTION_SEMANTICS|HANDLER_SPECS|scripts/env/tools/.*/(contract|semantics|handlers|cli|service)\.py' \
+  scripts tests README.md docs/memo/buddyswitch-parallel-modular-architecture.md -S
 ```
 
 Expected: active code and active architecture docs do not describe old files as current runtime.
-Historical memo references are acceptable only when clearly marked as old context.
+Historical implementation specs and memos may mention old files as source context or deletion
+targets, but they must not be imported as active runtime guidance.
 
 ## Task 8: Update Runtime Discovery, Skills, And Docs
 
@@ -882,6 +973,10 @@ python3 -m pytest \
   tests/test_runtime_broker.py \
   tests/test_turn_runtime.py \
   tests/test_runless_runtime_contract.py \
+  tests/test_clean_runtime_environment.py \
+  tests/test_buddy_env_sandbox.py \
+  tests/test_env_layer_boundaries.py \
+  tests/test_env_layer_end_to_end.py \
   tests/test_runtime_skills.py \
   tests/test_repo_consistency.py \
   -q
@@ -893,14 +988,16 @@ Expected: pass.
 
 ```bash
 git diff --check
-rg -n 'env\.tools\.(catalog|cli_helpers|discovery|dispatch|model|responses|router)|TOOL_SPEC|ACTION_SEMANTICS|HANDLER_SPECS|scripts/env/tools/.*/(contract|semantics|handlers|cli|service)\.py' scripts tests README.md docs/spec docs/memo -S
+rg -n 'env\.tools\.(catalog|cli_helpers|discovery|dispatch|model|responses|router)|TOOL_SPEC|ACTION_SEMANTICS|HANDLER_SPECS|scripts/env/tools/.*/(contract|semantics|handlers|cli|service)\.py' \
+  scripts tests README.md docs/memo/buddyswitch-parallel-modular-architecture.md -S
 ```
 
 Expected:
 
 - `git diff --check` passes;
 - no active code imports old runtime modules;
-- any historical docs hit clearly describes old context rather than current architecture.
+- active architecture docs do not describe old runtime modules as current architecture;
+- historical specs and memos may retain old module names only as source context or deletion targets.
 
 ## Completion Checklist
 
@@ -910,6 +1007,10 @@ Expected:
 - [ ] Selected invocation imports only selected private implementation code.
 - [ ] Tool packages import only the runtime SDK and local private files.
 - [ ] Tool packages mutate state only through `ToolContext`.
+- [ ] Tool packages never derive runtime object or buddybox storage paths from the host-visible
+      workspace.
+- [ ] Clean runtime environment tests still prove state-root-backed objects/buddybox and searchable
+      host-visible workspaces.
 - [ ] Generic CLI builds envelopes from registry definitions.
 - [ ] `context.get`, `context.summarize`, and `turn_runtime.py status` project the same registry.
 - [ ] Old shared env.tools runtime modules are deleted.

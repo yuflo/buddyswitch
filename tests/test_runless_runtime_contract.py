@@ -18,7 +18,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
-from env.tools import catalog as tool_catalog  # noqa: E402
+from env.tool_runtime import registry as tool_catalog  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -357,7 +357,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertIn("usage:", desc_help.stdout.lower())
 
-    def test_env_client_buddybox_file_subcommands_use_logical_name_flags(self) -> None:
+    def test_env_client_buddybox_file_subcommands_use_payload_json(self) -> None:
         for operation in ("list", "read", "delete"):
             with self.subTest(operation=operation):
                 completed = subprocess.run(
@@ -368,8 +368,9 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     check=True,
                 )
                 help_text = completed.stdout.lower()
-                self.assertIn("--logical-name", help_text)
+                self.assertIn("--payload", help_text)
                 self.assertNotIn("--path", help_text)
+                self.assertNotIn("--logical-name", help_text)
 
 
 if __name__ == "__main__":

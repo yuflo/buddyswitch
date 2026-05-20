@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from env.repos import runtime_files
-from env.tools import responses as tool_responses
-from env.tools.router import dispatch_env_tool_request
+from env.tool_runtime import results as tool_results
+from env.tool_runtime.registry import dispatch_env_tool_request
 from env_manifest import ManifestError, load_manifest
 
 
@@ -46,13 +46,13 @@ def _error(
         payload.update(extra)
     if "allowed_next_actions" in payload and "allowed_next_action_options" not in payload:
         payload["allowed_next_action_options"] = [
-            tool_responses.next_action_option(
+            tool_results.next_action_option(
                 tool="context",
                 action="summarize",
                 option_id="summarize_current_context_before_retry",
                 reason="Summarize current context before retrying runtime operations.",
             ),
-            tool_responses.next_action_option(
+            tool_results.next_action_option(
                 tool="context",
                 action="get",
                 option_id="inspect_context_before_retry",
