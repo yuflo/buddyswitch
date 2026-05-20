@@ -37,6 +37,7 @@ def refresh_runtime_root_bindings() -> None:
     """Rebind runtime roots from env.repos.runtime_files during staged migration."""
 
     global ROOT
+    global WORKSPACE_ROOT
     global STATE_ROOT
     global OBJECTS_ROOT
     global TRACKS_DIR
@@ -49,6 +50,7 @@ def refresh_runtime_root_bindings() -> None:
     global BUDDYBOX_LOCAL_DIR
 
     ROOT = runtime_files.ROOT
+    WORKSPACE_ROOT = runtime_files.WORKSPACE_ROOT
     STATE_ROOT = runtime_files.STATE_ROOT
     OBJECTS_ROOT = runtime_files.OBJECTS_ROOT
     TRACKS_DIR = runtime_files.TRACKS_DIR
@@ -68,6 +70,7 @@ RUNTIME_WORKSPACE_AGENTS_HEADER = runtime_files.RUNTIME_WORKSPACE_AGENTS_HEADER
 now_iso = runtime_files.now_iso
 runtime_workspace_root = runtime_files.runtime_workspace_root
 buddybox_local_dir = runtime_files.buddybox_local_dir
+refresh_runtime_roots_from_env = runtime_files.refresh_runtime_roots_from_env
 rel = runtime_files.rel
 runtime_workspace_agents_file = runtime_files.runtime_workspace_agents_file
 is_runtime_workspace = runtime_files.is_runtime_workspace

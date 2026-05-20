@@ -58,18 +58,6 @@ def _parse_profile_network(config_text: str) -> dict[str, object]:
     return parsed["permissions"][PERMISSION_PROFILE]["network"]
 
 
-def _runtime_workspace_denied_paths(workspace_dir: Path) -> set[str]:
-    return {
-        str((workspace_dir / "buddyswitch" / "skills").resolve(strict=False)),
-        str((workspace_dir / "tools").resolve(strict=False)),
-        str((workspace_dir / "tests").resolve(strict=False)),
-        str((workspace_dir / "docs").resolve(strict=False)),
-        str((workspace_dir / "buddyswitch" / "objects").resolve(strict=False)),
-        str((workspace_dir / "README.md").resolve(strict=False)),
-        str((workspace_dir / "buddyswitch-codex").resolve(strict=False)),
-    }
-
-
 def _assert_codex_filesystem_profile_is_flat(
     test: unittest.TestCase,
     filesystem: dict[str, object],
@@ -175,15 +163,20 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertNotIn('sandbox_mode = "workspace-write"', config_text)
             self.assertNotIn("[sandbox_workspace_write]", config_text)
             self.assertEqual(filesystem["/"], "read")
-            for denied_path in _runtime_workspace_denied_paths(workspace_dir):
-                self.assertEqual(filesystem[denied_path], "none")
+            self.assertIn("sandbox_approval = false", config_text)
+            self.assertEqual(filesystem[str(workspace_dir.resolve(strict=False))], "read")
+            self.assertEqual(filesystem[str((shared_root / "state").resolve(strict=False))], "none")
+            self.assertNotIn(str((workspace_dir / "buddyswitch" / "objects").resolve(strict=False)), filesystem)
+            self.assertNotIn(
+                str((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").resolve(strict=False)),
+                filesystem,
+            )
             _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
             self.assertEqual(filesystem[str(project_workspace_dir.resolve(strict=False))], "read")
             self.assertEqual(filesystem[str(ROOT.resolve(strict=False))], "none")
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "codex-home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "xdg-config").resolve(strict=False)), writable_paths)
-            self.assertIn(str((workspace_dir / "buddyswitch/local/buddybox/pm").resolve(strict=False)), writable_paths)
             self.assertIn(str(Path("/tmp").resolve(strict=False)), writable_paths)
 
             forbidden_writes = [
@@ -200,8 +193,6 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             forbidden_keys = [
                 shared_root,
                 shared_root / "project",
-                shared_root / "state",
-                workspace_dir,
                 instance_root,
                 shared_root / "source-codex-home",
             ]
@@ -271,11 +262,15 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             _assert_codex_filesystem_profile_is_flat(self, filesystem)
 
             self.assertEqual(filesystem["/"], "read")
-            for denied_path in _runtime_workspace_denied_paths(workspace_dir):
-                self.assertEqual(filesystem[denied_path], "none")
+            self.assertEqual(filesystem[str(workspace_dir.resolve(strict=False))], "read")
+            self.assertEqual(filesystem[str((shared_root / "state").resolve(strict=False))], "none")
+            self.assertNotIn(str((workspace_dir / "buddyswitch" / "objects").resolve(strict=False)), filesystem)
+            self.assertNotIn(
+                str((workspace_dir / "buddyswitch" / "local" / "buddybox" / "dev").resolve(strict=False)),
+                filesystem,
+            )
             _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
             self.assertIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
-            self.assertIn(str((workspace_dir / "buddyswitch/local/buddybox/dev").resolve(strict=False)), writable_paths)
             self.assertNotIn(str((shared_root / "state").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(shared_root.resolve(strict=False)), writable_paths)
             self.assertNotIn(str((shared_root / "project").resolve(strict=False)), writable_paths)
@@ -307,8 +302,9 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             filesystem = _profile_filesystem_entries(config_path.read_text(encoding="utf-8"))
             writable_paths = {key for key, value in filesystem.items() if value == "write"}
             _assert_codex_filesystem_profile_is_flat(self, filesystem)
-            for denied_path in _runtime_workspace_denied_paths(workspace_dir):
-                self.assertEqual(filesystem[denied_path], "none")
+            self.assertEqual(filesystem[str(workspace_dir.resolve(strict=False))], "read")
+            self.assertEqual(filesystem[str((shared_root / "state").resolve(strict=False))], "none")
+            self.assertNotIn(str((workspace_dir / "buddyswitch" / "objects").resolve(strict=False)), filesystem)
             _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
             self.assertNotIn(str(workspace_dir.resolve(strict=False)), writable_paths)
             self.assertNotIn(
@@ -320,7 +316,6 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "codex-home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "xdg-config").resolve(strict=False)), writable_paths)
-            self.assertIn(str((workspace_dir / "buddyswitch/local/buddybox/dev").resolve(strict=False)), writable_paths)
             self.assertIn(str(Path("/tmp").resolve(strict=False)), writable_paths)
 
     def test_permission_profile_denies_stale_runtime_source_surfaces(self) -> None:
@@ -346,8 +341,14 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             filesystem = _profile_filesystem_entries(config_path.read_text(encoding="utf-8"))
             _assert_codex_filesystem_profile_is_flat(self, filesystem)
-            for denied_path in _runtime_workspace_denied_paths(workspace_dir):
-                self.assertEqual(filesystem[denied_path], "none")
+            self.assertEqual(filesystem[str(workspace_dir.resolve(strict=False))], "read")
+            self.assertEqual(filesystem[str((shared_root / "state").resolve(strict=False))], "none")
+            self.assertEqual(filesystem[str(ROOT.resolve(strict=False))], "none")
+            self.assertNotIn(str((workspace_dir / "buddyswitch" / "objects").resolve(strict=False)), filesystem)
+            self.assertNotIn(
+                str((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").resolve(strict=False)),
+                filesystem,
+            )
             _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
 
     def test_patch_keeps_mcp_sections_and_forces_approve(self) -> None:

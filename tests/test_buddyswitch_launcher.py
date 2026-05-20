@@ -116,7 +116,7 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         profile_mode = "/instances/" in config_text and shared_root_resolved in config_text
 
         self.assertIn("approval_policy = { granular = {", top_level_text)
-        self.assertIn("sandbox_approval = true", config_text)
+        self.assertIn("sandbox_approval = false", config_text)
         self.assertIn("rules = false", config_text)
         self.assertIn("mcp_elicitations = false", config_text)
         self.assertIn("request_permissions = false", config_text)
@@ -131,6 +131,15 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             filesystem = parsed["permissions"]["buddyswitch-runtime"]["filesystem"]
             self.assertEqual(filesystem["/"], "read")
             self.assertEqual(filesystem[repo_root_resolved], "none")
+            workspace_keys = [path for path in filesystem if "/instances/" in path and path.endswith("/workspace")]
+            self.assertEqual(len(workspace_keys), 1, msg=workspace_keys)
+            self.assertEqual(filesystem[workspace_keys[0]], "read")
+            project_workspace_keys = [path for path in filesystem if path.endswith("/project/workspace")]
+            self.assertEqual(len(project_workspace_keys), 1, msg=project_workspace_keys)
+            self.assertIn(filesystem[project_workspace_keys[0]], {"read", "write"})
+            state_keys = [path for path in filesystem if path.endswith("/state")]
+            self.assertEqual(len(state_keys), 1, msg=state_keys)
+            self.assertEqual(filesystem[state_keys[0]], "none")
             self.assertNotIn(":project_roots", filesystem)
             for key, value in filesystem.items():
                 self.assertIsInstance(key, str)
@@ -138,20 +147,6 @@ class BuddySwitchLauncherTests(unittest.TestCase):
                 self.assertNotIn("*", key)
                 if key != "/":
                     self.assertTrue(Path(key).is_absolute(), msg=key)
-            denied_relative_paths = (
-                "buddyswitch/skills",
-                "tools",
-                "tests",
-                "docs",
-                "buddyswitch/objects",
-                "README.md",
-                "buddyswitch-codex",
-            )
-            for relative_path in denied_relative_paths:
-                suffix = f"/workspace/{relative_path}"
-                matches = [path for path in filesystem if path.endswith(suffix)]
-                self.assertEqual(len(matches), 1, msg=f"{relative_path}: {matches}")
-                self.assertEqual(filesystem[matches[0]], "none")
             scripts_matches = [path for path in filesystem if path.endswith("/workspace/scripts")]
             for scripts_path in scripts_matches:
                 self.assertEqual(filesystem[scripts_path], "read")
@@ -161,7 +156,6 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             self.assertIn("enabled = true", config_text)
             self.assertIn('mode = "full"', config_text)
             self.assertNotIn(str(repo_git_common_dir), config_text)
-            self.assertNotIn(json.dumps(shared_root_resolved), config_text)
         else:
             self.assertEqual(config_text.count('sandbox_mode = "workspace-write"'), 1)
             self.assertEqual(config_text.count("[sandbox_workspace_write]"), 1)
@@ -492,7 +486,7 @@ plugins = false
 # BuddySwitch managed automation permissions
 sandbox_mode = "workspace-write"
 approval_policy = { granular = {
-  sandbox_approval = true,
+  sandbox_approval = false,
   rules = false,
   mcp_elicitations = false,
   request_permissions = false,
@@ -996,15 +990,10 @@ exec "$real_git" "$@"
             (shared_root / "project" / "workspace" / "projects" / "app").resolve(strict=True),
         )
 
-        for kind in ("tracks", "tasks", "artifacts", "messages", "comments"):
-            projected = workspace_dir / "buddyswitch" / "objects" / kind
-            target = shared_root / "state" / "buddyswitch" / "objects" / kind
-            self.assertTrue(projected.is_symlink(), msg=f"runtime state projection should be symlink: {kind}")
-            self.assertEqual(projected.resolve(), target.resolve())
-
-        buddybox_root = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm"
-        self.assertTrue(buddybox_root.is_dir())
-        self.assertFalse(buddybox_root.is_symlink())
+        self.assertFalse((workspace_dir / "buddyswitch" / "objects").exists())
+        self.assertFalse((workspace_dir / "buddyswitch" / "objects").is_symlink())
+        self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").exists())
+        self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").is_symlink())
 
     def _cleanup_runtime_broker(self, instance_root: Path) -> None:
         pid_file = instance_root / "runtime" / "runtime-broker.pid"
@@ -1440,8 +1429,10 @@ exec "$real_git" "$@"
             self.assertFalse((workspace_dir / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists())
             self.assertTrue((workspace_dir / ".agents" / "skills" / "write-prd" / "SKILL.md").exists())
             self.assertFalse((workspace_dir / ".agents" / "skills" / "shape-prototype").exists())
-            self.assertTrue(probe.exists())
-            self.assertEqual(probe.read_text(encoding="utf-8"), "survives\n")
+            migrated_probe = shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm" / "reopen" / "probe.txt"
+            self.assertFalse(probe.exists())
+            self.assertTrue(migrated_probe.exists())
+            self.assertEqual(migrated_probe.read_text(encoding="utf-8"), "survives\n")
 
     def test_instance_open_rejects_unmanaged_source_changes_before_sparse_narrowing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -1571,10 +1562,7 @@ exec "$real_git" "$@"
                 ".agents/skills/**",
                 "projects/app",
                 ".runtime/**",
-                "buddyswitch/objects/tracks/**",
-                "buddyswitch/objects/tasks/**",
-                "buddyswitch/objects/artifacts/**",
-                "buddyswitch/local/buddybox/**",
+                ".codex/config.toml",
             }
             for line in expected_lines:
                 self.assertIn(line, exclude_lines)
@@ -2383,32 +2371,24 @@ exec "$real_git" "$@"
             cockpit_add = next(entry for entry in mcp_add_entries if entry["argv"][2] == "chrome-devtools-cockpit")
             self.assertIn(f"--browser-url=http://127.0.0.1:{browser_port}", cockpit_add["argv"])
 
-            projection_pairs = {
-                "buddyswitch/objects/tasks": shared_root / "state" / "buddyswitch" / "objects" / "tasks",
-                "buddyswitch/objects/tracks": shared_root / "state" / "buddyswitch" / "objects" / "tracks",
-                "buddyswitch/objects/artifacts": shared_root / "state" / "buddyswitch" / "objects" / "artifacts",
-            }
-            for relative_path, state_path in projection_pairs.items():
+            for relative_path in (
+                "buddyswitch/objects/tasks",
+                "buddyswitch/objects/tracks",
+                "buddyswitch/objects/artifacts",
+            ):
                 projected_path = workspace_dir / relative_path
-                self.assertTrue(state_path.is_dir(), f"missing shared state dir: {state_path}")
-                self.assertTrue(projected_path.is_symlink(), f"state projection should be a live symlink: {projected_path}")
-                self.assertEqual(projected_path.resolve(), state_path.resolve())
-                live_probe = state_path / "live-projection-probe.json"
-                live_probe.write_text('{"ok":true}\n', encoding="utf-8")
-                self.assertEqual((projected_path / live_probe.name).read_text(encoding="utf-8"), '{"ok":true}\n')
+                self.assertFalse(
+                    projected_path.exists() or projected_path.is_symlink(),
+                    f"runtime workspace must not expose projected state path: {projected_path}",
+                )
 
             buddybox_root = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm"
             shared_buddybox_root = shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm"
-            self.assertTrue(buddybox_root.exists(), "active buddybox root should be created in workspace")
-            self.assertTrue(buddybox_root.is_dir(), "active buddybox root should be a directory")
-            self.assertFalse(buddybox_root.is_symlink(), "active buddybox root should not be a symlink")
-            self.assertFalse(shared_buddybox_root.exists(), "shared state should not host active buddybox storage")
-            workspace_probe = buddybox_root / "workspace-private-probe.txt"
-            workspace_probe.write_text("private\n", encoding="utf-8")
             self.assertFalse(
-                (shared_buddybox_root / workspace_probe.name).exists(),
-                "workspace-local buddybox files must not appear under shared state",
+                buddybox_root.exists() or buddybox_root.is_symlink(),
+                "active buddybox root must not be an ordinary workspace path",
             )
+            self.assertFalse(shared_buddybox_root.exists(), "shared state buddybox remains tool-backed until written")
 
             self.assertFalse((workspace_dir / "buddyswitch/local/buddybox/dev").exists())
             self.assertFalse((workspace_dir / "buddyswitch/content/" / "buddybox").exists())
@@ -2468,7 +2448,8 @@ exec "$real_git" "$@"
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
-            instance_root = source_home_path / ".codex-buddyswitch" / "instances" / payload["instance_id"]
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_root = shared_root / "instances" / payload["instance_id"]
             workspace_dir = instance_root / "workspace"
             self.assertEqual(payload["cwd"], str(workspace_dir.resolve()))
             self.assertTrue(payload["runtime_broker_socket"])
@@ -2495,10 +2476,30 @@ exec "$real_git" "$@"
             status_payload = status_probe["json"]
             self.assertIsInstance(status_payload, dict, msg=status_probe)
             self.assertTrue(status_payload.get("healthy"), msg=status_payload)
-            self.assertEqual(
-                Path(str(status_payload.get("env_store_root"))).resolve(strict=False),
+            expected_runtime_roots = {
                 workspace_dir.resolve(strict=False),
+                (shared_root / "state").resolve(strict=False),
+            }
+            self.assertIn(
+                Path(str(status_payload.get("env_store_root"))).resolve(strict=False),
+                expected_runtime_roots,
             )
+            if status_payload.get("runtime_state_root") is not None:
+                self.assertIn(
+                    Path(str(status_payload.get("runtime_state_root"))).resolve(strict=False),
+                    expected_runtime_roots,
+                )
+            runtime_workspace_fact = status_payload.get("runtime_workspace_root")
+            if runtime_workspace_fact is None:
+                self.assertEqual(
+                    Path(str(status_payload.get("runtime_root"))).resolve(strict=False),
+                    workspace_dir.resolve(strict=False),
+                )
+            else:
+                self.assertEqual(
+                    Path(str(runtime_workspace_fact)).resolve(strict=False),
+                    workspace_dir.resolve(strict=False),
+                )
             self.assertIs(status_payload.get("runtime_workspace"), True)
 
     def test_start_with_buddy_allocates_next_browser_port_when_default_is_busy(self) -> None:
@@ -4441,11 +4442,11 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             )
             self.assertEqual(open_result.returncode, 0, msg=open_result.stderr)
 
-            self.assertTrue(probe.exists())
-            self.assertEqual(probe.read_text(encoding="utf-8"), "survives-reopen\n")
-            self.assertTrue((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").is_dir())
-            self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").is_symlink())
-            self.assertFalse((shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm").exists())
+            migrated_probe = shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm" / "rebuild" / "probe.txt"
+            self.assertFalse(probe.exists())
+            self.assertTrue(migrated_probe.exists())
+            self.assertEqual(migrated_probe.read_text(encoding="utf-8"), "survives-reopen\n")
+            self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").exists())
 
     def test_instance_open_repairs_stale_broker_before_first_prepare(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

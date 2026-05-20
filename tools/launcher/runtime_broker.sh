@@ -90,6 +90,7 @@ _buddyswitch_runtime_broker_lifecycle_json() {
   manifest_path="$(_buddyswitch_runtime_broker_manifest_path)" || return 1
   (
     cd "${BUDDYSWITCH_WORKSPACE_DIR}"
+    export BUDDYSWITCH_STATE_ROOT="${BUDDYSWITCH_SHARED_ROOT}/state"
     python3 "${broker_script}" "${command}" \
       --socket "${socket_path}" \
       --pid-file "${pid_file}" \

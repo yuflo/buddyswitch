@@ -79,7 +79,9 @@ class RuntimeWorkspaceTestMixin:
     def setUp(self) -> None:
         super().setUp()
         self._runtime_sandbox = RuntimeWorkspaceSandbox()
+        # Unit-style tests intentionally use one isolated root for both visible workspace and state.
         self.runtime_root = self._runtime_sandbox.start()
+        self.runtime_state_root = self.runtime_root
 
     def tearDown(self) -> None:
         self._runtime_sandbox.stop()
@@ -87,3 +89,6 @@ class RuntimeWorkspaceTestMixin:
 
     def _runtime_path(self, repo_path: str) -> Path:
         return self.runtime_root / repo_path
+
+    def _state_path(self, repo_path: str) -> Path:
+        return self.runtime_state_root / repo_path

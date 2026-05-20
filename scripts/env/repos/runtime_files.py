@@ -32,6 +32,7 @@ def _runtime_root_from_env(default_root: Path) -> Path:
 
 def _recompute_runtime_roots() -> None:
     global ROOT
+    global WORKSPACE_ROOT
     global STATE_ROOT
     global OBJECTS_ROOT
     global TRACKS_DIR
@@ -49,6 +50,7 @@ def _recompute_runtime_roots() -> None:
     else:
         ROOT = _RUNTIME_ROOT_OVERRIDE
         STATE_ROOT = ROOT
+    WORKSPACE_ROOT = ROOT
 
     OBJECTS_ROOT = STATE_ROOT / "buddyswitch" / "objects"
     TRACKS_DIR = OBJECTS_ROOT / "tracks"
@@ -61,6 +63,10 @@ def _recompute_runtime_roots() -> None:
     BUDDYBOX_LOCAL_DIR = LOCAL_ROOT / "buddybox"
     for listener in _RUNTIME_ROOT_LISTENERS:
         listener()
+
+
+def refresh_runtime_roots_from_env() -> None:
+    _recompute_runtime_roots()
 
 
 def register_runtime_root_listener(listener: Callable[[], None], *, call_immediately: bool = False) -> None:
@@ -103,7 +109,7 @@ def runtime_workspace_root(instance_payload: dict[str, Any] | None = None) -> Pa
 
 
 def buddybox_local_dir(instance_payload: dict[str, Any] | None = None) -> Path:
-    return runtime_workspace_root(instance_payload) / "buddyswitch" / "local" / "buddybox"
+    return BUDDYBOX_LOCAL_DIR
 
 
 def rel(path: Path) -> str:
@@ -130,8 +136,23 @@ def is_runtime_workspace(root: Path | None = None) -> bool:
 
 def require_runtime_workspace_write_root(root: Path | None = None) -> None:
     candidate = ROOT if root is None else root
+    shared_root_raw = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
+    state_root_raw = os.environ.get("BUDDYSWITCH_STATE_ROOT")
+    instance_id_raw = os.environ.get("BUDDYSWITCH_INSTANCE_ID")
+
     if is_runtime_workspace(candidate):
         return
+    if isinstance(instance_id_raw, str) and instance_id_raw.strip():
+        if isinstance(shared_root_raw, str) and shared_root_raw.strip():
+            shared_root = Path(shared_root_raw.strip()).expanduser().resolve(strict=False)
+            session_state_root = (
+                Path(state_root_raw.strip()).expanduser().resolve(strict=False)
+                if isinstance(state_root_raw, str) and state_root_raw.strip()
+                else STATE_ROOT.resolve(strict=False)
+            )
+            expected_state_root = (shared_root / "state").resolve(strict=False)
+            if session_state_root == expected_state_root:
+                return
     raise ValueError(
         "BuddySwitch runtime writes are blocked in the source checkout. "
         "Start the launcher workspace with ./buddyswitch-codex instance start --buddy <buddy> and rerun there."

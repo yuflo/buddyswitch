@@ -13,6 +13,7 @@ from typing import Any
 from env.repos import runtime_files
 
 ROOT: Path
+WORKSPACE_ROOT: Path
 STATE_ROOT: Path
 OBJECTS_ROOT: Path
 TRACKS_DIR: Path
@@ -29,6 +30,7 @@ def refresh_runtime_root_bindings() -> None:
     """Keep compatibility globals synced with runtime_files root bindings."""
 
     global ROOT
+    global WORKSPACE_ROOT
     global STATE_ROOT
     global OBJECTS_ROOT
     global TRACKS_DIR
@@ -41,6 +43,7 @@ def refresh_runtime_root_bindings() -> None:
     global BUDDYBOX_LOCAL_DIR
 
     ROOT = runtime_files.ROOT
+    WORKSPACE_ROOT = runtime_files.WORKSPACE_ROOT
     STATE_ROOT = runtime_files.STATE_ROOT
     OBJECTS_ROOT = runtime_files.OBJECTS_ROOT
     TRACKS_DIR = runtime_files.TRACKS_DIR
@@ -60,6 +63,7 @@ RUNTIME_WORKSPACE_AGENTS_HEADER = runtime_files.RUNTIME_WORKSPACE_AGENTS_HEADER
 now_iso = runtime_files.now_iso
 runtime_workspace_root = runtime_files.runtime_workspace_root
 buddybox_local_dir = runtime_files.buddybox_local_dir
+refresh_runtime_roots_from_env = runtime_files.refresh_runtime_roots_from_env
 rel = runtime_files.rel
 runtime_workspace_agents_file = runtime_files.runtime_workspace_agents_file
 is_runtime_workspace = runtime_files.is_runtime_workspace
@@ -135,6 +139,7 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "ROOT",
+    "WORKSPACE_ROOT",
     "STATE_ROOT",
     "OBJECTS_ROOT",
     "TRACKS_DIR",
@@ -150,6 +155,7 @@ __all__ = [
     "now_iso",
     "runtime_workspace_root",
     "buddybox_local_dir",
+    "refresh_runtime_roots_from_env",
     "rel",
     "runtime_workspace_agents_file",
     "is_runtime_workspace",

@@ -271,10 +271,6 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.assertNotIn(str((workspace_dir / ".sandbox").resolve(strict=False)), writable_paths)
             self.assertNotIn(str((workspace_dir / ".sandbox" / "design").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(shared_root.resolve(strict=False)), writable_paths)
-            self.assertIn(
-                str((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").resolve(strict=False)),
-                writable_paths,
-            )
 
     def test_permission_profile_keeps_dev_project_write_and_runtime_reads(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -293,13 +289,11 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertNotIn("*", key)
                 if key != "/":
                     self.assertTrue(Path(key).is_absolute(), msg=key)
-            self.assertEqual(
-                filesystem[str((runtime_workspace_dir / "buddyswitch" / "skills").resolve(strict=False))],
-                "none",
-            )
-            self.assertEqual(
-                filesystem[str((runtime_workspace_dir / "tools").resolve(strict=False))],
-                "none",
+            self.assertEqual(filesystem[str(runtime_workspace_dir.resolve(strict=False))], "read")
+            self.assertEqual(filesystem[str((shared_root / "state").resolve(strict=False))], "none")
+            self.assertNotIn(
+                str((runtime_workspace_dir / "buddyswitch" / "objects").resolve(strict=False)),
+                filesystem,
             )
 
     def test_env_tool_rejects_payload_paths_instead_of_bypassing_project_or_raw_state_boundaries(self) -> None:

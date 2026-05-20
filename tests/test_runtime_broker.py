@@ -178,7 +178,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response["error"]["code"], "E_ENV_TOOL", msg=response)
         self.assertEqual(response.get("permission_boundary"), "env.tool", msg=response)
 
-    def test_env_tool_buddybox_write_uses_instance_workspace_local_root(self) -> None:
+    def test_env_tool_buddybox_write_uses_shared_state_root(self) -> None:
         workspace_dir = self._runtime_path("alt-workspace")
         workspace_dir.mkdir(parents=True, exist_ok=True)
         (workspace_dir / "AGENTS.md").write_text("# BuddySwitch Runtime Workspace\n", encoding="utf-8")
@@ -215,13 +215,14 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=instance_json,
         )
         self.assertTrue(written.get("ok"), msg=written)
-        target = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm" / "broker" / "out.txt"
-        self.assertTrue(target.exists(), msg=target)
-        self.assertEqual(target.read_text(encoding="utf-8"), "broker\n")
-        self.assertFalse(self._runtime_path("buddyswitch/local/buddybox/pm/broker/out.txt").exists())
+        state_target = self._runtime_path("buddyswitch/local/buddybox/pm/broker/out.txt")
+        workspace_target = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm" / "broker" / "out.txt"
+        self.assertTrue(state_target.exists(), msg=state_target)
+        self.assertEqual(state_target.read_text(encoding="utf-8"), "broker\n")
+        self.assertFalse(workspace_target.exists())
         self.assertFalse(self._runtime_path("state/buddyswitch/local/buddybox/pm/broker/out.txt").exists())
 
-    def test_env_tool_buddybox_lifecycle_uses_instance_workspace_local_root(self) -> None:
+    def test_env_tool_buddybox_lifecycle_uses_shared_state_root(self) -> None:
         workspace_dir = self._runtime_path("alt-workspace-lifecycle")
         workspace_dir.mkdir(parents=True, exist_ok=True)
         (workspace_dir / "AGENTS.md").write_text("# BuddySwitch Runtime Workspace\n", encoding="utf-8")
@@ -259,12 +260,12 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(write_payload.get("ok"), msg=write_payload)
 
-        target = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm" / "broker" / "lifecycle.txt"
-        wrong_runtime_root = self._runtime_path("buddyswitch/local/buddybox/pm/broker/lifecycle.txt")
-        wrong_state_root = self._runtime_path("state/buddyswitch/local/buddybox/pm/broker/lifecycle.txt")
+        target = self._runtime_path("buddyswitch/local/buddybox/pm/broker/lifecycle.txt")
+        workspace_target = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm" / "broker" / "lifecycle.txt"
+        wrong_runtime_root = self._runtime_path("state/buddyswitch/local/buddybox/pm/broker/lifecycle.txt")
         self.assertTrue(target.exists(), msg=target)
+        self.assertFalse(workspace_target.exists(), msg=workspace_target)
         self.assertFalse(wrong_runtime_root.exists(), msg=wrong_runtime_root)
-        self.assertFalse(wrong_state_root.exists(), msg=wrong_state_root)
 
         read_payload = self._dispatch(
             method="env.tool",
@@ -1178,11 +1179,15 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 self.assertIs(status_payload.get("runtime_workspace"), True)
                 self.assertEqual(
                     Path(str(status_payload.get("env_store_root"))).resolve(strict=False),
+                    (workspace_dir / "state").resolve(strict=False),
+                )
+                self.assertEqual(
+                    Path(str(status_payload.get("runtime_workspace_root"))).resolve(strict=False),
                     workspace_dir.resolve(strict=False),
                 )
                 self.assertEqual(
-                    Path(str(status_payload.get("runtime_root"))).resolve(strict=False),
-                    workspace_dir.resolve(strict=False),
+                    Path(str(status_payload.get("runtime_state_root"))).resolve(strict=False),
+                    (workspace_dir / "state").resolve(strict=False),
                 )
                 self.assertEqual(
                     Path(str(status_payload.get("cwd"))).resolve(strict=False),
@@ -1194,11 +1199,15 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 self.assertIs(ping.get("runtime_workspace"), True)
                 self.assertEqual(
                     Path(str(ping.get("env_store_root"))).resolve(strict=False),
+                    (workspace_dir / "state").resolve(strict=False),
+                )
+                self.assertEqual(
+                    Path(str(ping.get("runtime_workspace_root"))).resolve(strict=False),
                     workspace_dir.resolve(strict=False),
                 )
                 self.assertEqual(
-                    Path(str(ping.get("runtime_root"))).resolve(strict=False),
-                    workspace_dir.resolve(strict=False),
+                    Path(str(ping.get("runtime_state_root"))).resolve(strict=False),
+                    (workspace_dir / "state").resolve(strict=False),
                 )
                 self.assertEqual(
                     Path(str(ping.get("cwd"))).resolve(strict=False),

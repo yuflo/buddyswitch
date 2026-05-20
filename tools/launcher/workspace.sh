@@ -210,24 +210,13 @@ EOF
 }
 
 buddyswitch_workspace_runtime_managed_paths() {
-  local active_buddy
-
-  active_buddy="$(buddyswitch_workspace_active_buddy)"
   cat <<'EOF'
 AGENTS.md
 .agents/skills
 .runtime
 .codex
 projects/app
-buddyswitch/objects/tracks
-buddyswitch/objects/tasks
-buddyswitch/objects/artifacts
-buddyswitch/objects/messages
-buddyswitch/objects/comments
 EOF
-  if [[ -n "${active_buddy}" ]]; then
-    printf 'buddyswitch/local/buddybox/%s\n' "${active_buddy}"
-  fi
 }
 
 buddyswitch_workspace_execution_worktree_has_sparse_boundary() {
@@ -508,28 +497,7 @@ buddyswitch_workspace_repair_runtime_projects_app_projection() {
 }
 
 buddyswitch_workspace_runtime_output_paths() {
-  local active_buddy
-  active_buddy="$(buddyswitch_workspace_active_buddy)"
-  cat <<'EOF'
-buddyswitch/objects/tracks
-buddyswitch/objects/tasks
-buddyswitch/objects/artifacts
-buddyswitch/objects/messages
-buddyswitch/objects/comments
-EOF
-  if [[ -n "${active_buddy}" ]]; then
-    printf 'buddyswitch/local/buddybox/%s\n' "${active_buddy}"
-  fi
-}
-
-buddyswitch_workspace_projected_state_paths() {
-  cat <<'EOF'
-buddyswitch/objects/tracks
-buddyswitch/objects/tasks
-buddyswitch/objects/artifacts
-buddyswitch/objects/messages
-buddyswitch/objects/comments
-EOF
+  true
 }
 
 buddyswitch_workspace_local_runtime_paths() {
@@ -804,6 +772,7 @@ buddyswitch_workspace_sync_runtime_surface() {
     buddyswitch_workspace_configure_execution_sparse_checkout "${workspace_dir}" existing || return $?
   fi
 
+  buddyswitch_workspace_cleanup_stale_state_projections
   buddyswitch_workspace_neutralize_project_codex_config
 }
 
@@ -831,12 +800,6 @@ AGENTS.md
 .runtime/**
 .codex/config.toml
 projects/app
-buddyswitch/objects/tracks/**
-buddyswitch/objects/tasks/**
-buddyswitch/objects/artifacts/**
-buddyswitch/objects/messages/**
-buddyswitch/objects/comments/**
-buddyswitch/local/buddybox/**
 .agents/skills/**
 EOF
 }
@@ -849,7 +812,7 @@ buddyswitch_workspace_ensure_state_skeleton() {
     while IFS= read -r relative_dir; do
       mkdir -p "${workspace_dir}/${relative_dir}"
     done < <(buddyswitch_workspace_local_runtime_paths)
-    buddyswitch_workspace_install_state_projections
+    buddyswitch_workspace_cleanup_stale_state_projections
     return
   fi
 
@@ -865,43 +828,84 @@ buddyswitch/local/buddybox
 EOF
 }
 
-buddyswitch_workspace_ensure_active_buddybox_root() {
-  local workspace_dir active_buddy relative_dir projected_dir
+buddyswitch_workspace_migrate_projection_files() {
+  local source_root="$1"
+  local target_root="$2"
+  local file_glob="$3"
+  local source_file relative_path target_file
 
-  workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
-  active_buddy="$(buddyswitch_workspace_active_buddy)"
-  if [[ -z "${active_buddy}" ]]; then
-    return 0
-  fi
-  relative_dir="buddyswitch/local/buddybox/${active_buddy}"
-  projected_dir="${workspace_dir}/${relative_dir}"
-  if [[ -L "${projected_dir}" || -f "${projected_dir}" ]]; then
-    rm -f "${projected_dir}"
-  fi
-  mkdir -p "$(dirname "${projected_dir}")"
-  mkdir -p "${projected_dir}"
+  [[ -d "${source_root}" ]] || return 0
+  mkdir -p "${target_root}"
+
+  while IFS= read -r source_file; do
+    [[ -n "${source_file}" ]] || continue
+    relative_path="${source_file#${source_root}/}"
+    target_file="${target_root}/${relative_path}"
+    mkdir -p "$(dirname "${target_file}")"
+    if [[ -e "${target_file}" ]]; then
+      if cmp -s "${source_file}" "${target_file}"; then
+        continue
+      fi
+      echo "state projection conflict for ${relative_path}" >&2
+      echo "workspace source: ${source_file}" >&2
+      echo "state target: ${target_file}" >&2
+      return 1
+    fi
+    cp -p "${source_file}" "${target_file}"
+  done < <(find "${source_root}" -type f -name "${file_glob}" -print | sort)
 }
 
-buddyswitch_workspace_install_state_projections() {
-  local workspace_dir state_root relative_dir state_dir projected_dir projected_resolved state_resolved
+buddyswitch_workspace_cleanup_projection_dir() {
+  local workspace_path="$1"
+  local state_path="$2"
+  local file_glob="$3"
+
+  if [[ -L "${workspace_path}" ]]; then
+    rm -f "${workspace_path}"
+    return 0
+  fi
+  if [[ ! -e "${workspace_path}" ]]; then
+    return 0
+  fi
+  if [[ ! -d "${workspace_path}" ]]; then
+    echo "stale projection path must be a directory or symlink: ${workspace_path}" >&2
+    return 1
+  fi
+
+  if ! buddyswitch_workspace_migrate_projection_files "${workspace_path}" "${state_path}" "${file_glob}"; then
+    return 1
+  fi
+  buddyswitch_workspace_force_remove_path "${workspace_path}"
+}
+
+buddyswitch_workspace_cleanup_stale_state_projections() {
+  local workspace_dir state_root workspace_objects_root state_objects_root
+  local workspace_buddybox_root buddy_entry buddy_id state_buddy_root
 
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
   state_root="${BUDDYSWITCH_SHARED_ROOT}/state"
-  while IFS= read -r relative_dir; do
-    state_dir="${state_root}/${relative_dir}"
-    projected_dir="${workspace_dir}/${relative_dir}"
-    mkdir -p "${state_dir}"
-    projected_resolved="$(buddyswitch_workspace_canonical_path "${projected_dir}")"
-    state_resolved="$(buddyswitch_workspace_canonical_path "${state_dir}")"
-    if [[ -L "${projected_dir}" && "${projected_resolved}" == "${state_resolved}" ]]; then
-      continue
-    fi
-    mkdir -p "$(dirname "${projected_dir}")"
-    buddyswitch_workspace_force_remove_path "${projected_dir}"
-    ln -s "${state_dir}" "${projected_dir}"
-  done < <(buddyswitch_workspace_projected_state_paths)
+  workspace_objects_root="${workspace_dir}/buddyswitch/objects"
+  state_objects_root="${state_root}/buddyswitch/objects"
+  workspace_buddybox_root="${workspace_dir}/buddyswitch/local/buddybox"
 
-  buddyswitch_workspace_ensure_active_buddybox_root
+  buddyswitch_workspace_cleanup_projection_dir "${workspace_objects_root}" "${state_objects_root}" "*.json" || return $?
+
+  if [[ -L "${workspace_buddybox_root}" ]]; then
+    rm -f "${workspace_buddybox_root}"
+    return 0
+  fi
+  if [[ ! -d "${workspace_buddybox_root}" ]]; then
+    return 0
+  fi
+
+  for buddy_entry in "${workspace_buddybox_root}"/*; do
+    [[ -e "${buddy_entry}" || -L "${buddy_entry}" ]] || continue
+    buddy_id="$(basename "${buddy_entry}")"
+    state_buddy_root="${state_root}/buddyswitch/local/buddybox/${buddy_id}"
+    buddyswitch_workspace_cleanup_projection_dir "${buddy_entry}" "${state_buddy_root}" "*" || return $?
+  done
+
+  find "${workspace_buddybox_root}" -depth -type d -empty -exec rmdir {} + >/dev/null 2>&1 || true
 }
 
 buddyswitch_workspace_active_buddy() {

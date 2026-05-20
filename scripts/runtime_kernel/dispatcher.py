@@ -131,6 +131,7 @@ def _runtime_server_env(
         )
     previous = {key: os.environ.get(key) for key in updates}
     os.environ.update(updates)
+    runtime_files.refresh_runtime_roots_from_env()
     try:
         yield
     finally:
@@ -139,6 +140,7 @@ def _runtime_server_env(
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+        runtime_files.refresh_runtime_roots_from_env()
 
 
 def _env_tool_dispatch(
@@ -166,8 +168,8 @@ def _env_tool_dispatch(
 def _ping_dispatch(*, session: RuntimeBrokerSession, instance_record: dict[str, Any]) -> dict[str, Any]:
     instance_id = str(instance_record["instance_id"]).strip()
     active_buddy = str(instance_record["buddy"]).strip()
-    runtime_root = Path.cwd().resolve(strict=False)
-    runtime_state_root = runtime_files.ROOT.resolve(strict=False)
+    runtime_workspace_root = runtime_files.runtime_workspace_root(instance_record).resolve(strict=False)
+    runtime_state_root = runtime_files.STATE_ROOT.resolve(strict=False)
     return {
         "ok": True,
         "protocol": "buddyswitch-runtime-broker/v2",
@@ -175,10 +177,12 @@ def _ping_dispatch(*, session: RuntimeBrokerSession, instance_record: dict[str, 
         "active_buddy": active_buddy,
         "pid": os.getpid(),
         "socket_path": str(session.socket_path) if session.socket_path is not None else None,
-        "runtime_root": str(runtime_root),
-        "cwd": str(runtime_root),
+        "runtime_root": str(runtime_workspace_root),
+        "runtime_workspace_root": str(runtime_workspace_root),
+        "runtime_state_root": str(runtime_state_root),
+        "cwd": str(runtime_workspace_root),
         "env_store_root": str(runtime_state_root),
-        "runtime_workspace": runtime_files.is_runtime_workspace(runtime_files.ROOT),
+        "runtime_workspace": runtime_files.is_runtime_workspace(runtime_workspace_root),
         "runtime_mode": "runless",
     }
 

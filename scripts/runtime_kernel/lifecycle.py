@@ -249,6 +249,8 @@ def broker_status(
         "log_file": str(paths.log_file),
         "healthy": False,
         "runtime_root": None,
+        "runtime_workspace_root": None,
+        "runtime_state_root": None,
         "cwd": None,
         "env_store_root": None,
         "runtime_workspace": None,
@@ -302,12 +304,27 @@ def broker_status(
     if ping.get("ok") is True:
         result = ping.get("result") if isinstance(ping.get("result"), dict) else {}
         runtime_root = result.get("runtime_root")
+        runtime_workspace_root = result.get("runtime_workspace_root")
+        runtime_state_root = result.get("runtime_state_root")
         cwd = result.get("cwd")
         env_store_root = result.get("env_store_root")
         runtime_workspace = result.get("runtime_workspace")
-        status["runtime_root"] = runtime_root if isinstance(runtime_root, str) and runtime_root.strip() else None
+        if isinstance(runtime_workspace_root, str) and runtime_workspace_root.strip():
+            status["runtime_workspace_root"] = runtime_workspace_root
+        else:
+            status["runtime_workspace_root"] = runtime_root if isinstance(runtime_root, str) and runtime_root.strip() else None
+        status["runtime_root"] = status["runtime_workspace_root"]
+        status["runtime_state_root"] = (
+            runtime_state_root
+            if isinstance(runtime_state_root, str) and runtime_state_root.strip()
+            else env_store_root if isinstance(env_store_root, str) and env_store_root.strip() else None
+        )
         status["cwd"] = cwd if isinstance(cwd, str) and cwd.strip() else None
-        status["env_store_root"] = env_store_root if isinstance(env_store_root, str) and env_store_root.strip() else None
+        status["env_store_root"] = (
+            env_store_root
+            if isinstance(env_store_root, str) and env_store_root.strip()
+            else status["runtime_state_root"]
+        )
         status["runtime_workspace"] = runtime_workspace if isinstance(runtime_workspace, bool) else None
 
         ping_pid = result.get("pid")
@@ -356,7 +373,7 @@ def broker_status(
 
         if expected_workspace_root is not None:
             expected_root = expected_workspace_root.resolve(strict=False)
-            for fact_name in ("runtime_root", "cwd", "env_store_root"):
+            for fact_name in ("runtime_workspace_root", "cwd"):
                 fact_value = status.get(fact_name)
                 if not isinstance(fact_value, str) or not fact_value:
                     status["error"] = {

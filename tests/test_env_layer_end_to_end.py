@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -15,6 +17,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_manifest  # noqa: E402
 import env_legacy_store as env_store  # noqa: E402
+from env.repos import runtime_files  # noqa: E402
 from env.tools import router as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -348,6 +351,41 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(evidence["ok"], msg=evidence)
         self.assertEqual(evidence.get("durability"), "transient token")
         self.assertFalse(evidence.get("mutates_product_state"), msg=evidence)
+
+
+class EnvLayerProductRootSplitTests(unittest.TestCase):
+    def test_object_writes_use_state_root_when_workspace_and_state_are_split(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            shared_root = Path(temp_dir) / "shared"
+            workspace_dir = shared_root / "instances" / "inst-e2e-product" / "workspace"
+            state_root = shared_root / "state"
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            (workspace_dir / "AGENTS.md").write_text("# BuddySwitch Runtime Workspace\n", encoding="utf-8")
+
+            updates = {
+                "BUDDYSWITCH_INSTANCE_ID": "inst-e2e-product",
+                "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
+                "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
+                "BUDDYSWITCH_WORKSPACE_DIR": str(workspace_dir),
+                "BUDDYSWITCH_STATE_ROOT": str(state_root),
+            }
+            with unittest.mock.patch.dict(os.environ, updates, clear=False):
+                try:
+                    runtime_files.refresh_runtime_roots_from_env()
+                    track_id = "track-e2e-product-state-root"
+                    created = env_store.create_track(
+                        track_id,
+                        "State Root Split",
+                        owner_buddy="pm",
+                        outcome="verify state split",
+                        appetite="1 day",
+                        now={"next": "verify", "blocker": None},
+                    )
+                    self.assertEqual(created.get("id"), track_id)
+                    self.assertTrue((state_root / "buddyswitch" / "objects" / "tracks" / f"{track_id}.json").exists())
+                    self.assertFalse((workspace_dir / "buddyswitch" / "objects" / "tracks" / f"{track_id}.json").exists())
+                finally:
+                    runtime_files.refresh_runtime_roots_from_env()
 
 
 if __name__ == "__main__":

@@ -49,7 +49,7 @@ def toml_string(value: str) -> str:
 
 def render_approval_policy() -> str:
     return (
-        "approval_policy = { granular = { sandbox_approval = true, rules = false, "
+        "approval_policy = { granular = { sandbox_approval = false, rules = false, "
         "mcp_elicitations = false, request_permissions = false, skill_approval = false } }\n"
     )
 
@@ -376,19 +376,6 @@ def _safe_temp_roots(
     return allowed
 
 
-def _profile_mode_workspace_deny_rules(workspace_dir: Path) -> dict[str, str]:
-    denied_paths = [
-        workspace_dir / "buddyswitch" / "skills",
-        workspace_dir / "tools",
-        workspace_dir / "tests",
-        workspace_dir / "docs",
-        workspace_dir / "buddyswitch" / "objects",
-        workspace_dir / "README.md",
-        workspace_dir / "buddyswitch-codex",
-    ]
-    return {str(canonical(str(path))): "none" for path in denied_paths}
-
-
 def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, str]:
     _require_profile_mode_args(args)
 
@@ -418,21 +405,16 @@ def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, str]:
     home = canonical(str(args.home))
     codex_home = canonical(str(args.codex_home))
     xdg_config_home = canonical(str(args.xdg_config_home))
-    buddybox_root_relative = env_profiles.resolve_buddybox_root(
-        str(profile["buddybox"]["root"]),
-        buddy_id=buddy_id,
-    )
-    buddybox_root = workspace_dir / buddybox_root_relative
-
     filesystem_entries: dict[str, str] = {}
     filesystem_entries["/"] = "read"
+    filesystem_entries[str(workspace_dir)] = "read"
     filesystem_entries[str(canonical_repo_root)] = "none"
+    filesystem_entries[str(state_root)] = "none"
     filesystem_entries[str(project_workspace_dir)] = (
         "write" if profile.get("project", {}).get("access") == "write" else "read"
     )
-    filesystem_entries.update(_profile_mode_workspace_deny_rules(workspace_dir))
 
-    writable_roots: list[Path] = [home, codex_home, xdg_config_home, buddybox_root]
+    writable_roots: list[Path] = [home, codex_home, xdg_config_home]
     forbidden_temp = [
         canonical_shared_root,
         project_root,

@@ -194,27 +194,27 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
         "tracks": {
             "description": "Readable track pages with current state and published materials.",
             "scope": "product collaboration state",
-            "source_of_truth": "buddyswitch/objects/tracks/*.json",
+            "source_of_truth": "track.open / track.list via runtime env tools",
         },
         "tasks": {
             "description": "Active-buddy private task hints and checklists.",
             "scope": "active-buddy private task state",
-            "source_of_truth": "buddyswitch/objects/tasks/*.json",
+            "source_of_truth": "task.get / task.list via runtime env tools",
         },
         "artifacts": {
             "description": "Readable artifact summaries for current shared track materials.",
             "scope": "product deliverable state",
-            "source_of_truth": "buddyswitch/objects/artifacts/*.json",
+            "source_of_truth": "artifact.get / artifact.list via runtime env tools",
         },
         "messages": {
             "description": "Direct buddy inbox messages, read through message.list.",
             "scope": "active-buddy inbox communication",
-            "source_of_truth": "buddyswitch/objects/messages/*.json",
+            "source_of_truth": "message.list via runtime env tools",
         },
         "comments": {
             "description": "Target-scoped comments on tracks and artifacts, read through comment.list.",
             "scope": "target discussion thread",
-            "source_of_truth": "buddyswitch/objects/comments/*.json",
+            "source_of_truth": "comment.list via runtime env tools",
         },
         "buddybox": {
             "description": "Active buddy private file capability metadata and tool-backed private data plane.",
