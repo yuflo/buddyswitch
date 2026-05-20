@@ -75,8 +75,10 @@ Open `http://127.0.0.1:8765/` and click `Refresh workspace`.
 
 ## Canonical Runtime Sources
 
-- `scripts/env/tools/contracts.py` for env tool registry, action payloads, and status/catalog projection.
-- `scripts/env/tools/semantics.py` for machine-readable operation semantics.
+- `scripts/env/tools/<tool>/contract.py` for per-tool action names, payload fields, permissions, and return metadata.
+- `scripts/env/tools/<tool>/semantics.py` for per-tool machine-readable capability and action semantics.
+- `scripts/env/tools/<tool>/cli.py`, `scripts/env/tools/<tool>/handlers.py`, and `scripts/env/tools/<tool>/service.py` for per-tool CLI registration, selected dispatch mapping, and service execution.
+- `scripts/env/tools/catalog.py` for service-light env tool discovery, status/catalog projection, and operation semantics projection.
 - `scripts/runtime_kernel/protocol.py` for runtime broker protocol envelope.
 - `scripts/runtime_kernel/dispatcher.py` for supported broker methods: `env.tool`, `ping`, `status`.
 - `framework/contracts/prepare-turn-context.json` for context payload contract compatibility.

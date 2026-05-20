@@ -268,11 +268,20 @@ class RepoConsistencyTests(unittest.TestCase):
                     "payload_fields"
                     + "|action_semantics"
                     + "|operation_semantics"
+                    + "|TOOL_SPEC"
+                    + "|ACTION_SEMANTICS"
+                    + "|HANDLER_SPECS"
+                    + "|scripts/env/tools/.*/contract\\.py"
+                    + "|scripts/env/tools/.*/semantics\\.py"
+                    + "|scripts/env/tools/.*/handlers\\.py"
+                    + "|scripts/env/tools/.*/service\\.py"
                     + "|\\|\\s*tool\\s*\\|\\s*action\\s*\\|\\s*payload"
                     + "|\\|\\s*action\\s*\\|\\s*payload"
                     + "|\\*\\*payload:\\*\\*"
                     + "|\\*\\*returns:\\*\\*"
                     + "|##\\s*payload\\s+examples"
+                    + "|##\\s*operations"
+                    + "|##\\s*`[^`]+`\\s+payload"
                 ),
                 *targets,
             ],
@@ -284,6 +293,39 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         hits = [line for line in completed.stdout.splitlines() if line.strip()]
         self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_parallel_modular_architecture_memo_documents_current_skill_tool_boundary(self) -> None:
+        path = ROOT / "docs/memo/buddyswitch-parallel-modular-architecture.md"
+        text = path.read_text(encoding="utf-8")
+        lowered = text.lower()
+
+        self.assertIn("## skill / tool contract 衔接规则", lowered)
+        self.assertIn("context.get.tool_catalog", text)
+        self.assertIn("python3 scripts/turn_runtime.py status", text)
+        self.assertIn("scripts/env/tools/<tool>/contract.py", text)
+        self.assertIn("scripts/env/tools/<tool>/semantics.py", text)
+        self.assertIn("scripts/env/tools/<tool>/cli.py", text)
+        self.assertIn("scripts/env/tools/<tool>/handlers.py", text)
+        self.assertIn("scripts/env/tools/<tool>/service.py", text)
+        self.assertIn("skill 通过 catalog 消费能力，不复制能力", lowered)
+        self.assertNotIn("## 第一阶段落地", text)
+        self.assertIn("## 已落地基础", text)
+        self.assertIn("workflow engine", lowered)
+        self.assertIn("plugin system", lowered)
+        self.assertIn("event bus", lowered)
+
+    def test_readme_runtime_sources_match_per_tool_runtime(self) -> None:
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("scripts/env/tools/catalog.py", text)
+        self.assertIn("scripts/env/tools/<tool>/contract.py", text)
+        self.assertIn("scripts/env/tools/<tool>/semantics.py", text)
+        self.assertIn("scripts/env/tools/<tool>/cli.py", text)
+        self.assertIn("scripts/env/tools/<tool>/handlers.py", text)
+        self.assertIn("scripts/env/tools/<tool>/service.py", text)
+
+        self.assertNotIn("scripts/env/tools/contracts.py", text)
+        self.assertNotIn("scripts/env/tools/semantics.py` for machine-readable operation semantics", text)
 
     def test_contracts_and_buddy_agents_point_to_runtime_discovery(self) -> None:
         for name in ("pm", "design", "dev", "market", "test"):

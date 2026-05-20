@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener
 
 import env_profiles
 from env_manifest import DEFAULT_MANIFEST
@@ -124,8 +124,11 @@ def _build_search_url(query: str, engine: str) -> str:
 def _open_browser_page(browser_endpoint: str, target_url: str) -> tuple[bool, str | None]:
     create_url = f"{browser_endpoint}/json/new?{quote(target_url, safe='')}"
     request = Request(create_url, method="PUT")
+    # The Chrome DevTools endpoint is always local to the instance browser.
+    # Bypass host proxy settings so local loopback requests don't go through HTTP_PROXY.
+    opener = build_opener(ProxyHandler({}))
     try:
-        with urlopen(request, timeout=3.0) as response:
+        with opener.open(request, timeout=3.0) as response:
             if 200 <= response.status < 300:
                 return True, None
             return False, f"Chrome DevTools returned HTTP {response.status}"

@@ -457,6 +457,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     + "|operation_semantics"
                     + "|\\|\\s*tool\\s*\\|\\s*action\\s*\\|\\s*payload"
                     + "|\\|\\s*action\\s*\\|\\s*payload"
+                    + "|##\\s*`[^`]+`\\s+payload"
                 ),
                 "buddyswitch/skills",
                 "framework/contracts",

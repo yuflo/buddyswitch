@@ -14,6 +14,15 @@ if str(SCRIPTS) not in sys.path:
 
 
 class RuntimeSkillsTests(unittest.TestCase):
+    SHARED_TOOL_SKILLS = {
+        "task": ROOT / "buddyswitch/skills/shared/task-tool/SKILL.md",
+        "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
+        "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
+        "buddybox": ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md",
+        "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
+        "comment": ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
+    }
+
     def setUp(self) -> None:
         manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
@@ -33,14 +42,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("handoff-tool", skills)
 
     def test_shared_tool_skills_do_not_teach_handoff_or_next_buddy(self) -> None:
-        shared_skill_files = [
-            ROOT / "buddyswitch/skills/shared/task-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
-        ]
+        shared_skill_files = list(self.SHARED_TOOL_SKILLS.values())
         for path in shared_skill_files:
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
@@ -55,14 +57,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                     self.assertGreater(handoff_idx, do_not_idx, msg=f"{path}: 'handoff' found before 'do not' section")
 
     def test_shared_tool_skills_teach_inline_json_payloads(self) -> None:
-        skill_paths = [
-            ROOT / "buddyswitch/skills/shared/task-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
-        ]
+        skill_paths = list(self.SHARED_TOOL_SKILLS.values())
         for path in skill_paths:
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
@@ -73,19 +68,47 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("payload file", text)
 
     def test_shared_tool_skills_route_exact_fields_to_runtime_discovery(self) -> None:
-        skill_paths = [
-            ROOT / "buddyswitch/skills/shared/task-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
-        ]
+        skill_paths = list(self.SHARED_TOOL_SKILLS.values())
         for path in skill_paths:
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("context.get.tool_catalog", text)
                 self.assertIn("turn_runtime.py status", text)
+
+    def test_shared_tool_skills_name_only_runtime_discovery_surfaces_for_exact_contracts(self) -> None:
+        required_refs = (
+            "context.get.tool_catalog",
+            "python3 scripts/turn_runtime.py status",
+        )
+        accepted_contract_refs = (
+            "context.get.tool_catalog",
+            "context.summarize.tool_affordances",
+            "python3 scripts/turn_runtime.py status",
+            "runtime response fields",
+        )
+        forbidden_refs = (
+            "scripts/env/tools/",
+            "contract.py",
+            "semantics.py",
+            "handlers.py",
+            "service.py",
+            "payload_fields",
+            "action_semantics",
+            "TOOL_SPEC",
+            "ACTION_SEMANTICS",
+        )
+        for tool, path in self.SHARED_TOOL_SKILLS.items():
+            text = path.read_text(encoding="utf-8")
+            lowered = text.lower()
+            with self.subTest(tool=tool):
+                for required in required_refs:
+                    self.assertIn(required, text)
+                self.assertTrue(
+                    any(ref in text for ref in accepted_contract_refs),
+                    msg=f"{path.relative_to(ROOT)} does not route exact contract knowledge to runtime discovery",
+                )
+                for forbidden in forbidden_refs:
+                    self.assertNotIn(forbidden.lower(), lowered)
 
     def test_shared_tool_skills_do_not_embed_payload_or_return_schema_blocks(self) -> None:
         skill_paths = [

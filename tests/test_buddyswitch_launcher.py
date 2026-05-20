@@ -1249,7 +1249,6 @@ exec "$real_git" "$@"
             self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "track-tool" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "artifact-tool" / "SKILL.md").exists())
-            self.assertTrue((runtime_skills / "track-tool" / "assets" / "track-operation-template.md").exists())
             for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
                 self.assertFalse((runtime_skills / removed).exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
@@ -2260,7 +2259,6 @@ exec "$real_git" "$@"
             self.assertTrue((runtime_skills / "track-tool" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "artifact-tool" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "write-prd" / "assets" / "prd-template.md").exists())
-            self.assertTrue((runtime_skills / "track-tool" / "assets" / "track-operation-template.md").exists())
             for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
                 self.assertFalse((runtime_skills / removed).exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
@@ -4608,7 +4606,6 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "track-tool" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "artifact-tool" / "SKILL.md").exists())
-            self.assertTrue((runtime_skills / "track-tool" / "assets" / "track-operation-template.md").exists())
             for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
                 self.assertFalse((runtime_skills / removed).exists())
             source_write_prd = ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "SKILL.md"

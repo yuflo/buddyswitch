@@ -81,6 +81,48 @@ Repo 不能互相调用；
 SKILL 不能复制 runtime contract。
 ```
 
+## SKILL / Tool Contract 衔接规则
+
+`SKILL` 和 `tool` 的稳定衔接面只有 runtime discovery：
+
+```text
+context.get.tool_catalog
+context.get.operation_semantics
+context.summarize.tool_affordances
+python3 scripts/turn_runtime.py status
+runtime env.tool response fields
+```
+
+普通 shared tool skills 默认引用 `context.get.tool_catalog['<tool>']`、`context.summarize.tool_affordances`、`python3 scripts/turn_runtime.py status` 和 runtime response fields。`context.get.operation_semantics` 是 runtime 可暴露的机器语义投影，可用于 runtime verification 和高级诊断；不要在 skill prose 中复制或解释它的表结构。
+
+`SKILL` 可以写：
+
+- 什么时候使用某类 tool；
+- 如何判断当前 workflow 需要哪种能力；
+- 先查哪些 runtime discovery 面；
+- 成功后如何验证 `ok`、`state_changed`、`state_changes`、returned ids；
+- 失败后如何读取 `permission_boundary`、`why_blocked`、`retry_guidance`、`allowed_next_actions`、`alternative_capabilities`。
+
+`SKILL` 不能写：
+
+- action / payload / return schema 表；
+- per-tool package 内部路径；
+- dispatch、handler、service 入口；
+- object repo 路径或 JSON 存储结构；
+- 与 runtime catalog 不一致的 payload 示例。
+
+每个 tool 的契约来源是：
+
+```text
+scripts/env/tools/<tool>/contract.py
+scripts/env/tools/<tool>/semantics.py
+scripts/env/tools/<tool>/cli.py
+scripts/env/tools/<tool>/handlers.py
+scripts/env/tools/<tool>/service.py
+```
+
+shared runtime 只负责发现、投影、路由、dispatch、response formatting。SKILL 通过 catalog 消费能力，不复制能力。
+
 ## 外部实践依据
 
 这个方向符合主流 agent/tool 架构：
@@ -132,28 +174,39 @@ artifact.create_revision -> track.add_material / track.add_proof -> track.open -
 | 修改 buddybox | buddybox service/file repo/test | product object repos |
 | 修改 track/artifact 发布 | publication domain、track/artifact repo、相关 service | message、comment、buddybox、task |
 
-## 第一阶段落地
+## 已落地基础
 
-按最短验证路径推进，不一次性大拆：
+`per-tool independence rebuild` 完成后，tool-specific ownership 已收敛到：
 
-1. 加边界测试：tool contract 投影一致、SKILL 不复制 schema、repo 不互相 import。
-2. 先抽 `message`：它最独立，适合验证新结构。
-3. 再抽 `comment`：验证 target readability 只能通过 domain ops。
-4. 固化 `buddybox` 私有文件边界：它不进入 product object 状态。
-5. `track/artifact` 等 runtime repair 合并后再抽：保留唯一发布路径。
-6. 最后处理 `task`：它不承担 artifact 发布或 track shared state。
+```text
+scripts/env/tools/<tool>/
+  contract.py
+  semantics.py
+  cli.py
+  handlers.py
+  service.py
+```
+
+central `TOOL_REGISTRY`、central semantics table、central handler map、central per-tool CLI dispatch branch、`env.services` tool entrypoint 都不再是 runtime API。
+
+接下来维护的边界是：
+
+1. 新增或修改 tool action，只改对应 tool package 和该 tool 的 focused tests。
+2. 修改 shared / buddy-specific `SKILL`，不改 Python runtime。
+3. `SKILL` 通过 runtime discovery 获取精确 action、payload、semantics、response guidance；普通 shared tool skills 不复制或讲解 `operation_semantics` 表结构。
+4. cross-object product coupling 仍然只允许在 explicit domain modules 中出现。
 
 ## 完成标准
 
-第一阶段只证明三件事：
+架构边界成立必须同时满足：
 
-1. 新增一个 `message` action，不需要改共享 SKILL。
-2. 修改一个 buddy-specific SKILL，不需要改 Python runtime。
-3. `message` / `comment` / `buddybox` 的测试可以独立运行，不被 `track` / `artifact` / `task` 牵连。
-
-必须保留的验证：
-
-- tool contract、catalog、dispatch、semantics 对齐。
-- object repo 没有 sibling repo import。
-- `track/artifact` 发布只有一个 domain 入口。
-- 现有 runtime contract tests 继续通过。
+1. 新增或修改一个 tool action，不需要改 shared SKILL。
+2. 修改一个 buddy-specific 或 shared SKILL，不需要改 Python runtime。
+3. shared tool skills 都指向 `context.get.tool_catalog['<tool>']` 或 `python3 scripts/turn_runtime.py status` 获取精确 payload / action / response guidance。
+4. prose 文档和 SKILL 不复制 `payload_fields`、`action_semantics`、`operation_semantics`、action/payload 表。
+5. `context.get` 返回的 `tool_catalog` 和 `operation_semantics` 等于 `env.tools.catalog` 的投影；`operation_semantics` 只作为 runtime discovery/result surface，不作为 skill prose mirror。
+6. catalog projection 不 import service、domain、repo。
+7. selected dispatch 不 import sibling tool service。
+8. object repo 没有 sibling repo import。
+9. `track/artifact/comment` 的真实产品耦合保留在 explicit domain modules。
+10. `python3 -m pytest tests/test_runtime_skills.py tests/test_repo_consistency.py tests/test_env_tool_response_contract.py -q` 通过。
