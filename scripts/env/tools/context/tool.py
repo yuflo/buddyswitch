@@ -33,15 +33,20 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': [],
                     'properties': {
                         'track_id': {
                             'type': 'string',
+                            'description': 'Optional track id filter for context sections.',
                         },
                         'task_id': {
                             'type': 'string',
+                            'description': 'Optional task id filter for context sections.',
                         },
                         'limit': {
-                            'type': 'string',
+                            'type': 'integer',
+                            'description': 'Optional maximum number of candidate rows per section.',
+                            'minimum': 1,
                         },
                     },
                 },
@@ -76,15 +81,20 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': [],
                     'properties': {
                         'track_id': {
                             'type': 'string',
+                            'description': 'Optional track id filter for summary rows.',
                         },
                         'task_id': {
                             'type': 'string',
+                            'description': 'Optional task id filter for summary rows.',
                         },
                         'limit': {
-                            'type': 'string',
+                            'type': 'integer',
+                            'description': 'Optional maximum number of summary rows per section.',
+                            'minimum': 1,
                         },
                     },
                 },
@@ -119,6 +129,7 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': [],
                     'properties': {},
                 },
                 output_schema={

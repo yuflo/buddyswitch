@@ -53,12 +53,16 @@ class TurnRuntimeRunlessTests(unittest.TestCase):
         self.assertNotIn("run", tools)
         self.assertNotIn("binding", tools)
         self.assertEqual(set(tools), set(tool_catalog.supported_tools()))
+        self.assertEqual(tools, tool_catalog.env_tools_description())
         for tool_name, row in sorted(tools.items()):
             with self.subTest(tool=tool_name):
                 self.assertIn("action_semantics", row)
                 action_semantics = row["action_semantics"]
                 self.assertIsInstance(action_semantics, dict, msg=row)
                 self.assertTrue(action_semantics, msg=row)
+        track_create = tools["track"]["input_schemas"]["create"]
+        self.assertEqual(track_create["properties"]["now"]["type"], "object")
+        self.assertEqual(track_create["properties"]["now"]["required"], ["next"])
         compact = tool_catalog.compact_tool_affordances()
         for tool_name, row in sorted(tools.items()):
             with self.subTest(compact_tool=tool_name):

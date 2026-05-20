@@ -33,6 +33,7 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': [],
                     'properties': {},
                 },
                 output_schema={
@@ -64,15 +65,21 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['query', 'backend'],
                     'properties': {
                         'query': {
                             'type': 'string',
+                            'description': 'Non-empty search query text.',
                         },
                         'backend': {
                             'type': 'string',
+                            'description': 'Explicit search backend choice.',
+                            'enum': ['browser', 'search_api'],
                         },
                         'engine': {
                             'type': 'string',
+                            'description': 'Optional search engine choice.',
+                            'enum': ['google', 'web', 'reddit', 'x'],
                         },
                     },
                 },
@@ -107,12 +114,16 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['query'],
                     'properties': {
                         'query': {
                             'type': 'string',
+                            'description': 'Non-empty search query text.',
                         },
                         'engine': {
                             'type': 'string',
+                            'description': 'Optional search engine choice.',
+                            'enum': ['google', 'web', 'reddit', 'x'],
                         },
                     },
                 },

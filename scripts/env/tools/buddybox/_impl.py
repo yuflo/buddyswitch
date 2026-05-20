@@ -250,12 +250,40 @@ def _alternative_capabilities() -> list[dict[str, Any]]:
     ]
 
 
+def _logical_name_field_error() -> dict[str, Any]:
+    return {
+        "path": "logical_name",
+        "message": "logical_name must be a non-empty private file path within active buddy scope",
+        "expected": "non-empty relative logical_name without buddy prefix or '..'",
+        "example": "notes/todo.md",
+    }
+
+
+def _content_exactly_one_field_error() -> dict[str, Any]:
+    return {
+        "path": "content",
+        "message": "provide exactly one of content or content_base64",
+        "expected": {"content": "string", "content_base64": "base64 string"},
+        "example": {"logical_name": "notes/todo.md", "content": "hello"},
+    }
+
+
+def _encoding_field_error() -> dict[str, Any]:
+    return {
+        "path": "encoding",
+        "message": "encoding must be one of auto, utf-8, base64",
+        "allowed_values": ["auto", "utf-8", "base64"],
+        "example": "utf-8",
+    }
+
+
 def _reject_payload(
     *,
     action: str,
     active_buddy: str,
     message: str,
     correctable_fields: list[str] | None = None,
+    field_errors: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return tool_results.rejection(
         tool="buddybox",
@@ -284,10 +312,17 @@ def _reject_payload(
         correctable_fields=correctable_fields,
         alternative_capabilities=_alternative_capabilities(),
         mutates_product_state=False,
+        field_errors=field_errors,
     )
 
 
-def _reject_logical_name(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+def _reject_logical_name(
+    *,
+    action: str,
+    active_buddy: str,
+    message: str,
+    field_errors: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return tool_results.rejection(
         tool="buddybox",
         action=action,
@@ -307,6 +342,7 @@ def _reject_logical_name(*, action: str, active_buddy: str, message: str) -> dic
         correctable_fields=["logical_name"],
         alternative_capabilities=_alternative_capabilities(),
         mutates_product_state=False,
+        field_errors=field_errors or [_logical_name_field_error()],
     )
 
 
@@ -509,6 +545,7 @@ def read_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSer
                 active_buddy=active_buddy,
                 message="encoding must be auto, utf-8, or base64",
                 correctable_fields=["encoding"],
+                field_errors=[_encoding_field_error()],
             )
 
     try:
@@ -585,6 +622,7 @@ def write_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSe
             active_buddy=active_buddy,
             message="provide exactly one of content or content_base64",
             correctable_fields=["content", "content_base64"],
+            field_errors=[_content_exactly_one_field_error()],
         )
 
     if content is not None:

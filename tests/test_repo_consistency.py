@@ -226,6 +226,51 @@ class RepoConsistencyTests(unittest.TestCase):
             disallowed.append(line)
         self.assertEqual(disallowed, [], msg="\n".join(disallowed))
 
+    def test_tool_semantic_contract_has_no_transition_residue(self) -> None:
+        completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                (
+                    "schema " + "card"
+                    + "|semantic " + "card"
+                    + "|compatibility " + "adapter"
+                    + "|dual " + "catalog"
+                    + "|fallback " + "registry"
+                    + "|minimal_" + "payload"
+                ),
+                "scripts",
+                "tests",
+                "buddyswitch",
+                "tools",
+                "README.md",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        disallowed = [line for line in hits if not line.startswith("tests/")]
+        self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+
+        per_tool_completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                "track\\.now|artifact\\.source_refs|comment\\.mentions|buddybox\\.list",
+                "scripts/env/tool_runtime",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(per_tool_completed.returncode, {0, 1}, msg=per_tool_completed.stderr)
+        per_tool_hits = [line for line in per_tool_completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(per_tool_hits, [], msg="\n".join(per_tool_hits))
+
     def test_active_cli_guidance_has_no_payload_file_route(self) -> None:
         targets = [
             "AGENTS.md",

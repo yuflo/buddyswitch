@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
+import copy
 import importlib
 import pkgutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import env.tools
 
@@ -147,9 +148,18 @@ def _action_semantic_row(tool: str, row: ActionDefinition) -> dict[str, Any]:
     properties = row.input_schema.get("properties")
     inputs: dict[str, str] = {}
     if isinstance(properties, dict):
-        for key in properties:
-            if isinstance(key, str):
-                inputs[key] = f"{key} payload field."
+        for key, value in properties.items():
+            if not isinstance(key, str) or not isinstance(value, dict):
+                continue
+            description = value.get("description")
+            if isinstance(description, str) and description.strip():
+                explained = description.strip()
+                value_type = value.get("type")
+                if value_type == "object" or (isinstance(value_type, list) and "object" in value_type):
+                    explained = f"{explained} Shape: object."
+                elif value_type == "array" or (isinstance(value_type, list) and "array" in value_type):
+                    explained = f"{explained} Shape: array."
+                inputs[key] = explained
     return {
         "title": row.title,
         "plain_description": row.description,
@@ -175,10 +185,12 @@ def env_tools_description() -> dict[str, dict[str, Any]]:
         definition = load_definition(tool)
         operations: list[str] = []
         payload_fields: dict[str, list[str]] = {}
+        input_schemas: dict[str, dict[str, Any]] = {}
         action_semantics: dict[str, dict[str, Any]] = {}
         for action in definition.actions:
             operations.append(action.name)
             payload_fields[action.name] = payload_fields_for_action(tool, action.name)
+            input_schemas[action.name] = _schema_copy(action.input_schema)
             action_semantics[action.name] = _action_semantic_row(tool, action)
 
         rows[tool] = {
@@ -194,6 +206,7 @@ def env_tools_description() -> dict[str, dict[str, Any]]:
             "cli_resource": definition.cli_resource,
             "operations": operations,
             "payload_fields": payload_fields,
+            "input_schemas": input_schemas,
             "action_semantics": action_semantics,
             "feedback_source": "runtime/tool response fields",
             "authoritative_fields": [
@@ -238,6 +251,12 @@ def compact_tool_affordances() -> dict[str, dict[str, Any]]:
             "returns": definition.description,
         }
     return rows
+
+
+def _schema_copy(schema: Mapping[str, Any] | Any) -> dict[str, Any]:
+    if not isinstance(schema, Mapping):
+        return {}
+    return copy.deepcopy(dict(schema))
 
 
 def action_mutates(tool: str, action: str) -> str | None:

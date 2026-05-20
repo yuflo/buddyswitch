@@ -22,6 +22,7 @@ _ALLOWED_MUTATION_VALUES = {
 }
 _TOOL_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _ACTION_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_ENUM_LIKE_FIELDS = {"status", "state", "health", "kind", "template", "target_type", "backend", "engine"}
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,100 @@ def _validate_schema_object(schema: Mapping[str, Any], *, field: str) -> None:
     properties = schema.get("properties")
     if not isinstance(properties, Mapping):
         raise ValueError(f"{field}.properties must be an object")
+    required = schema.get("required")
+    if not isinstance(required, list):
+        raise ValueError(f"{field}.required must be a list")
+    for index, name in enumerate(required):
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"{field}.required[{index}] must be a non-empty string")
+        if name not in properties:
+            raise ValueError(f"{field}.required[{index}] must reference a declared property")
+    for property_name, property_schema in properties.items():
+        if not isinstance(property_name, str) or not property_name.strip():
+            raise ValueError(f"{field}.properties keys must be non-empty strings")
+        if not isinstance(property_schema, Mapping):
+            raise ValueError(f"{field}.properties.{property_name} must be an object")
+        _validate_property_schema(
+            property_schema,
+            field=f"{field}.properties.{property_name}",
+            property_name=property_name,
+        )
+
+
+def _schema_type_has(schema: Mapping[str, Any], expected: str) -> bool:
+    value = schema.get("type")
+    if value == expected:
+        return True
+    if isinstance(value, list):
+        return expected in value
+    return False
+
+
+def _validate_property_schema(schema: Mapping[str, Any], *, field: str, property_name: str) -> None:
+    description = schema.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError(f"{field}.description must be a non-empty string")
+
+    if property_name in _ENUM_LIKE_FIELDS:
+        enum_values = schema.get("enum")
+        if not isinstance(enum_values, list) or not enum_values:
+            raise ValueError(f"{field}.enum must be a non-empty list")
+        for index, row in enumerate(enum_values):
+            if not isinstance(row, str) or not row.strip():
+                raise ValueError(f"{field}.enum[{index}] must be a non-empty string")
+
+    if _schema_type_has(schema, "object"):
+        _validate_object_property(schema, field=field)
+
+    if _schema_type_has(schema, "array"):
+        items = schema.get("items")
+        if not isinstance(items, Mapping):
+            raise ValueError(f"{field}.items must be an object")
+        _validate_combined_variants(items, field=f"{field}.items")
+        if _schema_type_has(items, "object"):
+            _validate_object_property(items, field=f"{field}.items")
+
+    _validate_combined_variants(schema, field=field)
+
+
+def _validate_object_property(schema: Mapping[str, Any], *, field: str) -> None:
+    if schema.get("additionalProperties") is not False:
+        raise ValueError(f"{field}.additionalProperties must be false")
+    properties = schema.get("properties")
+    if not isinstance(properties, Mapping):
+        raise ValueError(f"{field}.properties must be an object")
+    required = schema.get("required")
+    if not isinstance(required, list):
+        raise ValueError(f"{field}.required must be a list")
+    for index, name in enumerate(required):
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"{field}.required[{index}] must be a non-empty string")
+        if name not in properties:
+            raise ValueError(f"{field}.required[{index}] must reference a declared property")
+    for nested_name, nested_schema in properties.items():
+        if not isinstance(nested_name, str) or not nested_name.strip():
+            raise ValueError(f"{field}.properties keys must be non-empty strings")
+        if not isinstance(nested_schema, Mapping):
+            raise ValueError(f"{field}.properties.{nested_name} must be an object")
+        _validate_property_schema(
+            nested_schema,
+            field=f"{field}.properties.{nested_name}",
+            property_name=nested_name,
+        )
+
+
+def _validate_combined_variants(schema: Mapping[str, Any], *, field: str) -> None:
+    for key in ("anyOf", "oneOf", "allOf"):
+        value = schema.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, list) or not value:
+            raise ValueError(f"{field}.{key} must be a non-empty list")
+        for index, row in enumerate(value):
+            if not isinstance(row, Mapping):
+                raise ValueError(f"{field}.{key}[{index}] must be an object")
+            if _schema_type_has(row, "object"):
+                _validate_object_property(row, field=f"{field}.{key}[{index}]")
 
 
 def _validate_output_schema(schema: Mapping[str, Any], *, field: str) -> None:
@@ -118,4 +213,3 @@ def validate_definition(definition: ToolDefinition) -> None:
 
         _validate_schema_object(action.input_schema, field=f"{tool_id}.{name}.input_schema")
         _validate_output_schema(action.output_schema, field=f"{tool_id}.{name}.output_schema")
-

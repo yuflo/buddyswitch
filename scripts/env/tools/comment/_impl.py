@@ -46,6 +46,7 @@ def _reject_payload(
     active_buddy: str,
     message: str,
     correctable_fields: list[str] | None = None,
+    field_errors: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return tool_results.rejection(
         tool="comment",
@@ -62,6 +63,7 @@ def _reject_payload(
         retry_guidance="Fix comment payload fields and retry.",
         allowed_next_actions=["Use comment.list to inspect current threads on the target."],
         correctable_fields=correctable_fields,
+        field_errors=field_errors,
     )
 
 
@@ -170,7 +172,20 @@ def _normalize_mentions(
     if mentions is None:
         return []
     if not isinstance(mentions, list):
-        return _reject_payload(action=action, active_buddy=active_buddy, message="mentions must be a list", correctable_fields=["mentions"])
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="mentions must be a list",
+            correctable_fields=["mentions"],
+            field_errors=[
+                {
+                    "path": "mentions",
+                    "message": "mentions must be a list of manifest buddy ids",
+                    "expected": ["pm", "design"],
+                    "example": ["pm"],
+                }
+            ],
+        )
     buddies = _manifest_buddies(manifest)
     normalized: list[str] = []
     for row in mentions:
@@ -180,6 +195,14 @@ def _normalize_mentions(
                 active_buddy=active_buddy,
                 message="mentions entries must be non-empty strings",
                 correctable_fields=["mentions"],
+                field_errors=[
+                    {
+                        "path": "mentions",
+                        "message": "mentions entries must be non-empty buddy id strings",
+                        "expected": ["pm", "design"],
+                        "example": ["pm"],
+                    }
+                ],
             )
         buddy = row.strip()
         if buddy not in buddies:
@@ -188,6 +211,14 @@ def _normalize_mentions(
                 active_buddy=active_buddy,
                 message=f"unknown mention buddy: {buddy}",
                 correctable_fields=["mentions"],
+                field_errors=[
+                    {
+                        "path": "mentions",
+                        "message": f"unknown mention buddy: {buddy}",
+                        "allowed_values": sorted(buddies),
+                        "example": sorted(buddies)[:1],
+                    }
+                ],
             )
         if buddy not in normalized:
             normalized.append(buddy)
@@ -281,6 +312,14 @@ def add_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict
                 active_buddy=active_buddy,
                 message="anchor is required for target_type='artifact_section'",
                 correctable_fields=["anchor"],
+                field_errors=[
+                    {
+                        "path": "anchor",
+                        "message": "anchor is required when target_type is artifact_section",
+                        "expected": "non-empty string anchor id",
+                        "example": "section:problem-statement",
+                    }
+                ],
             )
         anchor = anchor.strip()
     elif anchor is not None:

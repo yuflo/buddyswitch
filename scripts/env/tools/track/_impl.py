@@ -32,6 +32,24 @@ class TrackServiceContext(TypedDict):
     manifest: dict[str, Any]
 
 
+def _now_field_error() -> dict[str, Any]:
+    return {
+        "path": "now",
+        "message": "now must be an object with required field next and optional blocker",
+        "expected": {"next": "non-empty string", "blocker": "string|null"},
+        "example": {"next": "Set up PM coordination.", "blocker": None},
+    }
+
+
+def _refs_field_error() -> dict[str, Any]:
+    return {
+        "path": "refs",
+        "message": "refs must be a list of artifact reference objects",
+        "expected": [{"type": "artifact", "id": "non-empty string"}],
+        "example": [{"type": "artifact", "id": "art-example-r1"}],
+    }
+
+
 def _allowed(action: str) -> set[str]:
     _, action_name = action.split(".", 1)
     for row in _ACTION_DEFINITION_MAP.get("actions", []):
@@ -40,7 +58,13 @@ def _allowed(action: str) -> set[str]:
     return set()
 
 
-def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+def _reject_payload(
+    *,
+    action: str,
+    active_buddy: str,
+    message: str,
+    field_errors: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     correctable_fields: list[str] | None = None
     if "unsupported payload fields:" in message:
         suffix = message.split("unsupported payload fields:", 1)[1].strip()
@@ -89,6 +113,7 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
             "Retry with only documented track payload fields.",
         ],
         correctable_fields=correctable_fields,
+        field_errors=field_errors,
     )
 
 
@@ -131,7 +156,13 @@ def _reject_authority(*, action: str, active_buddy: str, message: str) -> dict[s
     )
 
 
-def _reject_refs(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+def _reject_refs(
+    *,
+    action: str,
+    active_buddy: str,
+    message: str,
+    field_errors: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return tool_results.rejection(
         tool="track",
         action=action,
@@ -147,6 +178,7 @@ def _reject_refs(*, action: str, active_buddy: str, message: str) -> dict[str, A
         retry_guidance="Fix refs and retry.",
         allowed_next_actions=["Use track.open to inspect current material/proof artifact ids."],
         correctable_fields=["refs"],
+        field_errors=field_errors or [_refs_field_error()],
     )
 
 
@@ -309,7 +341,27 @@ def create_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -
     if not isinstance(appetite, str) or not appetite.strip():
         return _reject_payload(action=action, active_buddy=active_buddy, message="appetite is required")
     if not isinstance(now, dict):
-        return _reject_payload(action=action, active_buddy=active_buddy, message="now is required")
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="now must be an object with required field next and optional blocker",
+            field_errors=[_now_field_error()],
+        )
+    if not isinstance(now.get("next"), str) or not now.get("next", "").strip():
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="now.next is required",
+            field_errors=[_now_field_error()],
+        )
+    blocker = now.get("blocker")
+    if blocker is not None and not isinstance(blocker, str):
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="now.blocker must be a string or null",
+            field_errors=[_now_field_error()],
+        )
 
     state = args.get("state", "active")
     health = args.get("health", "ok")
@@ -410,9 +462,30 @@ def update_now_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCo
             )
         patch["health"] = health
     if "now" in args:
-        if not isinstance(args.get("now"), dict):
-            return _reject_payload(action=action, active_buddy=active_buddy, message="now must be an object")
-        patch["now"] = args.get("now")
+        now_value = args.get("now")
+        if not isinstance(now_value, dict):
+            return _reject_payload(
+                action=action,
+                active_buddy=active_buddy,
+                message="now must be an object with required field next and optional blocker",
+                field_errors=[_now_field_error()],
+            )
+        if not isinstance(now_value.get("next"), str) or not now_value.get("next", "").strip():
+            return _reject_payload(
+                action=action,
+                active_buddy=active_buddy,
+                message="now.next is required",
+                field_errors=[_now_field_error()],
+            )
+        blocker = now_value.get("blocker")
+        if blocker is not None and not isinstance(blocker, str):
+            return _reject_payload(
+                action=action,
+                active_buddy=active_buddy,
+                message="now.blocker must be a string or null",
+                field_errors=[_now_field_error()],
+            )
+        patch["now"] = now_value
 
     if not patch:
         return _reject_payload(action=action, active_buddy=active_buddy, message="at least one of now/state/health is required")
@@ -546,8 +619,10 @@ def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -
     if track_error is not None:
         return track_error
 
-    kind = args.get("kind")
+    kind = "progress" if "kind" not in args else args.get("kind")
     summary = args.get("summary")
+    if isinstance(kind, str):
+        kind = kind.strip()
     if kind not in context.repos.track.VALID_UPDATE_KIND:
         return _reject_payload(
             action=action,
@@ -559,14 +634,29 @@ def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -
 
     refs_arg = args.get("refs", [])
     if not isinstance(refs_arg, list):
-        return _reject_payload(action=action, active_buddy=active_buddy, message="refs must be a list")
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="refs must be a list",
+            field_errors=[_refs_field_error()],
+        )
     refs: list[dict[str, Any]] = []
     for row in refs_arg:
         if not isinstance(row, dict) or row.get("type") != "artifact":
-            return _reject_refs(action=action, active_buddy=active_buddy, message="refs entries must be artifact refs")
+            return _reject_refs(
+                action=action,
+                active_buddy=active_buddy,
+                message="refs entries must be artifact refs",
+                field_errors=[_refs_field_error()],
+            )
         ref_id = row.get("id")
         if not isinstance(ref_id, str) or not ref_id.strip():
-            return _reject_refs(action=action, active_buddy=active_buddy, message="artifact ref id is required")
+            return _reject_refs(
+                action=action,
+                active_buddy=active_buddy,
+                message="artifact ref id is required",
+                field_errors=[_refs_field_error()],
+            )
         normalized_ref_id = ref_id.strip()
         decision = context.rules.artifact_visibility.artifact_ref_decision_for_track_update(
             artifact_id=normalized_ref_id,

@@ -35,7 +35,38 @@ class ArtifactServiceContext(TypedDict):
 _LEGACY_SOURCE_RUN = "source" + "_run_id"
 
 
-def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
+def _template_field_error(allowed_values: tuple[str, ...]) -> dict[str, Any]:
+    return {
+        "path": "template",
+        "message": f"template must be one of {', '.join(allowed_values)}",
+        "allowed_values": list(allowed_values),
+        "example": "brief",
+    }
+
+
+def _source_refs_field_error() -> dict[str, Any]:
+    return {
+        "path": "source_refs",
+        "message": "source_refs must be a list of supported source_ref objects",
+        "expected": [
+            {"type": "artifact", "id": "art-..."},
+            {"type": "track", "id": "track-..."},
+            {"type": "task", "id": "task-..."},
+            {"type": "buddybox", "logical_name": "notes/source.txt"},
+            {"type": "external", "label": "Product page", "url": "https://example.com"},
+            {"type": "note", "label": "Source note"},
+        ],
+        "example": [{"type": "note", "label": "Source note"}],
+    }
+
+
+def _reject_payload(
+    *,
+    action: str,
+    active_buddy: str,
+    message: str,
+    field_errors: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     correctable_fields: list[str] | None = None
     if "unsupported payload fields:" in message:
         suffix = message.split("unsupported payload fields:", 1)[1].strip()
@@ -64,6 +95,7 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
             "Retry with supported payload fields only.",
         ],
         correctable_fields=correctable_fields,
+        field_errors=field_errors,
     )
 
 
@@ -95,7 +127,15 @@ def _reject_publication_path(
     )
 
 
-def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str, code: str = "E_ARTIFACT_SCOPE") -> dict[str, Any]:
+def _reject_scope(
+    *,
+    action: str,
+    active_buddy: str,
+    boundary: str,
+    message: str,
+    code: str = "E_ARTIFACT_SCOPE",
+    field_errors: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return tool_results.rejection(
         tool="artifact",
         action=action,
@@ -114,6 +154,7 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
             "Use artifact.create_revision for a private draft owned by the active buddy.",
         ],
         correctable_fields=["artifact_id"],
+        field_errors=field_errors,
     )
 
 
@@ -239,6 +280,7 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
             action=action,
             active_buddy=active_buddy,
             message=f"template must be one of {', '.join(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)}",
+            field_errors=[_template_field_error(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)],
         )
     if supersedes_artifact_id is not None and (not isinstance(supersedes_artifact_id, str) or not supersedes_artifact_id.strip()):
         return _reject_payload(
@@ -268,6 +310,7 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
             boundary="source_refs.required_fields",
             message=str(exc),
             code="E_SOURCE_REFS",
+            field_errors=[_source_refs_field_error()],
         )
     if isinstance(scope_error, dict):
         return _reject_scope(
@@ -276,6 +319,7 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
             boundary=str(scope_error.get("permission_boundary", "source_refs.read_scope")),
             message=str(scope_error.get("why_blocked", "source_refs read scope denied")),
             code="E_SOURCE_REFS_READ_SCOPE",
+            field_errors=[_source_refs_field_error()],
         )
 
     artifact_id = args.get("artifact_id")
@@ -373,6 +417,7 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
             action=action,
             active_buddy=active_buddy,
             message=f"template must be one of {', '.join(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)}",
+            field_errors=[_template_field_error(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)],
         )
     if "body" in patch and (not isinstance(patch["body"], str) or not patch["body"].strip()):
         return _reject_payload(action=action, active_buddy=active_buddy, message="body must be a non-empty string")
@@ -395,6 +440,7 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
                 boundary="source_refs.required_fields",
                 message=str(exc),
                 code="E_SOURCE_REFS",
+                field_errors=[_source_refs_field_error()],
             )
         if isinstance(scope_error, dict):
             return _reject_scope(
@@ -403,6 +449,7 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
                 boundary=str(scope_error.get("permission_boundary", "source_refs.read_scope")),
                 message=str(scope_error.get("why_blocked", "source_refs read scope denied")),
                 code="E_SOURCE_REFS_READ_SCOPE",
+                field_errors=[_source_refs_field_error()],
             )
         patch["source_refs"] = refs
 

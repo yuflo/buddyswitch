@@ -225,6 +225,27 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(summarize_semantics, dict)
         self.assertIn("inputs_explained", summarize_semantics)
         self.assertIn("success_means", summarize_semantics)
+        self.assertEqual(env_tools, tool_catalog.env_tools_description())
+
+    def test_context_get_exposes_full_input_schemas(self) -> None:
+        instance_json = self._instance_json()
+        payload = self._dispatch(
+            tool="context",
+            action="get",
+            args={},
+            instance_json=instance_json,
+        )
+        self.assertTrue(payload.get("ok"), msg=payload)
+        catalog_row = payload.get("tool_catalog")
+        self.assertIsInstance(catalog_row, dict, msg=payload)
+        assert isinstance(catalog_row, dict)
+        self.assertEqual(catalog_row, tool_catalog.env_tools_description())
+        track_create = catalog_row["track"]["input_schemas"]["create"]
+        self.assertEqual(track_create.get("type"), "object")
+        now_schema = track_create["properties"]["now"]
+        self.assertEqual(now_schema.get("type"), "object")
+        self.assertEqual(now_schema.get("required"), ["next"])
+        self.assertEqual(now_schema["properties"]["next"]["type"], "string")
 
     def test_task_artifact_records_reject_run_fields(self) -> None:
         with self.assertRaises(ValueError):

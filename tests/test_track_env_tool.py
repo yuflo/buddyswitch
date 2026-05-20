@@ -229,6 +229,32 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("unsupported payload fields: owner_buddy", str(rejected.get("why_blocked")))
         self.assertEqual(env_store.track_file("track-owner-buddy-update").read_text(encoding="utf-8"), before)
 
+    def test_add_update_defaults_kind_to_progress_when_omitted(self) -> None:
+        pm_instance = self._pm_instance()
+        created = self._create_track(instance_json=pm_instance, track_id="track-update-default-kind")
+        self.assertTrue(created.get("ok"), msg=created)
+
+        updated = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-track",
+            buddy="pm",
+            tool="track",
+            action="add_update",
+            args={
+                "track_id": "track-update-default-kind",
+                "summary": "default-kind update",
+            },
+        )
+        self.assertTrue(updated.get("ok"), msg=updated)
+        self.assertTrue(bool(updated.get("state_changed")), msg=updated)
+
+        track = env_store.get_track("track-update-default-kind")
+        self.assertIsInstance(track, dict)
+        assert isinstance(track, dict)
+        updates = [row for row in track.get("updates", []) if isinstance(row, dict)]
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].get("kind"), "progress")
+
     def test_all_buddies_can_list_and_open_non_archived_tracks(self) -> None:
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-shared-open").get("ok"))

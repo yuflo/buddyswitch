@@ -33,21 +33,28 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['title', 'summary'],
                     'properties': {
                         'task_id': {
                             'type': 'string',
+                            'description': 'Optional explicit task id.',
                         },
                         'title': {
                             'type': 'string',
+                            'description': 'Task title.',
                         },
                         'summary': {
                             'type': 'string',
+                            'description': 'Task summary.',
                         },
                         'status': {
                             'type': 'string',
+                            'description': 'Optional initial task status.',
+                            'enum': ['active', 'blocked', 'done', 'archived'],
                         },
                         'track_id': {
                             'type': 'string',
+                            'description': 'Optional linked track id.',
                         },
                     },
                 },
@@ -81,15 +88,21 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': [],
                     'properties': {
                         'status': {
                             'type': 'string',
+                            'description': 'Optional status filter.',
+                            'enum': ['active', 'blocked', 'done', 'archived'],
                         },
                         'track_id': {
                             'type': 'string',
+                            'description': 'Optional linked track filter.',
                         },
                         'limit': {
-                            'type': 'string',
+                            'type': 'integer',
+                            'description': 'Optional maximum number of rows to return.',
+                            'minimum': 1,
                         },
                     },
                 },
@@ -122,9 +135,11 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['task_id'],
                     'properties': {
                         'task_id': {
                             'type': 'string',
+                            'description': 'Task id to read.',
                         },
                     },
                 },
@@ -157,21 +172,28 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['task_id'],
                     'properties': {
                         'task_id': {
                             'type': 'string',
+                            'description': 'Task id to update.',
                         },
                         'title': {
                             'type': 'string',
+                            'description': 'Optional replacement title.',
                         },
                         'summary': {
                             'type': 'string',
+                            'description': 'Optional replacement summary.',
                         },
                         'status': {
                             'type': 'string',
+                            'description': 'Optional replacement status.',
+                            'enum': ['active', 'blocked', 'done', 'archived'],
                         },
                         'track_id': {
                             'type': 'string',
+                            'description': 'Optional replacement linked track id.',
                         },
                     },
                 },
@@ -204,9 +226,11 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['task_id'],
                     'properties': {
                         'task_id': {
                             'type': 'string',
+                            'description': 'Task id to archive.',
                         },
                     },
                 },

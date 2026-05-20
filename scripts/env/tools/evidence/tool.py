@@ -33,15 +33,20 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['target_type', 'target_id'],
                     'properties': {
                         'target_type': {
                             'type': 'string',
+                            'description': 'Evidence target type.',
+                            'enum': ['artifact'],
                         },
                         'target_id': {
                             'type': 'string',
+                            'description': 'Readable target id.',
                         },
                         'mode': {
                             'type': 'string',
+                            'description': 'Optional evidence mode hint.',
                         },
                     },
                 },
@@ -75,15 +80,20 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['target_type', 'target_id', 'reason'],
                     'properties': {
                         'target_type': {
                             'type': 'string',
+                            'description': 'Evidence target type.',
+                            'enum': ['artifact'],
                         },
                         'target_id': {
                             'type': 'string',
+                            'description': 'Readable target id.',
                         },
                         'reason': {
                             'type': 'string',
+                            'description': 'Reason text approving downgrade.',
                         },
                     },
                 },

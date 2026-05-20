@@ -46,6 +46,7 @@ _REJECTION_CANONICAL_FIELDS = {
     "correctable_fields",
     "alternative_capabilities",
     "mutates_product_state",
+    "field_errors",
 }
 
 _FORBIDDEN_AFFORDANCE_FRAGMENTS = (
@@ -100,6 +101,22 @@ def _validate_next_action_options(value: Any) -> list[dict[str, Any]]:
             raise ValueError(f"allowed_next_action_options[{index}] must be an object")
         _require_conditional_affordance_text(row.get("reason"), f"allowed_next_action_options[{index}].reason")
         normalized.append(dict(row))
+    return normalized
+
+
+def _validate_field_errors(value: Any) -> list[dict[str, Any]]:
+    rows = _require_list(value, "field_errors")
+    normalized: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ValueError(f"field_errors[{index}] must be an object")
+        path = _require_non_empty_text(row.get("path"), f"field_errors[{index}].path")
+        message = _require_non_empty_text(row.get("message"), f"field_errors[{index}].message")
+        if not any(key in row for key in ("expected", "allowed_values", "example")):
+            raise ValueError(
+                f"field_errors[{index}] must include expected, allowed_values, or example"
+            )
+        normalized.append(dict(row, path=path, message=message))
     return normalized
 
 
@@ -259,6 +276,7 @@ def rejection(
     correctable_fields: list[str] | None = None,
     alternative_capabilities: list[dict[str, Any]] | None = None,
     mutates_product_state: bool | None = None,
+    field_errors: list[dict[str, Any]] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -290,6 +308,8 @@ def rejection(
         payload["alternative_capabilities"] = list(alternative_capabilities)
     if mutates_product_state is not None:
         payload["mutates_product_state"] = _require_bool(mutates_product_state, "mutates_product_state")
+    if field_errors is not None:
+        payload["field_errors"] = _validate_field_errors(field_errors)
     if isinstance(allowed_next_action_options, list):
         payload["allowed_next_action_options"] = _validate_next_action_options(allowed_next_action_options)
     if isinstance(extra, dict):

@@ -33,27 +33,40 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['target_type', 'target_id', 'content'],
                     'properties': {
                         'target_type': {
                             'type': 'string',
+                            'description': 'Comment target type.',
+                            'enum': ['track', 'artifact', 'artifact_section'],
                         },
                         'target_id': {
                             'type': 'string',
+                            'description': 'Comment target id.',
                         },
                         'content': {
                             'type': 'string',
+                            'description': 'Comment body text.',
                         },
                         'reply_to': {
                             'type': 'string',
+                            'description': 'Optional parent comment id for threaded replies.',
                         },
                         'artifact_revision_id': {
                             'type': 'string',
+                            'description': 'Optional artifact revision id constraint for discussion scope.',
                         },
                         'anchor': {
                             'type': 'string',
+                            'description': "Optional section anchor; required when target_type is artifact_section.",
                         },
                         'mentions': {
-                            'type': 'string',
+                            'type': 'array',
+                            'description': 'Optional list of manifest buddy ids to mention.',
+                            'items': {
+                                'type': 'string',
+                                'description': 'Mentioned buddy id.',
+                            },
                         },
                     },
                 },
@@ -88,15 +101,21 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['target_type', 'target_id'],
                     'properties': {
                         'target_type': {
                             'type': 'string',
+                            'description': 'Comment target type.',
+                            'enum': ['track', 'artifact', 'artifact_section'],
                         },
                         'target_id': {
                             'type': 'string',
+                            'description': 'Comment target id.',
                         },
                         'status': {
                             'type': 'string',
+                            'description': 'Optional status filter.',
+                            'enum': ['open', 'resolved'],
                         },
                     },
                 },

@@ -33,15 +33,19 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['to_buddy', 'content'],
                     'properties': {
                         'to_buddy': {
                             'type': 'string',
+                            'description': 'manifest buddy id recipient; must differ from active_buddy.',
                         },
                         'content': {
                             'type': 'string',
+                            'description': 'Message body text.',
                         },
                         'reply_to': {
                             'type': 'string',
+                            'description': 'Optional parent message id for threading.',
                         },
                     },
                 },
@@ -76,9 +80,11 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': [],
                     'properties': {
                         'buddy': {
                             'type': 'string',
+                            'description': 'Optional inbox buddy filter.',
                         },
                     },
                 },

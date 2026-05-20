@@ -9,6 +9,42 @@ if TYPE_CHECKING:
     from env.tool_runtime.context import ToolContext
 from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition
 
+_NOW_SCHEMA = {
+    'type': 'object',
+    'description': 'Current next step and optional blocker for the track.',
+    'additionalProperties': False,
+    'required': ['next'],
+    'properties': {
+        'next': {
+            'type': 'string',
+            'description': 'Non-empty next action or current focus.',
+        },
+        'blocker': {
+            'type': ['string', 'null'],
+            'description': 'Current blocker text, or null when unblocked.',
+        },
+    },
+    'examples': [{'next': 'Set up PM coordination.', 'blocker': None}],
+}
+
+_REFS_ITEM_SCHEMA = {
+    'type': 'object',
+    'description': 'Artifact reference attached to this update row.',
+    'additionalProperties': False,
+    'required': ['type', 'id'],
+    'properties': {
+        'type': {
+            'type': 'string',
+            'description': "Reference type; track updates only accept 'artifact'.",
+            'enum': ['artifact'],
+        },
+        'id': {
+            'type': 'string',
+            'description': 'Artifact id referenced by this update.',
+        },
+    },
+}
+
 
 def _build_definition() -> ToolDefinition:
     return ToolDefinition(
@@ -33,27 +69,34 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['track_id', 'title', 'outcome', 'appetite', 'now'],
                     'properties': {
                         'track_id': {
                             'type': 'string',
+                            'description': 'Stable id for the new track.',
                         },
                         'title': {
                             'type': 'string',
+                            'description': 'Human-readable track title.',
                         },
                         'outcome': {
                             'type': 'string',
+                            'description': 'Desired track outcome.',
                         },
                         'appetite': {
                             'type': 'string',
+                            'description': 'Time or scope appetite for the track.',
                         },
-                        'now': {
-                            'type': 'object',
-                        },
+                        'now': _NOW_SCHEMA,
                         'state': {
                             'type': 'string',
+                            'description': 'Track state.',
+                            'enum': ['active', 'blocked', 'review', 'done'],
                         },
                         'health': {
                             'type': 'string',
+                            'description': 'Track health.',
+                            'enum': ['ok', 'risk', 'blocked', 'stale'],
                         },
                     },
                 },
@@ -86,12 +129,17 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': [],
                     'properties': {
                         'state': {
                             'type': 'string',
+                            'description': 'Optional state filter for non-archived tracks.',
+                            'enum': ['active', 'blocked', 'review', 'done'],
                         },
                         'limit': {
                             'type': 'integer',
+                            'description': 'Optional max number of rows to return.',
+                            'minimum': 1,
                         },
                     },
                 },
@@ -124,9 +172,11 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['track_id'],
                     'properties': {
                         'track_id': {
                             'type': 'string',
+                            'description': 'Existing non-archived track id to open.',
                         },
                     },
                 },
@@ -159,18 +209,22 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['track_id'],
                     'properties': {
                         'track_id': {
                             'type': 'string',
+                            'description': 'Existing non-archived track id to update.',
                         },
-                        'now': {
-                            'type': 'object',
-                        },
+                        'now': _NOW_SCHEMA,
                         'state': {
                             'type': 'string',
+                            'description': 'Optional track state patch.',
+                            'enum': ['active', 'blocked', 'review', 'done'],
                         },
                         'health': {
                             'type': 'string',
+                            'description': 'Optional track health patch.',
+                            'enum': ['ok', 'risk', 'blocked', 'stale'],
                         },
                     },
                 },
@@ -203,18 +257,23 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['track_id', 'artifact_id', 'label', 'summary'],
                     'properties': {
                         'track_id': {
                             'type': 'string',
+                            'description': 'Existing non-archived track id to mutate.',
                         },
                         'artifact_id': {
                             'type': 'string',
+                            'description': 'Active-buddy-owned draft artifact id to publish.',
                         },
                         'label': {
                             'type': 'string',
+                            'description': 'Human label for published material entry.',
                         },
                         'summary': {
                             'type': 'string',
+                            'description': 'Summary shown on track timeline and materials.',
                         },
                     },
                 },
@@ -251,18 +310,26 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['track_id', 'summary'],
                     'properties': {
                         'track_id': {
                             'type': 'string',
+                            'description': 'Existing non-archived track id to mutate.',
                         },
                         'summary': {
                             'type': 'string',
+                            'description': 'Update summary text appended to timeline.',
                         },
                         'kind': {
                             'type': 'string',
+                            'description': 'Optional update kind label.',
+                            'enum': ['progress', 'decision', 'blocker', 'proof'],
                         },
                         'refs': {
                             'type': 'array',
+                            'description': 'Optional artifact refs related to this update.',
+                            'items': _REFS_ITEM_SCHEMA,
+                            'examples': [[{'type': 'artifact', 'id': 'art-example-r1'}]],
                         },
                     },
                 },
@@ -296,18 +363,23 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['track_id', 'artifact_id', 'label', 'summary'],
                     'properties': {
                         'track_id': {
                             'type': 'string',
+                            'description': 'Existing non-archived track id to mutate.',
                         },
                         'artifact_id': {
                             'type': 'string',
+                            'description': 'Active-buddy-owned draft artifact id to publish as proof.',
                         },
                         'label': {
                             'type': 'string',
+                            'description': 'Human label for published proof entry.',
                         },
                         'summary': {
                             'type': 'string',
+                            'description': 'Summary shown on track timeline and close proof.',
                         },
                     },
                 },
@@ -344,9 +416,11 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['track_id'],
                     'properties': {
                         'track_id': {
                             'type': 'string',
+                            'description': 'Track id to archive (PM only).',
                         },
                     },
                 },

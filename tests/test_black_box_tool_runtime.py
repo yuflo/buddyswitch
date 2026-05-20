@@ -227,6 +227,119 @@ print(json.dumps({
                 )
                 self.assertIn(f"{tool}.{action}", semantics)
 
+    def test_definition_validation_rejects_incomplete_input_contracts(self) -> None:
+        from env.tool_runtime.definition import ActionDefinition
+        from env.tool_runtime.definition import MUTATES_NONE
+        from env.tool_runtime.definition import ToolDefinition
+        from env.tool_runtime.definition import validate_definition
+
+        def _definition_for(schema: dict[str, object]) -> ToolDefinition:
+            return ToolDefinition(
+                id="probe",
+                title="Probe",
+                description="Probe validation.",
+                cli_resource="probe",
+                command="python3 scripts/env/client.py probe ping --payload '<json-object>'",
+                scope="probe scope",
+                capability_boundary="probe boundary",
+                use_when=("testing",),
+                do_not_use_when=(),
+                actions=(
+                    ActionDefinition(
+                        name="ping",
+                        title="probe.ping",
+                        description="Probe action.",
+                        input_schema=schema,
+                        output_schema={"$ref": "ToolResult"},
+                        kind="read",
+                        mutates=MUTATES_NONE,
+                        required_permission="none",
+                        authority="probe",
+                    ),
+                ),
+            )
+
+        with self.assertRaises(ValueError):
+            validate_definition(
+                _definition_for(
+                    {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "title": {"type": "string", "description": "Title."},
+                        },
+                    }
+                )
+            )
+
+        with self.assertRaises(ValueError):
+            validate_definition(
+                _definition_for(
+                    {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["title"],
+                        "properties": {
+                            "title": {"type": "string"},
+                        },
+                    }
+                )
+            )
+
+        with self.assertRaises(ValueError):
+            validate_definition(
+                _definition_for(
+                    {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["title"],
+                        "properties": {
+                            "title": {"type": "string", "description": "Title."},
+                            "now": {
+                                "type": "object",
+                                "description": "Now payload.",
+                                "required": ["next"],
+                            },
+                        },
+                    }
+                )
+            )
+
+        with self.assertRaises(ValueError):
+            validate_definition(
+                _definition_for(
+                    {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["title"],
+                        "properties": {
+                            "title": {"type": "string", "description": "Title."},
+                            "refs": {
+                                "type": "array",
+                                "description": "Reference rows.",
+                            },
+                        },
+                    }
+                )
+            )
+
+        with self.assertRaises(ValueError):
+            validate_definition(
+                _definition_for(
+                    {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["status"],
+                        "properties": {
+                            "status": {
+                                "type": "string",
+                                "description": "Task status.",
+                            },
+                        },
+                    }
+                )
+            )
+
     def test_probe_tool_add_and_delete_use_only_tool_py_registration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             probe_root = Path(temp_dir) / "env" / "tools" / "probe"
@@ -258,7 +371,13 @@ print(json.dumps({
                                 input_schema={
                                     "type": "object",
                                     "additionalProperties": False,
-                                    "properties": {"message": {"type": "string"}},
+                                    "required": ["message"],
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "description": "Message to echo.",
+                                        }
+                                    },
                                 },
                                 output_schema={"$ref": "ToolResult"},
                                 kind="read",

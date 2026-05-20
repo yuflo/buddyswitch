@@ -142,6 +142,32 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         )
         self.assertEqual(comment_fields["list"], ["target_type", "target_id", "status"])
 
+    def test_full_catalog_exposes_input_schemas_from_definitions(self) -> None:
+        desc = catalog.env_tools_description()
+        for tool in sorted(catalog.supported_tools()):
+            for action in sorted(catalog.supported_actions(tool)):
+                action_def = catalog.get_action_definition(tool, action)
+                self.assertEqual(desc[tool]["input_schemas"][action], action_def.input_schema)
+
+    def test_inputs_explained_are_derived_from_schema_descriptions(self) -> None:
+        desc = catalog.env_tools_description()
+        for tool in sorted(catalog.supported_tools()):
+            for action in sorted(catalog.supported_actions(tool)):
+                schema = catalog.get_action_definition(tool, action).input_schema
+                properties = schema.get("properties") or {}
+                self.assertIsInstance(properties, dict, msg=f"{tool}.{action}")
+                assert isinstance(properties, dict)
+                explanations = desc[tool]["action_semantics"][action]["inputs_explained"]
+                self.assertEqual(set(explanations), set(properties))
+                for field, field_schema in properties.items():
+                    self.assertIsInstance(field_schema, dict, msg=f"{tool}.{action}.{field}")
+                    assert isinstance(field_schema, dict)
+                    description = field_schema.get("description")
+                    self.assertIsInstance(description, str, msg=f"{tool}.{action}.{field}.description")
+                    assert isinstance(description, str)
+                    self.assertIn(description, explanations[field])
+                    self.assertNotIn("payload field", explanations[field])
+
 
 if __name__ == "__main__":
     unittest.main()

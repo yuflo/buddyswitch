@@ -9,6 +9,102 @@ if TYPE_CHECKING:
     from env.tool_runtime.context import ToolContext
 from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition
 
+_SOURCE_REF_ITEMS_SCHEMA = {
+    'type': 'object',
+    'description': 'One provenance source reference row.',
+    'additionalProperties': False,
+    'required': ['type'],
+    'properties': {
+        'type': {
+            'type': 'string',
+            'description': 'Source reference kind.',
+        },
+        'id': {
+            'type': 'string',
+            'description': 'Referenced artifact/track/task id when type uses ids.',
+        },
+        'logical_name': {
+            'type': 'string',
+            'description': 'Referenced private buddybox logical_name when type is buddybox.',
+        },
+        'label': {
+            'type': 'string',
+            'description': 'Human label for note/external references.',
+        },
+        'url': {
+            'type': 'string',
+            'description': 'Optional URL when source ref type is external.',
+        },
+    },
+    'anyOf': [
+        {
+            'type': 'object',
+            'description': 'Artifact reference.',
+            'additionalProperties': False,
+            'required': ['type', 'id'],
+            'properties': {
+                'type': {'type': 'string', 'description': 'Artifact source reference.', 'enum': ['artifact']},
+                'id': {'type': 'string', 'description': 'Artifact id.'},
+            },
+        },
+        {
+            'type': 'object',
+            'description': 'Track reference.',
+            'additionalProperties': False,
+            'required': ['type', 'id'],
+            'properties': {
+                'type': {'type': 'string', 'description': 'Track source reference.', 'enum': ['track']},
+                'id': {'type': 'string', 'description': 'Track id.'},
+            },
+        },
+        {
+            'type': 'object',
+            'description': 'Task reference.',
+            'additionalProperties': False,
+            'required': ['type', 'id'],
+            'properties': {
+                'type': {'type': 'string', 'description': 'Task source reference.', 'enum': ['task']},
+                'id': {'type': 'string', 'description': 'Task id.'},
+            },
+        },
+        {
+            'type': 'object',
+            'description': 'Buddybox private provenance reference.',
+            'additionalProperties': False,
+            'required': ['type', 'logical_name'],
+            'properties': {
+                'type': {'type': 'string', 'description': 'Buddybox source reference.', 'enum': ['buddybox']},
+                'logical_name': {'type': 'string', 'description': 'Private buddybox logical_name.'},
+            },
+        },
+        {
+            'type': 'object',
+            'description': 'External source reference.',
+            'additionalProperties': False,
+            'required': ['type', 'label'],
+            'properties': {
+                'type': {'type': 'string', 'description': 'External source reference.', 'enum': ['external']},
+                'label': {'type': 'string', 'description': 'External source label.'},
+                'url': {'type': 'string', 'description': 'Optional external URL.'},
+            },
+        },
+        {
+            'type': 'object',
+            'description': 'Note source reference.',
+            'additionalProperties': False,
+            'required': ['type', 'label'],
+            'properties': {
+                'type': {'type': 'string', 'description': 'Note source reference.', 'enum': ['note']},
+                'label': {'type': 'string', 'description': 'Note label.'},
+            },
+        },
+    ],
+    'examples': [
+        [{'type': 'note', 'label': 'Source note'}],
+        [{'type': 'external', 'label': 'Product page', 'url': 'https://example.com'}],
+    ],
+}
+
 
 def _build_definition() -> ToolDefinition:
     return ToolDefinition(
@@ -33,9 +129,11 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['artifact_id'],
                     'properties': {
                         'artifact_id': {
                             'type': 'string',
+                            'description': 'Readable artifact id to fetch.',
                         },
                     },
                 },
@@ -68,30 +166,43 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['title', 'template', 'body'],
                     'properties': {
                         'artifact_id': {
                             'type': 'string',
+                            'description': 'Optional explicit artifact id for the new draft revision.',
                         },
                         'title': {
                             'type': 'string',
+                            'description': 'Draft artifact title.',
                         },
                         'summary': {
                             'type': 'string',
+                            'description': 'Optional short summary for the draft.',
                         },
                         'template': {
                             'type': 'string',
+                            'description': 'Artifact template.',
+                            'enum': ['brief', 'proposal', 'design', 'decision', 'proof', 'note'],
                         },
                         'body': {
                             'type': 'string',
+                            'description': 'Full markdown body content.',
                         },
                         'supersedes_artifact_id': {
                             'type': 'string',
+                            'description': 'Optional current artifact id this revision supersedes.',
                         },
                         'source_refs': {
                             'type': 'array',
+                            'description': 'Optional provenance source reference rows.',
+                            'items': _SOURCE_REF_ITEMS_SCHEMA,
                         },
                         'read_claim': {
                             'type': 'string',
+                            'description': (
+                                "Optional read-scope claim; use 'summarized-full-content' when claiming full readable-source coverage."
+                            ),
                         },
                     },
                 },
@@ -125,27 +236,39 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['artifact_id'],
                     'properties': {
                         'artifact_id': {
                             'type': 'string',
+                            'description': 'Active-buddy-owned artifact id to update.',
                         },
                         'title': {
                             'type': 'string',
+                            'description': 'Optional replacement title.',
                         },
                         'summary': {
                             'type': 'string',
+                            'description': 'Optional replacement summary.',
                         },
                         'template': {
                             'type': 'string',
+                            'description': 'Optional replacement template.',
+                            'enum': ['brief', 'proposal', 'design', 'decision', 'proof', 'note'],
                         },
                         'body': {
                             'type': 'string',
+                            'description': 'Optional replacement markdown body.',
                         },
                         'source_refs': {
                             'type': 'array',
+                            'description': 'Optional replacement provenance source reference rows.',
+                            'items': _SOURCE_REF_ITEMS_SCHEMA,
                         },
                         'read_claim': {
                             'type': 'string',
+                            'description': (
+                                "Optional read-scope claim; use 'summarized-full-content' when claiming full readable-source coverage."
+                            ),
                         },
                     },
                 },

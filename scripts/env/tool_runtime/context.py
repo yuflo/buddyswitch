@@ -217,7 +217,7 @@ class RuntimeObjectAccess:
             "artifacts": "artifact.get",
             "messages": "message.list",
             "comments": "comment.list",
-            "buddybox": "buddybox.list / buddybox.read / buddybox.write / buddybox.delete",
+            "buddybox": "buddybox list/read/write/delete",
         }
 
 

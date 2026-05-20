@@ -33,6 +33,7 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': [],
                     'properties': {},
                 },
                 output_schema={
@@ -64,15 +65,22 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': [],
                     'properties': {
                         'logical_name': {
                             'type': 'string',
+                            'description': 'Optional prefix logical_name to list under.',
                         },
                         'recursive': {
-                            'type': 'string',
+                            'type': 'boolean',
+                            'description': 'Whether to recurse into nested directories.',
+                            'default': False,
                         },
                         'limit': {
-                            'type': 'string',
+                            'type': 'integer',
+                            'description': 'Maximum number of summary rows to return.',
+                            'minimum': 1,
+                            'default': 200,
                         },
                     },
                 },
@@ -105,12 +113,16 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['logical_name'],
                     'properties': {
                         'logical_name': {
                             'type': 'string',
+                            'description': 'Logical_name of the private file to read.',
                         },
                         'encoding': {
                             'type': 'string',
+                            'description': 'Requested payload encoding for returned file content.',
+                            'enum': ['utf-8', 'base64'],
                         },
                     },
                 },
@@ -143,18 +155,23 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['logical_name'],
                     'properties': {
                         'logical_name': {
                             'type': 'string',
+                            'description': 'Logical_name of the private file to write.',
                         },
                         'content': {
                             'type': 'string',
+                            'description': 'UTF-8 text content. Provide exactly one of content or content_base64.',
                         },
                         'content_base64': {
                             'type': 'string',
+                            'description': 'Base64-encoded binary payload. Provide exactly one of content or content_base64.',
                         },
                         'content_type': {
                             'type': 'string',
+                            'description': 'Optional content type metadata for the written file.',
                         },
                     },
                 },
@@ -188,9 +205,11 @@ def _build_definition() -> ToolDefinition:
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
+                    'required': ['logical_name'],
                     'properties': {
                         'logical_name': {
                             'type': 'string',
+                            'description': 'Logical_name of the private file to delete.',
                         },
                     },
                 },

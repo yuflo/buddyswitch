@@ -17,6 +17,7 @@ if str(SCRIPTS) not in sys.path:
 
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
+from env.tool_runtime import results as tool_results  # noqa: E402
 import turn_runtime  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -336,6 +337,182 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertIn("published_proof", changes)
         self.assertIn("proof_added", changes)
         self.assertIn("update_added", changes)
+
+    def test_rejection_supports_canonical_field_errors(self) -> None:
+        payload = tool_results.rejection(
+            tool="track",
+            action="track.create",
+            active_buddy="pm",
+            code="E_TRACK_PAYLOAD",
+            message="now must be an object",
+            permission_boundary="request-payload",
+            human_summary="Track request payload is invalid.",
+            why_blocked="now must be an object",
+            impact="No track state changed.",
+            state_changed=False,
+            retryable=True,
+            retry_guidance="Fix now and retry.",
+            field_errors=[
+                {
+                    "path": "now",
+                    "message": "now must be an object with required next and optional blocker",
+                    "expected": {"next": "non-empty string", "blocker": "string|null"},
+                    "example": {"next": "Set up PM coordination.", "blocker": None},
+                }
+            ],
+        )
+        self.assertEqual(payload["field_errors"][0]["path"], "now")
+
+        with self.assertRaises(ValueError):
+            tool_results.rejection(
+                tool="track",
+                action="track.create",
+                active_buddy="pm",
+                code="E_TRACK_PAYLOAD",
+                message="now must be an object",
+                permission_boundary="request-payload",
+                human_summary="Track request payload is invalid.",
+                why_blocked="now must be an object",
+                impact="No track state changed.",
+                state_changed=False,
+                retryable=True,
+                retry_guidance="Fix now and retry.",
+                extra={"field_errors": []},
+            )
+
+    def test_high_friction_payload_rejections_include_field_errors(self) -> None:
+        pm_instance_id = "inst-pm-field-errors"
+        dev_instance_id = "inst-dev-field-errors"
+        pm_instance_json = self._instance_json(buddy="pm", instance_id=pm_instance_id)
+        dev_instance_json = self._instance_json(buddy="dev", instance_id=dev_instance_id)
+
+        created = self._dispatch(
+            instance_json=pm_instance_json,
+            instance_id=pm_instance_id,
+            buddy="pm",
+            tool="track",
+            action="create",
+            args={
+                "track_id": "track-field-errors",
+                "title": "Field Errors",
+                "outcome": "Improve payload recovery.",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        cases = [
+            (
+                "track.create.now",
+                self._dispatch(
+                    instance_json=pm_instance_json,
+                    instance_id=pm_instance_id,
+                    buddy="pm",
+                    tool="track",
+                    action="create",
+                    args={
+                        "track_id": "track-field-errors-bad-now",
+                        "title": "Bad now",
+                        "outcome": "fail",
+                        "appetite": "1 day",
+                        "now": "next step",
+                    },
+                ),
+                "now",
+            ),
+            (
+                "track.update_now.now",
+                self._dispatch(
+                    instance_json=pm_instance_json,
+                    instance_id=pm_instance_id,
+                    buddy="pm",
+                    tool="track",
+                    action="update_now",
+                    args={"track_id": "track-field-errors", "now": {"blocker": None}},
+                ),
+                "now",
+            ),
+            (
+                "track.add_update.refs",
+                self._dispatch(
+                    instance_json=pm_instance_json,
+                    instance_id=pm_instance_id,
+                    buddy="pm",
+                    tool="track",
+                    action="add_update",
+                    args={
+                        "track_id": "track-field-errors",
+                        "kind": "progress",
+                        "summary": "bad refs",
+                        "refs": {"id": "art-example-r1"},
+                    },
+                ),
+                "refs",
+            ),
+            (
+                "artifact.create_revision.source_refs",
+                self._dispatch(
+                    instance_json=dev_instance_json,
+                    instance_id=dev_instance_id,
+                    buddy="dev",
+                    tool="artifact",
+                    action="create_revision",
+                    args={
+                        "title": "Bad refs",
+                        "template": "brief",
+                        "body": "body",
+                        "source_refs": "oops",
+                    },
+                ),
+                "source_refs",
+            ),
+            (
+                "buddybox.write.content",
+                self._dispatch(
+                    instance_json=dev_instance_json,
+                    instance_id=dev_instance_id,
+                    buddy="dev",
+                    tool="buddybox",
+                    action="write",
+                    args={"logical_name": "notes/field-errors.txt"},
+                ),
+                "content",
+            ),
+            (
+                "comment.add.mentions",
+                self._dispatch(
+                    instance_json=pm_instance_json,
+                    instance_id=pm_instance_id,
+                    buddy="pm",
+                    tool="comment",
+                    action="add",
+                    args={
+                        "target_type": "track",
+                        "target_id": "track-field-errors",
+                        "content": "check mentions",
+                        "mentions": "pm",
+                    },
+                ),
+                "mentions",
+            ),
+        ]
+
+        for name, payload, expected_path in cases:
+            with self.subTest(case=name):
+                self._assert_rejection_contract(payload)
+                self.assertIs(payload.get("state_changed"), False, msg=payload)
+                self.assertEqual(payload.get("durability"), "none", msg=payload)
+                field_errors = payload.get("field_errors")
+                self.assertIsInstance(field_errors, list, msg=payload)
+                assert isinstance(field_errors, list)
+                self.assertTrue(field_errors, msg=payload)
+                normalized_paths = {
+                    row.get("path")
+                    for row in field_errors
+                    if isinstance(row, dict)
+                }
+                self.assertIn(expected_path, normalized_paths, msg=payload)
 
 
 if __name__ == "__main__":
