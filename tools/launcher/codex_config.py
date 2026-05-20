@@ -379,7 +379,6 @@ def _safe_temp_roots(
 def _profile_mode_workspace_deny_rules(workspace_dir: Path) -> dict[str, str]:
     denied_paths = [
         workspace_dir / "buddyswitch" / "skills",
-        workspace_dir / "scripts",
         workspace_dir / "tools",
         workspace_dir / "tests",
         workspace_dir / "docs",

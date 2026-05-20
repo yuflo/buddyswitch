@@ -140,7 +140,6 @@ class BuddySwitchLauncherTests(unittest.TestCase):
                     self.assertTrue(Path(key).is_absolute(), msg=key)
             denied_relative_paths = (
                 "buddyswitch/skills",
-                "scripts",
                 "tools",
                 "tests",
                 "docs",
@@ -153,6 +152,11 @@ class BuddySwitchLauncherTests(unittest.TestCase):
                 matches = [path for path in filesystem if path.endswith(suffix)]
                 self.assertEqual(len(matches), 1, msg=f"{relative_path}: {matches}")
                 self.assertEqual(filesystem[matches[0]], "none")
+            scripts_matches = [path for path in filesystem if path.endswith("/workspace/scripts")]
+            for scripts_path in scripts_matches:
+                self.assertEqual(filesystem[scripts_path], "read")
+            if not scripts_matches:
+                self.assertEqual(filesystem["/"], "read")
             self.assertIn("[permissions.buddyswitch-runtime.network]", config_text)
             self.assertIn("enabled = true", config_text)
             self.assertIn('mode = "full"', config_text)

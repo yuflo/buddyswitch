@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import json
+import os
+import platform
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -58,7 +61,6 @@ def _parse_profile_network(config_text: str) -> dict[str, object]:
 def _runtime_workspace_denied_paths(workspace_dir: Path) -> set[str]:
     return {
         str((workspace_dir / "buddyswitch" / "skills").resolve(strict=False)),
-        str((workspace_dir / "scripts").resolve(strict=False)),
         str((workspace_dir / "tools").resolve(strict=False)),
         str((workspace_dir / "tests").resolve(strict=False)),
         str((workspace_dir / "docs").resolve(strict=False)),
@@ -79,6 +81,15 @@ def _assert_codex_filesystem_profile_is_flat(
         test.assertNotIn("*", key)
         if key != "/":
             test.assertTrue(Path(key).is_absolute(), msg=key)
+
+
+def _assert_runtime_scripts_are_readable_but_not_writable(
+    test: unittest.TestCase,
+    filesystem: dict[str, object],
+    workspace_dir: Path,
+) -> None:
+    scripts_path = str((workspace_dir / "scripts").resolve(strict=False))
+    test.assertEqual(filesystem.get(scripts_path, filesystem.get("/")), "read")
 
 
 class BuddyEnvSandboxTests(unittest.TestCase):
@@ -166,6 +177,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertEqual(filesystem["/"], "read")
             for denied_path in _runtime_workspace_denied_paths(workspace_dir):
                 self.assertEqual(filesystem[denied_path], "none")
+            _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
             self.assertEqual(filesystem[str(project_workspace_dir.resolve(strict=False))], "read")
             self.assertEqual(filesystem[str(ROOT.resolve(strict=False))], "none")
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
@@ -261,6 +273,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertEqual(filesystem["/"], "read")
             for denied_path in _runtime_workspace_denied_paths(workspace_dir):
                 self.assertEqual(filesystem[denied_path], "none")
+            _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
             self.assertIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
             self.assertIn(str((workspace_dir / "buddyswitch/local/buddybox/dev").resolve(strict=False)), writable_paths)
             self.assertNotIn(str((shared_root / "state").resolve(strict=False)), writable_paths)
@@ -296,6 +309,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             _assert_codex_filesystem_profile_is_flat(self, filesystem)
             for denied_path in _runtime_workspace_denied_paths(workspace_dir):
                 self.assertEqual(filesystem[denied_path], "none")
+            _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
             self.assertNotIn(str(workspace_dir.resolve(strict=False)), writable_paths)
             self.assertNotIn(
                 str((workspace_dir / "buddyswitch/local/buddybox/pm").resolve(strict=False)),
@@ -334,6 +348,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             _assert_codex_filesystem_profile_is_flat(self, filesystem)
             for denied_path in _runtime_workspace_denied_paths(workspace_dir):
                 self.assertEqual(filesystem[denied_path], "none")
+            _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
 
     def test_patch_keeps_mcp_sections_and_forces_approve(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -449,6 +464,59 @@ web_search = "cached"
                 network["unix_sockets"],
                 {str(broker_socket.resolve(strict=False)): "allow"},
             )
+
+    def test_codex_macos_sandbox_can_read_runtime_scripts(self) -> None:
+        if platform.system() != "Darwin":
+            self.skipTest("codex macos sandbox smoke only runs on macOS")
+        if shutil.which("codex") is None:
+            self.skipTest("codex CLI not available")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            shared_root = temp_root / "shared"
+            instance_root = shared_root / "instances" / "inst-pm-sandbox-smoke"
+            workspace_dir = instance_root / "workspace"
+            project_workspace_dir = shared_root / "project" / "workspace"
+            config_path = instance_root / "codex-home" / "config.toml"
+            client_path = workspace_dir / "scripts" / "env" / "client.py"
+            client_path.parent.mkdir(parents=True)
+            client_path.write_text("print('runtime-script-readable')\n", encoding="utf-8")
+            project_workspace_dir.mkdir(parents=True)
+
+            completed = self._run_patch(
+                config_path=config_path,
+                shared_root=shared_root,
+                buddy="pm",
+                instance_root=instance_root,
+                workspace_dir=workspace_dir,
+                project_workspace_dir=project_workspace_dir,
+                home=instance_root / "home",
+                codex_home=instance_root / "codex-home",
+                xdg_config_home=instance_root / "xdg-config",
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            sandbox_env = os.environ.copy()
+            sandbox_env["CODEX_HOME"] = str(instance_root / "codex-home")
+            sandboxed = subprocess.run(
+                [
+                    "codex",
+                    "sandbox",
+                    "macos",
+                    "--permissions-profile",
+                    PERMISSION_PROFILE,
+                    "-C",
+                    str(workspace_dir),
+                    "python3",
+                    "scripts/env/client.py",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=sandbox_env,
+            )
+            self.assertEqual(sandboxed.returncode, 0, msg=sandboxed.stderr)
+            self.assertIn("runtime-script-readable", sandboxed.stdout)
 
     def test_missing_profile_returns_2_and_leaves_config_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
