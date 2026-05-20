@@ -26,6 +26,18 @@ _EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence
 
 
 class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    _CHEAP_ACTION_CASES = (
+        ("task", "list", {}, "dev"),
+        ("track", "list", {}, "dev"),
+        ("artifact", "get", {"artifact_id": "missing-artifact"}, "dev"),
+        ("buddybox", "desc", {}, "dev"),
+        ("context", "list_sources", {}, "dev"),
+        ("evidence", "issue_browser", {}, "dev"),
+        ("message", "list", {}, "dev"),
+        ("comment", "list", {}, "dev"),
+        ("search", "status", {}, "dev"),
+    )
+
     def _instance_json(
         self,
         *,
@@ -94,7 +106,7 @@ sys.path.insert(0, str(root / "scripts"))
 
 class BlockMessages(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == "env.services.messages":
+        if fullname == "env.tools.message.service":
             raise RuntimeError("blocked message service import")
         return None
 
@@ -159,7 +171,7 @@ from pathlib import Path
 root = Path.cwd()
 sys.path.insert(0, str(root / "scripts"))
 
-import env.tools.contracts
+import env.tools.catalog
 import env.tools.router
 import env.tools.dispatch
 
@@ -184,11 +196,11 @@ from pathlib import Path
 root = Path.cwd()
 sys.path.insert(0, str(root / "scripts"))
 
-import env.tools.contracts
+import env.tools.catalog
 import env.tools.router
 import env.tools.dispatch
 
-loaded = sorted(name for name in sys.modules if name.startswith("env.services."))
+loaded = sorted(name for name in sys.modules if name.startswith("env.tools.") and name.endswith(".service"))
 print(json.dumps(loaded))
 """
         completed = subprocess.run(
@@ -233,19 +245,65 @@ print(json.dumps(loaded))
         self.assertIs(response.get("retryable"), False)
         self.assertIn("blocked message service import", str(response.get("why_blocked")))
 
+    def test_selected_dispatch_imports_no_sibling_tool_services(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-selected-service-import", buddy="dev")
+        for tool, action, args, buddy in self._CHEAP_ACTION_CASES:
+            payload_json = json.dumps({"tool": tool, "action": action, "args": args}, ensure_ascii=True)
+            script = f"""
+import json
+import sys
+from pathlib import Path
+
+root = Path({str(ROOT)!r})
+sys.path.insert(0, str(root / "scripts"))
+
+import env_manifest
+from env.tools.router import dispatch_env_tool_request
+
+manifest_path = Path({str(MANIFEST)!r})
+instance_json = Path({str(instance_json)!r})
+instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
+response = dispatch_env_tool_request(
+    payload=json.loads({payload_json!r}),
+    active_buddy={buddy!r},
+    instance_id=instance_payload["instance_id"],
+    instance_json=instance_json,
+    instance_payload=instance_payload,
+    manifest=env_manifest.load_manifest(manifest_path),
+    manifest_path=manifest_path,
+)
+loaded = sorted(name for name in sys.modules if name.startswith("env.tools.") and name.endswith(".service"))
+print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
+"""
+            completed = subprocess.run(
+                ["python3", "-c", script],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            payload = json.loads(completed.stdout)
+            loaded = payload["loaded"]
+            response = payload["response"]
+            with self.subTest(tool=tool, action=action):
+                expected = f"env.tools.{tool}.service"
+                self.assertIn(expected, loaded, msg=payload)
+                self.assertEqual(loaded, [expected], msg=payload)
+                if response.get("ok") is not True:
+                    self.assertIs(response.get("state_changed"), False, msg=response)
+
     def test_active_env_tool_surface_excludes_handoff(self) -> None:
-        contracts = importlib.import_module("env.tools.contracts")
-        router = importlib.import_module("env.tools.router")
+        tool_catalog = importlib.import_module("env.tools.catalog")
         status_payload = importlib.import_module("turn_runtime")._build_env_tools_desc()
 
-        registry_tools = {row["tool"] for row in contracts.TOOL_REGISTRY}
+        registry_tools = set(tool_catalog.supported_tools())
         self.assertEqual(registry_tools, _EXPECTED_TOOLS)
         self.assertNotIn("handoff", registry_tools)
-        self.assertNotIn("track.advance", json.dumps(contracts.operation_semantics(), ensure_ascii=True))
+        self.assertNotIn("track.advance", json.dumps(tool_catalog.operation_semantics(), ensure_ascii=True))
 
-        self.assertEqual(set(router._TOOL_ACTIONS), _EXPECTED_TOOLS)
         self.assertEqual(set(status_payload), _EXPECTED_TOOLS)
-        self.assertNotIn("handoff", contracts.compact_tool_affordances())
+        self.assertNotIn("handoff", tool_catalog.compact_tool_affordances())
 
     def test_handoff_tool_is_unsupported(self) -> None:
         instance_json = self._instance_json()
@@ -259,8 +317,11 @@ print(json.dumps(loaded))
         self.assertIs(response.get("state_changed"), False)
 
     def test_track_advance_is_not_registered(self) -> None:
-        contracts = importlib.import_module("env.tools.contracts")
-        self.assertNotIn("advance", {row["name"] for row in contracts.get_tool_spec("track")["actions"]})
+        tool_catalog = importlib.import_module("env.tools.catalog")
+        track_spec = tool_catalog.get_tool_spec("track")
+        self.assertIsInstance(track_spec, dict)
+        assert isinstance(track_spec, dict)
+        self.assertNotIn("advance", {row["name"] for row in track_spec["actions"]})
 
         instance_json = self._instance_json(buddy="pm")
         env_store.create_track(
@@ -281,18 +342,16 @@ print(json.dumps(loaded))
         self.assertEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL")
 
     def test_dispatch_handler_coverage_matches_registry_actions(self) -> None:
-        contracts = importlib.import_module("env.tools.contracts")
+        tool_catalog = importlib.import_module("env.tools.catalog")
         dispatch = importlib.import_module("env.tools.dispatch")
-        router = importlib.import_module("env.tools.router")
         turn_runtime = importlib.import_module("turn_runtime")
 
         expected: dict[str, set[str]] = {}
-        for spec in contracts.TOOL_REGISTRY:
+        for spec in tool_catalog.tool_specs():
             expected[spec["tool"]] = {action["name"] for action in spec["actions"]}
 
         dispatch_actions = dispatch.dispatch_handler_actions()
         self.assertEqual(dispatch_actions, expected)
-        self.assertEqual({tool: set(actions) for tool, actions in router._TOOL_ACTIONS.items()}, expected)
         runtime_desc = turn_runtime._build_env_tools_desc()
         self.assertEqual(set(runtime_desc), set(expected))
         for tool, actions in expected.items():
@@ -302,9 +361,9 @@ print(json.dumps(loaded))
                 self.assertEqual(set(runtime_desc[tool]["action_semantics"]), actions)
         self.assertNotIn("handoff", dispatch_actions)
 
-    def test_cli_operation_maps_align_with_registry_actions(self) -> None:
-        contracts = importlib.import_module("env.tools.contracts")
-        for spec in contracts.TOOL_REGISTRY:
+    def test_cli_operation_maps_align_with_catalog_actions(self) -> None:
+        tool_catalog = importlib.import_module("env.tools.catalog")
+        for spec in tool_catalog.tool_specs():
             tool = spec["tool"]
             cli_resource = spec["cli_resource"]
             expected_actions = {action["name"] for action in spec["actions"]}
@@ -325,8 +384,8 @@ print(json.dumps(loaded))
         self.assertIn("--status", completed.stdout)
 
     def test_artifact_router_surface_uses_revision_actions(self) -> None:
-        contracts = importlib.import_module("env.tools.contracts")
-        artifact_spec = contracts.get_tool_spec("artifact")
+        tool_catalog = importlib.import_module("env.tools.catalog")
+        artifact_spec = tool_catalog.get_tool_spec("artifact")
         self.assertIsInstance(artifact_spec, dict)
         assert isinstance(artifact_spec, dict)
 
@@ -389,13 +448,11 @@ print(json.dumps(loaded))
         self.assertNotIn("archive", artifact_help.stdout)
 
     def test_comment_resolve_and_reopen_are_absent_from_active_surfaces(self) -> None:
-        contracts = importlib.import_module("env.tools.contracts")
+        tool_catalog = importlib.import_module("env.tools.catalog")
         dispatch = importlib.import_module("env.tools.dispatch")
-        router = importlib.import_module("env.tools.router")
 
-        self.assertEqual(contracts.supported_actions("comment"), {"add", "list"})
+        self.assertEqual(tool_catalog.supported_actions("comment"), {"add", "list"})
         self.assertEqual(dispatch.dispatch_handler_actions().get("comment"), {"add", "list"})
-        self.assertEqual(set(router._TOOL_ACTIONS.get("comment", set())), {"add", "list"})
         self.assertNotIn("resolve", self._cli_operations_for_resource("comment"))
         self.assertNotIn("reopen", self._cli_operations_for_resource("comment"))
 

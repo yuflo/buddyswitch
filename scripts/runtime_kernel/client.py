@@ -13,7 +13,7 @@ import socket
 from typing import Any
 import uuid
 
-from env.tools import contracts as tool_contracts
+from env.tools import catalog as tool_catalog
 
 from runtime_kernel import protocol
 
@@ -115,7 +115,7 @@ def _is_read_only_env_tool(method: str, params: dict[str, Any]) -> bool:
     if not isinstance(tool, str) or not tool.strip() or not isinstance(action_raw, str) or not action_raw.strip():
         return False
     action = action_raw.strip().replace("-", "_")
-    spec = tool_contracts.get_action_spec(tool.strip(), action)
+    spec = tool_catalog.get_action_spec(tool.strip(), action)
     if not isinstance(spec, dict):
         return False
     return spec.get("mutates") == "none"

@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from env.domain import artifact_visibility as artifact_visibility_domain
+from env.domain import source_refs as source_ref_domain
 from env.repos import artifacts as artifact_repo
-from env.services import source_refs as source_ref_service
-from env.tools import contracts as tool_contracts
+from env.tools.artifact import contract as tool_contract
 from env.tools import responses as tool_responses
 
 
@@ -129,8 +129,12 @@ def _reject_revision_scope(*, action: str, active_buddy: str, message: str) -> d
 
 
 def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
-    tool, action_name = action.split(".", 1)
-    allowed = tool_contracts.payload_fields_for_action(tool, action_name)
+    _, action_name = action.split(".", 1)
+    allowed = set()
+    for row in tool_contract.TOOL_SPEC.get("actions", []):
+        if isinstance(row, dict) and row.get("name") == action_name:
+            allowed = {field for field in row.get("payload_fields", []) if isinstance(field, str)}
+            break
     unknown = sorted(key for key in args if key not in allowed)
     if unknown:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")
@@ -240,7 +244,7 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
         return _reject_payload(action=action, active_buddy=active_buddy, message="read_claim must be a string")
 
     try:
-        normalized_refs, scope_error = source_ref_service.normalize_source_refs(
+        normalized_refs, scope_error = source_ref_domain.normalize_source_refs(
             args.get("source_refs"),
             active_buddy=active_buddy,
             read_claim=read_claim if isinstance(read_claim, str) else None,
@@ -367,7 +371,7 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
         if read_claim is not None and not isinstance(read_claim, str):
             return _reject_payload(action=action, active_buddy=active_buddy, message="read_claim must be a string")
         try:
-            refs, scope_error = source_ref_service.normalize_source_refs(
+            refs, scope_error = source_ref_domain.normalize_source_refs(
                 args.get("source_refs"),
                 active_buddy=active_buddy,
                 read_claim=read_claim if isinstance(read_claim, str) else None,

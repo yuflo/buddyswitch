@@ -7,12 +7,13 @@ import argparse
 import json
 from pathlib import Path
 import sys
-from typing import Any
+from typing import Any, Callable
 
 SCRIPTS_ROOT = Path(__file__).resolve().parents[1]
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
+from env.tools import discovery
 from runtime_kernel.client import RuntimeBrokerError, broker_unavailable_feedback, request_runtime_broker
 
 
@@ -47,156 +48,6 @@ def _error_payload(code: str, message: str, extra: dict[str, Any] | None = None)
     return payload
 
 
-def _load_json_object(raw: str) -> dict[str, Any]:
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"--payload must be a JSON object string: {exc.msg} at char {exc.pos}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("--payload must be a JSON object string")
-    return payload
-
-
-def _operation_to_action(operation: str) -> str:
-    return operation.replace("-", "_")
-
-
-def _add_payload_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--payload",
-        required=True,
-        metavar="JSON_OBJECT",
-        help="JSON object string to send as env.tool args; do not pass a file path.",
-    )
-
-
-def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Call broker-routed BuddySwitch env operations.")
-    sub = parser.add_subparsers(dest="resource", required=True)
-
-    task = sub.add_parser("task", help="Task env tool operations")
-    task_sub = task.add_subparsers(dest="operation", required=True)
-    create = task_sub.add_parser("create", help="Create active-buddy task")
-    _add_payload_argument(create)
-    task_sub.add_parser("list", help="List active-buddy tasks")
-    get = task_sub.add_parser("get", help="Get active-buddy task by id")
-    get.add_argument("--task-id", required=True)
-    update = task_sub.add_parser("update", help="Update active-buddy task fields")
-    _add_payload_argument(update)
-    archive = task_sub.add_parser("archive", help="Archive active-buddy task")
-    archive.add_argument("--task-id", required=True)
-
-    track = sub.add_parser("track", help="Track env tool operations")
-    track_sub = track.add_subparsers(dest="operation", required=True)
-    create_track = track_sub.add_parser("create", help="Create PM-owned track page")
-    _add_payload_argument(create_track)
-    track_sub.add_parser("list", help="List non-archived track page summaries")
-    open_track = track_sub.add_parser("open", help="Open one track page by id")
-    open_track.add_argument("--track-id", required=True)
-    update_now = track_sub.add_parser("update-now", help="Update now/state/health on track page")
-    _add_payload_argument(update_now)
-    add_material = track_sub.add_parser("add-material", help="Publish an existing draft artifact as current track material")
-    _add_payload_argument(add_material)
-    add_update = track_sub.add_parser("add-update", help="Append one track timeline update")
-    _add_payload_argument(add_update)
-    add_proof = track_sub.add_parser("add-proof", help="Publish an existing draft artifact as close proof")
-    _add_payload_argument(add_proof)
-    archive_track = track_sub.add_parser("archive", help="Archive PM-owned track")
-    archive_track.add_argument("--track-id", required=True)
-
-    artifact = sub.add_parser("artifact", help="Artifact env tool operations")
-    artifact_sub = artifact.add_subparsers(dest="operation", required=True)
-    get_artifact = artifact_sub.add_parser("get", help="Get readable artifact by id")
-    get_artifact.add_argument("--artifact-id", required=True)
-    create_artifact = artifact_sub.add_parser("create-revision", help="Create a private draft/revision artifact")
-    _add_payload_argument(create_artifact)
-    update_artifact = artifact_sub.add_parser("update-metadata", help="Update artifact title/summary/source refs")
-    _add_payload_argument(update_artifact)
-
-    context_parser = sub.add_parser("context", help="Context env operations")
-    context_sub = context_parser.add_subparsers(dest="operation", required=True)
-    context_get = context_sub.add_parser("get", help="Get runless context sections")
-    context_get.add_argument("--track-id")
-    context_get.add_argument("--task-id")
-    context_get.add_argument("--limit", type=int)
-    context_summarize = context_sub.add_parser("summarize", help="Summarize runless context")
-    context_summarize.add_argument("--track-id")
-    context_summarize.add_argument("--task-id")
-    context_summarize.add_argument("--limit", type=int)
-    context_sub.add_parser("list-sources", help="List context source descriptions")
-
-    buddybox = sub.add_parser("buddybox", help="Buddybox env operations")
-    buddybox_sub = buddybox.add_subparsers(dest="operation", required=True)
-    buddybox_sub.add_parser("desc", help="Describe active buddy private local workspace")
-    buddybox_list = buddybox_sub.add_parser("list", help="List buddybox files")
-    buddybox_list.add_argument("--logical-name")
-    buddybox_list.add_argument("--recursive", action="store_true")
-    buddybox_list.add_argument("--limit", type=int)
-    buddybox_read = buddybox_sub.add_parser("read", help="Read buddybox file")
-    buddybox_read.add_argument("--logical-name", required=True)
-    buddybox_read.add_argument("--encoding")
-    buddybox_write = buddybox_sub.add_parser("write", help="Write buddybox file")
-    _add_payload_argument(buddybox_write)
-    buddybox_delete = buddybox_sub.add_parser("delete", help="Delete buddybox file")
-    buddybox_delete.add_argument("--logical-name", required=True)
-
-    evidence = sub.add_parser("evidence", help="Evidence env operations")
-    evidence_sub = evidence.add_subparsers(dest="operation", required=True)
-    issue_browser = evidence_sub.add_parser("issue-browser", help="Issue browser preflight evidence")
-    issue_browser.add_argument("--target-type", required=True)
-    issue_browser.add_argument("--target-id", required=True)
-    issue_browser.add_argument("--mode")
-    approve_downgrade = evidence_sub.add_parser("approve-downgrade", help="Issue downgrade approval token")
-    approve_downgrade.add_argument("--target-type", required=True)
-    approve_downgrade.add_argument("--target-id", required=True)
-    approve_downgrade.add_argument("--reason", required=True)
-
-    message = sub.add_parser("message", help="Message env tool operations")
-    message_sub = message.add_subparsers(dest="operation", required=True)
-    message_send = message_sub.add_parser("send", help="Send a direct message to a buddy")
-    _add_payload_argument(message_send)
-    message_list = message_sub.add_parser("list", help="List active-buddy inbox messages")
-    message_list.add_argument("--buddy")
-
-    comment = sub.add_parser("comment", help="Comment env tool operations")
-    comment_sub = comment.add_subparsers(dest="operation", required=True)
-    comment_add = comment_sub.add_parser("add", help="Add a comment to a track or artifact")
-    _add_payload_argument(comment_add)
-    comment_list = comment_sub.add_parser("list", help="List comments on a target")
-    comment_list.add_argument("--target-type", required=True)
-    comment_list.add_argument("--target-id", required=True)
-    comment_list.add_argument("--status")
-
-    search = sub.add_parser(
-        "search",
-        help="Search env operations",
-        description="Search actions use --query (request/open-browser), --backend (request), and optional --engine.",
-    )
-    search_sub = search.add_subparsers(dest="operation", required=True)
-    status = search_sub.add_parser("status", help="Show runtime search configuration")
-    status.add_argument("--query")
-    request = search_sub.add_parser("request", help="Issue search request")
-    request.add_argument("--query", required=True)
-    request.add_argument("--backend", required=True, choices=["browser", "search_api"])
-    request.add_argument("--engine", choices=["google", "web", "reddit", "x"])
-    open_browser = search_sub.add_parser("open-browser", help="Open browser search URL")
-    open_browser.add_argument("--query", required=True)
-    open_browser.add_argument("--engine", choices=["google", "web", "reddit", "x"])
-
-    return parser.parse_args()
-
-
-def _context_args_from_cli(args: argparse.Namespace) -> dict[str, Any]:
-    if args.operation == "list-sources":
-        return {}
-    payload: dict[str, Any] = {}
-    for field in ("track_id", "task_id", "limit"):
-        value = getattr(args, field, None)
-        if value is not None:
-            payload[field] = value
-    return payload
-
-
 def _dispatch_env_tool(tool: str, action: str, args: dict[str, Any]) -> dict[str, Any]:
     params = {
         "tool": tool,
@@ -219,144 +70,38 @@ def _dispatch_env_tool(tool: str, action: str, args: dict[str, Any]) -> dict[str
         return _error_payload(exc.code, exc.message, extra)
 
 
-def _dispatch_task(args: argparse.Namespace) -> dict[str, Any]:
-    action = _operation_to_action(args.operation)
-    if args.operation in {"create", "update"}:
-        payload = _load_json_object(args.payload)
-        return _dispatch_env_tool("task", action, payload)
-    if args.operation in {"get", "archive"}:
-        return _dispatch_env_tool("task", action, {"task_id": args.task_id})
-    return _dispatch_env_tool("task", action, {})
+def _register_tool_clis(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    for tool in discovery.discover_tool_ids():
+        module = discovery.import_tool_module(tool, "cli")
+        register = getattr(module, "register_cli", None)
+        if not callable(register):
+            raise TypeError(f"env.tools.{tool}.cli.register_cli must be callable")
+        register(subparsers)
 
 
-def _dispatch_track(args: argparse.Namespace) -> dict[str, Any]:
-    action = _operation_to_action(args.operation)
-    if args.operation in {"create", "update-now", "add-material", "add-update", "add-proof"}:
-        payload = _load_json_object(args.payload)
-        return _dispatch_env_tool("track", action, payload)
-    if args.operation == "open":
-        return _dispatch_env_tool("track", action, {"track_id": args.track_id})
-    if args.operation == "archive":
-        return _dispatch_env_tool("track", action, {"track_id": args.track_id})
-    return _dispatch_env_tool("track", action, {})
-
-
-def _dispatch_artifact(args: argparse.Namespace) -> dict[str, Any]:
-    action = _operation_to_action(args.operation)
-    if args.operation in {"create-revision", "update-metadata"}:
-        return _dispatch_env_tool("artifact", action, _load_json_object(args.payload))
-    if args.operation == "get":
-        return _dispatch_env_tool("artifact", action, {"artifact_id": args.artifact_id})
-    raise ValueError(f"unsupported artifact operation: {args.operation}")
-
-
-def _dispatch_context(args: argparse.Namespace) -> dict[str, Any]:
-    action = _operation_to_action(args.operation)
-    return _dispatch_env_tool("context", action, _context_args_from_cli(args))
-
-
-def _dispatch_buddybox(args: argparse.Namespace) -> dict[str, Any]:
-    action = _operation_to_action(args.operation)
-    if args.operation == "desc":
-        return _dispatch_env_tool("buddybox", action, {})
-    if args.operation == "write":
-        return _dispatch_env_tool("buddybox", action, _load_json_object(args.payload))
-    if args.operation == "read":
-        payload: dict[str, Any] = {"logical_name": args.logical_name}
-        if isinstance(args.encoding, str) and args.encoding.strip():
-            payload["encoding"] = args.encoding.strip()
-        return _dispatch_env_tool("buddybox", action, payload)
-    if args.operation == "delete":
-        return _dispatch_env_tool("buddybox", action, {"logical_name": args.logical_name})
-    payload = {}
-    if isinstance(args.logical_name, str) and args.logical_name.strip():
-        payload["logical_name"] = args.logical_name.strip()
-    if args.recursive:
-        payload["recursive"] = True
-    if isinstance(args.limit, int):
-        payload["limit"] = args.limit
-    return _dispatch_env_tool("buddybox", action, payload)
-
-
-def _dispatch_evidence(args: argparse.Namespace) -> dict[str, Any]:
-    action = _operation_to_action(args.operation)
-    payload: dict[str, Any] = {
-        "target_type": args.target_type,
-        "target_id": args.target_id,
-    }
-    if args.operation == "issue-browser":
-        if isinstance(args.mode, str) and args.mode.strip():
-            payload["mode"] = args.mode.strip()
-    else:
-        payload["reason"] = args.reason
-    return _dispatch_env_tool("evidence", action, payload)
-
-
-def _dispatch_search(args: argparse.Namespace) -> dict[str, Any]:
-    action = _operation_to_action(args.operation)
-    payload: dict[str, Any] = {}
-    for field in ("query", "backend", "engine"):
-        value = getattr(args, field, None)
-        if value is not None:
-            payload[field] = value
-    return _dispatch_env_tool("search", action, payload)
-
-
-def _dispatch_message(args: argparse.Namespace) -> dict[str, Any]:
-    action = _operation_to_action(args.operation)
-    if args.operation == "send":
-        return _dispatch_env_tool("message", action, _load_json_object(args.payload))
-    if args.operation == "list":
-        payload: dict[str, Any] = {}
-        if isinstance(args.buddy, str) and args.buddy.strip():
-            payload["buddy"] = args.buddy.strip()
-        return _dispatch_env_tool("message", action, payload)
-    raise ValueError(f"unsupported message operation: {args.operation}")
-
-
-def _dispatch_comment(args: argparse.Namespace) -> dict[str, Any]:
-    action = _operation_to_action(args.operation)
-    if args.operation == "add":
-        return _dispatch_env_tool("comment", action, _load_json_object(args.payload))
-    if args.operation == "list":
-        payload = {"target_type": args.target_type, "target_id": args.target_id}
-        if isinstance(args.status, str) and args.status.strip():
-            payload["status"] = args.status.strip()
-        return _dispatch_env_tool("comment", action, payload)
-    raise ValueError(f"unsupported comment operation: {args.operation}")
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Call broker-routed BuddySwitch env operations.")
+    subparsers = parser.add_subparsers(dest="resource", required=True)
+    _register_tool_clis(subparsers)
+    return parser.parse_args()
 
 
 def main() -> int:
     try:
         args = _parse_args()
-        if args.resource == "task":
-            payload = _dispatch_task(args)
-        elif args.resource == "track":
-            payload = _dispatch_track(args)
-        elif args.resource == "artifact":
-            payload = _dispatch_artifact(args)
-        elif args.resource == "context":
-            payload = _dispatch_context(args)
-        elif args.resource == "buddybox":
-            payload = _dispatch_buddybox(args)
-        elif args.resource == "evidence":
-            payload = _dispatch_evidence(args)
-        elif args.resource == "search":
-            payload = _dispatch_search(args)
-        elif args.resource == "message":
-            payload = _dispatch_message(args)
-        elif args.resource == "comment":
-            payload = _dispatch_comment(args)
-        else:
-            raise ValueError(f"unsupported resource: {args.resource}")
+        tool = getattr(args, "_env_tool", None)
+        action = getattr(args, "_env_action", None)
+        payload_builder = getattr(args, "_env_payload_builder", None)
+        if not isinstance(tool, str) or not isinstance(action, str) or not callable(payload_builder):
+            raise ValueError("selected CLI operation is not registered as an env.tool action")
+        payload_fn: Callable[[argparse.Namespace], dict[str, Any]] = payload_builder
+        payload = _dispatch_env_tool(tool, action, payload_fn(args))
     except Exception as exc:
         print(json.dumps(_error_payload("E_ENV_CLI", str(exc)), ensure_ascii=True, indent=2))
         return 1
 
     print(json.dumps(payload, ensure_ascii=True, indent=2))
-    if payload.get("ok") is True:
-        return 0
-    return 1
+    return 0 if payload.get("ok") is True else 1
 
 
 if __name__ == "__main__":

@@ -181,11 +181,11 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertIn("python3 scripts/turn_runtime.py status", text)
 
     def test_runtime_contract_not_shared_skill_owns_inactive_actions(self) -> None:
-        from env.tools import contracts
+        from env.tools import catalog
 
-        self.assertNotIn("advance", contracts.supported_actions("track"))
-        self.assertNotIn("resolve", contracts.supported_actions("comment"))
-        self.assertNotIn("reopen", contracts.supported_actions("comment"))
+        self.assertNotIn("advance", catalog.supported_actions("track"))
+        self.assertNotIn("resolve", catalog.supported_actions("comment"))
+        self.assertNotIn("reopen", catalog.supported_actions("comment"))
 
 
 if __name__ == "__main__":

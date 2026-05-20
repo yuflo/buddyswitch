@@ -8,7 +8,7 @@ from typing import Any, TypedDict
 
 from env.domain import messages as message_domain
 from env.repos import messages as message_repo
-from env.tools import contracts as tool_contracts
+from env.tools.message import contract as tool_contract
 from env.tools import responses as tool_responses
 
 
@@ -95,6 +95,13 @@ def _manifest_buddy_ids(context: MessageServiceContext) -> set[str]:
     return message_domain.manifest_buddy_ids(context.get("manifest"))
 
 
+def _allowed_fields(action_name: str) -> set[str]:
+    for row in tool_contract.TOOL_SPEC.get("actions", []):
+        if isinstance(row, dict) and row.get("name") == action_name:
+            return {field for field in row.get("payload_fields", []) if isinstance(field, str)}
+    return set()
+
+
 def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
     action = "message.send"
     active_buddy = context["active_buddy"]
@@ -110,7 +117,7 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
             active_buddy=active_buddy,
             manifest_buddy_ids=manifest_buddies,
             get_message=message_repo.get_message,
-            allowed_fields=tool_contracts.payload_fields_for_action("message", "send"),
+            allowed_fields=_allowed_fields("send"),
         )
     except message_domain.MessagePayloadError as exc:
         return _reject_payload(
@@ -172,7 +179,7 @@ def list_messages(*, args: dict[str, Any], context: MessageServiceContext) -> di
         request = message_domain.prepare_list_request(
             args=args,
             manifest_buddy_ids=manifest_buddies,
-            allowed_fields=tool_contracts.payload_fields_for_action("message", "list"),
+            allowed_fields=_allowed_fields("list"),
         )
     except message_domain.MessagePayloadError as exc:
         return _reject_payload(

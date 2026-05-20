@@ -429,7 +429,7 @@ if os.environ.get("BUDDYSWITCH_TEST_RUNTIME_COMMAND_SMOKE") == "1":
         ("turn_runtime.status", ["python3", "scripts/turn_runtime.py", "status"]),
         ("context.summarize", ["python3", "scripts/env/client.py", "context", "summarize"]),
         ("buddybox.desc", ["python3", "scripts/env/client.py", "buddybox", "desc"]),
-        ("search.status", ["python3", "scripts/env/client.py", "search", "status", "--query", "boundary-smoke"]),
+        ("search.status", ["python3", "scripts/env/client.py", "search", "status"]),
     )
     for name, command in smoke_commands:
         result = subprocess.run(
@@ -2265,12 +2265,15 @@ exec "$real_git" "$@"
                 self.assertFalse((runtime_skills / removed).exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
             runtime_turn_runtime = workspace_dir / "scripts" / "turn_runtime.py"
-            source_turn_runtime = ROOT / "scripts" / "turn_runtime.py"
+            tracked_turn_runtime = subprocess.check_output(
+                ["git", "-C", str(ROOT), "show", "HEAD:scripts/turn_runtime.py"],
+                text=True,
+            )
             self.assertEqual(
                 runtime_turn_runtime.read_text(encoding="utf-8"),
-                source_turn_runtime.read_text(encoding="utf-8"),
+                tracked_turn_runtime,
             )
-            for relative in (
+            runtime_surface_candidates = (
                 "scripts/env_legacy_store.py",
                 "scripts/env/tools/dispatch.py",
                 "scripts/env/tools/router.py",
@@ -2280,7 +2283,27 @@ exec "$real_git" "$@"
                 "scripts/env/services/context.py",
                 "scripts/env/services/buddybox.py",
                 "scripts/env/services/evidence.py",
-            ):
+                "scripts/env/tools/task/service.py",
+                "scripts/env/tools/track/service.py",
+                "scripts/env/tools/artifact/service.py",
+                "scripts/env/tools/context/service.py",
+                "scripts/env/tools/buddybox/service.py",
+                "scripts/env/tools/evidence/service.py",
+                "scripts/env/tools/message/service.py",
+                "scripts/env/tools/comment/service.py",
+                "scripts/env/tools/search/service.py",
+                "scripts/env/domain/source_refs.py",
+                "scripts/env/domain/buddybox_workspace.py",
+            )
+            for relative in runtime_surface_candidates:
+                tracked = subprocess.run(
+                    ["git", "-C", str(ROOT), "cat-file", "-e", f"HEAD:{relative}"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if tracked.returncode != 0:
+                    continue
                 with self.subTest(runtime_surface=relative):
                     self.assertTrue((workspace_dir / relative).exists())
             removed_tool_files = [

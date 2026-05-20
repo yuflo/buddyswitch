@@ -18,7 +18,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
-from env.tools import contracts as tool_contracts  # noqa: E402
+from env.tools import catalog as tool_catalog  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -178,7 +178,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(self._runtime_path("runs/raw").exists())
 
     def test_tool_registry_exposes_runless_tools_and_excludes_memory_run_and_binding(self) -> None:
-        tools = tool_contracts.supported_tools()
+        tools = tool_catalog.supported_tools()
         self.assertNotIn("memory", tools)
         self.assertIn("buddybox", tools)
         self.assertNotIn("run", tools)

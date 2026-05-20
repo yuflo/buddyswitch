@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Any, Callable
 
 import turn_runtime
-from env.tools import contracts as tool_contracts
+from env.tools import catalog as tool_catalog
 
 
 class LockMode(str, Enum):
@@ -71,7 +71,7 @@ def lock_mode_for_request(method: str, params: dict[str, Any]) -> LockMode:
         return LockMode.WRITE
 
     action = action_raw.strip().replace("-", "_")
-    spec = tool_contracts.get_action_spec(tool.strip(), action)
+    spec = tool_catalog.get_action_spec(tool.strip(), action)
     if not isinstance(spec, dict):
         return LockMode.WRITE
     if spec.get("mutates") == "none":

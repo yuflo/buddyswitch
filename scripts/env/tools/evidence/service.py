@@ -9,7 +9,7 @@ from typing import Any, TypedDict
 
 from env.repos import artifacts as artifact_repo
 from env.repos import runtime_files
-from env.tools import contracts as tool_contracts
+from env.tools.evidence import contract as tool_contract
 from env.tools import responses as tool_responses
 
 
@@ -96,8 +96,12 @@ def _reject_scope(*, action: str, active_buddy: str, boundary: str, message: str
 
 
 def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
-    tool, action_name = action.split(".", 1)
-    allowed = tool_contracts.payload_fields_for_action(tool, action_name)
+    _, action_name = action.split(".", 1)
+    allowed = set()
+    for row in tool_contract.TOOL_SPEC.get("actions", []):
+        if isinstance(row, dict) and row.get("name") == action_name:
+            allowed = {field for field in row.get("payload_fields", []) if isinstance(field, str)}
+            break
     unknown = sorted(key for key in args if key not in allowed)
     if unknown:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"unsupported payload fields: {', '.join(unknown)}")

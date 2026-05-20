@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Registry-backed runless env.tool dispatch."""
+"""Generic per-tool env.tool dispatch."""
 
 from __future__ import annotations
 
@@ -7,71 +7,46 @@ import importlib
 from pathlib import Path
 from typing import Any
 
+from env.tools import discovery
 from env.tools import responses as tool_responses
 
 HandlerSpec = tuple[str, str]
 
-HANDLER_SPECS_BY_TOOL: dict[str, dict[str, HandlerSpec]] = {
-    "task": {
-        "create": ("env.services.tasks", "create_task_for_active_buddy"),
-        "list": ("env.services.tasks", "list_tasks_for_active_buddy"),
-        "get": ("env.services.tasks", "get_task_for_active_buddy"),
-        "update": ("env.services.tasks", "update_task_for_active_buddy"),
-        "archive": ("env.services.tasks", "archive_task_for_active_buddy"),
-    },
-    "track": {
-        "create": ("env.services.tracks", "create_track_for_pm"),
-        "list": ("env.services.tracks", "list_tracks_for_active_buddy"),
-        "open": ("env.services.tracks", "open_track_for_active_buddy"),
-        "update_now": ("env.services.tracks", "update_now_for_active_buddy"),
-        "add_material": ("env.services.tracks", "add_material_to_track"),
-        "add_update": ("env.services.tracks", "add_update_to_track"),
-        "add_proof": ("env.services.tracks", "add_proof_to_track"),
-        "archive": ("env.services.tracks", "archive_track_for_pm"),
-    },
-    "artifact": {
-        "get": ("env.services.artifacts", "get_artifact_for_active_buddy"),
-        "create_revision": ("env.services.artifacts", "create_artifact_revision"),
-        "update_metadata": ("env.services.artifacts", "update_artifact_metadata"),
-    },
-    "buddybox": {
-        "desc": ("env.services.buddybox", "describe_buddybox_for_active_buddy"),
-        "list": ("env.services.buddybox", "list_buddybox_for_active_buddy"),
-        "read": ("env.services.buddybox", "read_buddybox_for_active_buddy"),
-        "write": ("env.services.buddybox", "write_buddybox_for_active_buddy"),
-        "delete": ("env.services.buddybox", "delete_buddybox_for_active_buddy"),
-    },
-    "context": {
-        "get": ("env.services.context", "get_context"),
-        "summarize": ("env.services.context", "summarize_context"),
-        "list_sources": ("env.services.context", "list_sources"),
-    },
-    "evidence": {
-        "issue_browser": ("env.services.evidence", "issue_browser_for_active_instance"),
-        "approve_downgrade": ("env.services.evidence", "approve_downgrade_for_active_instance"),
-    },
-    "message": {
-        "send": ("env.services.messages", "send_message"),
-        "list": ("env.services.messages", "list_messages"),
-    },
-    "comment": {
-        "add": ("env.services.comments", "add_comment"),
-        "list": ("env.services.comments", "list_comments"),
-    },
-    "search": {
-        "status": ("env.services.search", "status_for_active_instance"),
-        "request": ("env.services.search", "request_for_active_instance"),
-        "open_browser": ("env.services.search", "open_browser_for_active_instance"),
-    },
-}
+
+def _handler_specs_for_tool(tool: str) -> dict[str, HandlerSpec]:
+    module = discovery.import_tool_module(tool, "handlers")
+    specs = getattr(module, "HANDLER_SPECS", None)
+    if not isinstance(specs, dict):
+        raise TypeError(f"env.tools.{tool}.handlers.HANDLER_SPECS must be an object")
+    normalized: dict[str, HandlerSpec] = {}
+    for action, row in specs.items():
+        if not isinstance(action, str):
+            continue
+        if not isinstance(row, tuple) or len(row) != 2:
+            raise TypeError(f"handler spec for {tool}.{action} must be tuple(module, function)")
+        module_name, function_name = row
+        if not isinstance(module_name, str) or not isinstance(function_name, str):
+            raise TypeError(f"handler spec for {tool}.{action} must be tuple(str, str)")
+        normalized[action] = (module_name, function_name)
+    return normalized
 
 
 def dispatch_handler_actions() -> dict[str, set[str]]:
-    return {tool: set(action_map) for tool, action_map in HANDLER_SPECS_BY_TOOL.items()}
+    rows: dict[str, set[str]] = {}
+    for tool in discovery.discover_tool_ids():
+        try:
+            specs = _handler_specs_for_tool(tool)
+        except Exception:
+            continue
+        rows[tool] = set(specs)
+    return rows
 
 
 def _load_handler(*, tool: str, action: str) -> Any:
-    module_name, function_name = HANDLER_SPECS_BY_TOOL[tool][action]
+    specs = _handler_specs_for_tool(tool)
+    if action not in specs:
+        raise KeyError(f"action '{action}' is not registered in env.tools.{tool}.handlers.HANDLER_SPECS")
+    module_name, function_name = specs[action]
     module = importlib.import_module(module_name)
     handler = getattr(module, function_name)
     if not callable(handler):
@@ -225,6 +200,7 @@ def dispatch_registered_env_tool(
                 "allowed_next_actions": ["Use another registered tool that does not depend on this handler."],
             },
         )
+
     context = _service_context(
         active_buddy=active_buddy,
         instance_id=instance_id,

@@ -8,6 +8,7 @@ import sys
 import unittest
 import uuid
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -15,7 +16,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import runtime_kernel.broker as runtime_broker  # noqa: E402
-from env.tools import contracts as tool_contracts  # noqa: E402
+from env.tools import catalog as tool_catalog  # noqa: E402
 import turn_runtime  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -180,7 +181,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self._assert_actionable_next_guidance(payload)
 
     def test_registry_excludes_removed_surfaces(self) -> None:
-        tools = {row["tool"] for row in tool_contracts.TOOL_REGISTRY}
+        tools = set(tool_catalog.supported_tools())
         self.assertNotIn("handoff", tools)
         self.assertNotIn("memory", tools)
         self.assertNotIn("run", tools)
@@ -194,8 +195,8 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
         self._assert_success_contract(full)
         self._assert_success_contract(summary)
-        expected_tool_catalog = tool_contracts.env_tools_description()
-        expected_operation_semantics = tool_contracts.operation_semantics()
+        expected_tool_catalog = tool_catalog.env_tools_description()
+        expected_operation_semantics = tool_catalog.operation_semantics()
         self.assertIn("tool_catalog", full)
         self.assertIn("operation_semantics", full)
         self.assertEqual(full.get("tool_catalog"), expected_tool_catalog)

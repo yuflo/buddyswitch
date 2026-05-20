@@ -17,6 +17,8 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+SHIPPED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "message", "comment", "search"}
+
 
 class EnvClientPayloadCliTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -169,6 +171,43 @@ class EnvClientPayloadCliTests(unittest.TestCase):
                     self.client.main()
         self.assertEqual(exc_info.exception.code, 2)
         broker.assert_not_called()
+
+    def test_client_has_no_per_tool_dispatch_branches(self) -> None:
+        source = (ROOT / "scripts" / "env" / "client.py").read_text(encoding="utf-8")
+        for tool in sorted(SHIPPED_TOOLS):
+            with self.subTest(tool=tool):
+                self.assertNotIn(f"def _dispatch_{tool}(", source)
+
+    def test_flag_payload_operations_still_map_to_expected_envelopes(self) -> None:
+        cases = [
+            (["task", "list", "--status", "active", "--limit", "10"], "task", "list", {"status": "active", "limit": 10}),
+            (["track", "list"], "track", "list", {}),
+            (["context", "list-sources"], "context", "list_sources", {}),
+            (["buddybox", "desc"], "buddybox", "desc", {}),
+            (
+                ["evidence", "issue-browser", "--target-type", "artifact", "--target-id", "art-1"],
+                "evidence",
+                "issue_browser",
+                {"target_type": "artifact", "target_id": "art-1"},
+            ),
+            (["search", "status"], "search", "status", {}),
+            (["message", "list", "--buddy", "design"], "message", "list", {"buddy": "design"}),
+            (
+                ["comment", "list", "--target-type", "track", "--target-id", "track-json", "--status", "open"],
+                "comment",
+                "list",
+                {"target_type": "track", "target_id": "track-json", "status": "open"},
+            ),
+        ]
+
+        for argv, expected_tool, expected_action, expected_args in cases:
+            with self.subTest(argv=argv):
+                code, output, broker = self._run_client(argv)
+                self.assertEqual(code, 0, msg=output)
+                broker.assert_called_once_with(
+                    "env.tool",
+                    {"tool": expected_tool, "action": expected_action, "args": expected_args},
+                )
 
 
 if __name__ == "__main__":

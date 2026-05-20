@@ -7,8 +7,9 @@ import base64
 from pathlib import Path
 from typing import Any, TypedDict
 
+from env.domain import buddybox_workspace as buddybox_workspace_domain
 from env.repos import buddybox_files as buddybox_repo
-from env.tools import contracts as tool_contracts
+from env.tools.buddybox import contract as tool_contract
 from env.tools import responses as tool_responses
 
 
@@ -20,11 +21,6 @@ class BuddyboxServiceContext(TypedDict):
     manifest: dict[str, Any]
 
 
-BUDDYBOX_PRIVACY_MESSAGE = (
-    "This is the active buddy's private file capability. "
-    "Other buddies cannot list, read, write, or delete these files. "
-    "Use artifact when content must become product-readable."
-)
 _PRIVATE_BOUNDARY = "active_buddy_private_file_capability"
 
 def _manifest_buddy_ids(context: BuddyboxServiceContext) -> set[str]:
@@ -39,26 +35,7 @@ def _manifest_buddy_ids(context: BuddyboxServiceContext) -> set[str]:
 
 
 def build_buddybox_desc(active_buddy: str, *, instance_payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    root = buddybox_repo.ensure_active_buddy_root(active_buddy=active_buddy, instance_payload=instance_payload)
-    return {
-        "capability": "private_file_workspace",
-        "owner_scope": "active_buddy",
-        "lifetime_scope": "active_instance_workspace",
-        "visibility": "active_buddy_private",
-        "product_readable": False,
-        "cross_buddy_readable": False,
-        "mutates_product_state": False,
-        "message": BUDDYBOX_PRIVACY_MESSAGE,
-        "supports": [
-            "describe_capability",
-            "list_private_file_summaries",
-            "read_private_file",
-            "write_private_text",
-            "write_private_binary",
-            "delete_private_file",
-        ],
-        "state_summary": buddybox_repo.state_summary(root=root),
-    }
+    return buddybox_workspace_domain.build_buddybox_desc(active_buddy, instance_payload=instance_payload)
 
 
 def _operation_semantic_ref(action: str) -> str:
@@ -363,8 +340,12 @@ def _reject_not_found(*, action: str, active_buddy: str, logical_name: str) -> d
 
 
 def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
-    tool, action_name = action.split(".", 1)
-    allowed = tool_contracts.payload_fields_for_action(tool, action_name)
+    _, action_name = action.split(".", 1)
+    allowed = set()
+    for row in tool_contract.TOOL_SPEC.get("actions", []):
+        if isinstance(row, dict) and row.get("name") == action_name:
+            allowed = {field for field in row.get("payload_fields", []) if isinstance(field, str)}
+            break
 
     if "path" in args:
         return _reject_payload(

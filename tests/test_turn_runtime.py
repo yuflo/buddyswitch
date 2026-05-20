@@ -14,7 +14,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from env.tools import contracts as tool_contracts  # noqa: E402
+from env.tools import catalog as tool_catalog  # noqa: E402
 
 
 class TurnRuntimeRunlessTests(unittest.TestCase):
@@ -52,14 +52,14 @@ class TurnRuntimeRunlessTests(unittest.TestCase):
         self.assertIn("buddybox", tools)
         self.assertNotIn("run", tools)
         self.assertNotIn("binding", tools)
-        self.assertEqual(set(tools), {row["tool"] for row in tool_contracts.TOOL_REGISTRY})
+        self.assertEqual(set(tools), set(tool_catalog.supported_tools()))
         for tool_name, row in sorted(tools.items()):
             with self.subTest(tool=tool_name):
                 self.assertIn("action_semantics", row)
                 action_semantics = row["action_semantics"]
                 self.assertIsInstance(action_semantics, dict, msg=row)
                 self.assertTrue(action_semantics, msg=row)
-        compact = tool_contracts.compact_tool_affordances()
+        compact = tool_catalog.compact_tool_affordances()
         for tool_name, row in sorted(tools.items()):
             with self.subTest(compact_tool=tool_name):
                 self.assertGreater(len(row), len(compact.get(tool_name, {})))

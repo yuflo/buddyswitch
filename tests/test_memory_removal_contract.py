@@ -20,8 +20,8 @@ import env_cleanup  # noqa: E402
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 import workspace_data  # noqa: E402
-from env.services import source_refs  # noqa: E402
-from env.tools import contracts as tool_contracts  # noqa: E402
+from env.domain import source_refs  # noqa: E402
+from env.tools import catalog as tool_catalog  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -129,10 +129,10 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
     def test_tool_registry_status_and_help_exclude_memory_and_handoff(self) -> None:
-        self.assertNotIn("memory", tool_contracts.supported_tools())
-        self.assertNotIn("handoff", tool_contracts.supported_tools())
-        self.assertFalse(any(key.startswith("memory.") for key in tool_contracts.operation_semantics()))
-        self.assertFalse(any(key.startswith("handoff.") for key in tool_contracts.operation_semantics()))
+        self.assertNotIn("memory", tool_catalog.supported_tools())
+        self.assertNotIn("handoff", tool_catalog.supported_tools())
+        self.assertFalse(any(key.startswith("memory.") for key in tool_catalog.operation_semantics()))
+        self.assertFalse(any(key.startswith("handoff.") for key in tool_catalog.operation_semantics()))
 
         status = subprocess.run(
             ["python3", str(ROOT / "scripts" / "turn_runtime.py"), "status"],

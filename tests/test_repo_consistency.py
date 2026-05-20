@@ -16,7 +16,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_store  # noqa: E402
 import turn_runtime  # noqa: E402
-from env.tools import contracts as tool_contracts  # noqa: E402
+from env.tools import catalog as tool_catalog  # noqa: E402
 
 _EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment"}
 
@@ -51,8 +51,9 @@ class RepoConsistencyTests(unittest.TestCase):
                 "-n",
                 r"(^|\\s)(import\\s+env_store|from\\s+env_store\\s+import)",
                 "scripts/turn_runtime.py",
+                "scripts/env/tools",
+                "scripts/env/domain",
                 "scripts/env/repos",
-                "scripts/env/services",
             ],
             cwd=ROOT,
             text=True,
@@ -92,16 +93,16 @@ class RepoConsistencyTests(unittest.TestCase):
 
     def test_env_tool_surface_uses_track_page_actions(self) -> None:
         env_tools = turn_runtime._build_env_tools_desc()
-        registry_tools = {row["tool"] for row in tool_contracts.TOOL_REGISTRY}
+        registry_tools = set(tool_catalog.supported_tools())
         self.assertEqual(registry_tools, _EXPECTED_TOOLS)
         self.assertEqual(set(env_tools), _EXPECTED_TOOLS)
 
-        track_actions = set(tool_contracts.supported_actions("track"))
+        track_actions = set(tool_catalog.supported_actions("track"))
         self.assertEqual(
             track_actions,
             {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
         )
-        artifact_actions = set(tool_contracts.supported_actions("artifact"))
+        artifact_actions = set(tool_catalog.supported_actions("artifact"))
         self.assertEqual(artifact_actions, {"get", "create_revision", "update_metadata"})
 
     def test_workspace_projection_contract_uses_track_page_shape(self) -> None:

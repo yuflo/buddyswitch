@@ -12,7 +12,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from env.tools import contracts  # noqa: E402
+from env.tools import catalog  # noqa: E402
 
 _EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment"}
 _EXPECTED_ACTIONS_BY_TOOL = {
@@ -30,14 +30,15 @@ _EXPECTED_ACTIONS_BY_TOOL = {
 
 class EnvToolSemanticContractTests(unittest.TestCase):
     def test_registry_semantics_cover_every_registered_tool_and_action(self) -> None:
-        desc = contracts.env_tools_description()
-        registry_tools = {row["tool"] for row in contracts.TOOL_REGISTRY}
+        desc = catalog.env_tools_description()
+        tool_specs = catalog.tool_specs()
+        registry_tools = {row["tool"] for row in tool_specs}
 
         self.assertEqual(registry_tools, _EXPECTED_TOOLS)
         self.assertEqual(set(desc), _EXPECTED_TOOLS)
-        self.assertEqual(contracts.semantic_contract_errors(), [])
+        self.assertEqual(catalog.semantic_contract_errors(), [])
 
-        for spec in contracts.TOOL_REGISTRY:
+        for spec in tool_specs:
             tool = spec["tool"]
             expected_actions = {row["name"] for row in spec["actions"]}
             self.assertEqual(expected_actions, _EXPECTED_ACTIONS_BY_TOOL[tool])
@@ -46,23 +47,23 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             self.assertEqual(set(desc[tool]["action_semantics"]), expected_actions)
 
     def test_handoff_and_track_advance_are_absent(self) -> None:
-        by_tool = {row["tool"]: row for row in contracts.TOOL_REGISTRY}
+        by_tool = {row["tool"]: row for row in catalog.tool_specs()}
         self.assertNotIn("handoff", by_tool)
         self.assertNotIn("advance", {row["name"] for row in by_tool["track"]["actions"]})
         self.assertNotIn("resolve", {row["name"] for row in by_tool["comment"]["actions"]})
         self.assertNotIn("reopen", {row["name"] for row in by_tool["comment"]["actions"]})
 
-        op = contracts.operation_semantics()
+        op = catalog.operation_semantics()
         self.assertNotIn("track.advance", op)
         self.assertFalse(any(key.startswith("handoff.") for key in op))
         self.assertNotIn("comment.resolve", op)
         self.assertNotIn("comment.reopen", op)
 
     def test_operation_semantics_machine_contract_is_preserved(self) -> None:
-        op = contracts.operation_semantics()
+        op = catalog.operation_semantics()
         expected_keys = {
             f"{tool_spec['tool']}.{action_spec['name']}"
-            for tool_spec in contracts.TOOL_REGISTRY
+            for tool_spec in catalog.tool_specs()
             for action_spec in tool_spec["actions"]
         }
         self.assertEqual(set(op), expected_keys)
@@ -82,7 +83,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertIsInstance(row.get("risk_hints"), dict)
 
     def test_critical_track_artifact_action_semantics_are_not_placeholders(self) -> None:
-        op = contracts.operation_semantics()
+        op = catalog.operation_semantics()
         critical = (
             "track.create",
             "track.open",
@@ -97,7 +98,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             assert isinstance(semantic, dict)
             with self.subTest(action=key):
                 self.assertIsInstance(semantic.get("risk_hints"), dict)
-                full_semantic = contracts.env_tools_description()[key.split(".", 1)[0]]["action_semantics"][key.split(".", 1)[1]]
+                full_semantic = catalog.env_tools_description()[key.split(".", 1)[0]]["action_semantics"][key.split(".", 1)[1]]
                 self.assertIsInstance(full_semantic.get("use_when"), list)
                 self.assertGreater(len(full_semantic.get("use_when", [])), 0)
                 self.assertIsInstance(full_semantic.get("do_not_use_when"), list)
@@ -110,7 +111,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertNotIn("Operation completed with structured tool feedback.", full_semantic.get("success_means", ""))
 
     def test_publication_payload_fields_match_single_publication_path(self) -> None:
-        desc = contracts.env_tools_description()
+        desc = catalog.env_tools_description()
         track_fields = desc["track"]["payload_fields"]
         artifact_fields = desc["artifact"]["payload_fields"]
         self.assertEqual(track_fields["add_material"], ["track_id", "artifact_id", "label", "summary"])
@@ -125,7 +126,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         )
 
     def test_compact_affordances_are_registry_aligned(self) -> None:
-        compact = contracts.compact_tool_affordances()
+        compact = catalog.compact_tool_affordances()
         self.assertEqual(set(compact), _EXPECTED_TOOLS)
         for tool, row in compact.items():
             with self.subTest(tool=tool):
@@ -135,7 +136,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertIn("state_effect", row)
 
     def test_comment_payload_fields_match_active_comment_capability(self) -> None:
-        desc = contracts.env_tools_description()
+        desc = catalog.env_tools_description()
         comment_fields = desc["comment"]["payload_fields"]
         self.assertEqual(
             comment_fields["add"],

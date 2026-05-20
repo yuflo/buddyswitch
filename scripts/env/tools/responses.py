@@ -5,7 +5,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from env.tools import contracts
+from env.tools import catalog as tool_catalog
+from env.tools.model import MUTATES_NONE
 
 _SUCCESS_CANONICAL_FIELDS = {
     "ok",
@@ -112,8 +113,8 @@ def next_action_option(
     preconditions: list[str] | None = None,
     source_refs: list[str] | None = None,
 ) -> dict[str, Any]:
-    action_spec = contracts.get_action_spec(tool, action)
-    mutates = contracts.MUTATES_NONE
+    action_spec = tool_catalog.get_action_spec(tool, action)
+    mutates = MUTATES_NONE
     default_preconditions: list[str] = []
     if isinstance(action_spec, dict):
         raw_mutates = action_spec.get("mutates")

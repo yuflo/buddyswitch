@@ -6,23 +6,23 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from env.tools import contracts as tool_contracts
+from env.tools import catalog as tool_catalog
+from env.tools import discovery
 from env.tools import responses as tool_responses
 from env.tools.dispatch import dispatch_registered_env_tool
 
-_TOOL_ACTIONS = {
-    tool: tool_contracts.supported_actions(tool)
-    for tool in sorted(tool_contracts.supported_tools())
-}
-_TOOL_HINTS = {tool: tool for tool in _TOOL_ACTIONS}
+
+def _tool_actions() -> dict[str, set[str]]:
+    return {tool: tool_catalog.supported_actions(tool) for tool in sorted(tool_catalog.supported_tools())}
 
 
 def _supported_tools_text() -> str:
-    return ", ".join(sorted(_TOOL_ACTIONS))
+    return ", ".join(sorted(_tool_actions()))
 
 
 def _supported_actions_text(tool: str) -> str:
-    return ", ".join(sorted(_TOOL_ACTIONS[tool]))
+    actions = _tool_actions().get(tool, set())
+    return ", ".join(sorted(actions))
 
 
 def _semantic_action(*, tool: str, action: str | None) -> str | None:
@@ -117,8 +117,35 @@ def dispatch_env_tool_request(
                 ),
             ],
         )
+
     tool = raw_tool.strip().lower()
-    if tool not in _TOOL_ACTIONS:
+    actions_by_tool = _tool_actions()
+    if tool not in actions_by_tool:
+        if discovery.tool_package_exists(tool):
+            return _reject(
+                code="E_ENV_TOOL_CATALOG",
+                message=f"env.tool package '{tool}' exists but its contract is unavailable",
+                active_buddy=active_buddy,
+                permission_boundary="env.tool.catalog",
+                human_summary=f"Tool '{tool}' package exists but its metadata could not be loaded.",
+                why_blocked="selected tool package contract/semantics failed to load",
+                impact="No env action ran and runtime state was unchanged.",
+                retryable=False,
+                retry_guidance="Fix selected tool metadata load errors before retrying.",
+                tool=tool,
+                allowed_next_actions=[
+                    "Use context.get to inspect tool_catalog and tool_catalog_errors.",
+                    "Use another supported tool until metadata errors are fixed.",
+                ],
+                correctable_fields=["tool"],
+                alternative_capabilities=[
+                    tool_responses.alternative_capability(
+                        tool="context",
+                        action="get",
+                        condition="Use when you need tool_catalog and tool_catalog_errors before retrying.",
+                    )
+                ],
+            )
         return _reject(
             code="E_ENV_TOOL",
             message=f"unsupported env.tool payload.tool: {tool}",
@@ -181,9 +208,10 @@ def dispatch_env_tool_request(
                 )
             ],
         )
+
     action = raw_action.strip().replace("-", "_")
     semantic_action = _semantic_action(tool=tool, action=action)
-    if action not in _TOOL_ACTIONS[tool]:
+    if action not in actions_by_tool[tool]:
         return _reject(
             code="E_ENV_TOOL",
             message=f"unsupported env.tool payload.action for {tool}: {action}",
@@ -201,7 +229,7 @@ def dispatch_env_tool_request(
             action=semantic_action,
             allowed_next_actions=[
                 f"Use one supported action: {_supported_actions_text(tool)}.",
-                f"Use context.get.tool_catalog['{_TOOL_HINTS[tool]}'] for action and payload field hints.",
+                f"Use context.get.tool_catalog['{tool}'] for action and payload field hints.",
                 "Run python3 scripts/turn_runtime.py status for the full env tool catalog.",
             ],
             correctable_fields=["action"],
@@ -235,7 +263,7 @@ def dispatch_env_tool_request(
             action=semantic_action,
             allowed_next_actions=[
                 "Set payload.args to an object and retry.",
-                f"Use context.get.tool_catalog['{_TOOL_HINTS[tool]}'].payload_fields to shape args.",
+                f"Use context.get.tool_catalog['{tool}'].payload_fields to shape args.",
             ],
             correctable_fields=["args"],
             alternative_capabilities=[

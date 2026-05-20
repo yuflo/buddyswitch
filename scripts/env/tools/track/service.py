@@ -9,7 +9,7 @@ from typing import Any, TypedDict
 from env.domain import artifact_visibility as artifact_visibility_domain
 from env.domain import publication as publication_domain
 from env.repos import tracks as track_repo
-from env.tools import contracts as tool_contracts
+from env.tools.track import contract as tool_contract
 from env.tools import responses as tool_responses
 
 
@@ -22,8 +22,11 @@ class TrackServiceContext(TypedDict):
 
 
 def _allowed(action: str) -> set[str]:
-    tool, action_name = action.split(".", 1)
-    return tool_contracts.payload_fields_for_action(tool, action_name)
+    _, action_name = action.split(".", 1)
+    for row in tool_contract.TOOL_SPEC.get("actions", []):
+        if isinstance(row, dict) and row.get("name") == action_name:
+            return {field for field in row.get("payload_fields", []) if isinstance(field, str)}
+    return set()
 
 
 def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:

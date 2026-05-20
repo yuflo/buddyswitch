@@ -32,7 +32,15 @@ PERMISSION_PROFILE = "buddyswitch-runtime"
 
 
 class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    _DOMAIN_CROSS_OBJECT_ALLOWLIST = {"publication", "comment_targets", "artifact_visibility"}
+    _DOMAIN_CROSS_OBJECT_ALLOWLIST = {
+        "publication",
+        "comment_targets",
+        "artifact_visibility",
+        "tasks",
+        "source_refs",
+        "buddybox_workspace",
+    }
+    _SHIPPED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "message", "comment", "search"}
 
     def _legacy_store_import_violations(self, roots: list[Path]) -> list[str]:
         violations: list[str] = []
@@ -52,6 +60,63 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                         if node.module == "env_legacy_store":
                             violations.append(f"{rel}:{node.lineno}: from env_legacy_store import ...")
         return violations
+
+    def test_tool_package_cross_imports_are_forbidden(self) -> None:
+        tool_root = ROOT / "scripts" / "env" / "tools"
+        violations: list[str] = []
+        for tool in sorted(self._SHIPPED_TOOLS):
+            package_dir = tool_root / tool
+            if not package_dir.is_dir():
+                violations.append(f"missing package: {package_dir.relative_to(ROOT)}")
+                continue
+            for path in sorted(package_dir.rglob("*.py")):
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+                rel = path.relative_to(ROOT).as_posix()
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            if alias.name.startswith("env.tools."):
+                                parts = alias.name.split(".")
+                                if len(parts) >= 3:
+                                    target = parts[2]
+                                    if target in self._SHIPPED_TOOLS and target != tool:
+                                        violations.append(f"{rel}:{node.lineno}: import {alias.name}")
+                    elif isinstance(node, ast.ImportFrom):
+                        module = node.module or ""
+                        if module == "env.tools":
+                            for alias in node.names:
+                                if alias.name in self._SHIPPED_TOOLS and alias.name != tool:
+                                    violations.append(f"{rel}:{node.lineno}: from env.tools import {alias.name}")
+                        elif module.startswith("env.tools."):
+                            parts = module.split(".")
+                            if len(parts) >= 3:
+                                target = parts[2]
+                                if target in self._SHIPPED_TOOLS and target != tool:
+                                    violations.append(f"{rel}:{node.lineno}: from {module} import ...")
+
+        self.assertEqual(violations, [], msg="\n".join(violations))
+
+    def test_legacy_env_services_tool_entrypoints_are_removed(self) -> None:
+        runtime_roots = [ROOT / "scripts"]
+        import_violations: list[str] = []
+        for root in runtime_roots:
+            for path in sorted(root.rglob("*.py")):
+                rel = path.relative_to(ROOT).as_posix()
+                source = path.read_text(encoding="utf-8")
+                tree = ast.parse(source, filename=str(path))
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            if alias.name.startswith("env.services"):
+                                import_violations.append(f"{rel}:{node.lineno}: import {alias.name}")
+                    elif isinstance(node, ast.ImportFrom):
+                        module = node.module or ""
+                        if module.startswith("env.services"):
+                            import_violations.append(f"{rel}:{node.lineno}: from {module} import ...")
+        self.assertEqual(import_violations, [], msg="\n".join(import_violations))
+
+        service_dir = ROOT / "scripts" / "env" / "services"
+        self.assertFalse(service_dir.exists(), msg=str(service_dir))
 
     def _patch_config(
         self,
@@ -255,13 +320,13 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(project_probe.exists())
         self.assertFalse(raw_probe.exists())
 
-    def test_env_services_direct_file_writes_are_explicitly_allowlisted(self) -> None:
+    def test_env_tool_services_do_not_write_files_directly(self) -> None:
         completed = subprocess.run(
             [
                 "rg",
                 "-n",
                 r"\.mkdir\(|\.write_text\(|\.write_bytes\(|\.unlink\(|os\.replace\(|NamedTemporaryFile\(",
-                "scripts/env/services",
+                "scripts/env/tools",
             ],
             cwd=ROOT,
             text=True,
@@ -270,23 +335,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         hits = [line for line in completed.stdout.splitlines() if line.strip()]
-        allowed_snippets = {
-            "scripts/env/services/buddybox.py": [
-                "root.mkdir(parents=True, exist_ok=True)",
-                "resolved.parent.mkdir(parents=True, exist_ok=True)",
-                "NamedTemporaryFile(\"wb\", delete=False, dir=resolved.parent)",
-                "os.replace(temp_name, resolved)",
-                "resolved.unlink()",
-            ]
-        }
-        disallowed: list[str] = []
-        for line in hits:
-            path = line.split(":", 1)[0]
-            snippets = allowed_snippets.get(path, [])
-            if any(snippet in line for snippet in snippets):
-                continue
-            disallowed.append(line)
-        self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+        self.assertEqual(hits, [], msg="\n".join(hits))
 
     def test_object_repo_sibling_imports_are_restricted_to_runtime_files(self) -> None:
         repo_files = sorted(path for path in ROOT.glob("scripts/**/repos/*.py") if path.name != "__init__.py")
@@ -340,7 +389,6 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_active_runtime_modules_do_not_import_env_legacy_store(self) -> None:
         roots = [
-            ROOT / "scripts/env/services",
             ROOT / "scripts/env/domain",
             ROOT / "scripts/env/repos",
             ROOT / "scripts/env/tools",
@@ -361,11 +409,9 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "scripts/env/repos/artifacts.py",
             "scripts/env/repos/tracks.py",
             "scripts/env/domain/artifact_visibility.py",
-            "scripts/env/services/artifacts.py",
-            "scripts/env/services/tracks.py",
             "scripts/env/domain/tasks.py",
         }
-        scanned_roots = [ROOT / "scripts/env/services", ROOT / "scripts/env/domain"]
+        scanned_roots = [ROOT / "scripts/env/domain"]
         violations: list[str] = []
         for root in scanned_roots:
             for path in sorted(root.glob("*.py")):

@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from env.domain import artifact_visibility as artifact_visibility_domain
+from env.domain import buddybox_workspace as buddybox_workspace_domain
 from env.repos import tasks as task_repo
 from env.repos import tracks as track_repo
-from env.services import buddybox as buddybox_service
-from env.tools import contracts as tool_contracts
+from env.tools import catalog as tool_catalog
+from env.tools.context import contract as tool_contract
 from env.tools import responses as tool_responses
 
 
@@ -55,8 +56,12 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
 
 
 def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str) -> dict[str, Any] | None:
-    tool, action_name = action.split(".", 1)
-    allowed = tool_contracts.payload_fields_for_action(tool, action_name)
+    _, action_name = action.split(".", 1)
+    allowed = set()
+    for row in tool_contract.TOOL_SPEC.get("actions", []):
+        if isinstance(row, dict) and row.get("name") == action_name:
+            allowed = {field for field in row.get("payload_fields", []) if isinstance(field, str)}
+            break
     unknown = sorted(key for key in args if key not in allowed)
     if unknown:
         return _reject_payload(
@@ -153,12 +158,13 @@ def _current_context_sections(*, active_buddy: str, args: dict[str, Any], instan
         limit_value=limit_value,
     )
 
-    buddybox_desc = buddybox_service.build_buddybox_desc(active_buddy, instance_payload=instance_payload)
+    buddybox_desc = buddybox_workspace_domain.build_buddybox_desc(active_buddy, instance_payload=instance_payload)
     candidate_tracks = [_candidate_track_row(track=row, active_buddy=active_buddy) for row in visible_tracks]
 
     return {
-        "tool_catalog": tool_contracts.env_tools_description(),
-        "operation_semantics": tool_contracts.operation_semantics(),
+        "tool_catalog": tool_catalog.env_tools_description(),
+        "operation_semantics": tool_catalog.operation_semantics(),
+        "tool_catalog_errors": tool_catalog.tool_catalog_errors(),
         "tracks": visible_tracks,
         "tasks": visible_tasks,
         "artifact_summaries": visible_artifacts,
@@ -276,7 +282,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "current_context_summary": sections["current_context_summary"],
         "candidate_tracks": sections["candidate_tracks"],
         "buddybox_desc": sections["buddybox_desc"],
-        "tool_affordances": tool_contracts.compact_tool_affordances(),
+        "tool_affordances": tool_catalog.compact_tool_affordances(),
         "decision_surface": sections["decision_surface"],
     }
 

@@ -15,7 +15,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_manifest  # noqa: E402
 import env_legacy_store as env_store  # noqa: E402
-from env.tools import contracts as tool_contracts  # noqa: E402
+from env.tools import catalog as tool_catalog  # noqa: E402
 from env.tools import router as tool_router  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -55,7 +55,7 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
     def test_registry_excludes_retired_run_and_binding_tools(self) -> None:
-        tools = set(tool_contracts.supported_tools())
+        tools = set(tool_catalog.supported_tools())
         self.assertNotIn("run", tools)
         self.assertNotIn("binding", tools)
         self.assertIn("context", tools)
