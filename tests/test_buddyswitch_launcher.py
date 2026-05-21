@@ -1228,16 +1228,6 @@ exec "$real_git" "$@"
                 encoding="utf-8"
             )
             self.assertEqual(agents_md.read_text(encoding="utf-8"), expected_agents)
-            runtime_prompt = agents_md.read_text(encoding="utf-8")
-            for token in (
-                "## Runtime Boundary",
-                "project.access=read-only",
-                "AGENTS.md is guidance only and not the permission source.",
-                "python3 scripts/env/client.py context summarize",
-                "Do not edit `buddyswitch/objects/**`",
-                "## Output Rule",
-            ):
-                self.assertIn(token, runtime_prompt)
             runtime_skills = workspace_dir / ".agents" / "skills"
             self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
             self.assertTrue((runtime_skills / "track-tool" / "SKILL.md").exists())
@@ -7901,7 +7891,7 @@ fi
 cat "${tmp_root}/stderr.txt"
 '''
         completed = subprocess.run(
-            ["/bin/zsh", "-lc", command],
+            ["/bin/bash", "-lc", command],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -7909,6 +7899,52 @@ cat "${tmp_root}/stderr.txt"
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         self.assertIn("BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE is required", completed.stdout + completed.stderr)
+
+    def test_workspace_install_runtime_agents_copies_existing_template_without_content_validation(self) -> None:
+        command = r'''
+set -euo pipefail
+source "tools/launcher/workspace.sh"
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "${tmp_root}"' EXIT
+export BUDDYSWITCH_SHARED_ROOT="${tmp_root}/shared"
+export BUDDYSWITCH_WORKSPACE_DIR="${tmp_root}/workspace"
+export BUDDYSWITCH_ACTIVE_BUDDY="pm"
+export BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE="${tmp_root}/AGENTS.md"
+mkdir -p "${BUDDYSWITCH_WORKSPACE_DIR}"
+printf '# Custom Runtime AGENTS\n\nFramework-owned prose can iterate freely.\n' >"${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
+buddyswitch_workspace_install_runtime_agents
+cmp "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}" "${BUDDYSWITCH_WORKSPACE_DIR}/AGENTS.md"
+'''
+        completed = subprocess.run(
+            ["/bin/bash", "-lc", command],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+    def test_buddy_agents_template_requirement_checks_presence_only(self) -> None:
+        command = r'''
+set -euo pipefail
+source "tools/launcher/env.sh"
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "${tmp_root}"' EXIT
+export BUDDYSWITCH_REPO_ROOT="${tmp_root}/repo"
+mkdir -p "${BUDDYSWITCH_REPO_ROOT}/tools/launcher/assets/buddies/pm"
+printf '# Custom Runtime AGENTS\n\nNo required wording.\n' >"${BUDDYSWITCH_REPO_ROOT}/tools/launcher/assets/buddies/pm/AGENTS.md"
+buddyswitch_require_buddy_agents_template pm
+printf '%s\n' "${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE}"
+'''
+        completed = subprocess.run(
+            ["/bin/bash", "-lc", command],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertTrue(completed.stdout.strip().endswith("/tools/launcher/assets/buddies/pm/AGENTS.md"))
 
     def test_workspace_sync_restores_runtime_outputs_when_worktree_rebuild_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

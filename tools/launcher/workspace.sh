@@ -703,7 +703,7 @@ buddyswitch_workspace_ensure_execution_worktree() {
 }
 
 buddyswitch_workspace_install_runtime_agents() {
-  local workspace_dir template_path buddy_id repo_root runtime_agents_helper manifest_path
+  local workspace_dir template_path buddy_id
 
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
   template_path="${BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE:-}"
@@ -720,15 +720,6 @@ buddyswitch_workspace_install_runtime_agents() {
     echo "Active buddy id is required for runtime AGENTS installation." >&2
     return 1
   fi
-
-  repo_root="$(buddyswitch_workspace_repo_root)"
-  runtime_agents_helper="${repo_root}/scripts/runtime_agents.py"
-  manifest_path="${repo_root}/buddyswitch/manifest.toml"
-  if [[ ! -f "${runtime_agents_helper}" ]]; then
-    echo "Runtime AGENTS helper missing: ${runtime_agents_helper}" >&2
-    return 1
-  fi
-  python3 "${runtime_agents_helper}" --manifest "${manifest_path}" validate --buddy "${buddy_id}" --template "${template_path}" >/dev/null
 
   cp "${template_path}" "${workspace_dir}/AGENTS.md"
 }

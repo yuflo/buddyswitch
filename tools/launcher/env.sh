@@ -6,7 +6,6 @@ BUDDYSWITCH_WORKSPACE_HELPER="${BUDDYSWITCH_LAUNCHER_DIR}/workspace.sh"
 BUDDYSWITCH_RUNTIME_LOCK_HELPER_DEFAULT="${BUDDYSWITCH_LAUNCHER_DIR}/runtime_lock.py"
 BUDDYSWITCH_CODEX_CONFIG_HELPER="${BUDDYSWITCH_LAUNCHER_DIR}/codex_config.py"
 BUDDYSWITCH_ENV_PROFILES_HELPER_REL="scripts/env_profiles.py"
-BUDDYSWITCH_RUNTIME_AGENTS_HELPER_REL="scripts/runtime_agents.py"
 
 if [[ ! -f "${BUDDYSWITCH_WORKSPACE_HELPER}" ]]; then
   echo "Workspace helper is missing under tools/launcher." >&2
@@ -183,20 +182,13 @@ buddyswitch_buddy_agents_template_path() {
 
 buddyswitch_require_buddy_agents_template() {
   local buddy_id="$1"
-  local template_path helper manifest_path
+  local template_path
 
   template_path="$(buddyswitch_buddy_agents_template_path "${buddy_id}")"
   if [[ ! -f "${template_path}" ]]; then
     echo "Buddy AGENTS template not found: ${template_path}" >&2
     return 1
   fi
-  helper="${BUDDYSWITCH_REPO_ROOT}/${BUDDYSWITCH_RUNTIME_AGENTS_HELPER_REL}"
-  manifest_path="${BUDDYSWITCH_REPO_ROOT}/buddyswitch/manifest.toml"
-  if [[ ! -f "${helper}" ]]; then
-    echo "Runtime AGENTS helper missing: ${helper}" >&2
-    return 1
-  fi
-  python3 "${helper}" --manifest "${manifest_path}" validate --buddy "${buddy_id}" --template "${template_path}" >/dev/null
   export BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE="${template_path}"
 }
 
