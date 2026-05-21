@@ -298,7 +298,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(response.get("ok"), msg=response)
         self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BACKEND_APPROVAL_REQUIRED")
         self.assertEqual(response.get("permission_boundary"), "search.search_api.user_approved_only")
-        self.assertIn("search open_browser", str(response.get("command_hint")))
+        self.assertIn("search open-browser", str(response.get("command_hint")))
 
     def test_search_request_search_api_returns_non_market_provider_unavailable(self) -> None:
         instance_json = self._instance_json(buddy="dev")

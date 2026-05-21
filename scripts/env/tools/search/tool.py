@@ -49,6 +49,12 @@ def _build_definition() -> ToolDefinition:
                 returns=(
                     'backend_status',
                 ),
+                use_when=(
+                    'You need search capability boundary and backend/browser readiness metadata only.',
+                ),
+                do_not_use_when=(
+                    'You need target URL planning or browser page opening.',
+                ),
                 risk_hints={
                     'read_only': True,
                     'destructive': False,
@@ -98,6 +104,13 @@ def _build_definition() -> ToolDefinition:
                     'backend',
                     'engine',
                 ),
+                use_when=(
+                    'You need explicit backend/query/engine URL planning metadata, including target_url, without opening a browser page (page_opened=false).',
+                ),
+                do_not_use_when=(
+                    'You need to open the search page now in the instance browser session; use search.open_browser.',
+                    'You want implicit backend auto selection instead of explicit backend payload.',
+                ),
                 risk_hints={
                     'read_only': True,
                     'destructive': False,
@@ -141,6 +154,13 @@ def _build_definition() -> ToolDefinition:
                     'target_url',
                     'backend',
                     'engine',
+                ),
+                use_when=(
+                    'You need to start browser-native discovery by opening a query URL in the launcher-managed browser, then continue with chrome-devtools-cockpit.',
+                ),
+                do_not_use_when=(
+                    'You only need search metadata or URL planning without opening a page.',
+                    'You are trying to use legacy non-payload flags for query or engine; provide payload fields only.',
                 ),
                 risk_hints={
                     'read_only': False,

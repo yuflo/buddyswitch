@@ -72,6 +72,14 @@ def _build_definition() -> ToolDefinition:
                     'task_id',
                     'task',
                 ),
+                use_when=(
+                    'You need to capture a new private work item for the active buddy.',
+                    'You are turning a newly identified step into a track-linked or standalone task row.',
+                ),
+                do_not_use_when=(
+                    'You need to modify an existing task; use task.update.',
+                    'You need to retire an existing task; use task.archive.',
+                ),
                 risk_hints={
                     'read_only': False,
                     'destructive': False,
@@ -119,6 +127,14 @@ def _build_definition() -> ToolDefinition:
                 returns=(
                     'tasks',
                 ),
+                use_when=(
+                    'You need a filtered task list view across many tasks by status or track_id.',
+                    'You are triaging active-buddy workload before selecting one task to edit.',
+                ),
+                do_not_use_when=(
+                    'You need one specific task summary row by task id; use task.get.',
+                    'You need to create or mutate task state; use task.create/task.update/task.archive.',
+                ),
                 risk_hints={
                     'read_only': True,
                     'destructive': False,
@@ -155,6 +171,14 @@ def _build_definition() -> ToolDefinition:
                 ),
                 returns=(
                     'task',
+                ),
+                use_when=(
+                    'You already know the task id and need the current full task row.',
+                    'You need to inspect one task before deciding whether to update or archive it.',
+                ),
+                do_not_use_when=(
+                    'You need multi-row filtering or queue triage; use task.list.',
+                    'You need to mutate task fields or lifecycle; use task.update or task.archive.',
                 ),
                 risk_hints={
                     'read_only': True,
@@ -210,6 +234,14 @@ def _build_definition() -> ToolDefinition:
                 returns=(
                     'task',
                 ),
+                use_when=(
+                    'You need to patch title/summary/status/track_id on an existing task.',
+                    'You want to move a task between active, blocked, and done without archiving it.',
+                ),
+                do_not_use_when=(
+                    'You need to create a brand-new task row; use task.create.',
+                    'You are removing the task from active workflow via archival; use task.archive.',
+                ),
                 risk_hints={
                     'read_only': False,
                     'destructive': False,
@@ -246,6 +278,14 @@ def _build_definition() -> ToolDefinition:
                 ),
                 returns=(
                     'task',
+                ),
+                use_when=(
+                    'You need to close out a task so it leaves active workflow views.',
+                    'You are preserving history while marking the task as archived lifecycle state.',
+                ),
+                do_not_use_when=(
+                    'You only need to mark ongoing progress states like blocked/done; use task.update.',
+                    'You need to inspect tasks without mutation; use task.get or task.list.',
                 ),
                 risk_hints={
                     'read_only': False,

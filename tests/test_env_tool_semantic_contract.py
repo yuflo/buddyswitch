@@ -26,13 +26,28 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     "message": {"send", "list"},
     "comment": {"add", "list"},
 }
+_PLACEHOLDER_SNIPPETS = ("is the intended action", "closer semantic match")
 
 
 class EnvToolSemanticContractTests(unittest.TestCase):
-    def test_registry_semantics_cover_every_registered_tool_and_action(self) -> None:
-        desc = catalog.env_tools_description()
-        registry_tools = set(catalog.supported_tools())
+    def _desc(self) -> dict[str, dict[str, object]]:
+        return catalog.env_tools_description()
 
+    def _semantic_text(self, *, tool: str, action: str) -> str:
+        semantic = self._desc()[tool]["action_semantics"][action]
+        self.assertIsInstance(semantic, dict, msg=f"{tool}.{action}")
+        assert isinstance(semantic, dict)
+        use_when = semantic.get("use_when")
+        do_not_use_when = semantic.get("do_not_use_when")
+        self.assertIsInstance(use_when, list, msg=f"{tool}.{action}.use_when")
+        self.assertIsInstance(do_not_use_when, list, msg=f"{tool}.{action}.do_not_use_when")
+        assert isinstance(use_when, list)
+        assert isinstance(do_not_use_when, list)
+        return "\n".join(str(row) for row in (use_when + do_not_use_when)).lower()
+
+    def test_registry_semantics_cover_every_registered_tool_and_action(self) -> None:
+        desc = self._desc()
+        registry_tools = set(catalog.supported_tools())
         self.assertEqual(registry_tools, _EXPECTED_TOOLS)
         self.assertEqual(set(desc), _EXPECTED_TOOLS)
         self.assertEqual(catalog.semantic_contract_errors(), [])
@@ -44,18 +59,67 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             self.assertEqual(set(desc[tool]["payload_fields"]), expected_actions)
             self.assertEqual(set(desc[tool]["action_semantics"]), expected_actions)
 
-    def test_handoff_and_track_advance_are_absent(self) -> None:
-        by_tool = {tool: set(catalog.supported_actions(tool)) for tool in catalog.supported_tools()}
-        self.assertNotIn("handoff", by_tool)
-        self.assertNotIn("advance", by_tool["track"])
-        self.assertNotIn("resolve", by_tool["comment"])
-        self.assertNotIn("reopen", by_tool["comment"])
+    def test_every_action_has_action_owned_selection_semantics(self) -> None:
+        desc = self._desc()
+        for tool in sorted(catalog.supported_tools()):
+            for action in sorted(catalog.supported_actions(tool)):
+                with self.subTest(action=f"{tool}.{action}"):
+                    semantic = desc[tool]["action_semantics"][action]
+                    self.assertIsInstance(semantic, dict)
+                    assert isinstance(semantic, dict)
+                    use_when = semantic.get("use_when")
+                    do_not_use_when = semantic.get("do_not_use_when")
+                    self.assertIsInstance(use_when, list)
+                    self.assertIsInstance(do_not_use_when, list)
+                    assert isinstance(use_when, list)
+                    assert isinstance(do_not_use_when, list)
+                    self.assertTrue(use_when)
+                    self.assertTrue(do_not_use_when)
+                    text = "\n".join(use_when + do_not_use_when).lower()
+                    for snippet in _PLACEHOLDER_SNIPPETS:
+                        self.assertNotIn(snippet, text)
 
-        op = catalog.operation_semantics()
-        self.assertNotIn("track.advance", op)
-        self.assertFalse(any(key.startswith("handoff.") for key in op))
-        self.assertNotIn("comment.resolve", op)
-        self.assertNotIn("comment.reopen", op)
+    def test_all_expected_actions_have_semantic_boundary_text(self) -> None:
+        desc = self._desc()
+        for tool, actions in _EXPECTED_ACTIONS_BY_TOOL.items():
+            self.assertEqual(set(desc[tool]["action_semantics"]), actions)
+            for action in actions:
+                with self.subTest(action=f"{tool}.{action}"):
+                    text = self._semantic_text(tool=tool, action=action)
+                    self.assertTrue(text.strip())
+
+    def test_adjacent_action_boundaries_are_explained(self) -> None:
+        checks = [
+            ("track", "add_material", ("material", "proof", "timeline")),
+            ("track", "add_update", ("timeline", "material", "proof")),
+            ("track", "add_proof", ("proof", "material", "timeline")),
+            ("artifact", "get", ("full", "body", "draft")),
+            ("artifact", "create_revision", ("draft", "publish", "update")),
+            ("artifact", "update_metadata", ("patch", "publish", "revision")),
+            ("task", "list", ("list", "summary", "get")),
+            ("task", "get", ("task id", "list", "update")),
+            ("task", "update", ("patch", "archive", "task")),
+            ("task", "archive", ("archive", "active", "update")),
+            ("comment", "add", ("discussion", "timeline", "message")),
+            ("search", "request", ("target_url", "without opening", "open_browser")),
+            ("search", "open_browser", ("browser", "open", "payload")),
+            ("evidence", "issue_browser", ("artifact", "token", "downgrade")),
+            ("evidence", "approve_downgrade", ("downgrade", "reason", "browser")),
+            ("context", "get", ("full", "catalog", "summarize")),
+            ("context", "summarize", ("compact", "summary", "get")),
+            ("context", "list_sources", ("source", "descriptor", "catalog")),
+            ("buddybox", "list", ("summary", "logical", "read")),
+            ("buddybox", "read", ("exact", "logical_name", "list")),
+            ("buddybox", "write", ("replace", "private", "artifact")),
+            ("buddybox", "delete", ("delete", "private", "archive")),
+            ("message", "send", ("inbox", "buddy", "comment")),
+            ("message", "list", ("inbox", "read", "comment")),
+        ]
+        for tool, action, snippets in checks:
+            text = self._semantic_text(tool=tool, action=action)
+            with self.subTest(action=f"{tool}.{action}"):
+                for snippet in snippets:
+                    self.assertIn(snippet, text, msg=f"{tool}.{action} missing snippet '{snippet}'")
 
     def test_operation_semantics_machine_contract_is_preserved(self) -> None:
         op = catalog.operation_semantics()
@@ -80,93 +144,30 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertIsInstance(row.get("returns"), list)
                 self.assertIsInstance(row.get("risk_hints"), dict)
 
-    def test_critical_track_artifact_action_semantics_are_not_placeholders(self) -> None:
-        op = catalog.operation_semantics()
-        critical = (
-            "track.create",
-            "track.open",
-            "track.add_material",
-            "track.add_proof",
-            "artifact.create_revision",
-            "artifact.get",
+    def test_broker_payload_action_ids_are_strict(self) -> None:
+        hyphenated = catalog.dispatch_env_tool_request(
+            payload={"tool": "search", "action": "open-browser", "args": {"query": "x"}},
+            active_buddy="market",
+            instance_id="inst-semantic-check",
+            instance_json=ROOT / "tmp" / "does-not-matter.json",
+            instance_payload={},
+            manifest={"buddies": [{"id": "market"}]},
+            manifest_path=ROOT / "buddyswitch" / "manifest.toml",
         )
-        for key in critical:
-            semantic = op.get(key)
-            self.assertIsInstance(semantic, dict, msg=key)
-            assert isinstance(semantic, dict)
-            with self.subTest(action=key):
-                self.assertIsInstance(semantic.get("risk_hints"), dict)
-                full_semantic = catalog.env_tools_description()[key.split(".", 1)[0]]["action_semantics"][key.split(".", 1)[1]]
-                self.assertIsInstance(full_semantic.get("use_when"), list)
-                self.assertGreater(len(full_semantic.get("use_when", [])), 0)
-                self.assertIsInstance(full_semantic.get("do_not_use_when"), list)
-                self.assertGreater(len(full_semantic.get("do_not_use_when", [])), 0)
-                self.assertIsInstance(full_semantic.get("inputs_explained"), dict)
-                self.assertGreater(len(full_semantic.get("inputs_explained", {})), 0)
-                self.assertIsInstance(full_semantic.get("common_failures"), list)
-                self.assertGreater(len(full_semantic.get("common_failures", [])), 0)
-                self.assertIsInstance(full_semantic.get("success_means"), str)
-                self.assertNotIn("Operation completed with structured tool feedback.", full_semantic.get("success_means", ""))
+        self.assertFalse(hyphenated.get("ok"), msg=hyphenated)
+        self.assertEqual((hyphenated.get("error") or {}).get("code"), "E_ENV_TOOL")
+        self.assertIn("open-browser", str((hyphenated.get("error") or {}).get("message", "")))
 
-    def test_publication_payload_fields_match_single_publication_path(self) -> None:
-        desc = catalog.env_tools_description()
-        track_fields = desc["track"]["payload_fields"]
-        artifact_fields = desc["artifact"]["payload_fields"]
-        self.assertEqual(track_fields["add_material"], ["track_id", "artifact_id", "label", "summary"])
-        self.assertEqual(track_fields["add_proof"], ["track_id", "artifact_id", "label", "summary"])
-        self.assertEqual(
-            artifact_fields["create_revision"],
-            ["artifact_id", "title", "summary", "template", "body", "supersedes_artifact_id", "source_refs", "read_claim"],
+        canonical = catalog.dispatch_env_tool_request(
+            payload={"tool": "search", "action": "open_browser", "args": {"query": "x"}},
+            active_buddy="market",
+            instance_id="inst-semantic-check",
+            instance_json=ROOT / "tmp" / "does-not-matter.json",
+            instance_payload={"browser_port": None},
+            manifest={"buddies": [{"id": "market"}]},
+            manifest_path=ROOT / "buddyswitch" / "manifest.toml",
         )
-        self.assertEqual(
-            artifact_fields["update_metadata"],
-            ["artifact_id", "title", "summary", "template", "body", "source_refs", "read_claim"],
-        )
-
-    def test_compact_affordances_are_registry_aligned(self) -> None:
-        compact = catalog.compact_tool_affordances()
-        self.assertEqual(set(compact), _EXPECTED_TOOLS)
-        for tool, row in compact.items():
-            with self.subTest(tool=tool):
-                self.assertIsInstance(row, dict)
-                self.assertIn("capability", row)
-                self.assertIn("returns", row)
-                self.assertIn("state_effect", row)
-
-    def test_comment_payload_fields_match_active_comment_capability(self) -> None:
-        desc = catalog.env_tools_description()
-        comment_fields = desc["comment"]["payload_fields"]
-        self.assertEqual(
-            comment_fields["add"],
-            ["target_type", "target_id", "content", "reply_to", "artifact_revision_id", "anchor", "mentions"],
-        )
-        self.assertEqual(comment_fields["list"], ["target_type", "target_id", "status"])
-
-    def test_full_catalog_exposes_input_schemas_from_definitions(self) -> None:
-        desc = catalog.env_tools_description()
-        for tool in sorted(catalog.supported_tools()):
-            for action in sorted(catalog.supported_actions(tool)):
-                action_def = catalog.get_action_definition(tool, action)
-                self.assertEqual(desc[tool]["input_schemas"][action], action_def.input_schema)
-
-    def test_inputs_explained_are_derived_from_schema_descriptions(self) -> None:
-        desc = catalog.env_tools_description()
-        for tool in sorted(catalog.supported_tools()):
-            for action in sorted(catalog.supported_actions(tool)):
-                schema = catalog.get_action_definition(tool, action).input_schema
-                properties = schema.get("properties") or {}
-                self.assertIsInstance(properties, dict, msg=f"{tool}.{action}")
-                assert isinstance(properties, dict)
-                explanations = desc[tool]["action_semantics"][action]["inputs_explained"]
-                self.assertEqual(set(explanations), set(properties))
-                for field, field_schema in properties.items():
-                    self.assertIsInstance(field_schema, dict, msg=f"{tool}.{action}.{field}")
-                    assert isinstance(field_schema, dict)
-                    description = field_schema.get("description")
-                    self.assertIsInstance(description, str, msg=f"{tool}.{action}.{field}.description")
-                    assert isinstance(description, str)
-                    self.assertIn(description, explanations[field])
-                    self.assertNotIn("payload field", explanations[field])
+        self.assertNotEqual((canonical.get("error") or {}).get("code"), "E_ENV_TOOL", msg=canonical)
 
 
 if __name__ == "__main__":

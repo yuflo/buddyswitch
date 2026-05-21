@@ -38,6 +38,8 @@ class ActionDefinition:
     authority: str
     preconditions: tuple[str, ...] = ()
     returns: tuple[str, ...] = ()
+    use_when: tuple[str, ...] = ()
+    do_not_use_when: tuple[str, ...] = ()
     risk_hints: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -60,6 +62,17 @@ def _require_text(value: Any, *, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
     return value.strip()
+
+
+def _validate_text_tuple(value: Any, *, field: str, require_non_empty: bool = False) -> tuple[str, ...]:
+    if not isinstance(value, tuple):
+        raise ValueError(f"{field} must be a tuple")
+    if require_non_empty and not value:
+        raise ValueError(f"{field} must be a non-empty tuple")
+    cleaned: list[str] = []
+    for index, row in enumerate(value):
+        cleaned.append(_require_text(row, field=f"{field}[{index}]"))
+    return tuple(cleaned)
 
 
 def _validate_schema_object(schema: Mapping[str, Any], *, field: str) -> None:
@@ -191,6 +204,8 @@ def validate_definition(definition: ToolDefinition) -> None:
     _require_text(definition.command, field=f"{tool_id}.command")
     _require_text(definition.scope, field=f"{tool_id}.scope")
     _require_text(definition.capability_boundary, field=f"{tool_id}.capability_boundary")
+    _validate_text_tuple(definition.use_when, field=f"{tool_id}.use_when", require_non_empty=True)
+    _validate_text_tuple(definition.do_not_use_when, field=f"{tool_id}.do_not_use_when", require_non_empty=True)
 
     seen_actions: set[str] = set()
     for action in definition.actions:
@@ -208,6 +223,12 @@ def validate_definition(definition: ToolDefinition) -> None:
         _require_text(action.kind, field=f"{tool_id}.{name}.kind")
         _require_text(action.required_permission, field=f"{tool_id}.{name}.required_permission")
         _require_text(action.authority, field=f"{tool_id}.{name}.authority")
+        _validate_text_tuple(action.use_when, field=f"{tool_id}.{name}.use_when", require_non_empty=True)
+        _validate_text_tuple(
+            action.do_not_use_when,
+            field=f"{tool_id}.{name}.do_not_use_when",
+            require_non_empty=True,
+        )
         if action.mutates not in _ALLOWED_MUTATION_VALUES:
             raise ValueError(f"{tool_id}.{name}.mutates must be one of {_ALLOWED_MUTATION_VALUES}")
 

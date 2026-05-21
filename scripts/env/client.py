@@ -87,8 +87,7 @@ def _register_tool_subcommands(subparsers: argparse._SubParsersAction[argparse.A
         tool_sub = parser.add_subparsers(dest="action", required=True)
         for action in sorted(tool_registry.supported_actions(tool)):
             cli_action = action.replace("_", "-")
-            aliases = [action] if cli_action != action else []
-            action_parser = tool_sub.add_parser(cli_action, aliases=aliases, help=f"{tool}.{action}")
+            action_parser = tool_sub.add_parser(cli_action, help=f"{tool}.{action}")
             action_parser.add_argument(
                 "--payload",
                 required=False,

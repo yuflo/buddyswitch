@@ -64,6 +64,14 @@ def _build_definition() -> ToolDefinition:
                 returns=(
                     'tool_evidence',
                 ),
+                use_when=(
+                    'You need transient browser evidence token metadata for one artifact target.',
+                ),
+                do_not_use_when=(
+                    'You need durable evidence persistence or mutation of product objects.',
+                    'The target is not an artifact.',
+                    'You are recording explicit downgrade approval metadata; use evidence.approve_downgrade.',
+                ),
                 risk_hints={
                     'read_only': False,
                     'destructive': False,
@@ -110,6 +118,14 @@ def _build_definition() -> ToolDefinition:
                 ),
                 returns=(
                     'tool_evidence',
+                ),
+                use_when=(
+                    'You need an explicit one-off artifact downgrade approval token with a non-empty reason.',
+                ),
+                do_not_use_when=(
+                    'You need a standing or blanket downgrade policy instead of one-off approval.',
+                    'Reason text is empty or omitted.',
+                    'You need normal browser evidence metadata issuance; use evidence.issue_browser after browser work.',
                 ),
                 risk_hints={
                     'read_only': False,

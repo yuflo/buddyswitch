@@ -64,6 +64,12 @@ def _build_definition() -> ToolDefinition:
                     'message_id',
                     'message',
                 ),
+                use_when=(
+                    'You need to deliver a direct buddy-to-buddy inbox message to a specific manifest buddy.',
+                ),
+                do_not_use_when=(
+                    'You only need inbox reads (use message.list) or target-scoped track/artifact discussion (use comment.add).',
+                ),
                 risk_hints={
                     'read_only': False,
                     'destructive': False,
@@ -100,6 +106,12 @@ def _build_definition() -> ToolDefinition:
                 ),
                 returns=(
                     'messages',
+                ),
+                use_when=(
+                    'You need to read active-buddy inbox messages, optionally filtered by sender buddy.',
+                ),
+                do_not_use_when=(
+                    'You need to create a new direct message (use message.send) or discuss a track/artifact target thread (use comment.add).',
                 ),
                 risk_hints={
                     'read_only': True,

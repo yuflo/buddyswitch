@@ -27,7 +27,7 @@ python3 scripts/env/client.py comment add --payload '{"target_type":"track","tar
 ## Workflow Notes
 
 - Use this tool for plain-text discussion on readable track and artifact targets.
-- Start with `python3 scripts/env/client.py context summarize` so comment actions run against current runtime-visible ids and state.
+- Start with `python3 scripts/env/client.py context summarize --payload '{}'` so comment actions run against current runtime-visible ids and state.
 - For exact operations, payload keys, optional keys, and response fields, inspect `context.get.tool_catalog['comment']` or `python3 scripts/turn_runtime.py status`.
 
 ## Key Boundary Rules
@@ -44,7 +44,7 @@ python3 scripts/env/client.py comment add --payload '{"target_type":"track","tar
 
 ```bash
 python3 scripts/env/client.py comment --help
-python3 scripts/env/client.py comment list --target-type track --target-id <track_id>
+python3 scripts/env/client.py comment list --payload '{"target_type":"track","target_id":"<track_id>"}'
 ```
 
 ## Do Not

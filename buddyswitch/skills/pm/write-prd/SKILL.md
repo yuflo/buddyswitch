@@ -36,8 +36,8 @@ description: Use when the task is producing PM product definition outputs such a
 ## Shared Runtime Rules
 - `artifact.create_revision` creates private draft/revision artifacts only.
 - Shared publication happens via `track.add_material` or `track.add_proof`.
-- Start with `python3 scripts/env/client.py context summarize`, then use `python3 scripts/env/client.py context get` when exact payload keys or response fields are unclear.
-- Do not edit `buddyswitch/objects/**` directly.
+- Start with `python3 scripts/env/client.py context summarize --payload '{}'`, then use `python3 scripts/env/client.py context get --payload '{}'` when exact payload keys or response fields are unclear.
+- Do not edit projected runtime object storage directly.
 - Use buddybox `logical_name` only for active-buddy-private working files.
 
 ## Examples

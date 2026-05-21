@@ -113,6 +113,14 @@ def _build_definition() -> ToolDefinition:
                 returns=(
                     'track',
                 ),
+                use_when=(
+                    'You are PM and need to start a new shared track page with initial outcome and now focus.',
+                    'No track exists yet for this initiative and collaborators need a canonical shared page.',
+                ),
+                do_not_use_when=(
+                    'You need to read or update an existing track; use track.list/track.open/track.update_now.',
+                    'You need to publish artifacts or timeline rows on an existing track; use add_material/add_update/add_proof.',
+                ),
                 risk_hints={
                     'read_only': False,
                     'destructive': False,
@@ -156,6 +164,14 @@ def _build_definition() -> ToolDefinition:
                 returns=(
                     'tracks',
                 ),
+                use_when=(
+                    'You need a summary index of non-archived tracks to choose where to operate.',
+                    'You are filtering candidate tracks by state before opening one in detail.',
+                ),
+                do_not_use_when=(
+                    'You already have track_id and need full page details; use track.open.',
+                    'You need to mutate track state or publication timeline; use a write track action.',
+                ),
                 risk_hints={
                     'read_only': True,
                     'destructive': False,
@@ -192,6 +208,14 @@ def _build_definition() -> ToolDefinition:
                 ),
                 returns=(
                     'track',
+                ),
+                use_when=(
+                    'You need full shared track page details for one known track_id.',
+                    'You are reviewing current now/timeline/material/proof before deciding on the next mutation.',
+                ),
+                do_not_use_when=(
+                    'You need to discover candidate track ids first; use track.list.',
+                    'You need to change now/state/health or append publications/updates; use write track actions.',
                 ),
                 risk_hints={
                     'read_only': True,
@@ -241,6 +265,14 @@ def _build_definition() -> ToolDefinition:
                 returns=(
                     'track',
                 ),
+                use_when=(
+                    'You need to patch track now.next/blocker or state/health without adding timeline rows.',
+                    'You are updating execution status (active/blocked/review/done) on the shared page.',
+                ),
+                do_not_use_when=(
+                    'You need a narrative event row in the timeline; use track.add_update.',
+                    'You need artifact publication into material/proof slots; use track.add_material or track.add_proof.',
+                ),
                 risk_hints={
                     'read_only': False,
                     'destructive': False,
@@ -273,7 +305,7 @@ def _build_definition() -> ToolDefinition:
                         },
                         'summary': {
                             'type': 'string',
-                            'description': 'Summary shown on track timeline and materials.',
+                            'description': 'Summary shown on the published material entry.',
                         },
                     },
                 },
@@ -293,6 +325,14 @@ def _build_definition() -> ToolDefinition:
                     'artifact_id',
                     'track',
                     'state_changes',
+                ),
+                use_when=(
+                    'You need to publish a draft artifact as current shared material on a track.',
+                    'The artifact should appear in track materials state (not as a standalone narrative-only update).',
+                ),
+                do_not_use_when=(
+                    'You need a plain timeline note without material publication; use track.add_update.',
+                    'You are publishing close proof rather than working material; use track.add_proof.',
                 ),
                 risk_hints={
                     'read_only': False,
@@ -347,6 +387,14 @@ def _build_definition() -> ToolDefinition:
                     'track',
                     'update',
                 ),
+                use_when=(
+                    'You need to append a timeline event (progress/decision/blocker/proof note) to track history.',
+                    'You need narrative status communication on the track without publishing a new material/proof artifact.',
+                ),
+                do_not_use_when=(
+                    'You are publishing an artifact into current material/proof slots; use track.add_material or track.add_proof.',
+                    'You only need to patch now/state/health fields; use track.update_now.',
+                ),
                 risk_hints={
                     'read_only': False,
                     'destructive': False,
@@ -400,6 +448,14 @@ def _build_definition() -> ToolDefinition:
                     'track',
                     'state_changes',
                 ),
+                use_when=(
+                    'You need to publish a draft artifact as track close proof for outcome validation.',
+                    'You are recording evidence in the dedicated proof slot, not general working material.',
+                ),
+                do_not_use_when=(
+                    'You are publishing ongoing working artifacts; use track.add_material.',
+                    'You only need a timeline narrative update with optional refs; use track.add_update.',
+                ),
                 risk_hints={
                     'read_only': False,
                     'destructive': False,
@@ -437,6 +493,14 @@ def _build_definition() -> ToolDefinition:
                 ),
                 returns=(
                     'track',
+                ),
+                use_when=(
+                    'You are PM and need to close a track lifecycle so it is archived from active collaboration flows.',
+                    'The track should no longer accept routine shared progress mutations.',
+                ),
+                do_not_use_when=(
+                    'You only need to reflect temporary execution blockage or completion; use track.update_now state/health.',
+                    'You still expect ongoing material, proof, or timeline updates on the same track.',
                 ),
                 risk_hints={
                     'read_only': False,

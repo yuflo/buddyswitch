@@ -180,7 +180,7 @@ def _engine_error(*, action: str, context: SearchServiceContext) -> dict[str, An
         ],
         extra={
             "allowed_engines": list(ALLOWED_ENGINES),
-            "command_hint": "python3 scripts/env/client.py search open_browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
+            "command_hint": "python3 scripts/env/client.py search open-browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
         },
     )
 
@@ -212,7 +212,7 @@ def _query_error(*, action: str, context: SearchServiceContext) -> dict[str, Any
             )
         ],
         extra={
-            "command_hint": "python3 scripts/env/client.py search open_browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
+            "command_hint": "python3 scripts/env/client.py search open-browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
         },
     )
 
@@ -375,7 +375,7 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
                 ),
             ],
             extra={
-                "command_hint": "python3 scripts/env/client.py search open_browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
+                "command_hint": "python3 scripts/env/client.py search open-browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
                 "reason": "No BuddySwitch-managed search API provider is configured.",
             },
         )
@@ -410,7 +410,7 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
             ),
         ],
         extra={
-            "command_hint": "python3 scripts/env/client.py search open_browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
+            "command_hint": "python3 scripts/env/client.py search open-browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
             "reason": "No BuddySwitch-managed search API provider is configured.",
         },
     )
@@ -465,7 +465,7 @@ def status_for_active_instance(*, args: dict[str, Any], context: SearchServiceCo
         extra={
             **_status_payload(context, boundary),
             "permission_boundary": "search.profile",
-            "command_hint": "python3 scripts/env/client.py search open_browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
+            "command_hint": "python3 scripts/env/client.py search open-browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
         },
     )
 
@@ -531,7 +531,7 @@ def request_for_active_instance(*, args: dict[str, Any], context: SearchServiceC
             "page_opened": False,
             "permission_boundary": "search.browser",
             "command_hint": (
-                f"python3 scripts/env/client.py search open_browser "
+                f"python3 scripts/env/client.py search open-browser "
                 f"--payload '{{\"query\":\"<query>\",\"engine\":\"{engine}\"}}'"
             ),
         },

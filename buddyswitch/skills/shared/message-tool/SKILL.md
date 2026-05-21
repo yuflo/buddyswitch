@@ -27,7 +27,7 @@ python3 scripts/env/client.py message send --payload '{"to_buddy":"design","cont
 ## Workflow Notes
 
 - Use this tool for direct buddy-to-buddy inbox communication.
-- Start with `python3 scripts/env/client.py context summarize` so message actions run against current runtime-visible buddy ids and state.
+- Start with `python3 scripts/env/client.py context summarize --payload '{}'` so message actions run against current runtime-visible buddy ids and state.
 - For exact operations, payload keys, optional keys, and response fields, inspect `context.get.tool_catalog['message']` or `python3 scripts/turn_runtime.py status`.
 
 ## Key Boundary Rules
@@ -42,7 +42,7 @@ python3 scripts/env/client.py message send --payload '{"to_buddy":"design","cont
 
 ```bash
 python3 scripts/env/client.py message --help
-python3 scripts/env/client.py message list
+python3 scripts/env/client.py message list --payload '{}'
 ```
 
 ## Do Not

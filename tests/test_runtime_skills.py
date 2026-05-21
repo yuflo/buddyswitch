@@ -18,6 +18,17 @@ if str(SCRIPTS) not in sys.path:
 
 
 class RuntimeSkillsTests(unittest.TestCase):
+    _OLD_FLAG_PATTERNS = (
+        "search open-browser --query",
+        "search open_browser --query",
+        "--query",
+        "--engine",
+        "--track-id",
+        "--task-id",
+        "--artifact-id",
+        "--target-type",
+        "--target-id",
+    )
     SHARED_TOOL_SKILLS = {
         "task": ROOT / "buddyswitch/skills/shared/task-tool/SKILL.md",
         "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
@@ -30,6 +41,19 @@ class RuntimeSkillsTests(unittest.TestCase):
     def setUp(self) -> None:
         manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+
+    def _active_skill_files(self) -> list[Path]:
+        files: list[Path] = []
+        for row in self.manifest.get("skills", []):
+            if not isinstance(row, dict):
+                continue
+            rel = row.get("path")
+            if not isinstance(rel, str) or not rel.strip():
+                continue
+            skill_file = ROOT / rel / "SKILL.md"
+            if skill_file.exists():
+                files.append(skill_file)
+        return files
 
     def test_handoff_tool_skill_is_removed(self) -> None:
         self.assertFalse((ROOT / "buddyswitch/skills/shared/handoff-tool/SKILL.md").exists())
@@ -70,6 +94,48 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("--payload /tmp", text)
                 self.assertNotIn("payload file path", text)
                 self.assertNotIn("payload file", text)
+
+    def test_active_skills_do_not_teach_old_env_client_flags(self) -> None:
+        for path in self._active_skill_files():
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                for pattern in self._OLD_FLAG_PATTERNS:
+                    self.assertNotIn(pattern, text)
+
+    def test_market_skills_use_payload_browser_entry(self) -> None:
+        market_files = [
+            ROOT / "buddyswitch/skills/market/research-scan/SKILL.md",
+            ROOT / "buddyswitch/skills/market/pmf-recon/SKILL.md",
+            ROOT / "buddyswitch/skills/market/customer-discovery/SKILL.md",
+            ROOT / "buddyswitch/skills/market/channel-discovery/SKILL.md",
+            ROOT / "buddyswitch/skills/market/positioning-copy/SKILL.md",
+            ROOT / "buddyswitch/skills/market/launch-prep/SKILL.md",
+        ]
+        for path in market_files:
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertIn("search open-browser --payload", text)
+                self.assertIn("chrome-devtools-cockpit", text)
+                self.assertNotIn("search open-browser --query", text)
+                self.assertNotIn("search open_browser --query", text)
+
+    def test_shared_tool_skill_env_client_examples_use_payload(self) -> None:
+        for tool, path in self.SHARED_TOOL_SKILLS.items():
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(tool=tool):
+                for line in text.splitlines():
+                    stripped = line.strip()
+                    if "python3 scripts/env/client.py" not in stripped:
+                        continue
+                    if stripped.startswith("#"):
+                        continue
+                    if "..." in stripped:
+                        continue
+                    if stripped.startswith("- Runtime execution uses env.tool"):
+                        continue
+                    if " --help" in stripped:
+                        continue
+                    self.assertIn("--payload", stripped, msg=f"{path.relative_to(ROOT)} line missing --payload: {stripped}")
 
     def test_shared_tool_skills_route_exact_fields_to_runtime_discovery(self) -> None:
         skill_paths = list(self.SHARED_TOOL_SKILLS.values())

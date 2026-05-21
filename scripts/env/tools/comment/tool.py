@@ -78,12 +78,21 @@ def _build_definition() -> ToolDefinition:
                 required_permission='comment.add',
                 authority='target.read_boundary',
                 preconditions=(
-                    'target_type is track or artifact',
+                    'target_type is one of track, artifact, artifact_section',
+                    'anchor is required when target_type is artifact_section',
                     'active buddy has read access to target',
                 ),
                 returns=(
                     'comment_id',
                     'comment',
+                ),
+                use_when=(
+                    'You need threaded discussion on a track, artifact, or artifact_section target.',
+                    'You need reply chains or mentions attached to a specific object context.',
+                ),
+                do_not_use_when=(
+                    'You need canonical track timeline progress chronology entries; use track.add_update.',
+                    'You need direct buddy inbox communication outside object threads; use message.send.',
                 ),
                 risk_hints={
                     'read_only': False,
@@ -115,7 +124,7 @@ def _build_definition() -> ToolDefinition:
                         'status': {
                             'type': 'string',
                             'description': 'Optional status filter.',
-                            'enum': ['open', 'resolved'],
+                            'enum': ['open', 'resolved', 'all'],
                         },
                     },
                 },
@@ -127,11 +136,20 @@ def _build_definition() -> ToolDefinition:
                 required_permission='comment.list',
                 authority='target.read_boundary',
                 preconditions=(
-                    'target_type is track or artifact',
+                    'target_type is one of track, artifact, artifact_section',
+                    'anchor is required when target_type is artifact_section',
                     'active buddy has read access to target',
                 ),
                 returns=(
                     'comments',
+                ),
+                use_when=(
+                    'You need to read conversation history for one track/artifact/artifact_section thread.',
+                    'You need open/resolved comment rows to decide follow-up discussion actions.',
+                ),
+                do_not_use_when=(
+                    'You need shared progress events or publication history; use track.open or track.add_update.',
+                    'You need direct buddy inbox history; use message.list.',
                 ),
                 risk_hints={
                     'read_only': True,

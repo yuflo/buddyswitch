@@ -28,7 +28,7 @@ description: Use when the active buddy needs private files such as drafts, proto
 - `desc`, `list`, and `read` are discovery/read paths for active-buddy private files.
 - `write` and `delete` mutate active-instance-local private files only (never product objects).
 - For exact payload keys, encoding options, and response fields, inspect `context.get.tool_catalog['buddybox']` or `python3 scripts/turn_runtime.py status`.
-- Start with `python3 scripts/env/client.py context summarize` so buddybox actions run against current runtime-visible state.
+- Start with `python3 scripts/env/client.py context summarize --payload '{}'` so buddybox actions run against current runtime-visible state.
 
 ## Response Rules
 - Trust runtime feedback fields: `state_changed`, `durability`, `allowed_next_action_options`, `correctable_fields`, and `alternative_capabilities`.

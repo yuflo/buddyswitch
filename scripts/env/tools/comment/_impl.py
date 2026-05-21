@@ -90,7 +90,7 @@ def _reject_scope(
         state_changed=False,
         retryable=retryable,
         retry_guidance="Fix target scope and retry." if retryable else "This action cannot be retried as-is.",
-        allowed_next_actions=["Use track.get or artifact.get to verify target readability first."],
+        allowed_next_actions=["Use track.open or artifact.get to verify target readability first."],
         correctable_fields=correctable_fields,
     )
 

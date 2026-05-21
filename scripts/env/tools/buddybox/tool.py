@@ -49,6 +49,12 @@ def _build_definition() -> ToolDefinition:
                 returns=(
                     'buddybox_desc',
                 ),
+                use_when=(
+                    'You need the private-file capability boundary, visibility semantics, or quick scope orientation before buddybox file operations.',
+                ),
+                do_not_use_when=(
+                    'You need private file rows or file bodies; use buddybox.list or buddybox.read. Do not use for product-readable publication paths.',
+                ),
                 risk_hints={
                     'read_only': True,
                     'destructive': False,
@@ -97,6 +103,12 @@ def _build_definition() -> ToolDefinition:
                 returns=(
                     'files',
                 ),
+                use_when=(
+                    'You need private logical_name inventory or summary rows within the active-buddy private file boundary.',
+                ),
+                do_not_use_when=(
+                    'You need one file body; use buddybox.read. Do not use this for product-readable outputs; use artifact.create_revision when content must leave private scope.',
+                ),
                 risk_hints={
                     'read_only': True,
                     'destructive': False,
@@ -122,7 +134,7 @@ def _build_definition() -> ToolDefinition:
                         'encoding': {
                             'type': 'string',
                             'description': 'Requested payload encoding for returned file content.',
-                            'enum': ['utf-8', 'base64'],
+                            'enum': ['auto', 'utf-8', 'base64'],
                         },
                     },
                 },
@@ -138,6 +150,13 @@ def _build_definition() -> ToolDefinition:
                 ),
                 returns=(
                     'private_file',
+                ),
+                use_when=(
+                    "You need one exact active-buddy private file body by logical_name, optionally with explicit encoding or implementation-selected 'auto' encoding.",
+                ),
+                do_not_use_when=(
+                    'You need private inventory discovery by path prefix; use buddybox.list first when logical_name is unknown.',
+                    'You need product-readable/shared artifact content; use artifact.create_revision and publication flows instead of private-file reads.',
                 ),
                 risk_hints={
                     'read_only': True,
@@ -189,6 +208,12 @@ def _build_definition() -> ToolDefinition:
                 returns=(
                     'private_file',
                 ),
+                use_when=(
+                    'You need to create or replace one active-buddy private file without mutating product-readable artifacts.',
+                ),
+                do_not_use_when=(
+                    'You intend to share content across buddies or publish product-readable state; use artifact.create_revision and track publication actions.',
+                ),
                 risk_hints={
                     'read_only': False,
                     'destructive': False,
@@ -226,6 +251,12 @@ def _build_definition() -> ToolDefinition:
                 returns=(
                     'deleted',
                     'logical_name',
+                ),
+                use_when=(
+                    'You need to remove one active-buddy private file from the private workspace boundary.',
+                ),
+                do_not_use_when=(
+                    'You need to archive tasks/tracks or change product-readable artifacts/materials; this only deletes private files and does not retract published content.',
                 ),
                 risk_hints={
                     'read_only': False,

@@ -65,6 +65,12 @@ def _build_definition() -> ToolDefinition:
                     'tool_catalog',
                     'decision_surface',
                 ),
+                use_when=(
+                    'You need full runtime sections plus full tool_catalog and operation_semantics before choosing exact downstream tool calls.',
+                ),
+                do_not_use_when=(
+                    'You only need compact orientation or source descriptors; use context.summarize or context.list_sources.',
+                ),
                 risk_hints={
                     'read_only': True,
                     'destructive': False,
@@ -113,6 +119,12 @@ def _build_definition() -> ToolDefinition:
                     'candidate_tracks',
                     'buddybox_desc',
                 ),
+                use_when=(
+                    'You need a compact first-pass summary with candidate ids and tool affordances without loading full catalog sections.',
+                ),
+                do_not_use_when=(
+                    'You need full operation semantics/tool catalog details or source descriptors only; use context.get or context.list_sources.',
+                ),
                 risk_hints={
                     'read_only': True,
                     'destructive': False,
@@ -144,6 +156,12 @@ def _build_definition() -> ToolDefinition:
                 ),
                 returns=(
                     'sources',
+                ),
+                use_when=(
+                    'You only need source descriptors and scope boundaries for context data planes.',
+                ),
+                do_not_use_when=(
+                    'You need candidate ids, affordances, full runtime sections, or full tool catalog semantics; use context.summarize or context.get.',
                 ),
                 risk_hints={
                     'read_only': True,

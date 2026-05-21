@@ -163,8 +163,8 @@ def _action_semantic_row(tool: str, row: ActionDefinition) -> dict[str, Any]:
     return {
         "title": row.title,
         "plain_description": row.description,
-        "use_when": [f"Use when {tool}.{row.name} is the intended action."],
-        "do_not_use_when": [f"Do not use {tool}.{row.name} when another action is a closer semantic match."],
+        "use_when": list(row.use_when),
+        "do_not_use_when": list(row.do_not_use_when),
         "inputs_explained": inputs,
         "side_effects": {
             "mutates": row.mutates,
@@ -275,7 +275,7 @@ def _supported_actions_text(tool: str) -> str:
 
 
 def _semantic_action(*, tool: str, action: str | None) -> str:
-    normalized = action.strip().replace("-", "_") if isinstance(action, str) and action.strip() else "unknown"
+    normalized = action.strip() if isinstance(action, str) and action.strip() else "unknown"
     return f"{tool}.{normalized}"
 
 
@@ -414,7 +414,7 @@ def dispatch_env_tool_request(
             ],
             correctable_fields=["action"],
         )
-    action = raw_action.strip().replace("-", "_")
+    action = raw_action.strip()
     if action not in supported_actions(tool):
         return _reject(
             tool=tool,

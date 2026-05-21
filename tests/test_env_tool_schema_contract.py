@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import sys
 import unittest
 from pathlib import Path
@@ -14,6 +15,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.tool_runtime import registry as catalog  # noqa: E402
+from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition  # noqa: E402
 
 
 _ENUM_FIELDS = {"status", "state", "health", "kind", "template", "target_type", "backend", "engine"}
@@ -88,10 +90,15 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertTrue(catalog.supported_tools())
         for tool in sorted(catalog.supported_tools()):
             for action in sorted(catalog.supported_actions(tool)):
-                schema = catalog.get_action_definition(tool, action).input_schema
+                action_definition = catalog.get_action_definition(tool, action)
+                schema = action_definition.input_schema
                 self.assertIsInstance(schema, dict, msg=f"{tool}.{action}.input_schema")
                 assert isinstance(schema, dict)
                 self._assert_object_shape(schema, path=f"{tool}.{action}.input_schema")
+                self.assertTrue(action_definition.use_when, msg=f"{tool}.{action}.use_when")
+                self.assertTrue(action_definition.do_not_use_when, msg=f"{tool}.{action}.do_not_use_when")
+                self.assertTrue(all(isinstance(row, str) and row.strip() for row in action_definition.use_when))
+                self.assertTrue(all(isinstance(row, str) and row.strip() for row in action_definition.do_not_use_when))
                 properties = schema.get("properties")
                 assert isinstance(properties, dict)
                 for field_name, field_schema in properties.items():
@@ -190,12 +197,14 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(buddybox_list["properties"]["limit"].get("type"), "integer")
         self.assertEqual(buddybox_list["properties"]["limit"].get("minimum"), 1)
         self.assertEqual(buddybox_list["properties"]["limit"].get("default"), 200)
-        self.assertEqual(buddybox_read["properties"]["encoding"].get("enum"), ["utf-8", "base64"])
+        self.assertEqual(buddybox_read["properties"]["encoding"].get("enum"), ["auto", "utf-8", "base64"])
 
         mentions = comment_add["properties"]["mentions"]
         self.assertEqual(mentions.get("type"), "array")
         self.assertEqual(mentions.get("items", {}).get("type"), "string")
         self.assertEqual(comment_add["properties"]["target_type"].get("enum"), ["track", "artifact", "artifact_section"])
+        comment_list = catalog.get_action_definition("comment", "list").input_schema
+        self.assertEqual(comment_list["properties"]["status"].get("enum"), ["open", "resolved", "all"])
 
         self.assertEqual(task_create["properties"]["status"].get("enum"), ["active", "blocked", "done", "archived"])
         self.assertEqual(task_list["properties"]["limit"].get("type"), "integer")
@@ -214,6 +223,44 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(search_open["properties"]["engine"].get("enum"), ["google", "web", "reddit", "x"])
 
         self.assertIn("manifest buddy id", message_send["properties"]["to_buddy"].get("description", ""))
+
+    def test_action_definition_validation_requires_action_semantic_tuples(self) -> None:
+        action = ActionDefinition(
+            name="example_action",
+            title="example.action",
+            description="Example action.",
+            input_schema={
+                "type": "object",
+                "additionalProperties": False,
+                "required": [],
+                "properties": {},
+            },
+            output_schema={"$ref": "ToolResult"},
+            kind="read",
+            mutates="none",
+            required_permission="none",
+            authority="example.readonly",
+            use_when=("Use when example action is needed.",),
+            do_not_use_when=("Do not use for write operations.",),
+        )
+        valid = ToolDefinition(
+            id="example",
+            title="Example",
+            description="Example tool",
+            cli_resource="example",
+            command="python3 scripts/env/client.py example do --payload '{}'",
+            scope="example scope",
+            capability_boundary="example capability boundary",
+            use_when=("Use for example checks.",),
+            do_not_use_when=("Do not use for non-example work.",),
+            actions=(action,),
+        )
+        validate_definition(valid)
+
+        with self.assertRaisesRegex(ValueError, "example.example_action.use_when"):
+            validate_definition(replace(valid, actions=(replace(action, use_when=()),)))
+        with self.assertRaisesRegex(ValueError, "example.example_action.do_not_use_when"):
+            validate_definition(replace(valid, actions=(replace(action, do_not_use_when=()),)))
 
 
 if __name__ == "__main__":

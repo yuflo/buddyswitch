@@ -150,6 +150,14 @@ def _build_definition() -> ToolDefinition:
                 returns=(
                     'artifact',
                 ),
+                use_when=(
+                    'You need one artifact by id with full markdown body content.',
+                    'You are validating publication output or source text before quoting/summarizing.',
+                ),
+                do_not_use_when=(
+                    'You need to create a new draft revision; use artifact.create_revision.',
+                    'You need to change artifact title/body/metadata; use artifact.update_metadata.',
+                ),
                 risk_hints={
                     'read_only': True,
                     'destructive': False,
@@ -220,6 +228,15 @@ def _build_definition() -> ToolDefinition:
                 returns=(
                     'artifact',
                 ),
+                use_when=(
+                    'You are creating a new draft artifact revision from fresh content.',
+                    'You need to supersede an earlier artifact while preserving revision lineage.',
+                ),
+                do_not_use_when=(
+                    'You need to publish an existing draft to a shared track; use track.add_material or track.add_proof.',
+                    'You only need to read existing content by id; use artifact.get.',
+                    'You only need to patch an existing draft artifact fields in place; use artifact.update_metadata.',
+                ),
                 risk_hints={
                     'read_only': False,
                     'destructive': False,
@@ -284,6 +301,15 @@ def _build_definition() -> ToolDefinition:
                 ),
                 returns=(
                     'artifact',
+                ),
+                use_when=(
+                    'You need to patch metadata or body on an existing active-buddy artifact id.',
+                    'You want to adjust title/summary/template/source refs without creating a new revision id.',
+                ),
+                do_not_use_when=(
+                    'You need to publish draft artifacts to shared material/proof slots; use track.add_material or track.add_proof.',
+                    'You are starting a net-new draft revision or superseding another artifact; use artifact.create_revision.',
+                    'You only need a read-only fetch of the artifact body; use artifact.get.',
                 ),
                 risk_hints={
                     'read_only': False,

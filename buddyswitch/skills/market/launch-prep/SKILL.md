@@ -6,7 +6,7 @@ description: Use when the task is preparing a first launch, validation page, or 
 # launch-prep
 
 ## Execution Order
-1. Before any market research, call `python3 scripts/env/client.py search open-browser --query "<initial query>" --engine <google|reddit|x|web>`, then continue discovery in `chrome-devtools-cockpit` and keep the workflow `browser-native`.
+1. Before any market research, call `python3 scripts/env/client.py search open-browser --payload '{"query":"<initial query>","engine":"<google|reddit|x|web>"}'`, then continue discovery in `chrome-devtools-cockpit` and keep the workflow `browser-native`.
 2. Read all selected upstream inputs before forming new market claims.
 3. If a critical source requires login, pause for mandatory takeover.
 4. Do not continue with snippet-only or text-only research when the skill contract requires browser-native work.

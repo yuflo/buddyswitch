@@ -22,6 +22,17 @@ _EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence
 
 
 class RepoConsistencyTests(unittest.TestCase):
+    _OLD_FLAG_PATTERNS = (
+        "search open-browser --query",
+        "search open_browser --query",
+        "--engine",
+        "--track-id",
+        "--task-id",
+        "--artifact-id",
+        "--target-type",
+        "--target-id",
+    )
+
     def _scan(self, pattern: str) -> list[str]:
         targets = [
             "README.md",
@@ -144,17 +155,105 @@ class RepoConsistencyTests(unittest.TestCase):
                     self.assertIn("track.add_proof", text)
                     self.assertNotIn("published_to_track", text)
 
-    def test_runtime_buddy_agents_use_track_open_guidance(self) -> None:
+    def test_runtime_buddy_agents_use_payload_env_client_guidance(self) -> None:
         buddies = ("market", "pm", "design", "dev", "test")
         for buddy in buddies:
             path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(buddy=buddy):
-                self.assertIn("track open --track-id", text)
-                self.assertNotIn("track get --track-id", text)
+                self.assertIn("context summarize --payload '{}'", text)
+                self.assertIn("context get --payload '{}'", text)
+                self.assertIn("track open --payload '{\"track_id\":\"<track-id>\"}'", text)
+                self.assertIn("task get --payload '{\"task_id\":\"<task-id>\"}'", text)
+                self.assertIn("artifact get --payload '{\"artifact_id\":\"<artifact-id>\"}'", text)
+                self.assertIn("search status --payload '{}'", text)
+                self.assertIn(
+                    "search open-browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
+                    text,
+                )
+                for pattern in self._OLD_FLAG_PATTERNS:
+                    self.assertNotIn(pattern, text)
                 self.assertNotIn("track join", text)
                 self.assertNotIn("attach" + "-task", text)
                 self.assertNotIn("detach" + "-task", text)
+
+    def test_active_cli_guidance_has_no_old_env_client_flags(self) -> None:
+        targets = [
+            "buddyswitch/skills",
+            "tools/launcher/assets/buddies",
+            "scripts/env/client.py",
+            "tests/test_runtime_skills.py",
+            "tests/test_repo_consistency.py",
+        ]
+        completed = subprocess.run(
+            [
+                "rg",
+                "-uuu",
+                "-n",
+                "-e",
+                "search open-browser --query",
+                "-e",
+                "search open_browser --query",
+                "-e",
+                "--engine",
+                "-e",
+                "--track-id",
+                "-e",
+                "--task-id",
+                "-e",
+                "--artifact-id",
+                "-e",
+                "--target-type",
+                "-e",
+                "--target-id",
+                *targets,
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        allowed_hits: list[str] = []
+        for line in hits:
+            lower = line.lower()
+            if line.startswith("tests/test_runtime_skills.py:"):
+                allowed_hits.append(line)
+                continue
+            if line.startswith("tests/test_repo_consistency.py:"):
+                allowed_hits.append(line)
+                continue
+        disallowed = [line for line in hits if line not in allowed_hits]
+        self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+
+    def test_invalid_old_env_client_flags_fail(self) -> None:
+        old_commands = [
+            ["python3", "scripts/env/client.py", "search", "open-browser", "--query", "x", "--engine", "google"],
+            ["python3", "scripts/env/client.py", "track", "open", "--track-id", "track-alpha"],
+            ["python3", "scripts/env/client.py", "task", "get", "--task-id", "task-alpha"],
+            ["python3", "scripts/env/client.py", "artifact", "get", "--artifact-id", "art-alpha"],
+            [
+                "python3",
+                "scripts/env/client.py",
+                "comment",
+                "list",
+                "--target-type",
+                "track",
+                "--target-id",
+                "track-alpha",
+            ],
+        ]
+        for command in old_commands:
+            with self.subTest(command=" ".join(command)):
+                completed = subprocess.run(
+                    command,
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertNotEqual(completed.returncode, 0)
 
     def test_role_rebuild_residue_scan(self) -> None:
         pattern_1 = (
