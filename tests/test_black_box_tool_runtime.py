@@ -19,7 +19,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 SHIPPED_TOOLS: dict[str, set[str]] = {
-    "artifact": {"create_revision", "get", "update_metadata"},
+    "artifact": {"list", "create_revision", "get", "update_metadata"},
     "buddybox": {"delete", "desc", "list", "read", "write"},
     "comment": {"add", "list", "resolve"},
     "context": {"get", "list_sources", "summarize"},

@@ -146,43 +146,143 @@ def _visible_tasks(
     return rows
 
 
-def _current_material_rows(
+def _candidate_artifact_rows(
     *,
-    tracks: list[dict[str, Any]],
+    track_filter: str | None,
     active_buddy: str,
     limit_value: int,
     context: ContextServiceContext,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    seen_material_ref_ids: set[str] = set()
+    for artifact in context.repos.artifact.list_artifacts():
+        decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_buddy)
+        if not bool(decision.get("allowed")):
+            continue
+        if isinstance(track_filter, str) and track_filter.strip():
+            if decision.get("track_id") != track_filter.strip():
+                continue
+        artifact_id = artifact.get("id")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            continue
+        comment_counts = context.rules.artifact_relations.comment_counts_for_artifact(artifact_id)
+        relation_counts = context.rules.artifact_relations.relation_counts_for_artifact(
+            artifact_id=artifact_id,
+            active_buddy=active_buddy,
+        )
+        rows.append(
+            context.rules.artifact_visibility.artifact_list_row(
+                artifact,
+                active_buddy,
+                comment_counts=comment_counts,
+                relation_counts=relation_counts,
+            )
+        )
+    rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("artifact_id") or "")), reverse=True)
+    return rows[:limit_value]
+
+
+def _open_comment_thread_rows(
+    *,
+    visible_track_ids: set[str],
+    visible_artifact_ids: set[str],
+    limit_value: int,
+    context: ContextServiceContext,
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for comment in context.repos.comment.list_comments():
+        target_type = comment.get("target_type")
+        target_id = comment.get("target_id")
+        if not isinstance(target_type, str) or not isinstance(target_id, str):
+            continue
+        normalized_target_type = "artifact" if target_type == "artifact_section" else target_type
+        if normalized_target_type == "track":
+            if target_id not in visible_track_ids:
+                continue
+        elif normalized_target_type == "artifact":
+            if target_id not in visible_artifact_ids:
+                continue
+        else:
+            continue
+        thread_id = comment.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id:
+            continue
+        grouped.setdefault(thread_id, []).append(comment)
+
+    rows: list[dict[str, Any]] = []
+    for thread_id, thread_comments in grouped.items():
+        open_count = sum(1 for row in thread_comments if row.get("status") == "open")
+        if open_count <= 0:
+            continue
+        latest = max(
+            thread_comments,
+            key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")),
+        )
+        target_type = latest.get("target_type")
+        if target_type == "artifact_section":
+            target_type = "artifact"
+        rows.append(
+            {
+                "thread_id": thread_id,
+                "target_type": target_type,
+                "target_id": latest.get("target_id"),
+                "latest_comment_id": latest.get("id"),
+                "latest_by_buddy": latest.get("by_buddy"),
+                "open_comment_count": open_count,
+                "updated_at": latest.get("created_at"),
+            }
+        )
+    rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("thread_id") or "")), reverse=True)
+    return rows[:limit_value]
+
+
+def _recent_update_rows(
+    *,
+    tracks: list[dict[str, Any]],
+    limit_value: int,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
     for track in tracks:
         track_id = track.get("id")
         if not isinstance(track_id, str) or not track_id:
             continue
-        for row in context.rules.artifact_visibility.current_material_rows_for_track(track_id, active_buddy):
-            artifact_id = row.get("artifact_id")
-            if not isinstance(artifact_id, str) or not artifact_id or artifact_id in seen_material_ref_ids:
+        for update in track.get("updates", []):
+            if not isinstance(update, dict):
                 continue
-            seen_material_ref_ids.add(artifact_id)
-            rows.append(row)
-            if len(rows) >= limit_value:
-                return rows
-    return rows
+            refs = update.get("refs")
+            ref_count = len(refs) if isinstance(refs, list) else 0
+            rows.append(
+                {
+                    "track_id": track_id,
+                    "update_id": update.get("id"),
+                    "kind": update.get("kind"),
+                    "summary": update.get("summary"),
+                    "by_buddy": update.get("by_buddy"),
+                    "ref_count": ref_count,
+                    "created_at": update.get("created_at"),
+                }
+            )
+    rows.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("update_id") or "")), reverse=True)
+    return rows[:limit_value]
 
 
 def _visible_requests(
     *,
     active_buddy: str,
+    track_filter: str | None,
     visible_track_ids: set[str],
     limit_value: int,
     context: ContextServiceContext,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    normalized_track_filter = track_filter.strip() if isinstance(track_filter, str) and track_filter.strip() else None
     for request in context.repos.request.list_requests():
         track_id = request.get("track_id")
         if not isinstance(track_id, str) or not track_id:
             continue
-        if visible_track_ids and track_id not in visible_track_ids:
+        if isinstance(normalized_track_filter, str):
+            if track_id != normalized_track_filter:
+                continue
+        elif visible_track_ids and track_id not in visible_track_ids:
             continue
         try:
             context.rules.comment_target.assert_target_readable(
@@ -229,17 +329,33 @@ def _current_context_sections(
         limit_value=limit_value,
         context=context,
     )
-    visible_artifacts = _current_material_rows(
-        tracks=visible_tracks,
+    visible_artifacts = _candidate_artifact_rows(
+        track_filter=track_filter if isinstance(track_filter, str) else None,
         active_buddy=active_buddy,
         limit_value=limit_value,
         context=context,
     )
     visible_requests = _visible_requests(
         active_buddy=active_buddy,
+        track_filter=track_filter if isinstance(track_filter, str) else None,
         visible_track_ids=visible_track_ids,
         limit_value=limit_value,
         context=context,
+    )
+    visible_artifact_ids = {
+        row.get("artifact_id")
+        for row in visible_artifacts
+        if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+    }
+    open_comment_threads = _open_comment_thread_rows(
+        visible_track_ids=visible_track_ids,
+        visible_artifact_ids={str(row) for row in visible_artifact_ids if isinstance(row, str)},
+        limit_value=limit_value,
+        context=context,
+    )
+    recent_updates = _recent_update_rows(
+        tracks=visible_tracks,
+        limit_value=limit_value,
     )
 
     buddybox_desc = context.rules.buddybox_workspace.build_buddybox_desc(active_buddy, instance_payload=instance_payload)
@@ -257,6 +373,9 @@ def _current_context_sections(
         "buddybox_desc": buddybox_desc,
         "candidate_tracks": candidate_tracks,
         "candidate_requests": candidate_requests,
+        "candidate_artifacts": visible_artifacts,
+        "open_comment_threads": open_comment_threads,
+        "recent_updates": recent_updates,
         "decision_surface": {
             "binding_state": {"state": "runless", "enum_values": ["runless"]},
             "active_buddy_relation": {"role": "explicit-id-tools"},
@@ -265,6 +384,8 @@ def _current_context_sections(
                 "has_tasks": bool(visible_tasks),
                 "has_artifacts": bool(visible_artifacts),
                 "has_requests": bool(visible_requests),
+                "has_open_comment_threads": bool(open_comment_threads),
+                "has_recent_updates": bool(recent_updates),
                 "has_buddybox_workspace": bool(buddybox_desc),
             },
         },
@@ -273,6 +394,8 @@ def _current_context_sections(
             "tasks": len(visible_tasks),
             "artifacts": len(visible_artifacts),
             "requests": len(visible_requests),
+            "open_comment_threads": len(open_comment_threads),
+            "recent_updates": len(recent_updates),
             "has_buddybox_workspace": bool(buddybox_desc),
         },
     }
@@ -291,9 +414,9 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "task.get / task.list via runtime env tools",
         },
         "artifacts": {
-            "description": "Readable artifact summaries for current shared track materials.",
+            "description": "Readable artifact summaries for private drafts and shared track materials/proofs.",
             "scope": "product deliverable state",
-            "source_of_truth": "artifact.get via runtime env tools",
+            "source_of_truth": "artifact.list / artifact.get via runtime env tools",
         },
         "messages": {
             "description": "Direct buddy inbox messages, read through message.list.",
@@ -378,6 +501,9 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "current_context_summary": sections["current_context_summary"],
         "candidate_tracks": sections["candidate_tracks"],
         "candidate_requests": sections["candidate_requests"],
+        "candidate_artifacts": sections["candidate_artifacts"],
+        "open_comment_threads": sections["open_comment_threads"],
+        "recent_updates": sections["recent_updates"],
         "buddybox_desc": sections["buddybox_desc"],
         "tool_affordances": tool_registry.compact_tool_affordances(),
         "decision_surface": sections["decision_surface"],

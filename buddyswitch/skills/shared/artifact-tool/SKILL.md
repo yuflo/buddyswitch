@@ -32,6 +32,7 @@ PY
 ```
 
 ## Workflow Notes
+- `list` returns readable summary rows for discovery (`title`/`summary` filters only, no `body`).
 - `get` returns one full artifact body by `artifact_id`.
 - `create-revision` creates an active-buddy private draft/revision only.
 - Shared publication starts only after `track.add-material` or `track.add-proof` succeeds.

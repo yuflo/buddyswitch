@@ -110,7 +110,7 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='artifact',
         title='Artifact Bodies',
-        description='Read full artifact bodies and manage active-buddy private drafts/metadata.',
+        description='Discover readable artifact summaries, read full artifact bodies, and manage active-buddy private drafts/metadata.',
         cli_resource='artifact',
         command="python3 scripts/env/client.py artifact <action> --payload '<json-object>'",
         scope='private drafts and published track material/proof artifacts',
@@ -122,6 +122,76 @@ def _build_definition() -> ToolDefinition:
             'You need shared publication mutation; use track.add_material or track.add_proof.',
         ),
         actions=(
+            ActionDefinition(
+                name='list',
+                title='artifact.list',
+                description='List readable artifact summary rows with simple filters and no body content.',
+                input_schema={
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': [],
+                    'properties': {
+                        'track_id': {
+                            'type': 'string',
+                            'description': 'Optional readable track id filter.',
+                        },
+                        'created_by': {
+                            'type': 'string',
+                            'description': 'Optional creator buddy id filter.',
+                        },
+                        'template': {
+                            'type': 'string',
+                            'description': 'Optional artifact template filter.',
+                            'enum': ['brief', 'proposal', 'design', 'decision', 'proof', 'note'],
+                        },
+                        'status': {
+                            'type': 'string',
+                            'description': 'Optional artifact status filter.',
+                            'enum': ['draft', 'published', 'archived'],
+                        },
+                        'q': {
+                            'type': 'string',
+                            'description': 'Optional case-insensitive title/summary substring filter.',
+                        },
+                        'limit': {
+                            'type': 'integer',
+                            'description': 'Optional maximum number of summary rows to return.',
+                            'minimum': 1,
+                        },
+                    },
+                },
+                output_schema={
+                    '$ref': 'ToolResult',
+                },
+                kind='read',
+                mutates='none',
+                required_permission='artifact.read',
+                authority='artifact.owner_or_publication_boundary',
+                preconditions=(
+                    'filters are valid and within readable scope boundaries',
+                ),
+                returns=(
+                    'artifacts',
+                    'count',
+                    'filters',
+                ),
+                use_when=(
+                    'You need artifact summary discovery before choosing exact artifact_id values.',
+                    'You need simple summary filters without loading full body content.',
+                ),
+                do_not_use_when=(
+                    'You need one full artifact body by exact id; use artifact.get.',
+                    'You need full-text body search; artifact.list only filters title and summary.',
+                ),
+                risk_hints={
+                    'read_only': True,
+                    'destructive': False,
+                    'idempotent': True,
+                    'open_world': False,
+                    'requires_human_approval': False,
+                    'external_effect': False,
+                },
+            ),
             ActionDefinition(
                 name='get',
                 title='artifact.get',

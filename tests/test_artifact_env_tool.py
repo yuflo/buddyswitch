@@ -802,6 +802,948 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertFalse(denied.get("ok"), msg=denied)
                 self.assertEqual(denied.get("permission_boundary"), "track.lifecycle_status")
 
+    def test_list_returns_owner_draft_summaries_without_body(self) -> None:
+        shared_instance_id = "inst-art-list-owner"
+        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        created_pm_brief = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-list-pm-brief",
+                "title": "PM Brief",
+                "summary": "Owner brief",
+                "template": "brief",
+                "body": "brief body",
+                "source_refs": [{"type": "note", "label": "seed-brief"}],
+            },
+        )
+        self.assertTrue(created_pm_brief.get("ok"), msg=created_pm_brief)
+        created_pm_note = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-list-pm-note",
+                "title": "PM Note",
+                "summary": "Owner note",
+                "template": "note",
+                "body": "note body",
+                "source_refs": [{"type": "note", "label": "seed-note"}],
+            },
+        )
+        self.assertTrue(created_pm_note.get("ok"), msg=created_pm_note)
+
+        instance_dev = self._instance_json(instance_id=shared_instance_id, buddy="dev")
+        created_dev_private = self._dispatch(
+            instance_json=instance_dev,
+            instance_id=shared_instance_id,
+            buddy="dev",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-list-dev-private",
+                "title": "Dev Private",
+                "summary": "Private to dev",
+                "template": "design",
+                "body": "dev draft body",
+            },
+        )
+        self.assertTrue(created_dev_private.get("ok"), msg=created_dev_private)
+
+        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        listed = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="list",
+            args={},
+        )
+        self.assertTrue(listed.get("ok"), msg=listed)
+        self.assertEqual(listed.get("state_changed"), False, msg=listed)
+        self.assertEqual(listed.get("durability"), "none", msg=listed)
+        rows = listed.get("artifacts")
+        self.assertIsInstance(rows, list, msg=listed)
+        assert isinstance(rows, list)
+        rows_by_id = {
+            str(row.get("artifact_id")): row
+            for row in rows
+            if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+        }
+        self.assertIn("art-list-pm-brief", rows_by_id)
+        self.assertIn("art-list-pm-note", rows_by_id)
+        self.assertNotIn("art-list-dev-private", rows_by_id)
+        for artifact_id in ("art-list-pm-brief", "art-list-pm-note"):
+            row = rows_by_id[artifact_id]
+            self.assertEqual(row.get("status"), "draft", msg=row)
+            self.assertEqual(row.get("currentness"), "draft", msg=row)
+            self.assertEqual(row.get("relation"), "owner", msg=row)
+            self.assertNotIn("body", row, msg=row)
+            self.assertIsInstance(row.get("source_refs_summary"), list, msg=row)
+            for key in (
+                "open_comment_count",
+                "resolved_comment_count",
+                "incoming_source_ref_count",
+                "target_request_count",
+                "result_request_count",
+                "track_update_ref_count",
+                "comment_count",
+            ):
+                self.assertIn(key, row, msg=row)
+
+    def test_list_returns_published_material_proof_and_history_summaries(self) -> None:
+        instance_pm = self._instance_json(instance_id="inst-pm-art-list-published", buddy="pm")
+        self.assertTrue(
+            self._create_track(
+                instance_json=instance_pm,
+                instance_id="inst-pm-art-list-published",
+                track_id="track-art-list-published",
+            ).get("ok")
+        )
+
+        created_r1 = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art-list-published",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-list-brief-r1",
+                "title": "Brief v1",
+                "summary": "v1",
+                "template": "brief",
+                "body": "v1 body",
+            },
+        )
+        self.assertTrue(created_r1.get("ok"), msg=created_r1)
+        published_r1 = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art-list-published",
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": "track-art-list-published",
+                "artifact_id": "art-list-brief-r1",
+                "label": "Brief",
+                "summary": "v1",
+            },
+        )
+        self.assertTrue(published_r1.get("ok"), msg=published_r1)
+
+        created_proof = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art-list-published",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-list-proof-r1",
+                "title": "Proof v1",
+                "summary": "proof",
+                "template": "proof",
+                "body": "proof body",
+            },
+        )
+        self.assertTrue(created_proof.get("ok"), msg=created_proof)
+        published_proof = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art-list-published",
+            buddy="pm",
+            tool="track",
+            action="add_proof",
+            args={
+                "track_id": "track-art-list-published",
+                "artifact_id": "art-list-proof-r1",
+                "label": "Close proof",
+                "summary": "proof",
+            },
+        )
+        self.assertTrue(published_proof.get("ok"), msg=published_proof)
+
+        created_r2 = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art-list-published",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-list-brief-r2",
+                "title": "Brief v2",
+                "summary": "v2",
+                "template": "brief",
+                "body": "v2 body",
+                "supersedes_artifact_id": "art-list-brief-r1",
+            },
+        )
+        self.assertTrue(created_r2.get("ok"), msg=created_r2)
+        published_r2 = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art-list-published",
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": "track-art-list-published",
+                "artifact_id": "art-list-brief-r2",
+                "label": "Brief",
+                "summary": "v2",
+            },
+        )
+        self.assertTrue(published_r2.get("ok"), msg=published_r2)
+
+        listed = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art-list-published",
+            buddy="pm",
+            tool="artifact",
+            action="list",
+            args={"track_id": "track-art-list-published"},
+        )
+        self.assertTrue(listed.get("ok"), msg=listed)
+        rows = listed.get("artifacts")
+        self.assertIsInstance(rows, list, msg=listed)
+        assert isinstance(rows, list)
+        rows_by_id = {
+            str(row.get("artifact_id")): row
+            for row in rows
+            if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+        }
+        self.assertIn("art-list-brief-r1", rows_by_id)
+        self.assertIn("art-list-brief-r2", rows_by_id)
+        self.assertIn("art-list-proof-r1", rows_by_id)
+        self.assertEqual(rows_by_id["art-list-brief-r2"].get("relation"), "track_material")
+        self.assertEqual(rows_by_id["art-list-brief-r2"].get("currentness"), "current")
+        self.assertEqual(rows_by_id["art-list-proof-r1"].get("relation"), "track_proof")
+        self.assertEqual(rows_by_id["art-list-proof-r1"].get("currentness"), "proof")
+        self.assertEqual(rows_by_id["art-list-brief-r1"].get("relation"), "track_history")
+        self.assertEqual(rows_by_id["art-list-brief-r1"].get("currentness"), "superseded")
+        for row in rows:
+            if isinstance(row, dict):
+                self.assertNotIn("body", row, msg=row)
+
+    def test_list_filters_are_simple_and_title_summary_only(self) -> None:
+        shared_instance_id = "inst-art-list-filter"
+        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        self.assertTrue(
+            self._create_track(
+                instance_json=instance_pm,
+                instance_id=shared_instance_id,
+                track_id="track-art-list-filter",
+            ).get("ok")
+        )
+
+        created_pm_brief = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-alpha-brief",
+                "title": "Alpha Brief",
+                "summary": "Signup flow",
+                "template": "brief",
+                "body": "brief body",
+            },
+        )
+        self.assertTrue(created_pm_brief.get("ok"), msg=created_pm_brief)
+        self.assertTrue(
+            self._dispatch(
+                instance_json=instance_pm,
+                instance_id=shared_instance_id,
+                buddy="pm",
+                tool="track",
+                action="add_material",
+                args={
+                    "track_id": "track-art-list-filter",
+                    "artifact_id": "art-alpha-brief",
+                    "label": "Brief",
+                    "summary": "Signup flow",
+                },
+            ).get("ok")
+        )
+
+        instance_design = self._instance_json(instance_id=shared_instance_id, buddy="design")
+        created_design = self._dispatch(
+            instance_json=instance_design,
+            instance_id=shared_instance_id,
+            buddy="design",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-alpha-design",
+                "title": "Alpha Design",
+                "summary": "Visual state",
+                "template": "design",
+                "body": "design body",
+            },
+        )
+        self.assertTrue(created_design.get("ok"), msg=created_design)
+        self.assertTrue(
+            self._dispatch(
+                instance_json=instance_design,
+                instance_id=shared_instance_id,
+                buddy="design",
+                tool="track",
+                action="add_material",
+                args={
+                    "track_id": "track-art-list-filter",
+                    "artifact_id": "art-alpha-design",
+                    "label": "Design",
+                    "summary": "Visual state",
+                },
+            ).get("ok")
+        )
+
+        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        created_body_only = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-beta-proof",
+                "title": "Beta Proof",
+                "summary": "Release evidence",
+                "template": "proof",
+                "body": "Contains SIGNUP keyword only in body.",
+            },
+        )
+        self.assertTrue(created_body_only.get("ok"), msg=created_body_only)
+        self.assertTrue(
+            self._dispatch(
+                instance_json=instance_pm,
+                instance_id=shared_instance_id,
+                buddy="pm",
+                tool="track",
+                action="add_proof",
+                args={
+                    "track_id": "track-art-list-filter",
+                    "artifact_id": "art-beta-proof",
+                    "label": "Proof",
+                    "summary": "Release evidence",
+                },
+            ).get("ok")
+        )
+
+        created_draft = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-filter-draft",
+                "title": "Draft Only",
+                "summary": "still draft",
+                "template": "note",
+                "body": "draft body",
+            },
+        )
+        self.assertTrue(created_draft.get("ok"), msg=created_draft)
+
+        q_signup = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="list",
+            args={"q": "signup"},
+        )
+        self.assertTrue(q_signup.get("ok"), msg=q_signup)
+        q_ids = {
+            str(row.get("artifact_id"))
+            for row in (q_signup.get("artifacts") or [])
+            if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+        }
+        self.assertIn("art-alpha-brief", q_ids)
+        self.assertNotIn("art-beta-proof", q_ids)
+
+        created_by_design = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="list",
+            args={"created_by": "design"},
+        )
+        self.assertTrue(created_by_design.get("ok"), msg=created_by_design)
+        for row in created_by_design.get("artifacts", []):
+            if isinstance(row, dict):
+                self.assertEqual(row.get("created_by"), "design", msg=row)
+
+        template_brief = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="list",
+            args={"template": "brief"},
+        )
+        self.assertTrue(template_brief.get("ok"), msg=template_brief)
+        for row in template_brief.get("artifacts", []):
+            if isinstance(row, dict):
+                self.assertEqual(row.get("template"), "brief", msg=row)
+
+        published_only = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="list",
+            args={"status": "published"},
+        )
+        self.assertTrue(published_only.get("ok"), msg=published_only)
+        published_ids = {
+            str(row.get("artifact_id"))
+            for row in (published_only.get("artifacts") or [])
+            if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+        }
+        self.assertNotIn("art-filter-draft", published_ids)
+
+        limited = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="list",
+            args={"limit": 1},
+        )
+        self.assertTrue(limited.get("ok"), msg=limited)
+        limited_rows = limited.get("artifacts")
+        self.assertIsInstance(limited_rows, list, msg=limited)
+        assert isinstance(limited_rows, list)
+        self.assertEqual(len(limited_rows), 1, msg=limited_rows)
+
+        track_scoped = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="list",
+            args={"track_id": "track-art-list-filter"},
+        )
+        self.assertTrue(track_scoped.get("ok"), msg=track_scoped)
+        for row in track_scoped.get("artifacts", []):
+            if isinstance(row, dict):
+                self.assertEqual(row.get("published_to_track"), "track-art-list-filter", msg=row)
+
+        default_limit = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="list",
+            args={},
+        )
+        self.assertTrue(default_limit.get("ok"), msg=default_limit)
+        default_rows = default_limit.get("artifacts")
+        self.assertIsInstance(default_rows, list, msg=default_limit)
+        assert isinstance(default_rows, list)
+        self.assertLessEqual(len(default_rows), 20)
+
+    def test_list_rejects_invalid_filters_without_state_change(self) -> None:
+        instance_pm = self._instance_json(instance_id="inst-pm-art-list-invalid", buddy="pm")
+        cases = [
+            {"unsupported": "x"},
+            {"template": "prd"},
+            {"status": "live"},
+            {"created_by": "unknown"},
+            {"q": 123},
+            {"limit": 0},
+            {"limit": "1"},
+            {"track_id": "   "},
+            {"track_id": "track-missing"},
+        ]
+        for args in cases:
+            result = self._dispatch(
+                instance_json=instance_pm,
+                instance_id="inst-pm-art-list-invalid",
+                buddy="pm",
+                tool="artifact",
+                action="list",
+                args=args,
+            )
+            with self.subTest(args=args):
+                self.assertFalse(result.get("ok"), msg=result)
+                self.assertEqual(result.get("state_changed"), False, msg=result)
+                self.assertEqual(result.get("durability"), "none", msg=result)
+                self.assertIsInstance(result.get("permission_boundary"), str, msg=result)
+                self.assertTrue(str(result.get("permission_boundary")).strip(), msg=result)
+                self.assertIsInstance(result.get("why_blocked"), str, msg=result)
+                self.assertTrue(str(result.get("why_blocked")).strip(), msg=result)
+
+    def test_list_hides_archived_track_artifacts_and_rejects_archived_track_filter(self) -> None:
+        instance_pm = self._instance_json(instance_id="inst-pm-art-list-archived", buddy="pm")
+        self.assertTrue(
+            self._create_track(
+                instance_json=instance_pm,
+                instance_id="inst-pm-art-list-archived",
+                track_id="track-art-list-archived",
+            ).get("ok")
+        )
+        created = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art-list-archived",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-list-archived-r1",
+                "title": "Archived material",
+                "summary": "archive me",
+                "template": "brief",
+                "body": "archive body",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+        self.assertTrue(
+            self._dispatch(
+                instance_json=instance_pm,
+                instance_id="inst-pm-art-list-archived",
+                buddy="pm",
+                tool="track",
+                action="add_material",
+                args={
+                    "track_id": "track-art-list-archived",
+                    "artifact_id": "art-list-archived-r1",
+                    "label": "Archived",
+                    "summary": "archive me",
+                },
+            ).get("ok")
+        )
+        self.assertTrue(
+            self._dispatch(
+                instance_json=instance_pm,
+                instance_id="inst-pm-art-list-archived",
+                buddy="pm",
+                tool="track",
+                action="archive",
+                args={"track_id": "track-art-list-archived"},
+            ).get("ok")
+        )
+
+        listed = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art-list-archived",
+            buddy="pm",
+            tool="artifact",
+            action="list",
+            args={},
+        )
+        self.assertTrue(listed.get("ok"), msg=listed)
+        listed_ids = {
+            str(row.get("artifact_id"))
+            for row in (listed.get("artifacts") or [])
+            if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+        }
+        self.assertNotIn("art-list-archived-r1", listed_ids)
+
+        track_filtered = self._dispatch(
+            instance_json=instance_pm,
+            instance_id="inst-pm-art-list-archived",
+            buddy="pm",
+            tool="artifact",
+            action="list",
+            args={"track_id": "track-art-list-archived"},
+        )
+        self.assertFalse(track_filtered.get("ok"), msg=track_filtered)
+        self.assertEqual(track_filtered.get("state_changed"), False, msg=track_filtered)
+        self.assertEqual(track_filtered.get("durability"), "none", msg=track_filtered)
+
+    def test_get_relation_summary_includes_publication_and_lineage(self) -> None:
+        shared_instance_id = "inst-art-rel-lineage"
+        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        self.assertTrue(
+            self._create_track(
+                instance_json=instance_pm,
+                instance_id=shared_instance_id,
+                track_id="track-art-rel-lineage",
+            ).get("ok")
+        )
+        created_r1 = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-lineage-r1",
+                "title": "Lineage v1",
+                "summary": "v1",
+                "template": "brief",
+                "body": "v1",
+            },
+        )
+        self.assertTrue(created_r1.get("ok"), msg=created_r1)
+        self.assertTrue(
+            self._dispatch(
+                instance_json=instance_pm,
+                instance_id=shared_instance_id,
+                buddy="pm",
+                tool="track",
+                action="add_material",
+                args={
+                    "track_id": "track-art-rel-lineage",
+                    "artifact_id": "art-lineage-r1",
+                    "label": "Brief",
+                    "summary": "v1",
+                },
+            ).get("ok")
+        )
+
+        instance_dev = self._instance_json(instance_id=shared_instance_id, buddy="dev")
+        created_dev_private = self._dispatch(
+            instance_json=instance_dev,
+            instance_id=shared_instance_id,
+            buddy="dev",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-lineage-private-r2",
+                "title": "Private supersede",
+                "summary": "private",
+                "template": "brief",
+                "body": "private",
+                "supersedes_artifact_id": "art-lineage-r1",
+            },
+        )
+        self.assertTrue(created_dev_private.get("ok"), msg=created_dev_private)
+
+        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        created_r2 = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-lineage-r2",
+                "title": "Lineage v2",
+                "summary": "v2",
+                "template": "brief",
+                "body": "v2",
+                "supersedes_artifact_id": "art-lineage-r1",
+            },
+        )
+        self.assertTrue(created_r2.get("ok"), msg=created_r2)
+        self.assertTrue(
+            self._dispatch(
+                instance_json=instance_pm,
+                instance_id=shared_instance_id,
+                buddy="pm",
+                tool="track",
+                action="add_material",
+                args={
+                    "track_id": "track-art-rel-lineage",
+                    "artifact_id": "art-lineage-r2",
+                    "label": "Brief",
+                    "summary": "v2",
+                },
+            ).get("ok")
+        )
+
+        fetched = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="get",
+            args={"artifact_id": "art-lineage-r1"},
+        )
+        self.assertTrue(fetched.get("ok"), msg=fetched)
+        artifact = fetched.get("artifact")
+        self.assertIsInstance(artifact, dict, msg=fetched)
+        assert isinstance(artifact, dict)
+        relation_summary = artifact.get("relation_summary")
+        self.assertIsInstance(relation_summary, dict, msg=artifact)
+        assert isinstance(relation_summary, dict)
+        publication = relation_summary.get("publication")
+        self.assertIsInstance(publication, dict, msg=relation_summary)
+        assert isinstance(publication, dict)
+        self.assertEqual(publication.get("track_id"), "track-art-rel-lineage")
+        self.assertEqual(publication.get("relation"), "track_history")
+        self.assertEqual(publication.get("currentness"), "superseded")
+        lineage = relation_summary.get("lineage")
+        self.assertIsInstance(lineage, dict, msg=relation_summary)
+        assert isinstance(lineage, dict)
+        self.assertIsNone(lineage.get("supersedes_artifact_id"))
+        superseded_by = lineage.get("superseded_by_artifact_ids")
+        self.assertIsInstance(superseded_by, list, msg=lineage)
+        assert isinstance(superseded_by, list)
+        self.assertIn("art-lineage-r2", superseded_by)
+        self.assertNotIn("art-lineage-private-r2", superseded_by)
+
+    def test_get_relation_summary_includes_permission_filtered_incoming_refs(self) -> None:
+        shared_instance_id = "inst-art-rel-incoming"
+        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        self.assertTrue(
+            self._create_track(
+                instance_json=instance_pm,
+                instance_id=shared_instance_id,
+                track_id="track-art-rel-incoming",
+            ).get("ok")
+        )
+        created_target = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-rel-target",
+                "title": "Relation target",
+                "summary": "target",
+                "template": "brief",
+                "body": "target body",
+            },
+        )
+        self.assertTrue(created_target.get("ok"), msg=created_target)
+        self.assertTrue(
+            self._dispatch(
+                instance_json=instance_pm,
+                instance_id=shared_instance_id,
+                buddy="pm",
+                tool="track",
+                action="add_material",
+                args={
+                    "track_id": "track-art-rel-incoming",
+                    "artifact_id": "art-rel-target",
+                    "label": "Target",
+                    "summary": "target",
+                },
+            ).get("ok")
+        )
+
+        visible_source = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-rel-source-visible",
+                "title": "Visible source",
+                "summary": "visible",
+                "template": "note",
+                "body": "visible",
+                "source_refs": [{"type": "artifact", "id": "art-rel-target"}],
+            },
+        )
+        self.assertTrue(visible_source.get("ok"), msg=visible_source)
+
+        instance_dev = self._instance_json(instance_id=shared_instance_id, buddy="dev")
+        private_source = self._dispatch(
+            instance_json=instance_dev,
+            instance_id=shared_instance_id,
+            buddy="dev",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-rel-source-private",
+                "title": "Private source",
+                "summary": "private",
+                "template": "note",
+                "body": "private",
+                "source_refs": [{"type": "artifact", "id": "art-rel-target"}],
+            },
+        )
+        self.assertTrue(private_source.get("ok"), msg=private_source)
+
+        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        request_target = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="request",
+            action="create",
+            args={
+                "track_id": "track-art-rel-incoming",
+                "to_buddy": "dev",
+                "title": "Use target",
+                "summary": "Target ref request",
+                "target_refs": [{"type": "artifact", "id": "art-rel-target"}],
+            },
+        )
+        self.assertTrue(request_target.get("ok"), msg=request_target)
+        request_target_id = str(request_target.get("request_id") or "")
+        self.assertTrue(request_target_id)
+
+        request_result = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="request",
+            action="create",
+            args={
+                "track_id": "track-art-rel-incoming",
+                "to_buddy": "dev",
+                "title": "Produce result",
+                "summary": "Result ref request",
+                "target_refs": [{"type": "track", "id": "track-art-rel-incoming"}],
+            },
+        )
+        self.assertTrue(request_result.get("ok"), msg=request_result)
+        request_result_id = str(request_result.get("request_id") or "")
+        self.assertTrue(request_result_id)
+        instance_dev = self._instance_json(instance_id=shared_instance_id, buddy="dev")
+        accepted = self._dispatch(
+            instance_json=instance_dev,
+            instance_id=shared_instance_id,
+            buddy="dev",
+            tool="request",
+            action="accept",
+            args={"request_id": request_result_id},
+        )
+        self.assertTrue(accepted.get("ok"), msg=accepted)
+        completed = self._dispatch(
+            instance_json=instance_dev,
+            instance_id=shared_instance_id,
+            buddy="dev",
+            tool="request",
+            action="complete",
+            args={
+                "request_id": request_result_id,
+                "result_refs": [{"type": "artifact", "id": "art-rel-target"}],
+            },
+        )
+        self.assertTrue(completed.get("ok"), msg=completed)
+
+        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        added_update = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="track",
+            action="add_update",
+            args={
+                "track_id": "track-art-rel-incoming",
+                "kind": "progress",
+                "summary": "Target update",
+                "refs": [{"type": "artifact", "id": "art-rel-target"}],
+            },
+        )
+        self.assertTrue(added_update.get("ok"), msg=added_update)
+        update_id = str(added_update.get("update_id") or "")
+        if not update_id:
+            track = env_store.get_track("track-art-rel-incoming")
+            self.assertIsInstance(track, dict, msg=added_update)
+            assert isinstance(track, dict)
+            updates = [row for row in track.get("updates", []) if isinstance(row, dict)]
+            self.assertTrue(updates, msg=track)
+            update_id = str(updates[-1].get("id") or "")
+        self.assertTrue(update_id)
+
+        comment_root = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "artifact",
+                "target_id": "art-rel-target",
+                "content": "root comment",
+            },
+        )
+        self.assertTrue(comment_root.get("ok"), msg=comment_root)
+        root_comment_id = str(comment_root.get("comment_id") or "")
+        self.assertTrue(root_comment_id)
+
+        comment_section = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "artifact_section",
+                "target_id": "art-rel-target",
+                "content": "section comment",
+                "anchor": "#section-1",
+            },
+        )
+        self.assertTrue(comment_section.get("ok"), msg=comment_section)
+        section_comment_id = str(comment_section.get("comment_id") or "")
+        self.assertTrue(section_comment_id)
+
+        fetched = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=shared_instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="get",
+            args={"artifact_id": "art-rel-target"},
+        )
+        self.assertTrue(fetched.get("ok"), msg=fetched)
+        artifact = fetched.get("artifact")
+        self.assertIsInstance(artifact, dict, msg=fetched)
+        assert isinstance(artifact, dict)
+        relation_summary = artifact.get("relation_summary")
+        self.assertIsInstance(relation_summary, dict, msg=artifact)
+        assert isinstance(relation_summary, dict)
+        incoming_refs = relation_summary.get("incoming_refs")
+        self.assertIsInstance(incoming_refs, dict, msg=relation_summary)
+        assert isinstance(incoming_refs, dict)
+
+        source_rows = incoming_refs.get("source_ref_by_artifacts")
+        self.assertIsInstance(source_rows, list, msg=incoming_refs)
+        assert isinstance(source_rows, list)
+        source_artifact_ids = {
+            str(row.get("artifact_id"))
+            for row in source_rows
+            if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
+        }
+        self.assertIn("art-rel-source-visible", source_artifact_ids)
+        self.assertNotIn("art-rel-source-private", source_artifact_ids)
+        for row in source_rows:
+            if isinstance(row, dict):
+                self.assertNotIn("body", row, msg=row)
+
+        target_rows = incoming_refs.get("target_ref_by_requests")
+        self.assertIsInstance(target_rows, list, msg=incoming_refs)
+        assert isinstance(target_rows, list)
+        target_request_ids = {
+            str(row.get("request_id"))
+            for row in target_rows
+            if isinstance(row, dict) and isinstance(row.get("request_id"), str)
+        }
+        self.assertIn(request_target_id, target_request_ids)
+
+        result_rows = incoming_refs.get("result_ref_by_requests")
+        self.assertIsInstance(result_rows, list, msg=incoming_refs)
+        assert isinstance(result_rows, list)
+        result_request_ids = {
+            str(row.get("request_id"))
+            for row in result_rows
+            if isinstance(row, dict) and isinstance(row.get("request_id"), str)
+        }
+        self.assertIn(request_result_id, result_request_ids)
+
+        update_rows = incoming_refs.get("track_update_refs")
+        self.assertIsInstance(update_rows, list, msg=incoming_refs)
+        assert isinstance(update_rows, list)
+        update_ids = {
+            str(row.get("update_id"))
+            for row in update_rows
+            if isinstance(row, dict) and isinstance(row.get("update_id"), str)
+        }
+        self.assertIn(update_id, update_ids)
+
+        comment_ids = incoming_refs.get("comment_ids")
+        self.assertIsInstance(comment_ids, list, msg=incoming_refs)
+        assert isinstance(comment_ids, list)
+        self.assertIn(root_comment_id, comment_ids)
+        self.assertIn(section_comment_id, comment_ids)
+        self.assertTrue(all(isinstance(row, str) for row in comment_ids))
+
 
 if __name__ == "__main__":
     unittest.main()

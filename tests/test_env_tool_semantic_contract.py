@@ -18,7 +18,7 @@ _EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence
 _EXPECTED_ACTIONS_BY_TOOL = {
     "task": {"create", "list", "get", "update", "archive"},
     "track": {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
-    "artifact": {"get", "create_revision", "update_metadata"},
+    "artifact": {"list", "get", "create_revision", "update_metadata"},
     "buddybox": {"desc", "list", "read", "write", "delete"},
     "context": {"get", "summarize", "list_sources"},
     "evidence": {"issue_browser", "approve_downgrade"},
@@ -91,6 +91,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
 
     def test_adjacent_action_boundaries_are_explained(self) -> None:
         checks = [
+            ("artifact", "list", ("summary", "filter", "get")),
             ("track", "add_material", ("material", "proof", "timeline")),
             ("track", "add_update", ("timeline", "material", "proof")),
             ("track", "add_proof", ("proof", "material", "timeline")),
@@ -129,6 +130,26 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             with self.subTest(action=f"{tool}.{action}"):
                 for snippet in snippets:
                     self.assertIn(snippet, text, msg=f"{tool}.{action} missing snippet '{snippet}'")
+
+    def test_forbidden_tool_and_action_surfaces_are_absent(self) -> None:
+        forbidden_tool_ids = {
+            "artifact_index",
+            "artifact_search",
+            "relation",
+            "insight",
+            "experiment",
+            "roadmap",
+            "review",
+            "approval",
+        }
+        supported_tools = set(catalog.supported_tools())
+        self.assertTrue(forbidden_tool_ids.isdisjoint(supported_tools))
+
+        forbidden_action_ids = {"artifact_index", "artifact_search", "relation", "insight", "experiment", "roadmap", "review", "approval"}
+        for tool in sorted(supported_tools):
+            actions = set(catalog.supported_actions(tool))
+            with self.subTest(tool=tool):
+                self.assertTrue(forbidden_action_ids.isdisjoint(actions))
 
     def test_operation_semantics_machine_contract_is_preserved(self) -> None:
         op = catalog.operation_semantics()

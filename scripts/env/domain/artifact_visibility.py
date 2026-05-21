@@ -204,20 +204,7 @@ def artifact_summary_row(
     active_buddy: str,
 ) -> dict[str, Any]:
     decision = artifact_read_decision(artifact, active_buddy)
-    relation = decision.get("relation")
-    if relation not in {"owner", "track_material", "track_proof", "track_history"}:
-        relation = "none"
-    status = artifact.get("status")
-    if status == "draft":
-        currentness = "draft"
-    elif relation == "track_material":
-        currentness = "current"
-    elif relation == "track_proof":
-        currentness = "proof"
-    elif relation == "track_history":
-        currentness = "superseded"
-    else:
-        currentness = "superseded"
+    relation, currentness = _relation_and_currentness_for_decision(artifact=artifact, decision=decision)
     return {
         "id": artifact.get("id"),
         "artifact_id": artifact.get("id"),
@@ -239,6 +226,64 @@ def artifact_summary_row(
         "published_to_track": artifact.get("published_to_track"),
         "updated_at": artifact.get("updated_at"),
         "created_at": artifact.get("created_at"),
+    }
+
+
+def _relation_and_currentness_for_decision(
+    *,
+    artifact: dict[str, Any],
+    decision: dict[str, Any],
+) -> tuple[str, str]:
+    relation = decision.get("relation")
+    if relation not in {"owner", "track_material", "track_proof", "track_history"}:
+        relation = "none"
+    status = artifact.get("status")
+    if status == "draft":
+        currentness = "draft"
+    elif relation == "track_material":
+        currentness = "current"
+    elif relation == "track_proof":
+        currentness = "proof"
+    else:
+        currentness = "superseded"
+    return str(relation), currentness
+
+
+def artifact_list_row(
+    artifact: dict[str, Any],
+    active_buddy: str,
+    *,
+    comment_counts: dict[str, int] | None = None,
+    relation_counts: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    from env.domain import source_refs as source_refs_domain
+
+    decision = artifact_read_decision(artifact, active_buddy)
+    relation, currentness = _relation_and_currentness_for_decision(artifact=artifact, decision=decision)
+    counts = comment_counts or {}
+    backlinks = relation_counts or {}
+    return {
+        "artifact_id": artifact.get("id"),
+        "title": artifact.get("title"),
+        "summary": artifact.get("summary", ""),
+        "template": artifact.get("template"),
+        "status": artifact.get("status"),
+        "currentness": currentness,
+        "relation": relation,
+        "created_by": artifact.get("created_by"),
+        "authors": artifact.get("authors"),
+        "published_to_track": artifact.get("published_to_track"),
+        "revision": artifact.get("revision"),
+        "supersedes_artifact_id": artifact.get("supersedes_artifact_id"),
+        "source_refs_summary": source_refs_domain.source_ref_summary(artifact.get("source_refs")),
+        "open_comment_count": int(counts.get("open_comment_count", 0)),
+        "resolved_comment_count": int(counts.get("resolved_comment_count", 0)),
+        "incoming_source_ref_count": int(backlinks.get("incoming_source_ref_count", 0)),
+        "target_request_count": int(backlinks.get("target_request_count", 0)),
+        "result_request_count": int(backlinks.get("result_request_count", 0)),
+        "track_update_ref_count": int(backlinks.get("track_update_ref_count", 0)),
+        "comment_count": int(backlinks.get("comment_count", 0)),
+        "updated_at": artifact.get("updated_at"),
     }
 
 

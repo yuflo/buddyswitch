@@ -134,6 +134,7 @@ def _reject_scope(
     boundary: str,
     message: str,
     code: str = "E_ARTIFACT_SCOPE",
+    correctable_fields: list[str] | None = None,
     field_errors: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return tool_results.rejection(
@@ -153,7 +154,7 @@ def _reject_scope(
             "Use track.open for shared artifact refs.",
             "Use artifact.create_revision for a private draft owned by the active buddy.",
         ],
-        correctable_fields=["artifact_id"],
+        correctable_fields=correctable_fields or ["artifact_id"],
         field_errors=field_errors,
     )
 
@@ -199,6 +200,166 @@ def _artifact_response_row(artifact: dict[str, Any], active_buddy: str, context:
     return context.rules.artifact_visibility.artifact_summary_row(artifact, active_buddy)
 
 
+def _normalize_list_filters(
+    args: dict[str, Any],
+    active_buddy: str,
+    context: ArtifactServiceContext,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    action = "artifact.list"
+    track_id: str | None = None
+    if "track_id" in args:
+        raw_track_id = args.get("track_id")
+        if not isinstance(raw_track_id, str) or not raw_track_id.strip():
+            return None, _reject_payload(action=action, active_buddy=active_buddy, message="track_id must be a non-empty string")
+        normalized_track_id = raw_track_id.strip()
+        readable = context.rules.artifact_visibility.assert_track_readable(
+            normalized_track_id,
+            active_buddy=active_buddy,
+            action=action,
+        )
+        if not bool(readable.get("ok")):
+            boundary = str(readable.get("permission_boundary", "artifact.read_scope"))
+            message = str(readable.get("message", f"track not found: {normalized_track_id}"))
+            if boundary == "request-payload":
+                return None, _reject_payload(action=action, active_buddy=active_buddy, message=message)
+            return None, _reject_scope(
+                action=action,
+                active_buddy=active_buddy,
+                boundary=boundary,
+                message=message,
+                code=str(readable.get("code", "E_ARTIFACT_SCOPE")),
+                correctable_fields=["track_id"],
+            )
+        track_id = normalized_track_id
+
+    created_by: str | None = None
+    if "created_by" in args:
+        raw_created_by = args.get("created_by")
+        if not isinstance(raw_created_by, str) or not raw_created_by.strip():
+            return None, _reject_payload(action=action, active_buddy=active_buddy, message="created_by must be a non-empty string")
+        normalized_created_by = raw_created_by.strip()
+        manifest_ids = context.rules.message.manifest_buddy_ids(context["manifest"])
+        if normalized_created_by not in manifest_ids:
+            return None, _reject_payload(
+                action=action,
+                active_buddy=active_buddy,
+                message="created_by must be one of manifest buddies",
+            )
+        created_by = normalized_created_by
+
+    template: str | None = None
+    if "template" in args:
+        raw_template = args.get("template")
+        if not isinstance(raw_template, str) or raw_template not in context.repos.artifact.VALID_ARTIFACT_TEMPLATES:
+            return None, _reject_payload(
+                action=action,
+                active_buddy=active_buddy,
+                message=f"template must be one of {', '.join(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)}",
+                field_errors=[_template_field_error(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)],
+            )
+        template = raw_template
+
+    status: str | None = None
+    if "status" in args:
+        raw_status = args.get("status")
+        if not isinstance(raw_status, str) or raw_status not in context.repos.artifact.VALID_ARTIFACT_STATUS:
+            return None, _reject_payload(
+                action=action,
+                active_buddy=active_buddy,
+                message=f"status must be one of {', '.join(context.repos.artifact.VALID_ARTIFACT_STATUS)}",
+            )
+        status = raw_status
+
+    q: str | None = None
+    if "q" in args:
+        raw_q = args.get("q")
+        if not isinstance(raw_q, str):
+            return None, _reject_payload(action=action, active_buddy=active_buddy, message="q must be a string")
+        q = raw_q.strip().lower() or None
+
+    limit = args.get("limit", 20)
+    if not isinstance(limit, int) or limit <= 0:
+        return None, _reject_payload(action=action, active_buddy=active_buddy, message="limit must be a positive integer")
+
+    return (
+        {
+            "track_id": track_id,
+            "created_by": created_by,
+            "template": template,
+            "status": status,
+            "q": q,
+            "limit": limit,
+        },
+        None,
+    )
+
+
+def list_artifacts_for_active_buddy(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
+    action = "artifact.list"
+    active_buddy = context["active_buddy"]
+    payload_error = _require_allowed_fields(action, args, active_buddy)
+    if payload_error is not None:
+        return payload_error
+
+    filters, filter_error = _normalize_list_filters(args, active_buddy, context)
+    if filter_error is not None:
+        return filter_error
+    assert isinstance(filters, dict)
+
+    rows: list[dict[str, Any]] = []
+    for artifact in context.repos.artifact.list_artifacts():
+        decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_buddy)
+        if not bool(decision.get("allowed")):
+            continue
+        if isinstance(filters.get("track_id"), str) and decision.get("track_id") != filters.get("track_id"):
+            continue
+        if isinstance(filters.get("created_by"), str) and artifact.get("created_by") != filters.get("created_by"):
+            continue
+        if isinstance(filters.get("template"), str) and artifact.get("template") != filters.get("template"):
+            continue
+        if isinstance(filters.get("status"), str) and artifact.get("status") != filters.get("status"):
+            continue
+        query = filters.get("q")
+        if isinstance(query, str) and query:
+            title = str(artifact.get("title") or "").lower()
+            summary = str(artifact.get("summary") or "").lower()
+            if query not in title and query not in summary:
+                continue
+
+        artifact_id = str(artifact.get("id") or "")
+        comment_counts = context.rules.artifact_relations.comment_counts_for_artifact(artifact_id) if artifact_id else {}
+        relation_counts = (
+            context.rules.artifact_relations.relation_counts_for_artifact(artifact_id=artifact_id, active_buddy=active_buddy)
+            if artifact_id
+            else {}
+        )
+        rows.append(
+            context.rules.artifact_visibility.artifact_list_row(
+                artifact,
+                active_buddy,
+                comment_counts=comment_counts,
+                relation_counts=relation_counts,
+            )
+        )
+
+    rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("artifact_id") or "")), reverse=True)
+    limited_rows = rows[: int(filters.get("limit", 20))]
+    return tool_results.success(
+        tool="artifact",
+        action=action,
+        active_buddy=active_buddy,
+        effect_summary=f"Returned {len(limited_rows)} readable artifact summary row(s).",
+        state_changed=False,
+        durability="none",
+        read_scope="readable artifact summaries only",
+        allowed_next_actions=[
+            "Use artifact.get with artifact_id to read full markdown body content.",
+            "Use track.open to inspect shared track publication state.",
+        ],
+        extra={"artifacts": limited_rows, "count": len(limited_rows), "filters": filters},
+    )
+
+
 def get_artifact_for_active_buddy(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
     action = "artifact.get"
     active_buddy = context["active_buddy"]
@@ -226,6 +387,10 @@ def get_artifact_for_active_buddy(*, args: dict[str, Any], context: ArtifactServ
         )
 
     row = _artifact_response_row(artifact, active_buddy, context)
+    row["relation_summary"] = context.rules.artifact_relations.relation_summary_for_artifact(
+        artifact=artifact,
+        active_buddy=active_buddy,
+    )
     return tool_results.success(
         tool="artifact",
         action=action,
@@ -479,6 +644,7 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
 _ACTION_HANDLERS = {
     'create_revision': create_artifact_revision,
     'get': get_artifact_for_active_buddy,
+    'list': list_artifacts_for_active_buddy,
     'update_metadata': update_artifact_metadata,
 }
 

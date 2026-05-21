@@ -83,7 +83,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='summarize',
                 title='context.summarize',
-                description='Return compact runtime context orientation and first-pass affordances.',
+                description='Return compact runtime context orientation with candidate tracks, requests, artifacts, open comment threads, and recent updates.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -115,15 +115,19 @@ def _build_definition() -> ToolDefinition:
                     'filters are valid',
                 ),
                 returns=(
-                    'summary',
+                    'current_context_summary',
                     'candidate_tracks',
+                    'candidate_requests',
+                    'candidate_artifacts',
+                    'open_comment_threads',
+                    'recent_updates',
                     'buddybox_desc',
                 ),
                 use_when=(
-                    'You need a compact first-pass summary with candidate ids and tool affordances without loading full catalog sections.',
+                    'You need a compact first-pass summary with candidate tracks/requests/artifacts and quick discussion/update attention cues.',
                 ),
                 do_not_use_when=(
-                    'You need full operation semantics/tool catalog details or source descriptors only; use context.get or context.list_sources.',
+                    'You need full operation semantics/tool catalog details, full comment bodies, or full artifact markdown body; use context.get/comment.list/artifact.get.',
                 ),
                 risk_hints={
                     'read_only': True,

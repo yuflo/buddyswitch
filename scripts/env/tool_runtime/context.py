@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 import uuid
 
+from env.domain import artifact_relations as _artifact_relations_domain
 from env.domain import artifact_visibility as _artifact_visibility_domain
 from env.domain import buddybox_workspace as _buddybox_workspace_domain
 from env.domain import comment_targets as _comment_target_domain
@@ -216,7 +217,7 @@ class RuntimeObjectAccess:
         return {
             "tracks": "track.list / track.open",
             "tasks": "task.list / task.get",
-            "artifacts": "artifact.get",
+            "artifacts": "artifact.list / artifact.get",
             "messages": "message.list",
             "comments": "comment.list",
             "requests": "request.list / request.get",
@@ -385,6 +386,7 @@ class RegistryCatalogAccess:
 class DomainAccess:
     """Host-owned domain validator/normalizer access."""
 
+    artifact_relations: Any = field(default_factory=lambda: _artifact_relations_domain)
     artifact_visibility: Any = field(default_factory=lambda: _artifact_visibility_domain)
     buddybox_workspace: Any = field(default_factory=lambda: _buddybox_workspace_domain)
     comment_target: Any = field(default_factory=lambda: _comment_target_domain)

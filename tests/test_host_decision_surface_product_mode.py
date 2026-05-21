@@ -86,6 +86,284 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertNotIn("handoff", affordances)
         self.assertNotIn("project_source", affordances)
 
+    def test_context_summarize_includes_compact_artifacts_comments_and_updates(self) -> None:
+        track = env_store.create_track(
+            "track-context-entry-surface",
+            "Entry Surface",
+            owner_buddy="pm",
+            outcome="Validate compact entry surface.",
+            appetite="1 day",
+            now={"next": "Seed artifacts", "blocker": None},
+        )
+        artifact = env_store.create_artifact_revision(
+            artifact_id="art-context-entry-r1",
+            title="Entry Artifact",
+            summary="Entry summary",
+            body="Entry body",
+            template="brief",
+            supersedes_artifact_id=None,
+            created_by="pm",
+            authors=["pm"],
+            source_refs=[{"type": "note", "label": "seed"}],
+        )
+        env_store.publish_track_material(
+            track_id=str(track["id"]),
+            artifact_id=str(artifact["id"]),
+            label="Entry",
+            from_buddy="pm",
+            summary="Entry summary",
+        )
+        proof = env_store.create_artifact_revision(
+            artifact_id="art-context-proof-r1",
+            title="Entry Proof",
+            summary="Proof summary",
+            body="Proof body",
+            template="proof",
+            supersedes_artifact_id=None,
+            created_by="pm",
+            authors=["pm"],
+            source_refs=[{"type": "note", "label": "proof-seed"}],
+        )
+        env_store.publish_track_proof(
+            track_id=str(track["id"]),
+            artifact_id=str(proof["id"]),
+            label="Proof",
+            from_buddy="pm",
+            summary="Proof summary",
+        )
+        created_request = self._dispatch(
+            buddy="pm",
+            tool="request",
+            action="create",
+            args={
+                "track_id": str(track["id"]),
+                "to_buddy": "market",
+                "title": "Validate entry surface",
+                "summary": "Check entry artifacts and updates.",
+                "target_refs": [{"type": "artifact", "id": str(artifact["id"])}],
+            },
+        )
+        self.assertTrue(created_request.get("ok"), msg=created_request)
+        added_comment = self._dispatch(
+            buddy="pm",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "artifact",
+                "target_id": str(artifact["id"]),
+                "content": "Open discussion",
+            },
+        )
+        self.assertTrue(added_comment.get("ok"), msg=added_comment)
+        added_update = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="add_update",
+            args={
+                "track_id": str(track["id"]),
+                "kind": "progress",
+                "summary": "Entry progress",
+                "refs": [{"type": "artifact", "id": str(artifact["id"])}],
+            },
+        )
+        self.assertTrue(added_update.get("ok"), msg=added_update)
+
+        summary = self._dispatch(buddy="market", tool="context", action="summarize", args={})
+        self.assertTrue(summary.get("ok"), msg=summary)
+        self.assertIn("candidate_artifacts", summary)
+        self.assertIn("candidate_requests", summary)
+        self.assertIn("open_comment_threads", summary)
+        self.assertIn("recent_updates", summary)
+        candidate_artifacts = summary.get("candidate_artifacts")
+        self.assertIsInstance(candidate_artifacts, list, msg=summary)
+        assert isinstance(candidate_artifacts, list)
+        self.assertTrue(any(isinstance(row, dict) and row.get("artifact_id") == "art-context-entry-r1" for row in candidate_artifacts))
+        for row in candidate_artifacts:
+            if isinstance(row, dict):
+                self.assertNotIn("body", row, msg=row)
+        open_threads = summary.get("open_comment_threads")
+        self.assertIsInstance(open_threads, list, msg=summary)
+        assert isinstance(open_threads, list)
+        self.assertTrue(any(isinstance(row, dict) and row.get("target_id") == "art-context-entry-r1" for row in open_threads))
+        recent_updates = summary.get("recent_updates")
+        self.assertIsInstance(recent_updates, list, msg=summary)
+        assert isinstance(recent_updates, list)
+        self.assertTrue(any(isinstance(row, dict) and row.get("track_id") == "track-context-entry-surface" for row in recent_updates))
+        context_summary = summary.get("current_context_summary")
+        self.assertIsInstance(context_summary, dict, msg=summary)
+        assert isinstance(context_summary, dict)
+        self.assertGreaterEqual(int(context_summary.get("artifacts", 0)), 1)
+        self.assertGreaterEqual(int(context_summary.get("open_comment_threads", 0)), 1)
+        self.assertGreaterEqual(int(context_summary.get("recent_updates", 0)), 1)
+        affordances = summary.get("tool_affordances")
+        self.assertIsInstance(affordances, dict, msg=summary)
+        assert isinstance(affordances, dict)
+        for tool_id in ("artifact", "request", "comment", "track", "context"):
+            self.assertIn(tool_id, affordances)
+
+    def test_context_summarize_track_filter_narrows_artifacts_requests_comments_and_updates(self) -> None:
+        track_a = env_store.create_track(
+            "track-context-filter-a",
+            "Filter A",
+            owner_buddy="pm",
+            outcome="A",
+            appetite="1 day",
+            now={"next": "A", "blocker": None},
+        )
+        track_b = env_store.create_track(
+            "track-context-filter-b",
+            "Filter B",
+            owner_buddy="pm",
+            outcome="B",
+            appetite="1 day",
+            now={"next": "B", "blocker": None},
+        )
+        art_a = env_store.create_artifact_revision(
+            artifact_id="art-context-filter-a-r1",
+            title="Artifact A",
+            summary="A",
+            body="A",
+            template="brief",
+            supersedes_artifact_id=None,
+            created_by="pm",
+            authors=["pm"],
+            source_refs=[{"type": "note", "label": "A"}],
+        )
+        art_b = env_store.create_artifact_revision(
+            artifact_id="art-context-filter-b-r1",
+            title="Artifact B",
+            summary="B",
+            body="B",
+            template="brief",
+            supersedes_artifact_id=None,
+            created_by="pm",
+            authors=["pm"],
+            source_refs=[{"type": "note", "label": "B"}],
+        )
+        env_store.publish_track_material(
+            track_id=str(track_a["id"]),
+            artifact_id=str(art_a["id"]),
+            label="A",
+            from_buddy="pm",
+            summary="A",
+        )
+        env_store.publish_track_material(
+            track_id=str(track_b["id"]),
+            artifact_id=str(art_b["id"]),
+            label="B",
+            from_buddy="pm",
+            summary="B",
+        )
+        request_a = self._dispatch(
+            buddy="pm",
+            tool="request",
+            action="create",
+            args={
+                "track_id": str(track_a["id"]),
+                "to_buddy": "market",
+                "title": "Request A",
+                "summary": "A",
+                "target_refs": [{"type": "artifact", "id": str(art_a["id"])}],
+            },
+        )
+        self.assertTrue(request_a.get("ok"), msg=request_a)
+        request_b = self._dispatch(
+            buddy="pm",
+            tool="request",
+            action="create",
+            args={
+                "track_id": str(track_b["id"]),
+                "to_buddy": "market",
+                "title": "Request B",
+                "summary": "B",
+                "target_refs": [{"type": "artifact", "id": str(art_b["id"])}],
+            },
+        )
+        self.assertTrue(request_b.get("ok"), msg=request_b)
+        comment_a = self._dispatch(
+            buddy="pm",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "artifact",
+                "target_id": str(art_a["id"]),
+                "content": "A comment",
+            },
+        )
+        self.assertTrue(comment_a.get("ok"), msg=comment_a)
+        comment_b = self._dispatch(
+            buddy="pm",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "artifact",
+                "target_id": str(art_b["id"]),
+                "content": "B comment",
+            },
+        )
+        self.assertTrue(comment_b.get("ok"), msg=comment_b)
+        update_a = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="add_update",
+            args={
+                "track_id": str(track_a["id"]),
+                "kind": "progress",
+                "summary": "A update",
+                "refs": [{"type": "artifact", "id": str(art_a["id"])}],
+            },
+        )
+        self.assertTrue(update_a.get("ok"), msg=update_a)
+        update_b = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="add_update",
+            args={
+                "track_id": str(track_b["id"]),
+                "kind": "progress",
+                "summary": "B update",
+                "refs": [{"type": "artifact", "id": str(art_b["id"])}],
+            },
+        )
+        self.assertTrue(update_b.get("ok"), msg=update_b)
+
+        filtered = self._dispatch(
+            buddy="market",
+            tool="context",
+            action="summarize",
+            args={"track_id": "track-context-filter-a"},
+        )
+        self.assertTrue(filtered.get("ok"), msg=filtered)
+        self.assertEqual(
+            [row.get("track_id") for row in filtered.get("candidate_tracks", []) if isinstance(row, dict)],
+            ["track-context-filter-a"],
+        )
+        for row in filtered.get("candidate_artifacts", []):
+            if isinstance(row, dict):
+                self.assertEqual(row.get("published_to_track"), "track-context-filter-a", msg=row)
+        for row in filtered.get("candidate_requests", []):
+            if isinstance(row, dict):
+                self.assertEqual(row.get("track_id"), "track-context-filter-a", msg=row)
+        for row in filtered.get("open_comment_threads", []):
+            if isinstance(row, dict):
+                self.assertEqual(row.get("target_id"), "art-context-filter-a-r1", msg=row)
+        for row in filtered.get("recent_updates", []):
+            if isinstance(row, dict):
+                self.assertEqual(row.get("track_id"), "track-context-filter-a", msg=row)
+
+        empty = self._dispatch(
+            buddy="market",
+            tool="context",
+            action="summarize",
+            args={"track_id": "track-context-filter-missing"},
+        )
+        self.assertTrue(empty.get("ok"), msg=empty)
+        self.assertEqual(empty.get("candidate_tracks"), [])
+        self.assertEqual(empty.get("candidate_artifacts"), [])
+        self.assertEqual(empty.get("candidate_requests"), [])
+        self.assertEqual(empty.get("open_comment_threads"), [])
+        self.assertEqual(empty.get("recent_updates"), [])
+
     def test_market_evidence_requires_target_scoped_args(self) -> None:
         response = self._dispatch(buddy="market", tool="evidence", action="issue_browser", args={"reason": "no target"})
         self.assertFalse(response["ok"])

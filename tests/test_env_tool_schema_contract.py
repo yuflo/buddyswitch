@@ -246,6 +246,28 @@ class EnvToolSchemaContractTests(unittest.TestCase):
 
         self.assertEqual(set(comment_resolve.get("required", [])), {"comment_id", "resolution_summary"})
 
+    def test_artifact_list_schema_is_simple_and_bounded(self) -> None:
+        artifact_list = catalog.get_action_definition("artifact", "list").input_schema
+        self.assertEqual(artifact_list.get("required"), [])
+        self.assertIs(artifact_list.get("additionalProperties"), False)
+        properties = artifact_list.get("properties")
+        self.assertIsInstance(properties, dict)
+        assert isinstance(properties, dict)
+        self.assertEqual(
+            set(properties),
+            {"track_id", "created_by", "template", "status", "q", "limit"},
+        )
+        self.assertEqual(
+            properties["template"].get("enum"),
+            ["brief", "proposal", "design", "decision", "proof", "note"],
+        )
+        self.assertEqual(
+            properties["status"].get("enum"),
+            ["draft", "published", "archived"],
+        )
+        self.assertEqual(properties["limit"].get("type"), "integer")
+        self.assertEqual(properties["limit"].get("minimum"), 1)
+
     def test_action_definition_validation_requires_action_semantic_tuples(self) -> None:
         action = ActionDefinition(
             name="example_action",

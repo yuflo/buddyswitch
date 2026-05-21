@@ -145,6 +145,12 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(artifact_row.get("template"), "brief")
         self.assertEqual(artifact_row.get("published_to_track"), track["id"])
         self.assertEqual(artifact_row.get("status"), "published")
+        self.assertNotIn("relation_summary", artifact_row)
+        self.assertNotIn("incoming_refs", artifact_row)
+        self.assertNotIn("source_ref_by_artifacts", artifact_row)
+        self.assertNotIn("target_ref_by_requests", artifact_row)
+        self.assertNotIn("result_ref_by_requests", artifact_row)
+        self.assertNotIn("track_update_refs", artifact_row)
 
         tasks = payload["tasks"]
         self.assertIsInstance(tasks, list)

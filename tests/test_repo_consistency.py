@@ -19,6 +19,16 @@ import turn_runtime  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
 
 _EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment", "request"}
+_FORBIDDEN_RUNTIME_SURFACES = {
+    "artifact_index",
+    "artifact_search",
+    "relation",
+    "insight",
+    "experiment",
+    "roadmap",
+    "review",
+    "approval",
+}
 
 
 class RepoConsistencyTests(unittest.TestCase):
@@ -114,9 +124,31 @@ class RepoConsistencyTests(unittest.TestCase):
             {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
         )
         artifact_actions = set(tool_catalog.supported_actions("artifact"))
-        self.assertEqual(artifact_actions, {"get", "create_revision", "update_metadata"})
+        self.assertEqual(artifact_actions, {"list", "get", "create_revision", "update_metadata"})
         request_actions = set(tool_catalog.supported_actions("request"))
         self.assertEqual(request_actions, {"create", "list", "get", "accept", "block", "complete", "cancel"})
+
+    def test_forbidden_runtime_surfaces_are_not_shipped(self) -> None:
+        self.assertTrue(_FORBIDDEN_RUNTIME_SURFACES.isdisjoint(set(tool_catalog.supported_tools())))
+        for tool in sorted(tool_catalog.supported_tools()):
+            actions = set(tool_catalog.supported_actions(tool))
+            with self.subTest(tool=tool):
+                self.assertTrue(_FORBIDDEN_RUNTIME_SURFACES.isdisjoint(actions))
+
+        tool_packages = {
+            path.name
+            for path in (ROOT / "scripts" / "env" / "tools").iterdir()
+            if path.is_dir() and not path.name.startswith("_")
+        }
+        self.assertTrue(_FORBIDDEN_RUNTIME_SURFACES.isdisjoint(tool_packages))
+
+        objects_root = ROOT / "buddyswitch" / "objects"
+        object_dirs = {
+            path.name
+            for path in objects_root.iterdir()
+            if path.is_dir()
+        } if objects_root.exists() else set()
+        self.assertTrue(_FORBIDDEN_RUNTIME_SURFACES.isdisjoint(object_dirs))
 
     def test_workspace_projection_contract_uses_track_page_shape(self) -> None:
         payload = json.loads((ROOT / "framework" / "contracts" / "workspace-projection.json").read_text(encoding="utf-8"))
