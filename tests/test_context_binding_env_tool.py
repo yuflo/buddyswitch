@@ -20,7 +20,7 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
-_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment", "request"}
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -232,8 +232,64 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            self.assertIn("readable_by_active_buddy", row)
-            self.assertNotIn("readable_by_current_buddy", row)
+            self.assertNotIn("body", row)
+
+    def test_context_summarize_track_filter_excludes_unpublished_owner_drafts(self) -> None:
+        self._seed_context_state()
+        draft = env_store.create_artifact_revision(
+            artifact_id="art-context-owner-draft-untracked",
+            title="Owner Draft",
+            summary="private draft",
+            body="private",
+            template="note",
+            supersedes_artifact_id=None,
+            created_by="dev",
+            authors=["dev"],
+            source_refs=[{"type": "note", "label": "private"}],
+        )
+        self.assertEqual(draft.get("status"), "draft")
+
+        instance_json = self._instance_json()
+        payload = self._dispatch(
+            instance_json=instance_json,
+            tool="context",
+            action="summarize",
+            args={"track_id": "track-context-active"},
+        )
+        self.assertTrue(payload.get("ok"), msg=payload)
+        ids = [
+            row.get("artifact_id")
+            for row in payload.get("candidate_artifacts", [])
+            if isinstance(row, dict)
+        ]
+        self.assertIn("art-task-dev-context-note-r2", ids)
+        self.assertNotIn("art-task-dev-context-note-r1", ids)
+        self.assertNotIn("art-context-owner-draft-untracked", ids)
+
+    def test_context_summarize_includes_compact_active_inbox_message_cues(self) -> None:
+        root = env_store.create_message(from_buddy="pm", to_buddy="dev", content="Need proof asset")
+        reply = env_store.create_message(from_buddy="design", to_buddy="dev", content="Screenshot ready", reply_to=root["id"])
+        env_store.create_message(from_buddy="dev", to_buddy="pm", content="Sent by dev only")
+        env_store.create_message(from_buddy="market", to_buddy="pm", content="Not dev inbox")
+
+        instance_json = self._instance_json()
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
+        self.assertTrue(payload.get("ok"), msg=payload)
+        cues = payload.get("message_cues")
+        self.assertIsInstance(cues, dict, msg=payload)
+        assert isinstance(cues, dict)
+        rows = cues.get("latest")
+        self.assertIsInstance(rows, list, msg=cues)
+        assert isinstance(rows, list)
+        ids = [row.get("message_id") for row in rows if isinstance(row, dict)]
+        self.assertIn(root["id"], ids)
+        self.assertIn(reply["id"], ids)
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            self.assertEqual(row.get("to_buddy"), "dev")
+            self.assertNotIn("content", row)
+        self.assertGreaterEqual(cues.get("count", 0), 2)
 
     def test_context_list_sources_excludes_handoffs(self) -> None:
         instance_json = self._instance_json()

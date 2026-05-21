@@ -92,6 +92,15 @@ def _build_definition() -> ToolDefinition:
                             'type': 'string',
                             'description': 'Optional inbox buddy filter.',
                         },
+                        'q': {
+                            'type': 'string',
+                            'description': 'Optional case-insensitive keyword filter over active-buddy inbox message content.',
+                        },
+                        'limit': {
+                            'type': 'integer',
+                            'description': 'Optional maximum number of inbox messages to return.',
+                            'minimum': 1,
+                        },
                     },
                 },
                 output_schema={
@@ -108,7 +117,7 @@ def _build_definition() -> ToolDefinition:
                     'messages',
                 ),
                 use_when=(
-                    'You need to read active-buddy inbox messages, optionally filtered by sender buddy.',
+                    'You need to read active-buddy inbox messages, optionally filtered by sender buddy, keyword, or bounded count.',
                 ),
                 do_not_use_when=(
                     'You need to create a new direct message (use message.send) or discuss a track/artifact target thread (use comment.add).',

@@ -235,6 +235,24 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsNone(payload.get("completed_at"))
         self.assertIsNone(payload.get("canceled_at"))
 
+    def test_create_rejects_unknown_field_before_required_fields(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-request-unknown", buddy="dev")
+        before = self._objects_state()
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-request-unknown",
+            buddy="dev",
+            tool="request",
+            action="create",
+            args={"__unexpected_payload_field__": True},
+        )
+        after = self._objects_state()
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_REQUEST_PAYLOAD")
+        self.assertIn("__unexpected_payload_field__", json.dumps(response, ensure_ascii=True))
+        self.assertIs(response.get("state_changed"), False)
+        self.assertEqual(before, after)
+
     def test_create_request_rejects_invalid_payloads_without_state_mutation(self) -> None:
         track_id = "track-req-invalid"
         archived_track_id = "track-req-archived"

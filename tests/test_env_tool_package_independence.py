@@ -30,6 +30,7 @@ SHIPPED_TOOLS = {
     "message",
     "comment",
     "search",
+    "request",
 }
 REQUIRED_TOOL_FILES = {"__init__.py", "tool.py", "_impl.py"}
 RETIRED_TOOL_FILES = {"contract.py", "semantics.py", "cli.py", "handlers.py", "service.py"}
@@ -150,22 +151,25 @@ print(json.dumps({"tools": tools, "impl": loaded_impl, "repos": loaded_repos, "d
                         scope="probe tool",
                         capability_boundary="test only",
                         use_when=("testing package discovery",),
-                        do_not_use_when=(),
+                        do_not_use_when=("you need runtime mutation",),
                         actions=(
                             ActionDefinition(
                                 name="ping",
                                 title="probe.ping",
                                 description="Probe ping",
-                                input_schema={
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "properties": {"message": {"type": "string"}},
-                                },
+                                    input_schema={
+                                        "type": "object",
+                                        "additionalProperties": False,
+                                        "required": [],
+                                        "properties": {"message": {"type": "string", "description": "Probe message."}},
+                                    },
                                 output_schema={"$ref": "ToolResult"},
                                 kind="read",
                                 mutates=MUTATES_NONE,
                                 required_permission="none",
                                 authority="probe",
+                                use_when=("you need probe ping",),
+                                do_not_use_when=("you need durable runtime mutation",),
                             ),
                         ),
                     )

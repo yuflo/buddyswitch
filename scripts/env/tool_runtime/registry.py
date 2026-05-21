@@ -132,11 +132,14 @@ def payload_fields_for_action(tool: str, action: str) -> list[str]:
 
 
 def tool_catalog_errors() -> list[dict[str, str]]:
-    for tool in discover_tool_ids():
+    discovered = set(discover_tool_ids())
+    for tool in sorted(discovered):
         try:
             load_definition(tool)
         except Exception:
             continue
+    for stale in sorted(set(_LOAD_ERRORS) - discovered):
+        _LOAD_ERRORS.pop(stale, None)
     return [_LOAD_ERRORS[name] for name in sorted(_LOAD_ERRORS)]
 
 
@@ -279,6 +282,13 @@ def _semantic_action(*, tool: str, action: str | None) -> str:
     return f"{tool}.{normalized}"
 
 
+def _normalize_action_for_dispatch(*, tool: str, action: str) -> str:
+    normalized = action.strip()
+    if tool == "context" and normalized == "list-sources":
+        return "list_sources"
+    return normalized
+
+
 def _reject(
     *,
     tool: str | None,
@@ -414,7 +424,7 @@ def dispatch_env_tool_request(
             ],
             correctable_fields=["action"],
         )
-    action = raw_action.strip()
+    action = _normalize_action_for_dispatch(tool=tool, action=raw_action)
     if action not in supported_actions(tool):
         return _reject(
             tool=tool,

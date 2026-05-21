@@ -180,6 +180,68 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for msg in messages:
             self.assertEqual(msg["from_buddy"], "design")
 
+    def test_message_list_q_filters_active_buddy_inbox_only(self):
+        env_store.create_message(from_buddy="pm", to_buddy="dev", content="Need Wukong proof asset")
+        env_store.create_message(from_buddy="design", to_buddy="dev", content="Hero screenshot ready")
+        env_store.create_message(from_buddy="market", to_buddy="pm", content="Wukong not in dev inbox")
+        env_store.create_message(from_buddy="dev", to_buddy="design", content="Wukong sent by dev")
+
+        instance_json = self._instance_json(instance_id="inst-dev-message-q", buddy="dev")
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-message-q",
+            buddy="dev",
+            tool="message",
+            action="list",
+            args={"q": "wukong"},
+        )
+        self.assertTrue(response.get("ok"), msg=response)
+        messages = response.get("messages", [])
+        self.assertEqual(len(messages), 1, msg=response)
+        self.assertEqual(messages[0]["from_buddy"], "pm")
+        self.assertEqual(messages[0]["to_buddy"], "dev")
+        self.assertIn("Wukong", messages[0]["content"])
+
+    def test_message_list_limit_bounds_active_buddy_inbox(self):
+        env_store.create_message(from_buddy="pm", to_buddy="dev", content="one")
+        env_store.create_message(from_buddy="design", to_buddy="dev", content="two")
+        env_store.create_message(from_buddy="market", to_buddy="dev", content="three")
+
+        instance_json = self._instance_json(instance_id="inst-dev-message-limit", buddy="dev")
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-message-limit",
+            buddy="dev",
+            tool="message",
+            action="list",
+            args={"limit": 2},
+        )
+        self.assertTrue(response.get("ok"), msg=response)
+        messages = response.get("messages", [])
+        self.assertEqual(len(messages), 2, msg=response)
+        self.assertEqual(response.get("discovery_summary", {}).get("count"), 2)
+
+    def test_message_list_rejects_product_binding_fields(self):
+        instance_json = self._instance_json(instance_id="inst-dev-message-bindings", buddy="dev")
+        for field, value in (
+            ("track_id", "track-x"),
+            ("artifact_id", "art-x"),
+            ("request_id", "req-x"),
+            ("refs", []),
+        ):
+            with self.subTest(field=field):
+                response = self._dispatch(
+                    instance_json=instance_json,
+                    instance_id="inst-dev-message-bindings",
+                    buddy="dev",
+                    tool="message",
+                    action="list",
+                    args={field: value},
+                )
+                self.assertFalse(response.get("ok"), msg=response)
+                self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
+                self.assertIn(field, json.dumps(response, ensure_ascii=True))
+
     def test_message_list_rejects_status_filter(self):
         instance_json = self._instance_json(instance_id="inst-dev-status", buddy="dev")
         response = self._dispatch(

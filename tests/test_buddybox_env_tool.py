@@ -157,6 +157,25 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self._assert_option(desc, "inspect_private_buddybox_summaries", tool="buddybox", action="list")
         self._assert_option(desc, "write_private_buddybox_file", tool="buddybox", action="write")
 
+    def test_desc_exposes_logical_name_policy_without_business_sop(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-buddybox-policy", buddy="dev")
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-buddybox-policy",
+            buddy="dev",
+            action="desc",
+            args={},
+        )
+        self.assertTrue(response.get("ok"), msg=response)
+        policy = response.get("logical_name_policy")
+        self.assertIsInstance(policy, dict, msg=response)
+        text = json.dumps(policy, ensure_ascii=True).lower()
+        for snippet in ("relative", "absolute", "..", "buddy prefix"):
+            self.assertIn(snippet, text)
+        self.assertIn("notes/todo.md", text)
+        self.assertNotIn("coordination/", text)
+        self.assertNotIn("execution/", text)
+
     def test_buddybox_logical_name_text_binary_lifecycle(self) -> None:
         instance_id = "inst-pm-box"
         instance_json = self._instance_json(buddy="pm", instance_id=instance_id)

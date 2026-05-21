@@ -153,14 +153,19 @@ def _candidate_artifact_rows(
     limit_value: int,
     context: ContextServiceContext,
 ) -> list[dict[str, Any]]:
+    normalized_track_filter = track_filter.strip() if isinstance(track_filter, str) and track_filter.strip() else None
     rows: list[dict[str, Any]] = []
     for artifact in context.repos.artifact.list_artifacts():
         decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_buddy)
         if not bool(decision.get("allowed")):
             continue
-        if isinstance(track_filter, str) and track_filter.strip():
-            if decision.get("track_id") != track_filter.strip():
-                continue
+        if not _context_artifact_row_allowed(
+            artifact=artifact,
+            decision=decision,
+            active_buddy=active_buddy,
+            track_filter=normalized_track_filter,
+        ):
+            continue
         artifact_id = artifact.get("id")
         if not isinstance(artifact_id, str) or not artifact_id:
             continue
@@ -179,6 +184,23 @@ def _candidate_artifact_rows(
         )
     rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("artifact_id") or "")), reverse=True)
     return rows[:limit_value]
+
+
+def _context_artifact_row_allowed(
+    *,
+    artifact: dict[str, Any],
+    decision: dict[str, Any],
+    active_buddy: str,
+    track_filter: str | None,
+) -> bool:
+    relation = decision.get("relation")
+    if isinstance(track_filter, str) and track_filter:
+        if decision.get("track_id") != track_filter:
+            return False
+        return relation in {"track_material", "track_proof"}
+    if relation in {"track_material", "track_proof"}:
+        return True
+    return artifact.get("status") == "draft" and artifact.get("created_by") == active_buddy
 
 
 def _open_comment_thread_rows(
@@ -263,6 +285,27 @@ def _recent_update_rows(
             )
     rows.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("update_id") or "")), reverse=True)
     return rows[:limit_value]
+
+
+def _message_cues(*, active_buddy: str, limit_value: int, context: ContextServiceContext) -> dict[str, Any]:
+    inbox = context.rules.message.filter_inbox_messages(
+        messages=context.repos.message.list_messages(),
+        active_buddy=active_buddy,
+        sender_buddy=None,
+        q=None,
+        limit=limit_value,
+    )
+    latest = [
+        {
+            "message_id": row.get("id"),
+            "from_buddy": row.get("from_buddy"),
+            "to_buddy": row.get("to_buddy"),
+            "reply_to": row.get("reply_to"),
+            "created_at": row.get("created_at"),
+        }
+        for row in inbox
+    ]
+    return {"count": len(inbox), "latest": latest}
 
 
 def _visible_requests(
@@ -357,6 +400,7 @@ def _current_context_sections(
         tracks=visible_tracks,
         limit_value=limit_value,
     )
+    message_cues = _message_cues(active_buddy=active_buddy, limit_value=limit_value, context=context)
 
     buddybox_desc = context.rules.buddybox_workspace.build_buddybox_desc(active_buddy, instance_payload=instance_payload)
     candidate_tracks = [_candidate_track_row(track=row, active_buddy=active_buddy) for row in visible_tracks]
@@ -376,6 +420,7 @@ def _current_context_sections(
         "candidate_artifacts": visible_artifacts,
         "open_comment_threads": open_comment_threads,
         "recent_updates": recent_updates,
+        "message_cues": message_cues,
         "decision_surface": {
             "binding_state": {"state": "runless", "enum_values": ["runless"]},
             "active_buddy_relation": {"role": "explicit-id-tools"},
@@ -396,6 +441,7 @@ def _current_context_sections(
             "requests": len(visible_requests),
             "open_comment_threads": len(open_comment_threads),
             "recent_updates": len(recent_updates),
+            "messages": int(message_cues.get("count", 0)),
             "has_buddybox_workspace": bool(buddybox_desc),
         },
     }
@@ -504,6 +550,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "candidate_artifacts": sections["candidate_artifacts"],
         "open_comment_threads": sections["open_comment_threads"],
         "recent_updates": sections["recent_updates"],
+        "message_cues": sections["message_cues"],
         "buddybox_desc": sections["buddybox_desc"],
         "tool_affordances": tool_registry.compact_tool_affordances(),
         "decision_surface": sections["decision_surface"],

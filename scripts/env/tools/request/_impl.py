@@ -318,6 +318,14 @@ def _reject_from_scope_exc(
 def create_request(*, args: dict[str, Any], context: RequestServiceContext) -> dict[str, Any]:
     action = "request.create"
     active_buddy = context["active_buddy"]
+    unknown = sorted(key for key in args if key not in _allowed(action))
+    if unknown:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=f"unsupported payload fields: {', '.join(unknown)}",
+            correctable_fields=unknown,
+        )
     raw_track_id = args.get("track_id")
     if not isinstance(raw_track_id, str) or not raw_track_id.strip():
         return _reject_payload(action=action, active_buddy=active_buddy, message="track_id is required", correctable_fields=["track_id"])

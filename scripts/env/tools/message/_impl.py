@@ -37,7 +37,7 @@ def _guess_correctable_fields(message: str) -> list[str] | None:
         suffix = message.split("unsupported payload fields:", 1)[1].strip()
         if suffix:
             return [row.strip() for row in suffix.split(",") if row.strip()]
-    for field in ("to_buddy", "content", "reply_to", "buddy"):
+    for field in ("to_buddy", "content", "reply_to", "buddy", "q", "limit"):
         if field in message:
             return [field]
     return None
@@ -218,6 +218,8 @@ def list_messages(*, args: dict[str, Any], context: MessageServiceContext) -> di
         messages=all_messages,
         active_buddy=active_buddy,
         sender_buddy=request["buddy"],
+        q=request["q"],
+        limit=request["limit"],
     )
 
     return tool_results.success(
@@ -231,7 +233,17 @@ def list_messages(*, args: dict[str, Any], context: MessageServiceContext) -> di
         allowed_next_actions=[
             "Use message.send to reply to a message.",
         ],
-        extra={"messages": inbox, "discovery_summary": {"count": len(inbox)}},
+        extra={
+            "messages": inbox,
+            "discovery_summary": {
+                "count": len(inbox),
+                "filters": {
+                    "buddy": request["buddy"],
+                    "q": request["q"],
+                    "limit": request["limit"],
+                },
+            },
+        },
     )
 
 

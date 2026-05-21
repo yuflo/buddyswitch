@@ -16,6 +16,8 @@ _FORBIDDEN_MESSAGE_FIELDS = {
     "track_id",
     "task_id",
     "artifact_id",
+    "request_id",
+    "refs",
     "recipients",
     "broadcast",
 }

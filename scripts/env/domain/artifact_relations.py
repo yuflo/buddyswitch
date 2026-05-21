@@ -13,8 +13,7 @@ from env.repos import requests as request_repo
 from env.repos import tracks as track_repo
 
 
-def _relation_and_currentness(*, artifact: dict[str, Any], active_buddy: str) -> tuple[str, str]:
-    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_buddy)
+def _relation_and_currentness(*, artifact: dict[str, Any], decision: dict[str, Any]) -> tuple[str, str]:
     relation = str(decision.get("relation") or "none")
     if relation not in {"owner", "track_material", "track_proof", "track_history"}:
         relation = "none"
@@ -192,7 +191,7 @@ def relation_summary_for_artifact(*, artifact: dict[str, Any], active_buddy: str
     if not isinstance(artifact_id, str) or not artifact_id:
         return {
             "publication": {
-                "track_id": artifact.get("published_to_track"),
+                "track_id": None,
                 "relation": "none",
                 "currentness": "superseded",
             },
@@ -209,13 +208,14 @@ def relation_summary_for_artifact(*, artifact: dict[str, Any], active_buddy: str
             },
         }
 
-    relation, currentness = _relation_and_currentness(artifact=artifact, active_buddy=active_buddy)
+    decision = artifact_visibility_domain.artifact_read_decision(artifact, active_buddy)
+    relation, currentness = _relation_and_currentness(artifact=artifact, decision=decision)
     comments = comment_repo.comments_for_target("artifact", artifact_id)
     comment_ids = [row.get("id") for row in comments if isinstance(row.get("id"), str)]
 
     return {
         "publication": {
-            "track_id": artifact.get("published_to_track"),
+            "track_id": decision.get("track_id"),
             "relation": relation,
             "currentness": currentness,
         },

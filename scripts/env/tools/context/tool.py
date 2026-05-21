@@ -121,6 +121,7 @@ def _build_definition() -> ToolDefinition:
                     'candidate_artifacts',
                     'open_comment_threads',
                     'recent_updates',
+                    'message_cues',
                     'buddybox_desc',
                 ),
                 use_when=(

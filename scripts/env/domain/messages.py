@@ -41,6 +41,8 @@ class SendRequest(TypedDict):
 
 class ListRequest(TypedDict):
     buddy: str | None
+    q: str | None
+    limit: int
 
 
 GetMessage = Callable[[str], Optional[dict[str, Any]]]
@@ -174,16 +176,28 @@ def prepare_list_request(*, args: dict[str, Any], manifest_buddy_ids: set[str], 
         )
 
     buddy_filter = args.get("buddy")
-    if buddy_filter is None:
-        return {"buddy": None}
-    if not isinstance(buddy_filter, str):
-        raise MessagePayloadError("buddy must be a non-empty string when provided", correctable_fields=["buddy"])
-    normalized = buddy_filter.strip()
-    if not normalized:
-        return {"buddy": None}
-    if normalized not in manifest_buddy_ids:
-        raise MessagePayloadError(f"unknown buddy filter: {normalized}", correctable_fields=["buddy"])
-    return {"buddy": normalized}
+    normalized_buddy: str | None = None
+    if buddy_filter is not None:
+        if not isinstance(buddy_filter, str):
+            raise MessagePayloadError("buddy must be a non-empty string when provided", correctable_fields=["buddy"])
+        candidate = buddy_filter.strip()
+        if candidate:
+            if candidate not in manifest_buddy_ids:
+                raise MessagePayloadError(f"unknown buddy filter: {candidate}", correctable_fields=["buddy"])
+            normalized_buddy = candidate
+
+    q_raw = args.get("q")
+    q: str | None = None
+    if q_raw is not None:
+        if not isinstance(q_raw, str):
+            raise MessagePayloadError("q must be a string", correctable_fields=["q"])
+        q = q_raw.strip().lower() or None
+
+    limit_raw = args.get("limit", 20)
+    if not isinstance(limit_raw, int) or limit_raw <= 0:
+        raise MessagePayloadError("limit must be a positive integer", correctable_fields=["limit"])
+
+    return {"buddy": normalized_buddy, "q": q, "limit": limit_raw}
 
 
 def filter_inbox_messages(
@@ -191,8 +205,13 @@ def filter_inbox_messages(
     messages: list[dict[str, Any]],
     active_buddy: str,
     sender_buddy: str | None = None,
+    q: str | None = None,
+    limit: int = 20,
 ) -> list[dict[str, Any]]:
     inbox = [message for message in messages if message.get("to_buddy") == active_buddy]
     if sender_buddy is not None:
         inbox = [message for message in inbox if message.get("from_buddy") == sender_buddy]
-    return inbox
+    if q:
+        inbox = [message for message in inbox if q in str(message.get("content") or "").lower()]
+    inbox.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")), reverse=True)
+    return inbox[:limit]
