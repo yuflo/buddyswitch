@@ -18,6 +18,7 @@ except ModuleNotFoundError:  # pragma: no cover - Windows fallback
 
 from env.repos import artifacts as artifact_repo
 from env.repos import comments as comment_repo
+from env.repos import requests as request_repo
 from env.repos import runtime_files
 from env.repos import tasks as task_repo
 from env.repos import tracks as track_repo
@@ -149,6 +150,10 @@ def task_object_path(task_id: str) -> str:
     return f"buddyswitch/objects/tasks/{task_id}.json"
 
 
+def request_object_path(request_id: str) -> str:
+    return f"buddyswitch/objects/requests/{request_id}.json"
+
+
 def build_comment_ids_by_target(comments: list[dict[str, Any]]) -> dict[tuple[str, str], list[str]]:
     grouped: dict[tuple[str, str], list[str]] = {}
     for comment in comments:
@@ -213,9 +218,19 @@ def build_task_view(task: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_request_view(request: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **request,
+        "object_path": request_object_path(request["id"]),
+        "file_name": Path(request_object_path(request["id"])).name,
+        "missing": False,
+    }
+
+
 def build_track_views(
     tracks: list[dict[str, Any]],
     artifacts: list[dict[str, Any]],
+    requests: list[dict[str, Any]],
     comment_ids_by_target: dict[tuple[str, str], list[str]],
     comment_status_by_target: dict[tuple[str, str], dict[str, int]],
 ) -> list[dict[str, Any]]:
@@ -236,6 +251,18 @@ def build_track_views(
         artifact_rows_by_track.setdefault(track_id, []).append(artifact)
     for track_id in artifact_rows_by_track:
         artifact_rows_by_track[track_id].sort(
+            key=lambda row: (str(row.get("updated_at", "")), str(row.get("id", ""))),
+            reverse=True,
+        )
+
+    request_rows_by_track: dict[str, list[dict[str, Any]]] = {}
+    for request in requests:
+        track_id = request.get("track_id")
+        if not isinstance(track_id, str) or not track_id:
+            continue
+        request_rows_by_track.setdefault(track_id, []).append(request)
+    for track_id in request_rows_by_track:
+        request_rows_by_track[track_id].sort(
             key=lambda row: (str(row.get("updated_at", "")), str(row.get("id", ""))),
             reverse=True,
         )
@@ -298,6 +325,19 @@ def build_track_views(
             reverse=True,
         )
         comment_counts = comment_status_by_target.get(("track", track_id), {"open_comment_count": 0, "resolved_comment_count": 0})
+        track_request_rows = request_rows_by_track.get(track_id, [])
+        request_ids = [str(row.get("id")) for row in track_request_rows if isinstance(row.get("id"), str)]
+        open_request_count = 0
+        blocked_request_count = 0
+        done_request_count = 0
+        for request in track_request_rows:
+            status = request.get("status")
+            if status == "open" or status == "accepted":
+                open_request_count += 1
+            elif status == "blocked":
+                blocked_request_count += 1
+            elif status == "done":
+                done_request_count += 1
         rows.append(
             {
                 "id": track_id,
@@ -312,10 +352,14 @@ def build_track_views(
                 "updates": [row for row in track.get("updates", []) if isinstance(row, dict)],
                 "close_proof": close_proof,
                 "comment_ids": list(comment_ids_by_target.get(("track", track_id), [])),
+                "request_ids": request_ids,
                 "updated_at": track["updated_at"],
                 "archived_at": track.get("archived_at"),
                 "open_comment_count": comment_counts.get("open_comment_count", 0),
                 "resolved_comment_count": comment_counts.get("resolved_comment_count", 0),
+                "open_request_count": open_request_count,
+                "blocked_request_count": blocked_request_count,
+                "done_request_count": done_request_count,
             }
         )
     rows.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
@@ -331,8 +375,9 @@ def build_workspace_projection() -> dict[str, Any]:
         build_artifact_view(artifact, comment_ids_by_target, comment_status_by_target)
         for artifact in artifact_repo.list_artifacts()
     ]
+    requests = [build_request_view(request) for request in request_repo.list_requests()]
     tasks = [build_task_view(task) for task in task_repo.list_tasks()]
-    tracks = build_track_views(track_repo.list_tracks(), artifacts, comment_ids_by_target, comment_status_by_target)
+    tracks = build_track_views(track_repo.list_tracks(), artifacts, requests, comment_ids_by_target, comment_status_by_target)
     standalone_tasks = [task for task in tasks if not task.get("track_id")]
     standalone_tasks.sort(key=lambda item: (item.get("updated_at", ""), item["id"]), reverse=True)
 
@@ -348,6 +393,7 @@ def build_workspace_projection() -> dict[str, Any]:
         "standalone_tasks": standalone_tasks,
         "tasks": tasks,
         "artifacts": artifacts,
+        "requests": requests,
     }
 
 

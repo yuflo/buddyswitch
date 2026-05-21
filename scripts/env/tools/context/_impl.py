@@ -97,6 +97,26 @@ def _candidate_track_row(*, track: dict[str, Any], active_buddy: str) -> dict[st
     }
 
 
+def _candidate_request_row(*, request: dict[str, Any], active_buddy: str) -> dict[str, Any]:
+    direction = "incoming" if request.get("to_buddy") == active_buddy else "outgoing"
+    if active_buddy == "pm" and request.get("to_buddy") != active_buddy and request.get("from_buddy") != active_buddy:
+        direction = "pm-visible"
+    result_refs = request.get("result_refs")
+    blocker = request.get("blocker")
+    return {
+        "request_id": request.get("id"),
+        "track_id": request.get("track_id"),
+        "from_buddy": request.get("from_buddy"),
+        "to_buddy": request.get("to_buddy"),
+        "title": request.get("title"),
+        "status": request.get("status"),
+        "direction": direction,
+        "blocker": blocker if isinstance(blocker, str) else None,
+        "result_ref_count": len(result_refs) if isinstance(result_refs, list) else 0,
+        "updated_at": request.get("updated_at"),
+    }
+
+
 def _visible_tracks(*, track_filter: str | None, limit_value: int, context: ContextServiceContext) -> list[dict[str, Any]]:
     tracks = [row for row in context.repos.track.list_tracks() if row.get("archived_at") is None]
     if isinstance(track_filter, str) and track_filter.strip():
@@ -150,6 +170,40 @@ def _current_material_rows(
     return rows
 
 
+def _visible_requests(
+    *,
+    active_buddy: str,
+    visible_track_ids: set[str],
+    limit_value: int,
+    context: ContextServiceContext,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for request in context.repos.request.list_requests():
+        track_id = request.get("track_id")
+        if not isinstance(track_id, str) or not track_id:
+            continue
+        if visible_track_ids and track_id not in visible_track_ids:
+            continue
+        try:
+            context.rules.comment_target.assert_target_readable(
+                target_type="track",
+                target_id=track_id,
+                active_buddy=active_buddy,
+                action="context.get",
+            )
+            context.rules.request.ensure_visible(request, active_buddy)
+        except (
+            context.rules.comment_target.CommentTargetPayloadError,
+            context.rules.comment_target.CommentTargetScopeError,
+            context.rules.request.RequestScopeError,
+        ):
+            continue
+        rows.append(request)
+        if len(rows) >= limit_value:
+            break
+    return rows
+
+
 def _current_context_sections(
     *,
     active_buddy: str,
@@ -181,9 +235,16 @@ def _current_context_sections(
         limit_value=limit_value,
         context=context,
     )
+    visible_requests = _visible_requests(
+        active_buddy=active_buddy,
+        visible_track_ids=visible_track_ids,
+        limit_value=limit_value,
+        context=context,
+    )
 
     buddybox_desc = context.rules.buddybox_workspace.build_buddybox_desc(active_buddy, instance_payload=instance_payload)
     candidate_tracks = [_candidate_track_row(track=row, active_buddy=active_buddy) for row in visible_tracks]
+    candidate_requests = [_candidate_request_row(request=row, active_buddy=active_buddy) for row in visible_requests]
 
     return {
         "tool_catalog": tool_registry.env_tools_description(),
@@ -192,8 +253,10 @@ def _current_context_sections(
         "tracks": visible_tracks,
         "tasks": visible_tasks,
         "artifact_summaries": visible_artifacts,
+        "requests": visible_requests,
         "buddybox_desc": buddybox_desc,
         "candidate_tracks": candidate_tracks,
+        "candidate_requests": candidate_requests,
         "decision_surface": {
             "binding_state": {"state": "runless", "enum_values": ["runless"]},
             "active_buddy_relation": {"role": "explicit-id-tools"},
@@ -201,6 +264,7 @@ def _current_context_sections(
                 "has_tracks": bool(visible_tracks),
                 "has_tasks": bool(visible_tasks),
                 "has_artifacts": bool(visible_artifacts),
+                "has_requests": bool(visible_requests),
                 "has_buddybox_workspace": bool(buddybox_desc),
             },
         },
@@ -208,6 +272,7 @@ def _current_context_sections(
             "tracks": len(visible_tracks),
             "tasks": len(visible_tasks),
             "artifacts": len(visible_artifacts),
+            "requests": len(visible_requests),
             "has_buddybox_workspace": bool(buddybox_desc),
         },
     }
@@ -239,6 +304,11 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "description": "Target-scoped comments on tracks and artifacts, read through comment.list.",
             "scope": "target discussion thread",
             "source_of_truth": "comment.list via runtime env tools",
+        },
+        "requests": {
+            "description": "Cross-buddy durable collaboration request lifecycle rows.",
+            "scope": "requester-recipient-pm visible request state",
+            "source_of_truth": "request.list / request.get via runtime env tools",
         },
         "buddybox": {
             "description": "Active buddy private file capability metadata and tool-backed private data plane.",
@@ -307,6 +377,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
     summary = {
         "current_context_summary": sections["current_context_summary"],
         "candidate_tracks": sections["candidate_tracks"],
+        "candidate_requests": sections["candidate_requests"],
         "buddybox_desc": sections["buddybox_desc"],
         "tool_affordances": tool_registry.compact_tool_affordances(),
         "decision_surface": sections["decision_surface"],

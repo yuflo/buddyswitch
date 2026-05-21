@@ -507,9 +507,137 @@ def list_comments(*, args: dict[str, Any], context: CommentServiceContext) -> di
     )
 
 
+def resolve_comment(*, args: dict[str, Any], context: CommentServiceContext) -> dict[str, Any]:
+    action = "comment.resolve"
+    active_buddy = context["active_buddy"]
+
+    unknown = sorted(key for key in args if key not in _allowed(action))
+    if unknown:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=f"unsupported payload fields: {', '.join(unknown)}",
+            correctable_fields=unknown,
+        )
+
+    if active_buddy != "pm":
+        return tool_results.rejection(
+            tool="comment",
+            action=action,
+            active_buddy=active_buddy,
+            code="E_COMMENT_SCOPE",
+            message="comment.resolve is PM-only",
+            permission_boundary="comment.pm_review_authority",
+            human_summary="Only PM can resolve comment threads.",
+            why_blocked="comment.resolve requires active_buddy='pm'.",
+            impact="No comments were changed.",
+            state_changed=False,
+            retryable=False,
+            retry_guidance="Retry as active buddy pm.",
+            allowed_next_actions=["Use comment.add to contribute evidence without closing the thread."],
+            correctable_fields=["active_buddy"],
+        )
+
+    comment_id = args.get("comment_id")
+    if not isinstance(comment_id, str) or not comment_id.strip():
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="comment_id must be a non-empty string",
+            correctable_fields=["comment_id"],
+        )
+    comment_id = comment_id.strip()
+
+    resolution_summary = args.get("resolution_summary")
+    if not isinstance(resolution_summary, str) or not resolution_summary.strip():
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="resolution_summary must be a non-empty string",
+            correctable_fields=["resolution_summary"],
+        )
+    resolution_summary = resolution_summary.strip()
+
+    seed = context.repos.comment.get_comment(comment_id)
+    if seed is None:
+        return _reject_scope(
+            action=action,
+            active_buddy=active_buddy,
+            code="E_COMMENT_THREAD_SCOPE",
+            boundary="comment.thread_scope",
+            message=f"comment not found: {comment_id}",
+            retryable=True,
+            correctable_fields=["comment_id"],
+        )
+    target_type = seed.get("target_type")
+    target_id = seed.get("target_id")
+    if not isinstance(target_type, str) or not isinstance(target_id, str):
+        return _reject_scope(
+            action=action,
+            active_buddy=active_buddy,
+            code="E_COMMENT_THREAD_SCOPE",
+            boundary="comment.thread_scope",
+            message=f"comment '{comment_id}' has invalid target linkage",
+            retryable=False,
+            correctable_fields=["comment_id"],
+        )
+
+    target_error = _ensure_target_readable(target_type, target_id, active_buddy, action, context)
+    if isinstance(target_error, dict):
+        return target_error
+
+    try:
+        resolved_rows = context.repos.comment.resolve_thread(
+            comment_id=comment_id,
+            resolved_by=active_buddy,
+            resolution_summary=resolution_summary,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if "already resolved" in message:
+            return tool_results.rejection(
+                tool="comment",
+                action=action,
+                active_buddy=active_buddy,
+                code="E_COMMENT_STATE",
+                message=message,
+                permission_boundary="comment.state",
+                human_summary="Comment thread is already fully resolved.",
+                why_blocked=message,
+                impact="No comments were changed.",
+                state_changed=False,
+                retryable=False,
+                retry_guidance="Use comment.add to create a new thread if new feedback is needed.",
+                allowed_next_actions=["Use comment.list to confirm thread status."],
+                correctable_fields=["comment_id"],
+            )
+        return _reject_payload(action=action, active_buddy=active_buddy, message=message)
+
+    updated_ids = [row.get("id") for row in resolved_rows if isinstance(row.get("id"), str)]
+    return tool_results.success(
+        tool="comment",
+        action=action,
+        active_buddy=active_buddy,
+        effect_summary=f"Resolved thread containing comment '{comment_id}' with {len(updated_ids)} durable row update(s).",
+        state_changed=True,
+        durability="durable",
+        updated_ids=updated_ids,
+        state_changes=[
+            {"object_type": "comment", "change": "resolved", "comment_id": row_id}
+            for row_id in updated_ids
+        ],
+        allowed_next_actions=[
+            "Use comment.list with status='resolved' to verify PM closure output.",
+            "Use comment.add to open new discussion if unresolved issues remain.",
+        ],
+        extra={"comments": resolved_rows, "comment_id": comment_id},
+    )
+
+
 _ACTION_HANDLERS = {
     'add': add_comment,
     'list': list_comments,
+    'resolve': resolve_comment,
 }
 
 

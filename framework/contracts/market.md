@@ -11,6 +11,8 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 - Publish market-facing evidence outputs through `track.add_material` / `track.add_proof` when they should become shared track artifacts.
 - Write market deliverables via `artifact.create_revision` using `template` + markdown `body`; draft creation stays private until `track.add_material` / `track.add_proof` publishes it to a track.
 - Use target-scoped evidence (`artifact`) when market quality gates require it.
+- Use `request.list` / `request.get` to track incoming and outgoing structured requests.
+- For requests assigned to Market, mutate lifecycle with `request.accept`, `request.block`, and `request.complete`.
 - Use buddybox for private research exports, logs, or local reports; use artifact for market deliverables PM, Design, or Dev must read.
 
 ## Runtime Boundary

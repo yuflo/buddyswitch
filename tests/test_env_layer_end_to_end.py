@@ -288,6 +288,151 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(denied["permission_boundary"], "artifact.buddy_scope")
         self.assertEqual((denied.get("error") or {}).get("code"), "E_ARTIFACT_SCOPE")
 
+    def test_request_lifecycle_and_pm_comment_resolution_flow(self) -> None:
+        track_id = "track-e2e-request-flow"
+        created = self._create_track(track_id)
+        self.assertTrue(created.get("ok"), msg=created)
+
+        pm_scope = self._create_draft(
+            buddy="pm",
+            artifact_id="art-pm-scope-r1",
+            template="brief",
+            body="# Scope\n\nApproved baseline",
+            summary="pm scope",
+        )
+        self.assertTrue(pm_scope.get("ok"), msg=pm_scope)
+        pm_scope_pub = self._dispatch(
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": track_id,
+                "artifact_id": "art-pm-scope-r1",
+                "label": "PM Scope",
+                "summary": "baseline",
+            },
+        )
+        self.assertTrue(pm_scope_pub.get("ok"), msg=pm_scope_pub)
+
+        before_messages = list(env_store.list_messages())
+        before_tasks = list(env_store.list_tasks())
+
+        request_created = self._dispatch(
+            buddy="pm",
+            tool="request",
+            action="create",
+            args={
+                "track_id": track_id,
+                "to_buddy": "dev",
+                "title": "Implement approved scope",
+                "summary": "Build implementation artifact from PM scope.",
+                "target_refs": [{"type": "artifact", "id": "art-pm-scope-r1"}],
+            },
+        )
+        self.assertTrue(request_created.get("ok"), msg=request_created)
+        request_id = str((request_created.get("request") or {}).get("id"))
+        self.assertTrue(request_id.startswith("req-"))
+
+        dev_inbox = self._dispatch(
+            buddy="dev",
+            tool="request",
+            action="list",
+            args={"box": "inbox", "track_id": track_id},
+        )
+        self.assertTrue(dev_inbox.get("ok"), msg=dev_inbox)
+        inbox_ids = [row.get("id") for row in dev_inbox.get("requests", []) if isinstance(row, dict)]
+        self.assertIn(request_id, inbox_ids)
+
+        accepted = self._dispatch(
+            buddy="dev",
+            tool="request",
+            action="accept",
+            args={"request_id": request_id},
+        )
+        self.assertTrue(accepted.get("ok"), msg=accepted)
+        self.assertEqual((accepted.get("request") or {}).get("status"), "accepted")
+
+        dev_result = self._create_draft(
+            buddy="dev",
+            artifact_id="art-dev-req-r1",
+            template="proposal",
+            body="# Implementation\n\nDelivered",
+            summary="dev implementation",
+        )
+        self.assertTrue(dev_result.get("ok"), msg=dev_result)
+        dev_result_pub = self._dispatch(
+            buddy="dev",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": track_id,
+                "artifact_id": "art-dev-req-r1",
+                "label": "Implementation",
+                "summary": "done",
+            },
+        )
+        self.assertTrue(dev_result_pub.get("ok"), msg=dev_result_pub)
+
+        completed = self._dispatch(
+            buddy="dev",
+            tool="request",
+            action="complete",
+            args={
+                "request_id": request_id,
+                "result_refs": [{"type": "artifact", "id": "art-dev-req-r1"}],
+            },
+        )
+        self.assertTrue(completed.get("ok"), msg=completed)
+        self.assertEqual((completed.get("request") or {}).get("status"), "done")
+
+        test_comment = self._dispatch(
+            buddy="test",
+            tool="comment",
+            action="add",
+            args={
+                "target_type": "artifact",
+                "target_id": "art-dev-req-r1",
+                "content": "Need PM closure review.",
+            },
+        )
+        self.assertTrue(test_comment.get("ok"), msg=test_comment)
+        comment_id = str((test_comment.get("comment") or {}).get("id"))
+
+        resolved = self._dispatch(
+            buddy="pm",
+            tool="comment",
+            action="resolve",
+            args={"comment_id": comment_id, "resolution_summary": "Reviewed and accepted."},
+        )
+        self.assertTrue(resolved.get("ok"), msg=resolved)
+        self.assertIn(comment_id, resolved.get("updated_ids", []))
+
+        resolved_list = self._dispatch(
+            buddy="pm",
+            tool="comment",
+            action="list",
+            args={"target_type": "artifact", "target_id": "art-dev-req-r1", "status": "resolved"},
+        )
+        self.assertTrue(resolved_list.get("ok"), msg=resolved_list)
+        self.assertEqual(len(resolved_list.get("comments", [])), 1)
+        self.assertEqual((resolved_list.get("comments", [{}])[0]).get("status"), "resolved")
+
+        pm_context = self._dispatch(
+            buddy="pm",
+            tool="context",
+            action="get",
+            args={"track_id": track_id, "limit": 10},
+        )
+        self.assertTrue(pm_context.get("ok"), msg=pm_context)
+        request_rows = [row for row in pm_context.get("requests", []) if isinstance(row, dict)]
+        request_row = next(row for row in request_rows if row.get("id") == request_id)
+        self.assertEqual(request_row.get("status"), "done")
+
+        after_messages = list(env_store.list_messages())
+        after_tasks = list(env_store.list_tasks())
+        self.assertEqual(before_messages, after_messages)
+        self.assertEqual(before_tasks, after_tasks)
+
     def test_response_planes_distinguish_product_private_token_and_browser_session(self) -> None:
         track = self._create_track("track-e2e-planes")
         self.assertTrue(track["ok"], msg=track)

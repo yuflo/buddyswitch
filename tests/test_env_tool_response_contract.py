@@ -205,7 +205,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertEqual(full.get("operation_semantics"), expected_operation_semantics)
         self.assertNotIn("tool_catalog", summary)
         self.assertNotIn("operation_semantics", summary)
-        self.assertNotIn("comment.resolve", full.get("operation_semantics", {}))
+        self.assertIn("comment.resolve", full.get("operation_semantics", {}))
         self.assertNotIn("comment.reopen", full.get("operation_semantics", {}))
 
     def test_unknown_tool_rejection_contract(self) -> None:
@@ -337,6 +337,66 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertIn("published_proof", changes)
         self.assertIn("proof_added", changes)
         self.assertIn("update_added", changes)
+
+    def test_request_write_and_rejection_paths_follow_canonical_contract(self) -> None:
+        instance_id = "inst-request-response"
+        pm_instance = self._instance_json(buddy="pm", instance_id=instance_id)
+        dev_instance = self._instance_json(buddy="dev", instance_id=f"{instance_id}-dev")
+
+        track = self._dispatch(
+            instance_json=pm_instance,
+            instance_id=instance_id,
+            buddy="pm",
+            tool="track",
+            action="create",
+            args={
+                "track_id": "track-request-response",
+                "title": "Request Response",
+                "outcome": "Validate request response contracts.",
+                "appetite": "1 day",
+                "now": {"next": "seed", "blocker": None},
+            },
+        )
+        self.assertTrue(track.get("ok"), msg=track)
+
+        created = self._dispatch(
+            instance_json=pm_instance,
+            instance_id=instance_id,
+            buddy="pm",
+            tool="request",
+            action="create",
+            args={
+                "track_id": "track-request-response",
+                "to_buddy": "dev",
+                "title": "Implement",
+                "summary": "Implement request response coverage.",
+                "target_refs": [{"type": "track", "id": "track-request-response"}],
+            },
+        )
+        self._assert_write_success_contract(created)
+        self.assertIsInstance(created.get("created_ids"), list, msg=created)
+        assert isinstance(created.get("created_ids"), list)
+        request_id = str(created["created_ids"][0])
+
+        unauthorized = self._dispatch(
+            instance_json=pm_instance,
+            instance_id=instance_id,
+            buddy="pm",
+            tool="request",
+            action="accept",
+            args={"request_id": request_id},
+        )
+        self._assert_rejection_contract(unauthorized)
+
+        accepted = self._dispatch(
+            instance_json=dev_instance,
+            instance_id=f"{instance_id}-dev",
+            buddy="dev",
+            tool="request",
+            action="accept",
+            args={"request_id": request_id},
+        )
+        self._assert_write_success_contract(accepted)
 
     def test_rejection_supports_canonical_field_errors(self) -> None:
         payload = tool_results.rejection(

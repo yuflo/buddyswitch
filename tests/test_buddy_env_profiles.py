@@ -80,6 +80,12 @@ class BuddyEnvProfilesTests(unittest.TestCase):
             effects = profile["state_capability"]["track_effects"]
             if effects:
                 track_effects_seen.append((buddy_id, effects))
+            self.assertEqual(
+                profile["state_capability"]["request_effects"],
+                ["create", "accept", "block", "complete", "cancel"],
+            )
+            expected_comment_effects = ["resolve"] if buddy_id == "pm" else []
+            self.assertEqual(profile["state_capability"]["comment_effects"], expected_comment_effects)
 
         self.assertEqual(
             track_effects_seen,

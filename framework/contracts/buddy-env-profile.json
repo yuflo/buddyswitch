@@ -1,6 +1,6 @@
 {
   "contract_id": "buddy-env-profile",
-  "contract_version": "2026-05-15",
+  "contract_version": "2026-05-21",
   "top_level_key_order": [
     "buddy_id",
     "contract_path",

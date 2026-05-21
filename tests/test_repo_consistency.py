@@ -18,7 +18,7 @@ import env_store  # noqa: E402
 import turn_runtime  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
 
-_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment", "request"}
 
 
 class RepoConsistencyTests(unittest.TestCase):
@@ -115,6 +115,8 @@ class RepoConsistencyTests(unittest.TestCase):
         )
         artifact_actions = set(tool_catalog.supported_actions("artifact"))
         self.assertEqual(artifact_actions, {"get", "create_revision", "update_metadata"})
+        request_actions = set(tool_catalog.supported_actions("request"))
+        self.assertEqual(request_actions, {"create", "list", "get", "accept", "block", "complete", "cancel"})
 
     def test_workspace_projection_contract_uses_track_page_shape(self) -> None:
         payload = json.loads((ROOT / "framework" / "contracts" / "workspace-projection.json").read_text(encoding="utf-8"))
@@ -166,11 +168,14 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("track open --payload '{\"track_id\":\"<track-id>\"}'", text)
                 self.assertIn("task get --payload '{\"task_id\":\"<task-id>\"}'", text)
                 self.assertIn("artifact get --payload '{\"artifact_id\":\"<artifact-id>\"}'", text)
+                self.assertIn("request get --payload '{\"request_id\":\"<request-id>\"}'", text)
                 self.assertIn("search status --payload '{}'", text)
                 self.assertIn(
                     "search open-browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
                     text,
                 )
+                if buddy == "pm":
+                    self.assertIn("comment resolve --payload '{\"comment_id\":\"<comment-id>\",\"resolution_summary\":\"<summary>\"}'", text)
                 for pattern in self._OLD_FLAG_PATTERNS:
                     self.assertNotIn(pattern, text)
                 self.assertNotIn("track join", text)

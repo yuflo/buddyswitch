@@ -1,13 +1,13 @@
 ---
 name: comment-tool
-description: Use when adding and listing comments on readable track and artifact targets through runtime env tools.
+description: Use when adding, listing, and PM-resolving comments on readable track and artifact targets through runtime env tools.
 ---
 
 # Comment Tool
 
 ## Purpose
 
-Add and list plain-text comments on readable track and artifact targets through the runtime env.tool layer.
+Add, list, and PM-resolve plain-text comments on readable track and artifact targets through the runtime env.tool layer.
 
 ## Runtime Route
 - CLI: `python3 scripts/env/client.py comment add --payload '{"target_type":"track","target_id":"track-alpha","content":"Design direction is ready."}'`
@@ -28,6 +28,8 @@ python3 scripts/env/client.py comment add --payload '{"target_type":"track","tar
 
 - Use this tool for plain-text discussion on readable track and artifact targets.
 - Start with `python3 scripts/env/client.py context summarize --payload '{}'` so comment actions run against current runtime-visible ids and state.
+- PM can close reviewed threads with `comment.resolve` and a non-empty `resolution_summary`.
+- Non-PM buddies keep discussion open by adding follow-up rows with `comment.add`.
 - For exact operations, payload keys, optional keys, and response fields, inspect `context.get.tool_catalog['comment']` or `python3 scripts/turn_runtime.py status`.
 
 ## Key Boundary Rules
@@ -35,6 +37,7 @@ python3 scripts/env/client.py comment add --payload '{"target_type":"track","tar
 - Comment relations are stored on comment objects via `target_type` and `target_id`.
 - Workspace views may expose `comment_ids` on tracks/artifacts as derived read-only fields; target objects do not persist those lists.
 - Comment objects are immutable after creation. No edit or delete.
+- Resolving one `comment_id` resolves its entire thread to durable `status=resolved`.
 - Task comments are not supported; only `track` and `artifact` targets are accepted.
 - Cross-target replies are rejected (reply must stay on the same target).
 - Foreign, superseded, or non-readable artifacts reject comment reads and writes.
@@ -50,7 +53,7 @@ python3 scripts/env/client.py comment list --payload '{"target_type":"track","ta
 ## Do Not
 
 - Do not use for task comments; only track and artifact targets are accepted.
-- Do not use for resolution workflows, status tracking (`resolved`, `status`), or assignment.
+- Do not attempt PM-only resolution as a non-PM buddy.
 - Do not attempt to edit or delete comments.
 - Do not use for direct buddy messaging; use `message.send` instead.
 - Do not use for review or approval workflows.

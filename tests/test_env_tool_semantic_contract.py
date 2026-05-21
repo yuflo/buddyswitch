@@ -14,7 +14,7 @@ if str(SCRIPTS) not in sys.path:
 
 from env.tool_runtime import registry as catalog  # noqa: E402
 
-_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment", "request"}
 _EXPECTED_ACTIONS_BY_TOOL = {
     "task": {"create", "list", "get", "update", "archive"},
     "track": {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
@@ -24,7 +24,8 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request", "open_browser"},
     "message": {"send", "list"},
-    "comment": {"add", "list"},
+    "comment": {"add", "list", "resolve"},
+    "request": {"create", "list", "get", "accept", "block", "complete", "cancel"},
 }
 _PLACEHOLDER_SNIPPETS = ("is the intended action", "closer semantic match")
 
@@ -114,6 +115,14 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("buddybox", "delete", ("delete", "private", "archive")),
             ("message", "send", ("inbox", "buddy", "comment")),
             ("message", "list", ("inbox", "read", "comment")),
+            ("comment", "resolve", ("pm", "thread", "resolved")),
+            ("request", "create", ("track", "request", "recipient")),
+            ("request", "list", ("inbox", "outbox", "status")),
+            ("request", "get", ("request", "visibility", "track")),
+            ("request", "accept", ("recipient", "accepted", "request")),
+            ("request", "block", ("recipient", "blocker", "request")),
+            ("request", "complete", ("recipient", "result", "done")),
+            ("request", "cancel", ("requester", "canceled", "request")),
         ]
         for tool, action, snippets in checks:
             text = self._semantic_text(tool=tool, action=action)

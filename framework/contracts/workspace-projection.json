@@ -1,6 +1,6 @@
 {
   "contract_id": "workspace-projection",
-  "contract_version": "2026-05-15",
+  "contract_version": "2026-05-21",
   "endpoint": "/api/workspace",
   "top_level_key_order": [
     "generated_at",
@@ -10,13 +10,15 @@
     "tracks",
     "standalone_tasks",
     "tasks",
-    "artifacts"
+    "artifacts",
+    "requests"
   ],
   "data_sources": [
     "buddyswitch/manifest.toml",
     "buddyswitch/objects/tracks/*.json",
     "buddyswitch/objects/tasks/*.json",
     "buddyswitch/objects/artifacts/*.json",
+    "buddyswitch/objects/requests/*.json",
     "buddyswitch/objects/comments/*.json"
   ],
   "read_only": true,
@@ -54,10 +56,14 @@
         "updates",
         "close_proof",
         "comment_ids",
+        "request_ids",
         "updated_at",
         "archived_at",
         "open_comment_count",
-        "resolved_comment_count"
+        "resolved_comment_count",
+        "open_request_count",
+        "blocked_request_count",
+        "done_request_count"
       ],
       "field_types": {
         "id": "string",
@@ -72,10 +78,14 @@
         "updates": "object-array",
         "close_proof": "artifact-summary-array",
         "comment_ids": "string-array",
+        "request_ids": "string-array",
         "updated_at": "string",
         "archived_at": "string-or-null",
         "open_comment_count": "integer",
-        "resolved_comment_count": "integer"
+        "resolved_comment_count": "integer",
+        "open_request_count": "integer",
+        "blocked_request_count": "integer",
+        "done_request_count": "integer"
       }
     },
     "task": {
@@ -149,6 +159,50 @@
         "resolved_comment_count": "integer",
         "created_at": "string",
         "updated_at": "string",
+        "object_path": "repo-relative-path",
+        "file_name": "basename",
+        "missing": "boolean"
+      }
+    },
+    "request": {
+      "key_order": [
+        "id",
+        "track_id",
+        "from_buddy",
+        "to_buddy",
+        "title",
+        "summary",
+        "target_refs",
+        "status",
+        "blocker",
+        "result_refs",
+        "created_at",
+        "updated_at",
+        "accepted_at",
+        "blocked_at",
+        "completed_at",
+        "canceled_at",
+        "object_path",
+        "file_name",
+        "missing"
+      ],
+      "field_types": {
+        "id": "string",
+        "track_id": "string",
+        "from_buddy": "string",
+        "to_buddy": "string",
+        "title": "string",
+        "summary": "string",
+        "target_refs": "object-array",
+        "status": "string",
+        "blocker": "string-or-null",
+        "result_refs": "object-array",
+        "created_at": "string",
+        "updated_at": "string",
+        "accepted_at": "string-or-null",
+        "blocked_at": "string-or-null",
+        "completed_at": "string-or-null",
+        "canceled_at": "string-or-null",
         "object_path": "repo-relative-path",
         "file_name": "basename",
         "missing": "boolean"

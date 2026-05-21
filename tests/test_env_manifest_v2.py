@@ -92,17 +92,35 @@ class EnvManifestV2Tests(unittest.TestCase):
         self.assertEqual(row.get("path"), "buddyswitch/skills/shared/buddybox-tool")
         self.assertTrue((ROOT / str(row["path"]) / "SKILL.md").exists())
 
-    def test_message_and_comment_permissions_are_supported(self) -> None:
-        """MCT-MAN-001: Manifest validator accepts message and comment permission objects."""
+    def test_message_comment_and_request_permissions_are_supported(self) -> None:
+        """MCT-MAN-001: Manifest validator accepts message/comment/request permission objects."""
         env_manifest._validate_permission("message.send", "synthetic")  # noqa: SLF001
         env_manifest._validate_permission("message.list", "synthetic")  # noqa: SLF001
         env_manifest._validate_permission("comment.add", "synthetic")  # noqa: SLF001
         env_manifest._validate_permission("comment.list", "synthetic")  # noqa: SLF001
+        env_manifest._validate_permission("comment.resolve", "synthetic")  # noqa: SLF001
+        env_manifest._validate_permission("request.read", "synthetic")  # noqa: SLF001
+        env_manifest._validate_permission("request.create", "synthetic")  # noqa: SLF001
+        env_manifest._validate_permission("request.accept", "synthetic")  # noqa: SLF001
+        env_manifest._validate_permission("request.block", "synthetic")  # noqa: SLF001
+        env_manifest._validate_permission("request.complete", "synthetic")  # noqa: SLF001
+        env_manifest._validate_permission("request.cancel", "synthetic")  # noqa: SLF001
 
-    def test_all_buddies_have_message_comment_tools_and_permissions(self) -> None:
-        """MCT-MAN-002: Every buddy has message-tool, comment-tool, and full permissions."""
-        required_tools = {"message-tool", "comment-tool"}
-        required_permissions = {"message.send", "message.list", "comment.add", "comment.list"}
+    def test_all_buddies_have_message_comment_request_tools_and_permissions(self) -> None:
+        """MCT-MAN-002: Every buddy has message/comment/request tools and participant permissions."""
+        required_tools = {"message-tool", "comment-tool", "request-tool"}
+        required_permissions = {
+            "message.send",
+            "message.list",
+            "comment.add",
+            "comment.list",
+            "request.read",
+            "request.create",
+            "request.accept",
+            "request.block",
+            "request.complete",
+            "request.cancel",
+        }
         for buddy in self.manifest.get("buddies", []):
             assert isinstance(buddy, dict)
             buddy_id = str(buddy.get("id"))
@@ -111,6 +129,10 @@ class EnvManifestV2Tests(unittest.TestCase):
             with self.subTest(buddy=buddy_id):
                 self.assertTrue(required_tools.issubset(skills), msg=f"{buddy_id} missing tools: {required_tools - skills}")
                 self.assertTrue(required_permissions.issubset(permissions), msg=f"{buddy_id} missing permissions: {required_permissions - permissions}")
+                if buddy_id == "pm":
+                    self.assertIn("comment.resolve", permissions)
+                else:
+                    self.assertNotIn("comment.resolve", permissions)
 
     def test_pm_manifest_and_profile_exclude_track_advance(self) -> None:
         pm = next(

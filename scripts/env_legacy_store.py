@@ -45,6 +45,7 @@ def refresh_runtime_root_bindings() -> None:
     global ARTIFACT_OBJECTS_DIR
     global MESSAGES_DIR
     global COMMENTS_DIR
+    global REQUESTS_DIR
     global CONTENT_ROOT
     global LOCAL_ROOT
     global BUDDYBOX_LOCAL_DIR
@@ -58,6 +59,7 @@ def refresh_runtime_root_bindings() -> None:
     ARTIFACT_OBJECTS_DIR = runtime_files.ARTIFACT_OBJECTS_DIR
     MESSAGES_DIR = runtime_files.MESSAGES_DIR
     COMMENTS_DIR = runtime_files.COMMENTS_DIR
+    REQUESTS_DIR = runtime_files.REQUESTS_DIR
     CONTENT_ROOT = runtime_files.CONTENT_ROOT
     LOCAL_ROOT = runtime_files.LOCAL_ROOT
     BUDDYBOX_LOCAL_DIR = runtime_files.BUDDYBOX_LOCAL_DIR
@@ -509,7 +511,7 @@ def validate_message(message: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
-    forbidden_fields = {"resolved", "resolved_at", "task_id", "edit_history", "attachment"}
+    forbidden_fields = {"resolved", "task_id", "edit_history", "attachment"}
     forbidden = sorted(key for key in comment if key in forbidden_fields)
     if forbidden:
         raise ValueError(f"unsupported comment fields: {', '.join(forbidden)}")
@@ -531,6 +533,18 @@ def validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
     status = _require_non_empty_text(comment.get("status", "open"), "comment.status")
     if status not in {"open", "resolved"}:
         raise ValueError("comment.status must be one of open|resolved")
+
+    resolved_by = comment.get("resolved_by")
+    resolved_at = comment.get("resolved_at")
+    resolution_summary = comment.get("resolution_summary")
+    if status == "resolved":
+        resolved_by = _require_non_empty_text(resolved_by, "comment.resolved_by")
+        resolved_at = _require_non_empty_text(resolved_at, "comment.resolved_at")
+        resolution_summary = _require_non_empty_text(resolution_summary, "comment.resolution_summary")
+    else:
+        resolved_by = None
+        resolved_at = None
+        resolution_summary = None
 
     mentions_raw = comment.get("mentions", [])
     if mentions_raw is None:
@@ -576,6 +590,9 @@ def validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
         "artifact_revision_id": artifact_revision_id,
         "reply_to": reply_to,
         "created_at": created_at,
+        "resolved_by": resolved_by,
+        "resolved_at": resolved_at,
+        "resolution_summary": resolution_summary,
     }
 
 
@@ -1414,6 +1431,9 @@ def create_comment(
         "artifact_revision_id": artifact_revision_id,
         "reply_to": reply_to,
         "created_at": now_iso(),
+        "resolved_by": None,
+        "resolved_at": None,
+        "resolution_summary": None,
     }
     return save_comment(comment)
 
@@ -1444,6 +1464,7 @@ def update_comment_thread_status(thread_id: str, status: str) -> list[dict[str, 
         raise ValueError("status must be one of open|resolved")
 
     rows = list_comments()
+    now = now_iso()
     updated: list[dict[str, Any]] = []
     for row in rows:
         row_thread_id = row.get("thread_id")
@@ -1451,6 +1472,14 @@ def update_comment_thread_status(thread_id: str, status: str) -> list[dict[str, 
             continue
         patched = dict(row)
         patched["status"] = status
+        if status == "resolved":
+            patched["resolved_by"] = str(row.get("by_buddy") or "")
+            patched["resolved_at"] = now
+            patched["resolution_summary"] = str(row.get("resolution_summary") or "resolved")
+        else:
+            patched["resolved_by"] = None
+            patched["resolved_at"] = None
+            patched["resolution_summary"] = None
         patched = save_comment(patched)
         updated.append(patched)
     if not updated:

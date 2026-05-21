@@ -279,6 +279,22 @@ def validate_env_profile(
             f"expected {expected_track_effects}, got {track_effects}"
         )
 
+    request_effects = _require_string_list(state_capability.get("request_effects"), "state_capability.request_effects")
+    expected_request_effects = ["create", "accept", "block", "complete", "cancel"]
+    if request_effects != expected_request_effects:
+        raise EnvProfileError(
+            "state_capability.request_effects must be exactly "
+            f"{expected_request_effects}; got {request_effects}"
+        )
+
+    comment_effects = _require_string_list(state_capability.get("comment_effects"), "state_capability.comment_effects")
+    expected_comment_effects = ["resolve"] if buddy_id == "pm" else []
+    if comment_effects != expected_comment_effects:
+        raise EnvProfileError(
+            f"state_capability.comment_effects mismatch for '{buddy_id}': "
+            f"expected {expected_comment_effects}, got {comment_effects}"
+        )
+
     tool_capability = _require_dict(profile.get("tool_capability"), "tool_capability")
     browser_cockpit = _require_enum(
         enums=enums,

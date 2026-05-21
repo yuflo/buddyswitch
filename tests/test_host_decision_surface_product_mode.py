@@ -55,6 +55,19 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             now={"next": "Scan market", "blocker": None},
         )
         env_store.create_task("task-market-decision", "Scan market", buddy="market", track_id=track["id"])
+        request_created = self._dispatch(
+            buddy="pm",
+            tool="request",
+            action="create",
+            args={
+                "track_id": str(track["id"]),
+                "to_buddy": "market",
+                "title": "Collect market proof",
+                "summary": "Scan competitors and report signal quality.",
+                "target_refs": [{"type": "track", "id": str(track["id"])}],
+            },
+        )
+        self.assertTrue(request_created["ok"], msg=request_created)
 
         response = self._dispatch(buddy="market", tool="context", action="summarize", args={})
         self.assertTrue(response["ok"], msg=response)
@@ -63,10 +76,13 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertNotIn("memory_summaries", response)
         self.assertIn("candidate_tracks", response)
         self.assertTrue(any(row.get("track_id") == "track-market-decision" for row in response["candidate_tracks"]))
+        self.assertIn("candidate_requests", response)
+        self.assertTrue(any(row.get("track_id") == "track-market-decision" for row in response["candidate_requests"]))
+        self.assertGreaterEqual(int((response.get("current_context_summary") or {}).get("requests", 0)), 1)
         affordances = response.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=response)
         assert isinstance(affordances, dict)
-        self.assertTrue({"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment"}.issubset(set(affordances)))
+        self.assertTrue({"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment", "request"}.issubset(set(affordances)))
         self.assertNotIn("handoff", affordances)
         self.assertNotIn("project_source", affordances)
 

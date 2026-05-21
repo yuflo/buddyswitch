@@ -36,6 +36,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         "buddybox": ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md",
         "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
         "comment": ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
+        "request": ROOT / "buddyswitch/skills/shared/request-tool/SKILL.md",
     }
 
     def setUp(self) -> None:
@@ -61,7 +62,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("handoff-tool", all_skill_ids)
 
     def test_each_buddy_keeps_shared_runtime_tools_without_handoff(self) -> None:
-        required = {"track-tool", "artifact-tool", "task-tool", "buddybox-tool", "message-tool", "comment-tool"}
+        required = {"track-tool", "artifact-tool", "task-tool", "buddybox-tool", "message-tool", "comment-tool", "request-tool"}
         for buddy in self.manifest.get("buddies", []):
             assert isinstance(buddy, dict)
             skills = set(buddy.get("skills", []))
@@ -197,7 +198,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         """MCT-SURF-006: Message/comment skills don't teach non-goal features."""
         msg_skill = (ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md").read_text(encoding="utf-8").lower()
         cmt_skill = (ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md").read_text(encoding="utf-8").lower()
-        non_goals = ["broadcast", "read receipt", "read_receipt", "handoff", "edit", "delete", "resolve", "task comment", "whiteboard"]
+        non_goals = ["broadcast", "read receipt", "read_receipt", "handoff", "edit", "delete", "reopen", "task comment", "whiteboard"]
         for skill_text, label in [(msg_skill, "message-tool"), (cmt_skill, "comment-tool")]:
             with self.subTest(skill=label):
                 self.assertIn("env.tool", skill_text)
@@ -263,6 +264,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             "buddybox": ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md",
             "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
             "comment": ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
+            "request": ROOT / "buddyswitch/skills/shared/request-tool/SKILL.md",
         }
         for tool, path in skill_paths.items():
             text = path.read_text(encoding="utf-8").lower()
@@ -277,7 +279,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         from env.tool_runtime import registry as catalog
 
         self.assertNotIn("advance", catalog.supported_actions("track"))
-        self.assertNotIn("resolve", catalog.supported_actions("comment"))
+        self.assertIn("resolve", catalog.supported_actions("comment"))
         self.assertNotIn("reopen", catalog.supported_actions("comment"))
 
 

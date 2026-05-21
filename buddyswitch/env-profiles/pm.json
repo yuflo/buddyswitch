@@ -33,6 +33,16 @@
       "add_update",
       "add_proof",
       "archive"
+    ],
+    "request_effects": [
+      "create",
+      "accept",
+      "block",
+      "complete",
+      "cancel"
+    ],
+    "comment_effects": [
+      "resolve"
     ]
   },
   "tool_capability": {

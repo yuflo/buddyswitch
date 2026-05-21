@@ -21,10 +21,11 @@ if str(SCRIPTS) not in sys.path:
 SHIPPED_TOOLS: dict[str, set[str]] = {
     "artifact": {"create_revision", "get", "update_metadata"},
     "buddybox": {"delete", "desc", "list", "read", "write"},
-    "comment": {"add", "list"},
+    "comment": {"add", "list", "resolve"},
     "context": {"get", "list_sources", "summarize"},
     "evidence": {"approve_downgrade", "issue_browser"},
     "message": {"list", "send"},
+    "request": {"create", "list", "get", "accept", "block", "complete", "cancel"},
     "search": {"open_browser", "request", "status"},
     "task": {"archive", "create", "get", "list", "update"},
     "track": {"add_material", "add_proof", "add_update", "archive", "create", "list", "open", "update_now"},
@@ -358,11 +359,11 @@ print(json.dumps({
                         title="Probe",
                         description="Probe tool",
                         cli_resource="probe",
-                            command="python3 scripts/env/client.py probe ping --payload '<json-object>'",
+                        command="python3 scripts/env/client.py probe ping --payload '<json-object>'",
                         scope="probe",
                         capability_boundary="probe boundary",
                         use_when=("testing",),
-                        do_not_use_when=(),
+                        do_not_use_when=("you need durable runtime object mutation",),
                         actions=(
                             ActionDefinition(
                                 name="ping",
@@ -384,6 +385,8 @@ print(json.dumps({
                                 mutates=MUTATES_NONE,
                                 required_permission="probe.ping",
                                 authority="probe",
+                                use_when=("echo one test payload",),
+                                do_not_use_when=("you need runtime object mutation",),
                             ),
                         ),
                     )

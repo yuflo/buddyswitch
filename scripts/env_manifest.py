@@ -269,6 +269,7 @@ def _validate_permission(permission: str, label: str) -> None:
         "evidence",
         "message",
         "comment",
+        "request",
         "search",
     }
     if obj not in supported_objects:

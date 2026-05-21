@@ -10,6 +10,8 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 - Read shared state from `track.open` before deciding publish/mutation order.
 - Create private PM draft/revision artifacts via `artifact.create_revision` using `template` and markdown `body`.
 - Publish product direction, briefs, decisions, and close proof via `track.add_material` / `track.add_proof` using existing `artifact_id` values.
+- Use `request.create` / `request.list` / `request.get` / `request.cancel` for durable cross-buddy request state on tracks.
+- Use `comment.resolve` (PM-only) to close reviewed comment threads with explicit resolution summary.
 - Use buddybox for PM-owned private local drafts, lightweight prototypes, exports, or supporting files; use artifact when content must become product-readable.
 
 ## Runtime Boundary

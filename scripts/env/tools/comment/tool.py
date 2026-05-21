@@ -14,7 +14,7 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='comment',
         title='Object Comments',
-        description='Add and list comments on readable track and artifact targets.',
+        description='Add, list, and PM-resolve comments on readable track and artifact targets.',
         cli_resource='comment',
         command="python3 scripts/env/client.py comment <action> --payload '<json-object>'",
         scope='target-scoped plain-text comments on readable tracks and artifacts',
@@ -155,6 +155,56 @@ def _build_definition() -> ToolDefinition:
                     'read_only': True,
                     'destructive': False,
                     'idempotent': True,
+                    'open_world': False,
+                    'requires_human_approval': False,
+                    'external_effect': False,
+                },
+            ),
+            ActionDefinition(
+                name='resolve',
+                title='comment.resolve',
+                description='PM-only resolution for one full comment thread.',
+                input_schema={
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['comment_id', 'resolution_summary'],
+                    'properties': {
+                        'comment_id': {
+                            'type': 'string',
+                            'description': 'Comment id in the thread PM reviewed.',
+                        },
+                        'resolution_summary': {
+                            'type': 'string',
+                            'description': 'PM review closure summary.',
+                        },
+                    },
+                },
+                output_schema={
+                    '$ref': 'ToolResult',
+                },
+                kind='write',
+                mutates='runtime_objects',
+                required_permission='comment.resolve',
+                authority='pm.review_closure',
+                preconditions=(
+                    'active buddy is pm',
+                    'comment_id references an existing thread comment on a readable non-archived target',
+                    'thread has at least one open comment row',
+                ),
+                returns=(
+                    'comments',
+                    'updated_ids',
+                ),
+                use_when=(
+                    'PM reviewed a thread and wants durable resolved closure state for all rows in that thread.',
+                ),
+                do_not_use_when=(
+                    'You need to continue discussion; use comment.add for new evidence or follow-up notes.',
+                ),
+                risk_hints={
+                    'read_only': False,
+                    'destructive': False,
+                    'idempotent': False,
                     'open_world': False,
                     'requires_human_approval': False,
                     'external_effect': False,

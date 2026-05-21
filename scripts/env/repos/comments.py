@@ -11,7 +11,7 @@ from . import runtime_files
 
 _TARGET_TYPES = {"track", "artifact", "artifact_section"}
 _COMMENT_STATUSES = {"open", "resolved"}
-_FORBIDDEN_COMMENT_FIELDS = {"resolved", "resolved_at", "task_id", "edit_history", "attachment"}
+_FORBIDDEN_COMMENT_FIELDS = {"resolved", "task_id", "edit_history", "attachment"}
 
 
 def _require_non_empty_text(value: Any, field: str) -> str:
@@ -46,6 +46,18 @@ def _validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
     status = _require_non_empty_text(comment.get("status", "open"), "comment.status")
     if status not in _COMMENT_STATUSES:
         raise ValueError("comment.status must be one of open|resolved")
+
+    resolved_by = comment.get("resolved_by")
+    resolved_at = comment.get("resolved_at")
+    resolution_summary = comment.get("resolution_summary")
+    if status == "resolved":
+        resolved_by = _require_non_empty_text(resolved_by, "comment.resolved_by")
+        resolved_at = _require_non_empty_text(resolved_at, "comment.resolved_at")
+        resolution_summary = _require_non_empty_text(resolution_summary, "comment.resolution_summary")
+    else:
+        resolved_by = None
+        resolved_at = None
+        resolution_summary = None
 
     mentions_raw = comment.get("mentions", [])
     if mentions_raw is None:
@@ -92,6 +104,9 @@ def _validate_comment(comment: dict[str, Any]) -> dict[str, Any]:
         "artifact_revision_id": artifact_revision_id,
         "reply_to": reply_to,
         "created_at": created_at,
+        "resolved_by": resolved_by,
+        "resolved_at": resolved_at,
+        "resolution_summary": resolution_summary,
     }
 
 
@@ -175,6 +190,9 @@ def create_comment(
             "artifact_revision_id": artifact_revision_id,
             "reply_to": reply_to,
             "created_at": runtime_files.now_iso(),
+            "resolved_by": None,
+            "resolved_at": None,
+            "resolution_summary": None,
         }
     )
 
@@ -197,3 +215,37 @@ def comments_for_target(target_type: str, target_id: str) -> list[dict[str, Any]
             matched.append(row)
     matched.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
     return matched
+
+
+def resolve_thread(*, comment_id: str, resolved_by: str, resolution_summary: str) -> list[dict[str, Any]]:
+    normalized_comment_id = runtime_files.require_id(comment_id, "comment_id")
+    normalized_resolved_by = _require_non_empty_text(resolved_by, "resolved_by")
+    normalized_summary = _require_non_empty_text(resolution_summary, "resolution_summary")
+
+    seed = get_comment(normalized_comment_id)
+    if seed is None:
+        raise ValueError(f"comment not found: {normalized_comment_id}")
+    thread_id = _require_non_empty_text(seed.get("thread_id"), "comment.thread_id")
+
+    thread_rows = [row for row in list_comments() if row.get("thread_id") == thread_id]
+    if not thread_rows:
+        raise ValueError(f"comment thread not found: {thread_id}")
+    if all(row.get("status") == "resolved" for row in thread_rows):
+        raise ValueError(f"comment thread '{thread_id}' is already resolved")
+
+    now = runtime_files.now_iso()
+    normalized_updates: list[dict[str, Any]] = []
+    for row in thread_rows:
+        updated_row = dict(row)
+        updated_row["status"] = "resolved"
+        updated_row["resolved_by"] = normalized_resolved_by
+        updated_row["resolved_at"] = now
+        updated_row["resolution_summary"] = normalized_summary
+        normalized_updates.append(_validate_comment(updated_row))
+
+    runtime_files.require_runtime_workspace_write_root()
+    runtime_files.COMMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    for row in normalized_updates:
+        runtime_files.write_json_object(_comment_file(str(row["id"])), row)
+    normalized_updates.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
+    return normalized_updates

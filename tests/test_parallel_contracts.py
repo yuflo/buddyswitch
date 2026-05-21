@@ -16,6 +16,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_legacy_store as env_store  # noqa: E402
 import workspace_data  # noqa: E402
+from env.repos import requests as request_repo  # noqa: E402
 from env_legacy_store import create_artifact_revision, create_task, create_track  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -40,6 +41,7 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("tracks", top_keys)
         self.assertIn("tasks", top_keys)
         self.assertIn("artifacts", top_keys)
+        self.assertIn("requests", top_keys)
 
         sources = contract["data_sources"]
         self.assertFalse(any("handoffs" in str(row) for row in sources))
@@ -86,6 +88,18 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             author_buddy="dev",
             content="Artifact comment",
         )
+        request = request_repo.create_request(
+            track_id=track["id"],
+            from_buddy="pm",
+            to_buddy="dev",
+            title="Implement contract freeze",
+            summary="Use published implementation report as baseline.",
+            target_refs=[{"type": "artifact", "id": artifact["id"]}],
+            status="done",
+            blocker=None,
+            result_refs=[{"type": "artifact", "id": artifact["id"]}],
+            completed_at="2026-05-21T10:00:00+08:00",
+        )
         raw_track = env_store.get_track(track["id"])
         raw_track["comment_ids"] = ["comment-stale-track"]
         env_store.track_file(track["id"]).write_text(
@@ -103,6 +117,7 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(set(payload), set(_load_json(CONTRACT)["top_level_key_order"]))
         self.assertNotIn("handoffs", payload)
         self.assertNotIn("comments", payload, msg="workspace projection must not expose top-level comments")
+        self.assertIn("requests", payload)
 
         tracks = payload["tracks"]
         self.assertIsInstance(tracks, list)
@@ -115,6 +130,10 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual([entry.get("artifact_id") for entry in shared_materials], [artifact["id"]])
         self.assertIn("comment_ids", row, msg="track view missing comment_ids")
         self.assertEqual(row.get("comment_ids"), [track_comment["id"]])
+        self.assertEqual(row.get("request_ids"), [request["id"]])
+        self.assertEqual(row.get("open_request_count"), 0)
+        self.assertEqual(row.get("blocked_request_count"), 0)
+        self.assertEqual(row.get("done_request_count"), 1)
         self.assertNotIn("tasks", row)
         self.assertNotIn("task_ids", row)
 
@@ -134,6 +153,13 @@ class ParallelContractsTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         # Task views must NOT have comment_ids
         task_row = next(r for r in tasks if isinstance(r, dict) and r.get("id") == task["id"])
         self.assertNotIn("comment_ids", task_row, msg="task view must not expose comment_ids")
+
+        requests = payload["requests"]
+        self.assertIsInstance(requests, list)
+        assert isinstance(requests, list)
+        request_row = next(r for r in requests if isinstance(r, dict) and r.get("id") == request["id"])
+        self.assertEqual(request_row.get("track_id"), track["id"])
+        self.assertEqual(request_row.get("status"), "done")
 
     def test_message_comment_buddybox_focused_tests_run_as_independent_loop(self) -> None:
         completed = subprocess.run(

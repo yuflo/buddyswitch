@@ -18,7 +18,7 @@ from env.tool_runtime import registry as catalog  # noqa: E402
 from env.tool_runtime.definition import ActionDefinition, ToolDefinition, validate_definition  # noqa: E402
 
 
-_ENUM_FIELDS = {"status", "state", "health", "kind", "template", "target_type", "backend", "engine"}
+_ENUM_FIELDS = {"status", "state", "health", "kind", "template", "target_type", "backend", "engine", "box", "type"}
 
 
 def _type_has(schema: Mapping[str, Any], expected: str) -> bool:
@@ -131,6 +131,10 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         search_request = catalog.get_action_definition("search", "request").input_schema
         search_open = catalog.get_action_definition("search", "open_browser").input_schema
         message_send = catalog.get_action_definition("message", "send").input_schema
+        request_create = catalog.get_action_definition("request", "create").input_schema
+        request_list = catalog.get_action_definition("request", "list").input_schema
+        request_complete = catalog.get_action_definition("request", "complete").input_schema
+        comment_resolve = catalog.get_action_definition("comment", "resolve").input_schema
 
         create_now = track_create["properties"]["now"]
         update_now = track_update_now["properties"]["now"]
@@ -223,6 +227,24 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(search_open["properties"]["engine"].get("enum"), ["google", "web", "reddit", "x"])
 
         self.assertIn("manifest buddy id", message_send["properties"]["to_buddy"].get("description", ""))
+
+        self.assertIn("track_id", request_create.get("required", []))
+        self.assertIn("to_buddy", request_create.get("required", []))
+        self.assertIn("title", request_create.get("required", []))
+        self.assertIn("summary", request_create.get("required", []))
+        target_ref = request_create["properties"]["target_refs"]["items"]
+        self.assertEqual(target_ref.get("type"), "object")
+        self.assertIs(target_ref.get("additionalProperties"), False)
+        self.assertEqual(set(target_ref.get("required", [])), {"type", "id"})
+        self.assertEqual(target_ref.get("properties", {}).get("type", {}).get("enum"), ["track", "artifact", "comment"])
+        self.assertEqual(request_list["properties"]["box"].get("enum"), ["all", "inbox", "outbox"])
+        self.assertEqual(request_list["properties"]["status"].get("enum"), ["open", "accepted", "blocked", "done", "canceled"])
+        self.assertEqual(request_complete["properties"]["result_refs"].get("type"), "array")
+        result_ref = request_complete["properties"]["result_refs"]["items"]
+        self.assertEqual(result_ref.get("type"), "object")
+        self.assertEqual(result_ref.get("properties", {}).get("type", {}).get("enum"), ["track", "artifact", "comment"])
+
+        self.assertEqual(set(comment_resolve.get("required", [])), {"comment_id", "resolution_summary"})
 
     def test_action_definition_validation_requires_action_semantic_tuples(self) -> None:
         action = ActionDefinition(

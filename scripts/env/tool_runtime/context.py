@@ -15,6 +15,7 @@ from env.domain import buddybox_workspace as _buddybox_workspace_domain
 from env.domain import comment_targets as _comment_target_domain
 from env.domain import messages as _message_domain
 from env.domain import publication as _publication_domain
+from env.domain import requests as _request_domain
 from env.domain import source_refs as _source_ref_domain
 from env.domain import tasks as _task_domain
 import env_profiles
@@ -23,6 +24,7 @@ from env.repos import artifacts as _artifact_repo
 from env.repos import buddybox_files as _buddybox_repo
 from env.repos import comments as _comment_repo
 from env.repos import messages as _message_repo
+from env.repos import requests as _request_repo
 from env.repos import runtime_files
 from env.repos import tasks as _task_repo
 from env.repos import tracks as _track_repo
@@ -217,6 +219,7 @@ class RuntimeObjectAccess:
             "artifacts": "artifact.get",
             "messages": "message.list",
             "comments": "comment.list",
+            "requests": "request.list / request.get",
             "buddybox": "buddybox list/read/write/delete",
         }
 
@@ -387,6 +390,7 @@ class DomainAccess:
     comment_target: Any = field(default_factory=lambda: _comment_target_domain)
     message: Any = field(default_factory=lambda: _message_domain)
     publication: Any = field(default_factory=lambda: _publication_domain)
+    request: Any = field(default_factory=lambda: _request_domain)
     source_refs: Any = field(default_factory=lambda: _source_ref_domain)
     task: Any = field(default_factory=lambda: _task_domain)
 
@@ -399,6 +403,7 @@ class RepoAccess:
     buddybox: Any = field(default_factory=lambda: _buddybox_repo)
     comment: Any = field(default_factory=lambda: _comment_repo)
     message: Any = field(default_factory=lambda: _message_repo)
+    request: Any = field(default_factory=lambda: _request_repo)
     runtime_files: Any = field(default_factory=lambda: runtime_files)
     task: Any = field(default_factory=lambda: _task_repo)
     track: Any = field(default_factory=lambda: _track_repo)

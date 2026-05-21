@@ -40,6 +40,7 @@ def _recompute_runtime_roots() -> None:
     global ARTIFACT_OBJECTS_DIR
     global MESSAGES_DIR
     global COMMENTS_DIR
+    global REQUESTS_DIR
     global CONTENT_ROOT
     global LOCAL_ROOT
     global BUDDYBOX_LOCAL_DIR
@@ -58,6 +59,7 @@ def _recompute_runtime_roots() -> None:
     ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
     MESSAGES_DIR = OBJECTS_ROOT / "messages"
     COMMENTS_DIR = OBJECTS_ROOT / "comments"
+    REQUESTS_DIR = OBJECTS_ROOT / "requests"
     CONTENT_ROOT = STATE_ROOT / "buddyswitch" / "content"
     LOCAL_ROOT = STATE_ROOT / "buddyswitch" / "local"
     BUDDYBOX_LOCAL_DIR = LOCAL_ROOT / "buddybox"
@@ -166,6 +168,7 @@ def ensure_runtime_dirs() -> None:
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
     MESSAGES_DIR.mkdir(parents=True, exist_ok=True)
     COMMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def require_id(value: str, label: str) -> str:

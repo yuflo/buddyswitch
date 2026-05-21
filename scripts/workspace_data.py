@@ -47,6 +47,7 @@ def build_task_view(task: dict[str, Any]) -> dict[str, Any]:
 def build_track_views(
     tracks: list[dict[str, Any]],
     artifacts: list[dict[str, Any]],
+    requests: list[dict[str, Any]] | None = None,
     comment_ids_by_target: dict[tuple[str, str], list[str]] | None = None,
     comment_status_by_target: dict[tuple[str, str], dict[str, int]] | None = None,
 ) -> list[dict[str, Any]]:
@@ -55,6 +56,7 @@ def build_track_views(
     return _build_track_views(
         tracks,
         artifacts,
+        requests or [],
         comment_ids_by_target or {},
         comment_status_by_target or {},
     )
