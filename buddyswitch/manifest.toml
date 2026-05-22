@@ -29,8 +29,44 @@ id = "launch-prep"
 path = "buddyswitch/skills/market/launch-prep"
 
 [[skills]]
-id = "write-prd"
-path = "buddyswitch/skills/pm/write-prd"
+id = "read-product-context"
+path = "buddyswitch/skills/pm/read-product-context"
+
+[[skills]]
+id = "synthesize-cross-functional-inputs"
+path = "buddyswitch/skills/pm/synthesize-cross-functional-inputs"
+
+[[skills]]
+id = "frame-product-direction"
+path = "buddyswitch/skills/pm/frame-product-direction"
+
+[[skills]]
+id = "define-scope"
+path = "buddyswitch/skills/pm/define-scope"
+
+[[skills]]
+id = "write-requirements"
+path = "buddyswitch/skills/pm/write-requirements"
+
+[[skills]]
+id = "write-acceptance-criteria"
+path = "buddyswitch/skills/pm/write-acceptance-criteria"
+
+[[skills]]
+id = "make-product-decision"
+path = "buddyswitch/skills/pm/make-product-decision"
+
+[[skills]]
+id = "decide-from-proof"
+path = "buddyswitch/skills/pm/decide-from-proof"
+
+[[skills]]
+id = "triage-track"
+path = "buddyswitch/skills/pm/triage-track"
+
+[[skills]]
+id = "sequence-product-work"
+path = "buddyswitch/skills/pm/sequence-product-work"
 
 [[skills]]
 id = "track-tool"
@@ -130,7 +166,25 @@ permissions = ["track.read", "track.update_now", "track.add_material", "track.ad
 id = "pm"
 label = "PM"
 scope = "Own product iteration and track progression."
-skills = ["write-prd", "track-tool", "artifact-tool", "task-tool", "buddybox-tool", "message-tool", "comment-tool", "request-tool"]
+skills = [
+  "read-product-context",
+  "synthesize-cross-functional-inputs",
+  "frame-product-direction",
+  "define-scope",
+  "write-requirements",
+  "write-acceptance-criteria",
+  "make-product-decision",
+  "decide-from-proof",
+  "triage-track",
+  "sequence-product-work",
+  "track-tool",
+  "artifact-tool",
+  "task-tool",
+  "buddybox-tool",
+  "message-tool",
+  "comment-tool",
+  "request-tool",
+]
 artifact_templates = ["brief", "decision", "note"]
 permissions = [
   "track.read",

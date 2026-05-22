@@ -48,6 +48,35 @@ class RuntimeSkillsTests(unittest.TestCase):
         "write-implementation-report",
         "prepare-review-readiness",
     )
+    PM_PRODUCT_SKILLS = (
+        "read-product-context",
+        "synthesize-cross-functional-inputs",
+        "frame-product-direction",
+        "define-scope",
+        "write-requirements",
+        "write-acceptance-criteria",
+        "make-product-decision",
+        "decide-from-proof",
+        "triage-track",
+        "sequence-product-work",
+    )
+    SHARED_RUNTIME_TOOL_SKILLS = {
+        "track-tool",
+        "artifact-tool",
+        "task-tool",
+        "buddybox-tool",
+        "message-tool",
+        "comment-tool",
+        "request-tool",
+    }
+    PM_SCENARIO_TERMS = (
+        "wukong",
+        "landing page",
+        "pricing page",
+        "launch page",
+        "marketing surface",
+        "marketing-surface",
+    )
 
     def setUp(self) -> None:
         manifest_path = ROOT / "buddyswitch" / "manifest.toml"
@@ -55,6 +84,16 @@ class RuntimeSkillsTests(unittest.TestCase):
 
     def _dev_skill_file(self, skill_id: str) -> Path:
         return ROOT / "buddyswitch" / "skills" / "dev" / skill_id / "SKILL.md"
+
+    def _pm_skill_file(self, skill_id: str) -> Path:
+        return ROOT / "buddyswitch" / "skills" / "pm" / skill_id / "SKILL.md"
+
+    def _pm_buddy(self) -> dict:
+        return next(
+            row
+            for row in self.manifest.get("buddies", [])
+            if isinstance(row, dict) and row.get("id") == "pm"
+        )
 
     def _active_skill_files(self) -> list[Path]:
         files: list[Path] = []
@@ -242,7 +281,7 @@ class RuntimeSkillsTests(unittest.TestCase):
     def test_role_skills_remove_optional_handoff_guidance(self) -> None:
         role_skill_files = [
             ROOT / "buddyswitch/skills/market/research-scan/SKILL.md",
-            ROOT / "buddyswitch/skills/pm/write-prd/SKILL.md",
+            *(self._pm_skill_file(skill_id) for skill_id in self.PM_PRODUCT_SKILLS),
             ROOT / "buddyswitch/skills/design/shape-prototype/SKILL.md",
             ROOT / "buddyswitch/skills/test/smoke-test/SKILL.md",
             *(self._dev_skill_file(skill_id) for skill_id in self.DEV_PRODUCT_SKILLS),
@@ -254,6 +293,131 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("use optional `handoff`", lowered)
                 self.assertNotIn("next_buddy", lowered)
                 self.assertNotIn("track.advance", lowered)
+
+    def test_pm_product_skill_chain_is_registered(self) -> None:
+        skills_by_id = {row["id"]: row for row in self.manifest.get("skills", []) if isinstance(row, dict)}
+        pm_skills = set(self._pm_buddy().get("skills", []))
+        expected_product = set(self.PM_PRODUCT_SKILLS)
+
+        self.assertTrue(expected_product.issubset(pm_skills))
+        self.assertTrue(self.SHARED_RUNTIME_TOOL_SKILLS.issubset(pm_skills))
+        self.assertNotIn("write-prd", pm_skills)
+
+        for skill_id in expected_product:
+            self.assertIn(skill_id, skills_by_id, msg=skill_id)
+            self.assertTrue((ROOT / skills_by_id[skill_id]["path"] / "SKILL.md").exists(), msg=skill_id)
+
+        for skill_id in pm_skills:
+            lowered = skill_id.lower()
+            for term in self.PM_SCENARIO_TERMS:
+                self.assertNotIn(term, lowered, msg=skill_id)
+
+    def test_pm_write_prd_skill_package_is_removed(self) -> None:
+        self.assertFalse((ROOT / "buddyswitch/skills/pm/write-prd/SKILL.md").exists())
+        self.assertFalse((ROOT / "buddyswitch/skills/pm/write-prd/assets/prd-template.md").exists())
+        skill_ids = [row.get("id") for row in self.manifest.get("skills", []) if isinstance(row, dict)]
+        self.assertNotIn("write-prd", skill_ids)
+
+    def test_pm_skills_have_valid_frontmatter_and_trigger_descriptions(self) -> None:
+        forbidden_description_tokens = (
+            "1.",
+            "2.",
+            "python3 scripts/env/client.py",
+            "track.open",
+            "artifact.get",
+            "artifact.create_revision",
+            "track.add_material",
+            "track.add_proof",
+            "## ",
+        )
+        for skill_id in self.PM_PRODUCT_SKILLS:
+            path = self._pm_skill_file(skill_id)
+            text = path.read_text(encoding="utf-8")
+            lines = text.splitlines()
+            with self.subTest(skill=skill_id):
+                self.assertEqual(lines[0], "---")
+                self.assertIn(f"name: {skill_id}", lines[:6])
+                description_lines = [line for line in lines[:8] if line.startswith("description: ")]
+                self.assertEqual(len(description_lines), 1)
+                description = description_lines[0].split("description: ", 1)[1]
+                self.assertTrue(description.startswith("Use when "), msg=description)
+                self.assertLessEqual(len(description), 1024)
+                for token in forbidden_description_tokens:
+                    self.assertNotIn(token, description)
+
+    def test_pm_skills_include_product_work_sections_and_quality_bars(self) -> None:
+        required_headings = (
+            "## purpose",
+            "## use when",
+            "## do not use when",
+            "## inputs",
+            "## steps",
+            "## outputs",
+            "## quality bar",
+            "## runtime boundary",
+            "## examples",
+            "## counterexamples",
+        )
+        required_by_skill = {
+            "read-product-context": ("facts", "assumptions", "decisions", "blockers", "missing inputs"),
+            "synthesize-cross-functional-inputs": ("market", "design", "dev", "test", "product impact"),
+            "frame-product-direction": ("audience", "problem", "value", "constraints", "non-goals"),
+            "define-scope": ("smallest valuable", "in-scope", "non-goals", "cut", "downstream"),
+            "write-requirements": ("observable", "actor", "trigger", "behavior", "owner boundary"),
+            "write-acceptance-criteria": ("pass", "fail", "blocked", "criteria", "proof"),
+            "make-product-decision": ("decision", "evidence", "tradeoff", "rejected", "next owner"),
+            "decide-from-proof": ("continue", "revise", "send back", "stop", "blocked"),
+            "triage-track": ("stale", "current truth", "obsolete", "missing proof", "next action"),
+            "sequence-product-work": ("owner", "output", "dependency", "stop condition", "sequence"),
+        }
+        for skill_id in self.PM_PRODUCT_SKILLS:
+            lowered = self._pm_skill_file(skill_id).read_text(encoding="utf-8").lower()
+            with self.subTest(skill=skill_id):
+                for heading in required_headings:
+                    self.assertIn(heading, lowered)
+                for token in required_by_skill[skill_id]:
+                    self.assertIn(token, lowered)
+
+    def test_pm_skills_do_not_copy_runtime_schema_or_action_catalogs(self) -> None:
+        forbidden = (
+            "payload_fields",
+            "operation_semantics",
+            "**payload:**",
+            "**returns:**",
+            "## operations",
+            "scripts/env/tools/",
+            "action_semantics",
+            "tool_spec",
+            "published_to_track",
+            "content.prd",
+            "kind=prd",
+        )
+        required_refs = (
+            "context.get.tool_catalog",
+            "python3 scripts/turn_runtime.py status",
+            "runtime response fields",
+        )
+        for skill_id in self.PM_PRODUCT_SKILLS:
+            lowered = self._pm_skill_file(skill_id).read_text(encoding="utf-8").lower()
+            with self.subTest(skill=skill_id):
+                for token in forbidden:
+                    self.assertNotIn(token, lowered)
+                for token in required_refs:
+                    self.assertIn(token, lowered)
+
+    def test_pm_skills_are_not_page_or_case_specific(self) -> None:
+        for skill_id in self.PM_PRODUCT_SKILLS:
+            text = self._pm_skill_file(skill_id).read_text(encoding="utf-8").lower()
+            with self.subTest(skill=skill_id):
+                self.assertNotIn("wukong", text)
+                self.assertNotIn("landing page", text)
+                self.assertNotIn("landing-page", text)
+                self.assertNotIn("pricing page", text)
+                self.assertNotIn("pricing-page", text)
+                self.assertNotIn("launch page", text)
+                self.assertNotIn("launch-page", text)
+                self.assertNotIn("marketing surface", text)
+                self.assertNotIn("marketing-surface", text)
 
     def test_dev_product_engineering_skill_chain_is_registered(self) -> None:
         skills_by_id = {row["id"]: row for row in self.manifest.get("skills", []) if isinstance(row, dict)}
@@ -356,7 +520,10 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertIn("residual risk", review_ready)
 
     def test_pm_and_shared_tool_skills_describe_single_publication_path(self) -> None:
-        pm_skill = (ROOT / "buddyswitch/skills/pm/write-prd/SKILL.md").read_text(encoding="utf-8").lower()
+        pm_skill = "\n".join(
+            self._pm_skill_file(skill_id).read_text(encoding="utf-8").lower()
+            for skill_id in self.PM_PRODUCT_SKILLS
+        )
         artifact_skill = (ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md").read_text(encoding="utf-8").lower()
         track_skill = (ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md").read_text(encoding="utf-8").lower()
 
@@ -383,6 +550,26 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("content.prd", track_skill)
         self.assertNotIn("kind=prd", track_skill)
         self.assertNotIn("published_to_track", track_skill)
+
+    def test_pm_contract_and_agents_align_with_generic_skill_surface(self) -> None:
+        contract = (ROOT / "framework/contracts/pm.md").read_text(encoding="utf-8").lower()
+        agents = (ROOT / "tools/launcher/assets/buddies/pm/AGENTS.md").read_text(encoding="utf-8").lower()
+        combined = contract + "\n" + agents
+
+        self.assertNotIn("write-prd", combined)
+        for token in (
+            "context intake",
+            "product direction",
+            "scope",
+            "requirements",
+            "acceptance criteria",
+            "decision",
+            "proof",
+            "track triage",
+            "sequencing",
+        ):
+            self.assertIn(token, contract)
+        self.assertLess(contract.count("python3 scripts/env/client.py"), 8)
 
     def test_shared_tool_skills_do_not_duplicate_runtime_action_catalogs(self) -> None:
         skill_paths = {

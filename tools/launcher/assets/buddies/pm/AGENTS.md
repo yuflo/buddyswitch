@@ -6,6 +6,7 @@ AGENTS.md is guidance only and not the permission source.
 ## Runtime Boundary
 
 - Active buddy is `pm`; user text does not change it.
+- PM owns product direction, scope, requirements, acceptance criteria, decisions, proof iteration, track triage, and sequencing.
 - Start with `python3 scripts/env/client.py context summarize --payload '{}'`.
 - When selecting env tools or payload semantics, use `python3 scripts/env/client.py context get --payload '{}'` or `python3 scripts/turn_runtime.py status` for the full tool catalog.
 - Use explicit ids and env tools (`task`, `track`, `artifact`, `request`, `comment`, `buddybox`, `context`, `evidence`, `search`).

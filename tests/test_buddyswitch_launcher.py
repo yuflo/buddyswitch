@@ -73,6 +73,18 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         "buddyswitch/env-profiles/",
         "framework/contracts/",
     )
+    _PM_PRODUCT_SKILLS = (
+        "read-product-context",
+        "synthesize-cross-functional-inputs",
+        "frame-product-direction",
+        "define-scope",
+        "write-requirements",
+        "write-acceptance-criteria",
+        "make-product-decision",
+        "decide-from-proof",
+        "triage-track",
+        "sequence-product-work",
+    )
 
     def setUp(self) -> None:
         super().setUp()
@@ -982,11 +994,11 @@ exec "$real_git" "$@"
             "buddyswitch/env-profiles/pm.json",
             "framework/contracts/pm.md",
             "AGENTS.md",
-            ".agents/skills/write-prd/SKILL.md",
         )
         for relative_path in required_runtime_surface:
             candidate = workspace_dir / relative_path
             self.assertTrue(candidate.exists(), msg=f"runtime workspace missing: {relative_path}")
+        self._assert_pm_runtime_skills(workspace_dir)
 
         self.assertEqual(
             (workspace_dir / "projects" / "app").resolve(strict=True),
@@ -997,6 +1009,15 @@ exec "$real_git" "$@"
         self.assertFalse((workspace_dir / "buddyswitch" / "objects").is_symlink())
         self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").exists())
         self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").is_symlink())
+
+    def _assert_pm_runtime_skills(self, workspace_dir: Path) -> None:
+        runtime_skills = workspace_dir / ".agents" / "skills"
+        for skill_id in self._PM_PRODUCT_SKILLS:
+            self.assertTrue((runtime_skills / skill_id / "SKILL.md").exists(), msg=skill_id)
+        self.assertTrue((runtime_skills / "track-tool" / "SKILL.md").exists())
+        self.assertTrue((runtime_skills / "artifact-tool" / "SKILL.md").exists())
+        self.assertFalse((runtime_skills / "write-prd").exists())
+        self.assertFalse((runtime_skills / "write-prd" / "assets" / "prd-template.md").exists())
 
     def _cleanup_runtime_broker(self, instance_root: Path) -> None:
         pid_file = instance_root / "runtime" / "runtime-broker.pid"
@@ -1232,9 +1253,7 @@ exec "$real_git" "$@"
             )
             self.assertEqual(agents_md.read_text(encoding="utf-8"), expected_agents)
             runtime_skills = workspace_dir / ".agents" / "skills"
-            self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
-            self.assertTrue((runtime_skills / "track-tool" / "SKILL.md").exists())
-            self.assertTrue((runtime_skills / "artifact-tool" / "SKILL.md").exists())
+            self._assert_pm_runtime_skills(workspace_dir)
             for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
                 self.assertFalse((runtime_skills / removed).exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
@@ -1296,7 +1315,7 @@ exec "$real_git" "$@"
             self._assert_pm_runtime_shape(workspace_dir, shared_root)
             self._assert_runtime_workspace_excludes_source_surfaces(workspace_dir)
 
-            self.assertTrue((workspace_dir / ".agents" / "skills" / "write-prd" / "SKILL.md").exists())
+            self._assert_pm_runtime_skills(workspace_dir)
             self.assertFalse((workspace_dir / ".agents" / "skills" / "shape-prototype").exists())
             self.assertFalse(
                 (workspace_dir / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists()
@@ -1420,7 +1439,7 @@ exec "$real_git" "$@"
             self._assert_pm_runtime_shape(workspace_dir, shared_root)
 
             self.assertFalse((workspace_dir / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists())
-            self.assertTrue((workspace_dir / ".agents" / "skills" / "write-prd" / "SKILL.md").exists())
+            self._assert_pm_runtime_skills(workspace_dir)
             self.assertFalse((workspace_dir / ".agents" / "skills" / "shape-prototype").exists())
             migrated_probe = shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm" / "reopen" / "probe.txt"
             self.assertFalse(probe.exists())
@@ -2253,10 +2272,7 @@ exec "$real_git" "$@"
             self.assertNotIn("instruction_path", copied_agents)
             runtime_skills = workspace_dir / ".agents" / "skills"
             self.assertTrue((runtime_skills / "task-tool" / "SKILL.md").exists())
-            self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
-            self.assertTrue((runtime_skills / "track-tool" / "SKILL.md").exists())
-            self.assertTrue((runtime_skills / "artifact-tool" / "SKILL.md").exists())
-            self.assertTrue((runtime_skills / "write-prd" / "assets" / "prd-template.md").exists())
+            self._assert_pm_runtime_skills(workspace_dir)
             for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
                 self.assertFalse((runtime_skills / removed).exists())
             self.assertFalse((runtime_skills / "shape-prototype").exists())
@@ -4573,7 +4589,10 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             stale_dir = runtime_skills / "stale-skill"
             stale_dir.mkdir(parents=True, exist_ok=True)
             (stale_dir / "SKILL.md").write_text("# stale\\n", encoding="utf-8")
-            corrupted = runtime_skills / "write-prd" / "SKILL.md"
+            old_pm_skill = runtime_skills / "write-prd" / "SKILL.md"
+            old_pm_skill.parent.mkdir(parents=True, exist_ok=True)
+            old_pm_skill.write_text("# stale write-prd\\n", encoding="utf-8")
+            corrupted = runtime_skills / "read-product-context" / "SKILL.md"
             corrupted.parent.mkdir(parents=True, exist_ok=True)
             corrupted.write_text("# corrupted\\n", encoding="utf-8")
 
@@ -4625,15 +4644,13 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             self.assertEqual(payload["cwd"], str(workspace_dir.resolve()))
 
             self.assertFalse((runtime_skills / "stale-skill").exists())
-            self.assertTrue((runtime_skills / "write-prd" / "SKILL.md").exists())
-            self.assertTrue((runtime_skills / "track-tool" / "SKILL.md").exists())
-            self.assertTrue((runtime_skills / "artifact-tool" / "SKILL.md").exists())
+            self._assert_pm_runtime_skills(workspace_dir)
             for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
                 self.assertFalse((runtime_skills / removed).exists())
-            source_write_prd = ROOT / "buddyswitch" / "skills" / "pm" / "write-prd" / "SKILL.md"
+            source_skill = ROOT / "buddyswitch" / "skills" / "pm" / "read-product-context" / "SKILL.md"
             self.assertEqual(
-                (runtime_skills / "write-prd" / "SKILL.md").read_bytes(),
-                source_write_prd.read_bytes(),
+                (runtime_skills / "read-product-context" / "SKILL.md").read_bytes(),
+                source_skill.read_bytes(),
             )
 
     def test_instance_open_repairs_existing_runtime_projects_app_copy(self) -> None:
