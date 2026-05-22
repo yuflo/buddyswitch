@@ -140,6 +140,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             instance_root = shared_root / "instances" / "inst-pm-example"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
+            product_source_root = project_workspace_dir / "projects" / "app"
             config_path = temp_root / "config.toml"
 
             completed = self._run_patch(
@@ -172,7 +173,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
                 filesystem,
             )
             _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
-            self.assertEqual(filesystem[str(project_workspace_dir.resolve(strict=False))], "read")
+            self.assertEqual(filesystem[str(product_source_root.resolve(strict=False))], "read")
             self.assertEqual(filesystem[str(ROOT.resolve(strict=False))], "none")
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "codex-home").resolve(strict=False)), writable_paths)
@@ -183,6 +184,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
                 shared_root,
                 shared_root / "project",
                 project_workspace_dir,
+                product_source_root,
                 shared_root / "state",
                 workspace_dir,
                 instance_root,
@@ -210,6 +212,9 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             config_path = temp_root / "config.toml"
             state_temp = shared_root / "state" / "tmp"
             project_source_temp = project_workspace_dir / "projects" / "app" / "tmp"
+            project_workspace_temp = project_workspace_dir / "tmp"
+            instance_temp = instance_root / "tmp"
+            runtime_workspace_temp = workspace_dir / "tmp"
 
             completed = self._run_patch(
                 config_path=config_path,
@@ -226,6 +231,12 @@ class BuddyEnvSandboxTests(unittest.TestCase):
                     str(state_temp),
                     "--temp-root",
                     str(project_source_temp),
+                    "--temp-root",
+                    str(project_workspace_temp),
+                    "--temp-root",
+                    str(instance_temp),
+                    "--temp-root",
+                    str(runtime_workspace_temp),
                 ],
             )
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
@@ -234,14 +245,19 @@ class BuddyEnvSandboxTests(unittest.TestCase):
 
             self.assertNotIn(str(state_temp.resolve(strict=False)), writable_paths)
             self.assertNotIn(str(project_source_temp.resolve(strict=False)), writable_paths)
+            self.assertNotIn(str(project_workspace_temp.resolve(strict=False)), writable_paths)
+            self.assertNotIn(str(instance_temp.resolve(strict=False)), writable_paths)
+            self.assertNotIn(str(runtime_workspace_temp.resolve(strict=False)), writable_paths)
+            self.assertIn(str(Path("/tmp").resolve(strict=False)), writable_paths)
 
-    def test_dev_permission_profile_includes_project_workspace_but_keeps_state_read_only(self) -> None:
+    def test_dev_permission_profile_writes_source_root_only_and_keeps_state_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
             instance_root = shared_root / "instances" / "inst-dev-example"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
+            product_source_root = project_workspace_dir / "projects" / "app"
             config_path = temp_root / "config.toml"
 
             completed = self._run_patch(
@@ -270,7 +286,8 @@ class BuddyEnvSandboxTests(unittest.TestCase):
                 filesystem,
             )
             _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
-            self.assertIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
+            self.assertIn(str(product_source_root.resolve(strict=False)), writable_paths)
+            self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
             self.assertNotIn(str((shared_root / "state").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(shared_root.resolve(strict=False)), writable_paths)
             self.assertNotIn(str((shared_root / "project").resolve(strict=False)), writable_paths)
@@ -285,6 +302,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             instance_root = shared_root / "instances" / "inst-dev-hardening"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
+            product_source_root = project_workspace_dir / "projects" / "app"
             config_path = temp_root / "config.toml"
 
             completed = self._run_patch(
@@ -312,7 +330,8 @@ class BuddyEnvSandboxTests(unittest.TestCase):
                 writable_paths,
             )
 
-            self.assertIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
+            self.assertIn(str(product_source_root.resolve(strict=False)), writable_paths)
+            self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "codex-home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "xdg-config").resolve(strict=False)), writable_paths)
@@ -518,6 +537,171 @@ web_search = "cached"
             )
             self.assertEqual(sandboxed.returncode, 0, msg=sandboxed.stderr)
             self.assertIn("runtime-script-readable", sandboxed.stdout)
+
+    def test_codex_macos_sandbox_enforces_source_root_write_boundary(self) -> None:
+        if platform.system() != "Darwin":
+            self.skipTest("codex macos sandbox smoke only runs on macOS")
+        if shutil.which("codex") is None:
+            self.skipTest("codex CLI not available")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            shared_root = temp_root / "shared"
+            dev_instance_root = shared_root / "instances" / "inst-dev-source-root-smoke"
+            dev_workspace_dir = dev_instance_root / "workspace"
+            project_workspace_dir = shared_root / "project" / "workspace"
+            product_source_root = project_workspace_dir / "projects" / "app"
+            dev_workspace_dir.mkdir(parents=True, exist_ok=True)
+            (project_workspace_dir / "tools").mkdir(parents=True, exist_ok=True)
+            (project_workspace_dir / "docs").mkdir(parents=True, exist_ok=True)
+            (shared_root / "state").mkdir(parents=True, exist_ok=True)
+            product_source_root.mkdir(parents=True, exist_ok=True)
+            dev_config_path = dev_instance_root / "codex-home" / "config.toml"
+
+            completed = self._run_patch(
+                config_path=dev_config_path,
+                shared_root=shared_root,
+                buddy="dev",
+                instance_root=dev_instance_root,
+                workspace_dir=dev_workspace_dir,
+                project_workspace_dir=project_workspace_dir,
+                home=dev_instance_root / "home",
+                codex_home=dev_instance_root / "codex-home",
+                xdg_config_home=dev_instance_root / "xdg-config",
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            dev_env = os.environ.copy()
+            dev_env["CODEX_HOME"] = str(dev_instance_root / "codex-home")
+
+            allowed_write = subprocess.run(
+                [
+                    "codex",
+                    "sandbox",
+                    "macos",
+                    "--permissions-profile",
+                    PERMISSION_PROFILE,
+                    "-C",
+                    str(dev_workspace_dir),
+                    "python3",
+                    "-c",
+                    (
+                        "from pathlib import Path; "
+                        f"p=Path({json.dumps(str(product_source_root / 'dev-allowed-write.txt'))}); "
+                        "p.parent.mkdir(parents=True, exist_ok=True); "
+                        "p.write_text('dev-write\\n', encoding='utf-8')"
+                    ),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=dev_env,
+            )
+            self.assertEqual(allowed_write.returncode, 0, msg=allowed_write.stderr)
+            self.assertTrue((product_source_root / "dev-allowed-write.txt").exists())
+
+            denied_targets = [
+                project_workspace_dir / "tools" / "dev-blocked-tools.txt",
+                project_workspace_dir / "docs" / "dev-blocked-docs.txt",
+                dev_workspace_dir / "dev-blocked-runtime-workspace.txt",
+                shared_root / "state" / "dev-blocked-raw-state.txt",
+            ]
+            for target in denied_targets:
+                denied = subprocess.run(
+                    [
+                        "codex",
+                        "sandbox",
+                        "macos",
+                        "--permissions-profile",
+                        PERMISSION_PROFILE,
+                        "-C",
+                        str(dev_workspace_dir),
+                        "python3",
+                        "-c",
+                        (
+                            "from pathlib import Path; "
+                            f"p=Path({json.dumps(str(target))}); "
+                            "p.parent.mkdir(parents=True, exist_ok=True); "
+                            "p.write_text('blocked\\n', encoding='utf-8')"
+                        ),
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    env=dev_env,
+                )
+                with self.subTest(target=str(target)):
+                    self.assertNotEqual(denied.returncode, 0, msg=denied.stdout + denied.stderr)
+                    self.assertFalse(target.exists(), msg=str(target))
+
+            pm_instance_root = shared_root / "instances" / "inst-pm-source-root-smoke"
+            pm_workspace_dir = pm_instance_root / "workspace"
+            pm_config_path = pm_instance_root / "codex-home" / "config.toml"
+            source_probe = product_source_root / "pm-readable.txt"
+            source_probe.write_text("pm can read\n", encoding="utf-8")
+            pm_workspace_dir.mkdir(parents=True, exist_ok=True)
+
+            pm_completed = self._run_patch(
+                config_path=pm_config_path,
+                shared_root=shared_root,
+                buddy="pm",
+                instance_root=pm_instance_root,
+                workspace_dir=pm_workspace_dir,
+                project_workspace_dir=project_workspace_dir,
+                home=pm_instance_root / "home",
+                codex_home=pm_instance_root / "codex-home",
+                xdg_config_home=pm_instance_root / "xdg-config",
+            )
+            self.assertEqual(pm_completed.returncode, 0, msg=pm_completed.stderr)
+
+            pm_env = os.environ.copy()
+            pm_env["CODEX_HOME"] = str(pm_instance_root / "codex-home")
+            pm_read = subprocess.run(
+                [
+                    "codex",
+                    "sandbox",
+                    "macos",
+                    "--permissions-profile",
+                    PERMISSION_PROFILE,
+                    "-C",
+                    str(pm_workspace_dir),
+                    "python3",
+                    "-c",
+                    f"from pathlib import Path; print(Path({json.dumps(str(source_probe))}).read_text(encoding='utf-8').strip())",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=pm_env,
+            )
+            self.assertEqual(pm_read.returncode, 0, msg=pm_read.stderr)
+            self.assertIn("pm can read", pm_read.stdout)
+
+            pm_blocked_path = product_source_root / "pm-blocked-write.txt"
+            pm_write = subprocess.run(
+                [
+                    "codex",
+                    "sandbox",
+                    "macos",
+                    "--permissions-profile",
+                    PERMISSION_PROFILE,
+                    "-C",
+                    str(pm_workspace_dir),
+                    "python3",
+                    "-c",
+                    (
+                        "from pathlib import Path; "
+                        f"p=Path({json.dumps(str(pm_blocked_path))}); "
+                        "p.write_text('pm-write\\n', encoding='utf-8')"
+                    ),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=pm_env,
+            )
+            self.assertNotEqual(pm_write.returncode, 0, msg=pm_write.stdout + pm_write.stderr)
+            self.assertFalse(pm_blocked_path.exists())
 
     def test_missing_profile_returns_2_and_leaves_config_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -45,8 +45,36 @@ id = "shape-prototype"
 path = "buddyswitch/skills/design/shape-prototype"
 
 [[skills]]
-id = "implement-task"
-path = "buddyswitch/skills/dev/implement-task"
+id = "enter-dev-workspace"
+path = "buddyswitch/skills/dev/enter-dev-workspace"
+
+[[skills]]
+id = "read-implementation-context"
+path = "buddyswitch/skills/dev/read-implementation-context"
+
+[[skills]]
+id = "handle-empty-source-root"
+path = "buddyswitch/skills/dev/handle-empty-source-root"
+
+[[skills]]
+id = "implement-scoped-change"
+path = "buddyswitch/skills/dev/implement-scoped-change"
+
+[[skills]]
+id = "debug-regression"
+path = "buddyswitch/skills/dev/debug-regression"
+
+[[skills]]
+id = "select-local-verification"
+path = "buddyswitch/skills/dev/select-local-verification"
+
+[[skills]]
+id = "write-implementation-report"
+path = "buddyswitch/skills/dev/write-implementation-report"
+
+[[skills]]
+id = "prepare-review-readiness"
+path = "buddyswitch/skills/dev/prepare-review-readiness"
 
 [[skills]]
 id = "skill-creator-importer"
@@ -151,7 +179,24 @@ permissions = ["track.read", "track.update_now", "track.add_material", "track.ad
 id = "dev"
 label = "Dev"
 scope = "Implement approved scope in project code."
-skills = ["implement-task", "skill-creator-importer", "track-tool", "artifact-tool", "task-tool", "buddybox-tool", "message-tool", "comment-tool", "request-tool"]
+skills = [
+  "enter-dev-workspace",
+  "read-implementation-context",
+  "handle-empty-source-root",
+  "implement-scoped-change",
+  "debug-regression",
+  "select-local-verification",
+  "write-implementation-report",
+  "prepare-review-readiness",
+  "skill-creator-importer",
+  "track-tool",
+  "artifact-tool",
+  "task-tool",
+  "buddybox-tool",
+  "message-tool",
+  "comment-tool",
+  "request-tool",
+]
 artifact_templates = ["brief", "note"]
 permissions = ["track.read", "track.update_now", "track.add_material", "track.add_update", "track.add_proof", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "request.read", "request.create", "request.accept", "request.block", "request.complete", "request.cancel", "search.use"]
 

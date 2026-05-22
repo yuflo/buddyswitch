@@ -391,7 +391,9 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         pm_agents = (ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("project.access=read-only", pm_agents)
+        self.assertNotIn("project.access=", pm_agents)
+        self.assertNotIn("projects/app", pm_agents)
+        self.assertIn("context summarize --payload '{}'", pm_agents)
 
         summary = self._dispatch(buddy="pm", tool="context", action="summarize", args={})
         self.assertTrue(summary["ok"], msg=summary)

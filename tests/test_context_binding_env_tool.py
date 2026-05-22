@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -301,6 +303,150 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("handoffs", sources)
         self.assertIn("tracks", sources)
         self.assertIn("artifacts", sources)
+
+    def test_context_summarize_includes_source_workspace_facts_for_dev(self) -> None:
+        instance_json = self._instance_json(buddy="dev")
+        source_root = self._runtime_path("projects/app")
+        source_root.mkdir(parents=True, exist_ok=True)
+        (source_root / "README.md").write_text("# App\n", encoding="utf-8")
+
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+        self.assertTrue(payload.get("ok"), msg=payload)
+        source = payload.get("source_workspace")
+        self.assertIsInstance(source, dict, msg=payload)
+        assert isinstance(source, dict)
+        self.assertEqual(source.get("active_buddy"), "dev")
+        self.assertEqual(source.get("path"), "projects/app")
+        self.assertEqual(source.get("access"), "write")
+        self.assertIs(source.get("can_write_source"), True)
+        self.assertEqual(source.get("state"), "readme_only")
+        self.assertEqual(source.get("top_level_entries"), ["README.md"])
+        self.assertIs(source.get("top_level_entries_truncated"), False)
+        self.assertIn("env_profile", str(source.get("source_of_truth")))
+        boundary = str(source.get("permission_boundary", "")).lower()
+        self.assertIn("read-only", boundary)
+        self.assertIn("does not configure", boundary)
+        self.assertNotIn("# App", json.dumps(source, ensure_ascii=True))
+
+    def test_context_summarize_includes_source_workspace_facts_for_non_dev(self) -> None:
+        instance_json = self._instance_json(buddy="pm")
+        source_root = self._runtime_path("projects/app")
+        source_root.mkdir(parents=True, exist_ok=True)
+        (source_root / "README.md").write_text("# App\n", encoding="utf-8")
+
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="pm")
+        self.assertTrue(payload.get("ok"), msg=payload)
+        source = payload.get("source_workspace")
+        self.assertIsInstance(source, dict, msg=payload)
+        assert isinstance(source, dict)
+        self.assertEqual(source.get("active_buddy"), "pm")
+        self.assertEqual(source.get("access"), "read-only")
+        self.assertIs(source.get("can_write_source"), False)
+        self.assertEqual(source.get("state"), "readme_only")
+        self.assertIn("read-only", str(source.get("permission_boundary", "")).lower())
+
+    def test_context_source_workspace_state_classification(self) -> None:
+        instance_json = self._instance_json(buddy="dev")
+        source_root = self._runtime_path("projects/app")
+        cases: list[tuple[str, list[str] | None, str]] = [
+            ("missing", None, "missing"),
+            ("empty", [], "empty"),
+            ("readme_only", ["README.md"], "readme_only"),
+            ("package", ["package.json"], "has_source"),
+            ("src", ["src/index.ts"], "has_source"),
+        ]
+
+        for name, entries, expected_state in cases:
+            with self.subTest(case=name):
+                if source_root.exists():
+                    shutil.rmtree(source_root)
+                if entries is not None:
+                    source_root.mkdir(parents=True, exist_ok=True)
+                    for rel in entries:
+                        entry_path = source_root / rel
+                        entry_path.parent.mkdir(parents=True, exist_ok=True)
+                        entry_path.write_text("// seed\n", encoding="utf-8")
+
+                payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+                self.assertTrue(payload.get("ok"), msg=payload)
+                source = payload.get("source_workspace")
+                self.assertIsInstance(source, dict, msg=payload)
+                assert isinstance(source, dict)
+                self.assertEqual(source.get("state"), expected_state)
+                self.assertIsInstance(source.get("top_level_entries"), list)
+                self.assertNotIn("// seed", json.dumps(source, ensure_ascii=True))
+
+    def test_context_list_sources_includes_source_workspace_descriptor(self) -> None:
+        instance_json = self._instance_json(buddy="dev")
+        listed = self._dispatch(instance_json=instance_json, tool="context", action="list_sources", args={}, buddy="dev")
+        self.assertTrue(listed.get("ok"), msg=listed)
+        sources = listed.get("sources")
+        self.assertIsInstance(sources, dict, msg=listed)
+        assert isinstance(sources, dict)
+        source_workspace = sources.get("source_workspace")
+        self.assertIsInstance(source_workspace, dict, msg=sources)
+        assert isinstance(source_workspace, dict)
+        self.assertIn("read-only", str(source_workspace.get("scope", "")).lower())
+        self.assertIn("env profile", str(source_workspace.get("source_of_truth", "")).lower())
+        self.assertFalse(source_workspace.get("mutates_product_state"))
+        self.assertFalse(source_workspace.get("grants_write_authority"))
+        self.assertFalse(source_workspace.get("configures_source_root"))
+
+    def test_context_get_metadata_and_source_workspace_semantics(self) -> None:
+        instance_json = self._instance_json(buddy="dev")
+        source_root = self._runtime_path("projects/app")
+        source_root.mkdir(parents=True, exist_ok=True)
+        (source_root / "README.md").write_text("# App\n", encoding="utf-8")
+
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="get", args={}, buddy="dev")
+        self.assertTrue(payload.get("ok"), msg=payload)
+        source = payload.get("source_workspace")
+        self.assertIsInstance(source, dict, msg=payload)
+        assert isinstance(source, dict)
+        self.assertEqual(source.get("path"), "projects/app")
+        self.assertEqual(source.get("state"), "readme_only")
+        self.assertTrue(str(source.get("resolved_path", "")).endswith("/projects/app"))
+
+        operation_semantics = payload.get("operation_semantics")
+        self.assertIsInstance(operation_semantics, dict, msg=payload)
+        assert isinstance(operation_semantics, dict)
+        self.assertIn("source_workspace", operation_semantics["context.get"]["returns"])
+        self.assertIn("source_workspace", operation_semantics["context.summarize"]["returns"])
+
+        context_catalog = payload.get("tool_catalog", {}).get("context", {})
+        self.assertIsInstance(context_catalog, dict, msg=payload)
+        assert isinstance(context_catalog, dict)
+        action_semantics = context_catalog.get("action_semantics", {})
+        self.assertIsInstance(action_semantics, dict, msg=context_catalog)
+        assert isinstance(action_semantics, dict)
+        summarize_description = str(action_semantics.get("summarize", {}).get("plain_description", "")).lower()
+        self.assertIn("source", summarize_description)
+        self.assertIn("read-only", summarize_description)
+
+    def test_context_source_workspace_uses_profile_not_agents_text_and_profile_failure_is_explicit(self) -> None:
+        instance_json = self._instance_json(buddy="dev")
+        source_root = self._runtime_path("projects/app")
+        source_root.mkdir(parents=True, exist_ok=True)
+        (source_root / "README.md").write_text("# App\n", encoding="utf-8")
+        (self._runtime_path("AGENTS.md")).write_text(
+            "# wrong facts\nprojects/app is missing and project.access=read-only\n",
+            encoding="utf-8",
+        )
+
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+        self.assertTrue(payload.get("ok"), msg=payload)
+        source = payload.get("source_workspace")
+        self.assertIsInstance(source, dict, msg=payload)
+        assert isinstance(source, dict)
+        self.assertEqual(source.get("path"), "projects/app")
+        self.assertEqual(source.get("access"), "write")
+        self.assertIs(source.get("can_write_source"), True)
+
+        with patch("env.tools.context._impl.env_profiles.require_env_profile", side_effect=RuntimeError("boom")):
+            rejected = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_CONTEXT_SOURCE_WORKSPACE")
+        self.assertNotEqual(((rejected.get("source_workspace") or {}).get("state")), "missing")
 
     def test_context_get_applies_filters(self) -> None:
         self._seed_context_state()

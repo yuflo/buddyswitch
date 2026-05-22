@@ -16,9 +16,9 @@
       "xdg-config",
       "scratch",
       "temp",
-      "project-workspace"
+      "source-root"
     ],
-    "project_workspace": "write",
+    "source_root": "write",
     "raw_state": "broker-only"
   },
   "state_capability": {

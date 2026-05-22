@@ -17,7 +17,7 @@
       "scratch",
       "temp"
     ],
-    "project_workspace": "read-only",
+    "source_root": "read-only",
     "raw_state": "broker-only"
   },
   "state_capability": {

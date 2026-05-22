@@ -38,10 +38,23 @@ class RuntimeSkillsTests(unittest.TestCase):
         "comment": ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
         "request": ROOT / "buddyswitch/skills/shared/request-tool/SKILL.md",
     }
+    DEV_PRODUCT_SKILLS = (
+        "enter-dev-workspace",
+        "read-implementation-context",
+        "handle-empty-source-root",
+        "implement-scoped-change",
+        "debug-regression",
+        "select-local-verification",
+        "write-implementation-report",
+        "prepare-review-readiness",
+    )
 
     def setUp(self) -> None:
         manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+
+    def _dev_skill_file(self, skill_id: str) -> Path:
+        return ROOT / "buddyswitch" / "skills" / "dev" / skill_id / "SKILL.md"
 
     def _active_skill_files(self) -> list[Path]:
         files: list[Path] = []
@@ -216,8 +229,8 @@ class RuntimeSkillsTests(unittest.TestCase):
             ROOT / "buddyswitch/skills/market/research-scan/SKILL.md",
             ROOT / "buddyswitch/skills/pm/write-prd/SKILL.md",
             ROOT / "buddyswitch/skills/design/shape-prototype/SKILL.md",
-            ROOT / "buddyswitch/skills/dev/implement-task/SKILL.md",
             ROOT / "buddyswitch/skills/test/smoke-test/SKILL.md",
+            *(self._dev_skill_file(skill_id) for skill_id in self.DEV_PRODUCT_SKILLS),
         ]
         for path in role_skill_files:
             text = path.read_text(encoding="utf-8")
@@ -226,6 +239,106 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("use optional `handoff`", lowered)
                 self.assertNotIn("next_buddy", lowered)
                 self.assertNotIn("track.advance", lowered)
+
+    def test_dev_product_engineering_skill_chain_is_registered(self) -> None:
+        skills_by_id = {row["id"]: row for row in self.manifest.get("skills", []) if isinstance(row, dict)}
+        dev = next(row for row in self.manifest.get("buddies", []) if isinstance(row, dict) and row.get("id") == "dev")
+        dev_skills = set(dev.get("skills", []))
+        expected = set(self.DEV_PRODUCT_SKILLS)
+        self.assertTrue(expected.issubset(dev_skills))
+        self.assertIn("skill-creator-importer", dev_skills)
+        self.assertNotIn("implement-task", dev_skills)
+        for skill_id in expected:
+            self.assertIn(skill_id, skills_by_id, msg=skill_id)
+            skill_file = ROOT / skills_by_id[skill_id]["path"] / "SKILL.md"
+            self.assertTrue(skill_file.exists(), msg=skill_file)
+
+    def test_dev_skills_keep_operational_sections_and_scenarios(self) -> None:
+        required_headings = (
+            "## use when",
+            "## do not use when",
+            "## inputs",
+            "## steps",
+            "## outputs",
+            "## guardrails",
+        )
+        for skill_id in self.DEV_PRODUCT_SKILLS:
+            path = self._dev_skill_file(skill_id)
+            text = path.read_text(encoding="utf-8")
+            lowered = text.lower()
+            with self.subTest(skill=skill_id):
+                self.assertIn("name:", lowered)
+                self.assertIn("description:", lowered)
+                for heading in required_headings:
+                    self.assertIn(heading, lowered)
+                self.assertTrue(
+                    "## verification" in lowered or "## stop conditions" in lowered,
+                    msg=f"{path} missing verification/stop section",
+                )
+                self.assertIn("## examples", lowered)
+                self.assertIn("## counterexamples", lowered)
+
+    def test_dev_skills_do_not_copy_runtime_schema_or_action_catalogs(self) -> None:
+        forbidden = (
+            "payload_fields",
+            "operation_semantics",
+            "**payload:**",
+            "**returns:**",
+            "## operations",
+            "project.write_file",
+            "project.apply_patch",
+            "configure_project",
+            "delete_file",
+        )
+        for skill_id in self.DEV_PRODUCT_SKILLS:
+            path = self._dev_skill_file(skill_id)
+            lowered = path.read_text(encoding="utf-8").lower()
+            with self.subTest(skill=skill_id):
+                for token in forbidden:
+                    self.assertNotIn(token, lowered)
+                self.assertIn("context.get.tool_catalog", lowered)
+                self.assertIn("turn_runtime.py status", lowered)
+
+    def test_dev_skills_use_runtime_source_facts_and_not_literal_path_authority(self) -> None:
+        for skill_id in self.DEV_PRODUCT_SKILLS:
+            path = self._dev_skill_file(skill_id)
+            text = path.read_text(encoding="utf-8")
+            lowered = text.lower()
+            with self.subTest(skill=skill_id):
+                self.assertNotIn("project.access=", lowered)
+                self.assertNotIn("`projects/app` is the authority", lowered)
+
+        enter_workspace = self._dev_skill_file("enter-dev-workspace").read_text(encoding="utf-8").lower()
+        implement_scope = self._dev_skill_file("implement-scoped-change").read_text(encoding="utf-8").lower()
+        self.assertIn("source_workspace.path", enter_workspace)
+        self.assertIn("locked source root", enter_workspace)
+        self.assertIn("changed files", implement_scope)
+        self.assertIn("locked source root", implement_scope)
+
+    def test_dev_skill_scenario_coverage_for_empty_root_verification_and_review_handoff(self) -> None:
+        handle_empty = self._dev_skill_file("handle-empty-source-root").read_text(encoding="utf-8").lower()
+        verification = self._dev_skill_file("select-local-verification").read_text(encoding="utf-8").lower()
+        reporting = self._dev_skill_file("write-implementation-report").read_text(encoding="utf-8").lower()
+        review_ready = self._dev_skill_file("prepare-review-readiness").read_text(encoding="utf-8").lower()
+        debug = self._dev_skill_file("debug-regression").read_text(encoding="utf-8").lower()
+        read_context = self._dev_skill_file("read-implementation-context").read_text(encoding="utf-8").lower()
+
+        for token in ("missing", "empty", "readme_only", "has_source"):
+            self.assertIn(token, handle_empty)
+        self.assertIn("not source-link missing", handle_empty)
+        self.assertIn("scaffold", handle_empty)
+        self.assertIn("pm/user", handle_empty)
+        self.assertIn("artifact body", read_context)
+        self.assertIn("outside locked root", self._dev_skill_file("implement-scoped-change").read_text(encoding="utf-8").lower())
+        self.assertIn("reproduce", debug)
+        self.assertIn("root cause", debug)
+        self.assertIn("no project test command", verification)
+        self.assertIn("verification blocked", reporting)
+        self.assertIn("changed files", reporting)
+        self.assertIn("risks", reporting)
+        self.assertIn("follow-ups", reporting)
+        self.assertIn("blast radius", review_ready)
+        self.assertIn("residual risk", review_ready)
 
     def test_pm_and_shared_tool_skills_describe_single_publication_path(self) -> None:
         pm_skill = (ROOT / "buddyswitch/skills/pm/write-prd/SKILL.md").read_text(encoding="utf-8").lower()

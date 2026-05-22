@@ -235,12 +235,14 @@ def validate_env_profile(
 
     fs_capability = _require_dict(profile.get("filesystem_capability"), "filesystem_capability")
     host_writable = _require_string_list(fs_capability.get("host_writable"), "filesystem_capability.host_writable")
-    project_workspace_access = _require_enum(
+    source_root_access = _require_enum(
         enums=enums,
-        key="filesystem_capability.project_workspace",
-        value=fs_capability.get("project_workspace"),
-        label="filesystem_capability.project_workspace",
+        key="filesystem_capability.source_root",
+        value=fs_capability.get("source_root"),
+        label="filesystem_capability.source_root",
     )
+    if "project_workspace" in fs_capability:
+        raise EnvProfileError("filesystem_capability.project_workspace is retired; use source_root")
     _require_enum(
         enums=enums,
         key="filesystem_capability.raw_state",
@@ -250,7 +252,7 @@ def validate_env_profile(
 
     expected_host_writable = ["home", "codex-home", "xdg-config", "scratch", "temp"]
     if buddy_id == "dev":
-        expected_host_writable = [*expected_host_writable, "project-workspace"]
+        expected_host_writable = [*expected_host_writable, "source-root"]
     if host_writable != expected_host_writable:
         raise EnvProfileError(
             f"filesystem_capability.host_writable mismatch for '{buddy_id}': "
@@ -336,15 +338,15 @@ def validate_env_profile(
     )
 
     expected_project_access = "write" if buddy_id == "dev" else "read-only"
-    expected_workspace_access = "write" if buddy_id == "dev" else "read-only"
+    expected_source_root_access = "write" if buddy_id == "dev" else "read-only"
     if project_access != expected_project_access:
         raise EnvProfileError(
             f"project.access mismatch for '{buddy_id}': expected {expected_project_access!r}, got {project_access!r}"
         )
-    if project_workspace_access != expected_workspace_access:
+    if source_root_access != expected_source_root_access:
         raise EnvProfileError(
-            "filesystem_capability.project_workspace mismatch for "
-            f"'{buddy_id}': expected {expected_workspace_access!r}, got {project_workspace_access!r}"
+            "filesystem_capability.source_root mismatch for "
+            f"'{buddy_id}': expected {expected_source_root_access!r}, got {source_root_access!r}"
         )
 
     if buddy_id == "market":

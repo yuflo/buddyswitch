@@ -238,11 +238,12 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
-    def test_dev_project_workspace_is_writable_and_non_dev_project_workspace_is_read_only(self) -> None:
+    def test_dev_source_root_is_writable_and_non_dev_source_root_is_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
             project_workspace_dir = shared_root / "project" / "workspace"
+            project_source_root = project_workspace_dir / "projects" / "app"
 
             dev_writable = self._writable_paths(
                 self._patch_config(temp_root=temp_root, buddy="dev", shared_root=shared_root)
@@ -251,7 +252,9 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self._patch_config(temp_root=temp_root, buddy="pm", shared_root=shared_root)
             )
 
-            self.assertIn(str(project_workspace_dir.resolve(strict=False)), dev_writable)
+            self.assertIn(str(project_source_root.resolve(strict=False)), dev_writable)
+            self.assertNotIn(str(project_source_root.resolve(strict=False)), pm_writable)
+            self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), dev_writable)
             self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), pm_writable)
             self.assertNotIn(str((shared_root / "state").resolve(strict=False)), dev_writable)
             self.assertNotIn(str(shared_root.resolve(strict=False)), dev_writable)
@@ -266,22 +269,26 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
             config_text = self._patch_config(temp_root=temp_root, buddy="pm", shared_root=shared_root)
             writable_paths = self._writable_paths(config_text)
+            project_source_root = project_workspace_dir / "projects" / "app"
             self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
+            self.assertNotIn(str(project_source_root.resolve(strict=False)), writable_paths)
             self.assertNotIn(str(workspace_dir.resolve(strict=False)), writable_paths)
             self.assertNotIn(str((workspace_dir / ".sandbox").resolve(strict=False)), writable_paths)
             self.assertNotIn(str((workspace_dir / ".sandbox" / "design").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(shared_root.resolve(strict=False)), writable_paths)
 
-    def test_permission_profile_keeps_dev_project_write_and_runtime_reads(self) -> None:
+    def test_permission_profile_keeps_dev_source_root_write_and_runtime_reads(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
             project_workspace_dir = shared_root / "project" / "workspace"
+            project_source_root = project_workspace_dir / "projects" / "app"
             runtime_workspace_dir = shared_root / "instances" / "inst-dev-boundary" / "workspace"
             config_text = self._patch_config(temp_root=temp_root, buddy="dev", shared_root=shared_root)
             writable_paths = self._writable_paths(config_text)
             filesystem = self._filesystem_entries(config_text)
-            self.assertIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
+            self.assertIn(str(project_source_root.resolve(strict=False)), writable_paths)
+            self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
             self.assertNotIn(":project_roots", filesystem)
             for key, value in filesystem.items():
                 self.assertIsInstance(key, str)

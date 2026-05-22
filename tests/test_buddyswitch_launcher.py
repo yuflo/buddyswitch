@@ -134,9 +134,12 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             workspace_keys = [path for path in filesystem if "/instances/" in path and path.endswith("/workspace")]
             self.assertEqual(len(workspace_keys), 1, msg=workspace_keys)
             self.assertEqual(filesystem[workspace_keys[0]], "read")
+            project_source_keys = [path for path in filesystem if path.endswith("/project/workspace/projects/app")]
+            self.assertEqual(len(project_source_keys), 1, msg=project_source_keys)
+            self.assertIn(filesystem[project_source_keys[0]], {"read", "write"})
             project_workspace_keys = [path for path in filesystem if path.endswith("/project/workspace")]
-            self.assertEqual(len(project_workspace_keys), 1, msg=project_workspace_keys)
-            self.assertIn(filesystem[project_workspace_keys[0]], {"read", "write"})
+            if project_workspace_keys:
+                self.assertEqual(filesystem[project_workspace_keys[0]], "read")
             state_keys = [path for path in filesystem if path.endswith("/state")]
             self.assertEqual(len(state_keys), 1, msg=state_keys)
             self.assertEqual(filesystem[state_keys[0]], "none")
@@ -1950,13 +1953,14 @@ exec "$real_git" "$@"
             self.assertIn("locked to the `design` buddy", prompt_text)
             for token in (
                 "## Runtime Boundary",
-                "project.access=read-only",
                 "env_tools.search",
                 "Native Codex `web_search` is unavailable",
                 "scripts/env/client.py search status",
                 "## Output Rule",
             ):
                 self.assertIn(token, prompt_text)
+            self.assertNotIn("project.access=", prompt_text)
+            self.assertNotIn("projects/app", prompt_text)
             runtime_skills = workspace_dir / ".agents" / "skills"
             self.assertTrue((runtime_skills / "shape-prototype" / "SKILL.md").exists())
             self.assertFalse((runtime_skills / "write-prd").exists())
@@ -2066,7 +2070,18 @@ exec "$real_git" "$@"
                     self._assert_directory_file_bytes_equal(source=source_dir, target=target_dir)
 
                 if buddy_id == "dev":
-                    self.assertTrue((runtime_skills / "implement-task" / "SKILL.md").exists())
+                    for skill_id in (
+                        "enter-dev-workspace",
+                        "read-implementation-context",
+                        "handle-empty-source-root",
+                        "implement-scoped-change",
+                        "debug-regression",
+                        "select-local-verification",
+                        "write-implementation-report",
+                        "prepare-review-readiness",
+                    ):
+                        self.assertTrue((runtime_skills / skill_id / "SKILL.md").exists())
+                    self.assertFalse((runtime_skills / "implement-task").exists())
                     self.assertTrue((runtime_skills / "skill-creator-importer" / "SKILL.md").exists())
                     self.assertTrue(
                         (runtime_skills / "skill-creator-importer" / "assets" / "skill-import-report-template.md").exists()
@@ -2222,12 +2237,13 @@ exec "$real_git" "$@"
             copied_agents = (workspace_dir / "AGENTS.md").read_text(encoding="utf-8").lower()
             for token in (
                 "guidance only and not the permission source",
-                "project.access=read-only",
                 "env tools (`task`, `track`",
                 "python3 scripts/env/client.py context summarize",
                 "## output rule",
             ):
                 self.assertIn(token, copied_agents)
+            self.assertNotIn("project.access=", copied_agents)
+            self.assertNotIn("projects/app", copied_agents)
             self.assertNotIn("state_effects.track", copied_agents)
             self.assertNotIn("skill_id", copied_agents)
             self.assertNotIn("persist-skill-result", copied_agents)

@@ -399,6 +399,15 @@ def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, str]:
     instance_root = canonical(str(args.instance_root))
     workspace_dir = canonical(str(args.workspace_dir))
     project_workspace_dir = canonical(str(args.project_workspace_dir))
+    project_profile_path = str(profile.get("project", {}).get("path", "")).strip()
+    if not project_profile_path:
+        raise ValueError("env profile project.path must be a non-empty relative path")
+    project_source_root = canonical(str(project_workspace_dir / project_profile_path))
+    if not path_contains(project_workspace_dir, project_source_root):
+        raise ValueError("env profile project.path resolves outside shared project workspace")
+    source_root_access = str(profile.get("filesystem_capability", {}).get("source_root", "")).strip()
+    if source_root_access not in {"write", "read-only"}:
+        raise ValueError("env profile filesystem_capability.source_root must be 'write' or 'read-only'")
     state_root = canonical_shared_root / "state"
     project_root = canonical_shared_root / "project"
 
@@ -410,15 +419,14 @@ def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, str]:
     filesystem_entries[str(workspace_dir)] = "read"
     filesystem_entries[str(canonical_repo_root)] = "none"
     filesystem_entries[str(state_root)] = "none"
-    filesystem_entries[str(project_workspace_dir)] = (
-        "write" if profile.get("project", {}).get("access") == "write" else "read"
-    )
+    filesystem_entries[str(project_source_root)] = "write" if source_root_access == "write" else "read"
 
     writable_roots: list[Path] = [home, codex_home, xdg_config_home]
     forbidden_temp = [
         canonical_shared_root,
         project_root,
         project_workspace_dir,
+        project_source_root,
         state_root,
         instance_root,
         workspace_dir,
@@ -432,7 +440,15 @@ def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, str]:
         )
     )
 
-    blocked_roots = [canonical_shared_root, project_root, state_root, instance_root, workspace_dir]
+    blocked_roots = [
+        canonical_shared_root,
+        project_root,
+        project_workspace_dir,
+        project_source_root,
+        state_root,
+        instance_root,
+        workspace_dir,
+    ]
     for root in writable_roots:
         if not is_safe_writable_root(root, canonical_repo_root, canonical_source_codex_home):
             raise ValueError(f"refusing writable root: {root}")

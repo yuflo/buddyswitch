@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, TypedDict
 
+import env_profiles
 from env.tool_runtime import registry as tool_registry
 from .tool import DEFINITION
 from env.tool_runtime import results as tool_results
@@ -31,6 +32,7 @@ class ContextServiceContext(TypedDict):
     instance_json: Path
     instance_payload: dict[str, Any]
     manifest: dict[str, Any]
+    manifest_path: Path | None
 
 
 def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
@@ -80,6 +82,121 @@ def _require_allowed_fields(action: str, args: dict[str, Any], active_buddy: str
             message=f"unsupported payload fields: {', '.join(unknown)}",
         )
     return None
+
+
+def _repo_root_from_manifest_path(manifest_path: Path) -> Path:
+    resolved = manifest_path.resolve(strict=False)
+    if len(resolved.parents) < 2:
+        raise ValueError(f"manifest path is not under expected repo layout: {resolved}")
+    return resolved.parents[1]
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _load_active_env_profile(
+    context: ContextServiceContext,
+    active_buddy: str,
+) -> dict[str, Any]:
+    manifest_path_raw = context.get("manifest_path")
+    if manifest_path_raw is None:
+        raise ValueError("manifest_path is required for source_workspace profile resolution")
+    manifest_path = Path(str(manifest_path_raw)).expanduser().resolve(strict=False)
+    repo_root = _repo_root_from_manifest_path(manifest_path)
+    return env_profiles.require_env_profile(
+        active_buddy,
+        manifest_path=manifest_path,
+        repo_root=repo_root,
+    )
+
+
+def _classify_source_root(root: Path, *, limit: int = 20) -> tuple[str, list[str], bool]:
+    if not root.exists() or not root.is_dir():
+        return "missing", [], False
+    all_entries = sorted(path.name for path in root.iterdir() if not path.name.startswith("."))
+    entries = all_entries[:limit]
+    truncated = len(all_entries) > limit
+    if not entries:
+        return "empty", [], truncated
+    lowered = {entry.lower() for entry in all_entries}
+    if lowered <= {"readme", "readme.md"}:
+        return "readme_only", entries, truncated
+    return "has_source", entries, truncated
+
+
+def _source_workspace_rejection(
+    *,
+    action: str,
+    active_buddy: str,
+    message: str,
+) -> dict[str, Any]:
+    return tool_results.rejection(
+        tool="context",
+        action=action,
+        active_buddy=active_buddy,
+        code="E_CONTEXT_SOURCE_WORKSPACE",
+        message=message,
+        permission_boundary="context.source_workspace",
+        human_summary="Source workspace facts are unavailable for this runtime context.",
+        why_blocked=message,
+        impact="Context did not guess source-root facts and did not mutate state.",
+        state_changed=False,
+        retryable=True,
+        retry_guidance="Fix env profile/runtime workspace wiring, then retry context discovery.",
+        allowed_next_actions=[
+            "Check env profile validation and project.path/source_root settings.",
+            "Retry context.summarize or context.get after runtime profile resolution is fixed.",
+        ],
+    )
+
+
+def _build_source_workspace(
+    *,
+    active_buddy: str,
+    instance_payload: dict[str, Any],
+    context: ContextServiceContext,
+    include_resolved_path: bool,
+) -> dict[str, Any]:
+    profile = _load_active_env_profile(context, active_buddy)
+    project_path = str(profile.get("project", {}).get("path", "")).strip()
+    if not project_path:
+        raise ValueError("env profile project.path is missing")
+    source_root_access = str(profile.get("filesystem_capability", {}).get("source_root", "")).strip()
+    if source_root_access not in {"write", "read-only"}:
+        raise ValueError("env profile filesystem_capability.source_root must be 'write' or 'read-only'")
+
+    workspace_key = "workspace" + "_dir"
+    runtime_workspace_raw = instance_payload.get(workspace_key)
+    if not isinstance(runtime_workspace_raw, str) or not runtime_workspace_raw.strip():
+        raise ValueError("instance payload workspace path is missing")
+    runtime_workspace = Path(runtime_workspace_raw).expanduser().resolve(strict=False)
+    source_root = (runtime_workspace / project_path).resolve(strict=False)
+    if not _is_relative_to(source_root, runtime_workspace):
+        raise ValueError("profile project.path resolves outside runtime workspace")
+
+    state, entries, truncated = _classify_source_root(source_root)
+    source_workspace: dict[str, Any] = {
+        "active_buddy": active_buddy,
+        "path": project_path,
+        "access": source_root_access,
+        "can_write_source": source_root_access == "write",
+        "state": state,
+        "top_level_entries": entries,
+        "top_level_entries_truncated": truncated,
+        "source_of_truth": "env_profile.project.path + env_profile.filesystem_capability.source_root + workspace_projection",
+        "permission_boundary": (
+            "context is read-only; filesystem writes are enforced by sandbox profile; "
+            "context does not configure roots or grant write access"
+        ),
+    }
+    if include_resolved_path:
+        source_workspace["resolved_path"] = str(source_root)
+    return source_workspace
 
 
 def _candidate_track_row(*, track: dict[str, Any], active_buddy: str) -> dict[str, Any]:
@@ -352,6 +469,7 @@ def _current_context_sections(
     active_buddy: str,
     args: dict[str, Any],
     instance_payload: dict[str, Any],
+    include_resolved_path: bool,
     context: ContextServiceContext,
 ) -> dict[str, Any]:
     track_filter = args.get("track_id")
@@ -401,6 +519,12 @@ def _current_context_sections(
         limit_value=limit_value,
     )
     message_cues = _message_cues(active_buddy=active_buddy, limit_value=limit_value, context=context)
+    source_workspace = _build_source_workspace(
+        active_buddy=active_buddy,
+        instance_payload=instance_payload,
+        context=context,
+        include_resolved_path=include_resolved_path,
+    )
 
     buddybox_desc = context.rules.buddybox_workspace.build_buddybox_desc(active_buddy, instance_payload=instance_payload)
     candidate_tracks = [_candidate_track_row(track=row, active_buddy=active_buddy) for row in visible_tracks]
@@ -421,6 +545,7 @@ def _current_context_sections(
         "open_comment_threads": open_comment_threads,
         "recent_updates": recent_updates,
         "message_cues": message_cues,
+        "source_workspace": source_workspace,
         "decision_surface": {
             "binding_state": {"state": "runless", "enum_values": ["runless"]},
             "active_buddy_relation": {"role": "explicit-id-tools"},
@@ -498,6 +623,14 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
                 "delete_private_file",
             ],
         },
+        "source_workspace": {
+            "description": "Runtime product source root facts for the active buddy.",
+            "scope": "read-only source orientation",
+            "source_of_truth": "env profile project.path/access and instance workspace projection",
+            "mutates_product_state": False,
+            "grants_write_authority": False,
+            "configures_source_root": False,
+        },
     }
 
 
@@ -508,20 +641,28 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
     if payload_error is not None:
         return payload_error
 
-    sections = _current_context_sections(
-        active_buddy=active_buddy,
-        args=args,
-        instance_payload=context["instance_payload"],
-        context=context,
-    )
+    try:
+        sections = _current_context_sections(
+            active_buddy=active_buddy,
+            args=args,
+            instance_payload=context["instance_payload"],
+            include_resolved_path=True,
+            context=context,
+        )
+    except Exception as exc:
+        return _source_workspace_rejection(
+            action=action,
+            active_buddy=active_buddy,
+            message=str(exc),
+        )
     return tool_results.success(
         tool="context",
         action=action,
         active_buddy=active_buddy,
-        effect_summary="Returned full runtime context sections plus full tool catalog and full operation semantics.",
+        effect_summary="Returned full runtime context sections plus source_workspace facts, full tool catalog, and full operation semantics.",
         state_changed=False,
         durability="none",
-        read_scope="read-only runtime context sections and full catalog metadata",
+        read_scope="read-only runtime context sections, source workspace facts, and full catalog metadata",
         allowed_next_actions=[
             "Use task/track/artifact/buddybox tools with explicit ids.",
             "Use context.summarize for compact orientation.",
@@ -537,14 +678,23 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
     if payload_error is not None:
         return payload_error
 
-    sections = _current_context_sections(
-        active_buddy=active_buddy,
-        args=args,
-        instance_payload=context["instance_payload"],
-        context=context,
-    )
+    try:
+        sections = _current_context_sections(
+            active_buddy=active_buddy,
+            args=args,
+            instance_payload=context["instance_payload"],
+            include_resolved_path=False,
+            context=context,
+        )
+    except Exception as exc:
+        return _source_workspace_rejection(
+            action=action,
+            active_buddy=active_buddy,
+            message=str(exc),
+        )
     summary = {
         "current_context_summary": sections["current_context_summary"],
+        "source_workspace": sections["source_workspace"],
         "candidate_tracks": sections["candidate_tracks"],
         "candidate_requests": sections["candidate_requests"],
         "candidate_artifacts": sections["candidate_artifacts"],
@@ -560,10 +710,10 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         tool="context",
         action=action,
         active_buddy=active_buddy,
-        effect_summary="Returned compact context orientation with candidate ids, buddybox descriptor, and first-pass tool affordances.",
+        effect_summary="Returned compact context orientation with source_workspace facts, candidate ids, buddybox descriptor, and first-pass tool affordances.",
         state_changed=False,
         durability="none",
-        read_scope="compact read-only orientation; not full catalog",
+        read_scope="compact read-only orientation with source_workspace facts; not full catalog",
         allowed_next_actions=[
             "Use explicit ids from candidate tracks/tasks/artifacts in subsequent tool calls.",
             "Use context.get for full sections when needed.",
@@ -583,10 +733,10 @@ def list_sources(*, args: dict[str, Any], context: ContextServiceContext) -> dic
         tool="context",
         action=action,
         active_buddy=active_buddy,
-        effect_summary="Returned context source descriptors only.",
+        effect_summary="Returned read-only context source descriptors, including source_workspace orientation semantics.",
         state_changed=False,
         durability="none",
-        read_scope="source descriptor metadata only",
+        read_scope="read-only source descriptor metadata only; no root configuration or write grants",
         allowed_next_actions=["Use context.summarize or context.get with optional filters."],
         extra={"sources": context_sources_desc()},
     )

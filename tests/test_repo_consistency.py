@@ -150,6 +150,22 @@ class RepoConsistencyTests(unittest.TestCase):
         } if objects_root.exists() else set()
         self.assertTrue(_FORBIDDEN_RUNTIME_SURFACES.isdisjoint(object_dirs))
 
+    def test_no_project_or_source_write_env_tool_is_shipped(self) -> None:
+        forbidden_tools = {"project", "dev_env", "source", "filesystem", "workspace_write"}
+        self.assertTrue(forbidden_tools.isdisjoint(set(tool_catalog.supported_tools())))
+
+        tool_packages = {
+            path.name
+            for path in (ROOT / "scripts" / "env" / "tools").iterdir()
+            if path.is_dir() and not path.name.startswith("_")
+        }
+        self.assertTrue(forbidden_tools.isdisjoint(tool_packages))
+
+        forbidden_actions = {"apply_patch", "write_file", "delete_file", "configure_project"}
+        for tool in tool_catalog.supported_tools():
+            with self.subTest(tool=tool):
+                self.assertTrue(forbidden_actions.isdisjoint(set(tool_catalog.supported_actions(tool))))
+
     def test_workspace_projection_contract_uses_track_page_shape(self) -> None:
         payload = json.loads((ROOT / "framework" / "contracts" / "workspace-projection.json").read_text(encoding="utf-8"))
         top = set(payload.get("top_level_key_order", []))
@@ -213,6 +229,19 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("track join", text)
                 self.assertNotIn("attach" + "-task", text)
                 self.assertNotIn("detach" + "-task", text)
+
+    def test_runtime_buddy_agents_do_not_embed_project_source_facts(self) -> None:
+        buddies = ("market", "pm", "design", "dev", "test")
+        for buddy in buddies:
+            path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(buddy=buddy):
+                self.assertIn("context summarize --payload '{}'", text)
+                self.assertIn("context get --payload '{}'", text)
+                self.assertIn("agents.md is guidance only and not the permission source", text)
+                self.assertIn("do not bypass runtime", text)
+                self.assertNotIn("projects/app", text)
+                self.assertNotIn("project.access=", text)
 
     def test_active_cli_guidance_has_no_old_env_client_flags(self) -> None:
         targets = [

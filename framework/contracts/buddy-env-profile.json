@@ -24,7 +24,7 @@
   "enums": {
     "project.visibility": ["live"],
     "project.access": ["read-only", "write"],
-    "filesystem_capability.project_workspace": ["read-only", "write"],
+    "filesystem_capability.source_root": ["read-only", "write"],
     "filesystem_capability.raw_state": ["broker-only"],
     "state_capability.artifact_templates": ["from-manifest"],
     "tool_capability.browser_cockpit": ["required", "available", "unavailable"],

@@ -54,10 +54,14 @@ class BuddyEnvProfilesTests(unittest.TestCase):
             self.assertEqual(profile["filesystem_capability"]["raw_state"], "broker-only")
             if buddy_id == "dev":
                 self.assertEqual(profile["project"]["access"], "write")
-                self.assertEqual(profile["filesystem_capability"]["project_workspace"], "write")
+                self.assertEqual(profile["filesystem_capability"]["source_root"], "write")
+                self.assertIn("source-root", profile["filesystem_capability"]["host_writable"])
+                self.assertNotIn("project-workspace", profile["filesystem_capability"]["host_writable"])
             else:
                 self.assertEqual(profile["project"]["access"], "read-only")
-                self.assertEqual(profile["filesystem_capability"]["project_workspace"], "read-only")
+                self.assertEqual(profile["filesystem_capability"]["source_root"], "read-only")
+                self.assertNotIn("source-root", profile["filesystem_capability"]["host_writable"])
+                self.assertNotIn("project-workspace", profile["filesystem_capability"]["host_writable"])
             if buddy_id == "market":
                 self.assertEqual(profile["tool_capability"]["browser_cockpit"], "required")
                 self.assertEqual(profile["tool_capability"]["market_research_evidence"], "required")
@@ -98,6 +102,14 @@ class BuddyEnvProfilesTests(unittest.TestCase):
             ],
         )
 
+    def test_profile_contract_uses_source_root_permission_semantics(self) -> None:
+        contract = env_profiles.profile_contract(ROOT)
+        enums = contract.get("enums")
+        self.assertIsInstance(enums, dict)
+        assert isinstance(enums, dict)
+        self.assertIn("filesystem_capability.source_root", enums)
+        self.assertNotIn("filesystem_capability.project_workspace", enums)
+
     def test_validate_all_cli(self) -> None:
         completed = subprocess.run(
             ["python3", str(ROOT / "scripts" / "env_profiles.py"), "validate-all"],
@@ -127,6 +139,19 @@ class BuddyEnvProfilesTests(unittest.TestCase):
                     manifest_path=self.manifest_path,
                     repo_root=temp_root,
                 )
+
+    def test_validation_rejects_profiles_with_retired_project_workspace_key(self) -> None:
+        manifest = env_manifest.load_manifest(self.manifest_path)
+        profile = json.loads((self.profile_root / "dev.json").read_text(encoding="utf-8"))
+        profile["filesystem_capability"]["source_root"] = "write"
+        profile["filesystem_capability"]["project_workspace"] = "write"
+        with self.assertRaisesRegex(env_profiles.EnvProfileError, "project_workspace is retired"):
+            env_profiles.validate_env_profile(
+                profile,
+                buddy_id="dev",
+                manifest=manifest,
+                repo_root=ROOT,
+            )
 
     def test_search_capability_boundary_is_required_and_validated(self) -> None:
         manifest = env_manifest.load_manifest(self.manifest_path)

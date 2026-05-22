@@ -14,11 +14,11 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='context',
         title='Context Discovery',
-        description='Read runtime orientation, compact affordances, full tool catalog, and operation semantics.',
+        description='Read runtime orientation, compact affordances, full tool catalog, operation semantics, and read-only source_workspace facts.',
         cli_resource='context',
         command="python3 scripts/env/client.py context <action> --payload '<json-object>'",
         scope='runless read-only orientation payload',
-        capability_boundary='Context actions are read-only and never grant write authority.',
+        capability_boundary='Context actions are read-only orientation only; they do not configure source roots or grant write authority.',
         use_when=(
             'You need runtime discovery and orientation before choosing write operations.',
         ),
@@ -29,7 +29,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='get',
                 title='context.get',
-                description='Return full runtime context sections with full tool catalog and operation semantics.',
+                description='Return full runtime context sections with full tool catalog, operation semantics, and read-only source workspace facts.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -62,6 +62,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 returns=(
                     'sections',
+                    'source_workspace',
                     'tool_catalog',
                     'decision_surface',
                 ),
@@ -83,7 +84,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='summarize',
                 title='context.summarize',
-                description='Return compact runtime context orientation with candidate tracks, requests, artifacts, open comment threads, and recent updates.',
+                description='Return compact runtime context orientation with candidate tracks/requests/artifacts plus read-only source workspace facts and first-pass affordances.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -116,6 +117,7 @@ def _build_definition() -> ToolDefinition:
                 ),
                 returns=(
                     'current_context_summary',
+                    'source_workspace',
                     'candidate_tracks',
                     'candidate_requests',
                     'candidate_artifacts',
@@ -142,7 +144,7 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='list_sources',
                 title='context.list_sources',
-                description='Return context source descriptors only.',
+                description='Return context source descriptors, including source_workspace read-only orientation semantics.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
@@ -163,7 +165,7 @@ def _build_definition() -> ToolDefinition:
                     'sources',
                 ),
                 use_when=(
-                    'You only need source descriptors and scope boundaries for context data planes.',
+                    'You only need source descriptors and scope boundaries, including source_workspace semantics, for context data planes.',
                 ),
                 do_not_use_when=(
                     'You need candidate ids, affordances, full runtime sections, or full tool catalog semantics; use context.summarize or context.get.',
