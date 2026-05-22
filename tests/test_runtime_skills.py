@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,6 +18,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.tool_runtime import registry as tool_registry  # noqa: E402
+import runtime_skills  # noqa: E402
 
 
 class RuntimeSkillsTests(unittest.TestCase):
@@ -44,12 +46,26 @@ class RuntimeSkillsTests(unittest.TestCase):
         "enter-dev-workspace",
         "read-implementation-context",
         "handle-empty-source-root",
+        "plan-thin-slice-implementation",
         "implement-scoped-change",
         "debug-regression",
         "select-local-verification",
+        "request-dev-code-review",
+        "handle-review-feedback",
+        "finish-dev-change",
+        "pressure-test-dev-skill",
+        "parallelize-independent-dev-work",
         "write-implementation-report",
         "prepare-review-readiness",
     )
+    DEV_STARTUP_SKILLS = {
+        "plan-thin-slice-implementation",
+        "request-dev-code-review",
+        "handle-review-feedback",
+        "finish-dev-change",
+        "pressure-test-dev-skill",
+        "parallelize-independent-dev-work",
+    }
     PM_PRODUCT_SKILLS = (
         "read-product-context",
         "synthesize-cross-functional-inputs",
@@ -93,6 +109,9 @@ class RuntimeSkillsTests(unittest.TestCase):
 
     def _dev_skill_file(self, skill_id: str) -> Path:
         return ROOT / "buddyswitch" / "skills" / "dev" / skill_id / "SKILL.md"
+
+    def _dev_skill_text(self, skill_id: str) -> str:
+        return self._dev_skill_file(skill_id).read_text(encoding="utf-8").lower()
 
     def _pm_skill_file(self, skill_id: str) -> Path:
         return ROOT / "buddyswitch" / "skills" / "pm" / skill_id / "SKILL.md"
@@ -509,12 +528,221 @@ class RuntimeSkillsTests(unittest.TestCase):
         dev_skills = set(dev.get("skills", []))
         expected = set(self.DEV_PRODUCT_SKILLS)
         self.assertTrue(expected.issubset(dev_skills))
+        self.assertTrue(self.DEV_STARTUP_SKILLS.issubset(dev_skills))
+        self.assertTrue(self.SHARED_RUNTIME_TOOL_SKILLS.issubset(dev_skills))
         self.assertIn("skill-creator-importer", dev_skills)
         self.assertNotIn("implement-task", dev_skills)
         for skill_id in expected:
             self.assertIn(skill_id, skills_by_id, msg=skill_id)
             skill_file = ROOT / skills_by_id[skill_id]["path"] / "SKILL.md"
             self.assertTrue(skill_file.exists(), msg=skill_file)
+        for buddy_id in ("market", "pm", "design", "test"):
+            buddy = next(
+                row
+                for row in self.manifest.get("buddies", [])
+                if isinstance(row, dict) and row.get("id") == buddy_id
+            )
+            with self.subTest(buddy=buddy_id):
+                self.assertTrue(self.DEV_STARTUP_SKILLS.isdisjoint(set(buddy.get("skills", []))))
+
+    def test_dev_skills_have_valid_frontmatter_and_trigger_descriptions(self) -> None:
+        forbidden_description_tokens = (
+            "1.",
+            "2.",
+            "python3 scripts/env/client.py",
+            "track.open",
+            "artifact.get",
+            "## ",
+        )
+        for skill_id in self.DEV_PRODUCT_SKILLS:
+            path = self._dev_skill_file(skill_id)
+            text = path.read_text(encoding="utf-8")
+            lines = text.splitlines()
+            with self.subTest(skill=skill_id):
+                self.assertEqual(lines[0], "---")
+                self.assertIn(f"name: {skill_id}", lines[:6])
+                description_lines = [line for line in lines[:8] if line.startswith("description: ")]
+                self.assertEqual(len(description_lines), 1)
+                description = description_lines[0].split("description: ", 1)[1]
+                self.assertTrue(description.startswith("Use when "), msg=description)
+                self.assertLessEqual(len(description), 1024)
+                for token in forbidden_description_tokens:
+                    self.assertNotIn(token, description)
+
+    def test_implement_scoped_change_teaches_buddyswitch_tdd_default(self) -> None:
+        text = self._dev_skill_text("implement-scoped-change")
+        for token in (
+            "failing test first",
+            "confirm the failure",
+            "smallest direct change",
+            "locked source root",
+            "exception reason",
+            "after green",
+            "do not silently change product scope",
+        ):
+            self.assertIn(token, text)
+        self.assertNotIn("when practical", text)
+
+    def test_debug_regression_teaches_systematic_root_cause_loop(self) -> None:
+        text = self._dev_skill_text("debug-regression")
+        for token in (
+            "reproduce",
+            "root cause",
+            "trace",
+            "working example",
+            "single hypothesis",
+            "one change",
+            "regression test",
+            "three",
+            "architecture",
+            "do not add broad fallback",
+            "do not swallow errors",
+        ):
+            self.assertIn(token, text)
+
+    def test_select_local_verification_requires_fresh_evidence_before_completion_claims(self) -> None:
+        text = self._dev_skill_text("select-local-verification")
+        for token in (
+            "fresh",
+            "exit code",
+            "command proves",
+            "read output",
+            "before claiming",
+            "blocked",
+            "blast radius",
+            "no stale output",
+        ):
+            self.assertIn(token, text)
+        self.assertNotIn("should pass", text)
+
+    def test_plan_thin_slice_implementation_skill_covers_scope_file_map_and_verification(self) -> None:
+        text = self._dev_skill_text("plan-thin-slice-implementation")
+        for token in (
+            "## purpose",
+            "## use when",
+            "## do not use when",
+            "## inputs",
+            "## steps",
+            "## outputs",
+            "## guardrails",
+            "## stop conditions",
+            "## verification",
+            "## examples",
+            "## counterexamples",
+            "smallest verifiable",
+            "file map",
+            "non-goals",
+            "acceptance",
+            "verification",
+            "product semantics",
+            "security",
+            "privacy",
+            "payment",
+            "data migration",
+        ):
+            self.assertIn(token, text)
+        self.assertNotIn("workflow engine", text)
+        self.assertNotIn("platform planning", text)
+
+    def test_request_dev_code_review_skill_covers_review_inputs_and_severity(self) -> None:
+        text = self._dev_skill_text("request-dev-code-review")
+        for token in (
+            "requirements",
+            "changed files",
+            "verification evidence",
+            "known risks",
+            "spec compliance",
+            "code quality",
+            "critical",
+            "important",
+        ):
+            self.assertIn(token, text)
+        self.assertNotIn("review replaces tests", text)
+
+    def test_handle_review_feedback_skill_requires_verification_before_implementation(self) -> None:
+        text = self._dev_skill_text("handle-review-feedback")
+        for token in (
+            "read",
+            "clarify",
+            "verify",
+            "evaluate",
+            "one item at a time",
+            "push back",
+            "yagni",
+            "focused verification",
+            "do not blindly implement",
+            "stop and clarify",
+        ):
+            self.assertIn(token, text)
+
+    def test_finish_dev_change_skill_respects_worktree_and_completion_boundaries(self) -> None:
+        text = self._dev_skill_text("finish-dev-change")
+        for token in (
+            "fresh verification",
+            "linked worktree",
+            "detached head",
+            "pull request",
+            "keep",
+            "discard",
+            "explicit confirmation",
+            "do not delete launcher-owned",
+            "do not merge into main without",
+        ):
+            self.assertIn(token, text)
+        self.assertNotIn("git clean -fd", text)
+        self.assertNotIn("git reset --hard", text)
+
+    def test_pressure_test_dev_skill_teaches_skill_behavior_testing(self) -> None:
+        text = self._dev_skill_text("pressure-test-dev-skill")
+        for token in (
+            "pressure scenario",
+            "baseline",
+            "failure",
+            "behavior",
+            "verify",
+            "static tests",
+            "not a one-off",
+        ):
+            self.assertIn(token, text)
+
+    def test_parallelize_independent_dev_work_skill_requires_disjoint_scope(self) -> None:
+        text = self._dev_skill_text("parallelize-independent-dev-work")
+        for token in (
+            "independent",
+            "shared state",
+            "overlapping write",
+            "sequential dependency",
+            "critical path",
+            "review and integrate",
+            "do not parallelize",
+        ):
+            self.assertIn(token, text)
+
+    def test_runtime_skill_installer_materializes_expanded_dev_skill_set(self) -> None:
+        expected = set(self.DEV_PRODUCT_SKILLS) | self.SHARED_RUNTIME_TOOL_SKILLS | {"skill-creator-importer"}
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            workspace = Path(temp_dir) / "workspace"
+            workspace.mkdir()
+            installed = runtime_skills.install_runtime_skills(
+                manifest_path=ROOT / "buddyswitch" / "manifest.toml",
+                buddy_id="dev",
+                workspace=workspace,
+            )
+            installed_set = set(installed)
+            self.assertTrue(expected.issubset(installed_set))
+            for skill_id in self.DEV_STARTUP_SKILLS:
+                skill_file = workspace / ".agents" / "skills" / skill_id / "SKILL.md"
+                self.assertTrue(skill_file.exists(), msg=skill_id)
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            workspace = Path(temp_dir) / "pm-workspace"
+            workspace.mkdir()
+            installed = runtime_skills.install_runtime_skills(
+                manifest_path=ROOT / "buddyswitch" / "manifest.toml",
+                buddy_id="pm",
+                workspace=workspace,
+            )
+            self.assertTrue(self.DEV_STARTUP_SKILLS.isdisjoint(set(installed)))
 
     def test_dev_skills_keep_operational_sections_and_scenarios(self) -> None:
         required_headings = (

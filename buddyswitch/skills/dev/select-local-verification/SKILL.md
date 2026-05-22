@@ -6,7 +6,7 @@ description: Use when Dev needs to choose focused local proof for changed source
 # Select Local Verification
 
 ## Purpose
-- Choose the shortest meaningful verification that matches the change risk.
+- Choose the shortest meaningful verification that matches the change risk and acts as a fresh evidence gate.
 
 ## Use when
 - Source was changed.
@@ -22,24 +22,31 @@ description: Use when Dev needs to choose focused local proof for changed source
 
 ## Steps
 1. Inspect project hints (`package.json`, test configs, makefiles, CI scripts).
-2. Pick focused checks first.
-3. Run selected checks.
-4. If no project test command is discoverable, record that explicitly and pick nearest safe proof.
-5. Escalate to broader checks only when blast radius requires it.
+2. Pick the command that proves the intended claim so the command proves the outcome you want to report.
+3. Run fresh focused verification first.
+4. Read output and exit code before claiming pass, fixed, ready, or complete.
+5. If no project test command is discoverable, record that explicitly and pick the nearest safe proof.
+6. Escalate from focused checks to broader checks when blast radius requires it.
 
 ## Outputs
 - Verification command set with pass/fail/blocked evidence.
 
 ## Guardrails
-- Do not claim pass from stale output.
+- No stale output: do not claim pass from old runs or memory.
+- Do not predict success without running the command that proves it.
 - Do not skip verification when cheap local proof exists.
 - Distinguish fake topology checks from real permission/sandbox proof.
 
 ## Stop Conditions
-- Verification blocked by missing dependency/tooling/environment; record exact blocker.
+- Verification blocked by missing dependency/tooling/environment; record the exact blocker instead of success language.
+
+## Verification
+- Fresh verification output and exit code support the claim before claiming completion.
+- Broader checks match the blast radius of the change.
 
 ## Examples
-- Component change -> focused component test plus build check.
+- Component change -> run the focused component test fresh, read output and exit code, then add build coverage if blast radius is wider.
 
 ## Counterexamples
 - "Not tested" without checking available scripts or local commands.
+- "Looks fixed" based on stale output.

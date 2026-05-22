@@ -93,6 +93,10 @@ id = "handle-empty-source-root"
 path = "buddyswitch/skills/dev/handle-empty-source-root"
 
 [[skills]]
+id = "plan-thin-slice-implementation"
+path = "buddyswitch/skills/dev/plan-thin-slice-implementation"
+
+[[skills]]
 id = "implement-scoped-change"
 path = "buddyswitch/skills/dev/implement-scoped-change"
 
@@ -103,6 +107,26 @@ path = "buddyswitch/skills/dev/debug-regression"
 [[skills]]
 id = "select-local-verification"
 path = "buddyswitch/skills/dev/select-local-verification"
+
+[[skills]]
+id = "request-dev-code-review"
+path = "buddyswitch/skills/dev/request-dev-code-review"
+
+[[skills]]
+id = "handle-review-feedback"
+path = "buddyswitch/skills/dev/handle-review-feedback"
+
+[[skills]]
+id = "finish-dev-change"
+path = "buddyswitch/skills/dev/finish-dev-change"
+
+[[skills]]
+id = "pressure-test-dev-skill"
+path = "buddyswitch/skills/dev/pressure-test-dev-skill"
+
+[[skills]]
+id = "parallelize-independent-dev-work"
+path = "buddyswitch/skills/dev/parallelize-independent-dev-work"
 
 [[skills]]
 id = "write-implementation-report"
@@ -237,9 +261,15 @@ skills = [
   "enter-dev-workspace",
   "read-implementation-context",
   "handle-empty-source-root",
+  "plan-thin-slice-implementation",
   "implement-scoped-change",
   "debug-regression",
   "select-local-verification",
+  "request-dev-code-review",
+  "handle-review-feedback",
+  "finish-dev-change",
+  "pressure-test-dev-skill",
+  "parallelize-independent-dev-work",
   "write-implementation-report",
   "prepare-review-readiness",
   "skill-creator-importer",
