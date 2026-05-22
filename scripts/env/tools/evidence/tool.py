@@ -19,6 +19,9 @@ def _build_definition() -> ToolDefinition:
         command="python3 scripts/env/client.py evidence <action> --payload '<json-object>'",
         scope='target-scoped browser evidence for market quality gates',
         capability_boundary='Evidence actions are target-scoped and return transient token metadata.',
+        object_model=(
+            'Evidence actions issue transient target-scoped token metadata for artifact quality gates. Evidence tokens do not persist product objects and do not replace durable artifact, track, request, or comment state.'
+        ),
         use_when=(
             'You need artifact-scoped evidence token metadata.',
         ),
@@ -57,6 +60,25 @@ def _build_definition() -> ToolDefinition:
                 mutates='broker_token',
                 required_permission='evidence.issue',
                 authority='market.evidence_scope',
+                visibility='active-buddy token response only',
+                durability='transient',
+                result_content_level='token metadata',
+                success_effect='Issues one transient browser evidence token metadata row for an artifact target.',
+                failure_state_guarantee='Rejected token issuance does not create token metadata and does not mutate product state.',
+                reads=(
+                    'target artifact metadata',
+                    'browser evidence payload',
+                ),
+                writes=(
+                    'transient evidence token metadata',
+                ),
+                does_not_write=(
+                    'artifact body',
+                    'artifact state',
+                    'track state',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'target_type is artifact',
                     'target_id references readable target',
@@ -112,6 +134,25 @@ def _build_definition() -> ToolDefinition:
                 mutates='broker_token',
                 required_permission='evidence.approve',
                 authority='market.evidence_scope',
+                visibility='active-buddy token response only',
+                durability='transient',
+                result_content_level='token metadata',
+                success_effect='Issues one transient downgrade approval token metadata row with a non-empty reason.',
+                failure_state_guarantee='Rejected token issuance does not create token metadata and does not mutate product state.',
+                reads=(
+                    'target artifact metadata',
+                    'reason payload',
+                ),
+                writes=(
+                    'transient downgrade approval token metadata',
+                ),
+                does_not_write=(
+                    'artifact body',
+                    'artifact state',
+                    'track state',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'target_type is artifact',
                     'reason is non-empty',

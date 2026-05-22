@@ -19,6 +19,9 @@ def _build_definition() -> ToolDefinition:
         command="python3 scripts/env/client.py message <action> --payload '<json-object>'",
         scope='direct buddy-to-buddy inbox messaging',
         capability_boundary='Messages are direct buddy-to-buddy scope only.',
+        object_model=(
+            'Messages are direct buddy-to-buddy inbox rows. They are informal direct communication and do not mutate tracks, artifacts, tasks, comments, or request lifecycle state.'
+        ),
         use_when=(
             'You need direct inbox messaging between manifest-declared buddies.',
         ),
@@ -56,6 +59,26 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='message.send',
                 authority='message.direct_buddy_channel',
+                visibility='sender and recipient direct message visibility',
+                durability='durable',
+                result_content_level='message row and id',
+                success_effect='Sends one direct inbox message to another manifest buddy.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'manifest buddy ids',
+                ),
+                writes=(
+                    'direct buddy inbox message',
+                ),
+                does_not_write=(
+                    'tracks',
+                    'tasks',
+                    'artifacts',
+                    'comments',
+                    'requests',
+                    'buddybox files',
+                    'browser session',
+                ),
                 preconditions=(
                     'to_buddy is a declared manifest buddy',
                     'to_buddy != active_buddy',
@@ -110,6 +133,24 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='message.list',
                 authority='message.active_buddy_inbox',
+                visibility='active-buddy inbox',
+                durability='none',
+                result_content_level='message rows',
+                success_effect='Lists active-buddy inbox messages with optional filters.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'active-buddy inbox messages',
+                ),
+                writes=(),
+                does_not_write=(
+                    'messages',
+                    'tracks',
+                    'tasks',
+                    'artifacts',
+                    'comments',
+                    'requests',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'active buddy owns message.list permission',
                 ),

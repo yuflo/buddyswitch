@@ -19,6 +19,9 @@ def _build_definition() -> ToolDefinition:
         command="python3 scripts/env/client.py search <action> --payload '<json-object>'",
         scope='runtime-visible search capability boundary',
         capability_boundary='Search actions remain inside configured profile backend and launcher browser boundaries.',
+        object_model=(
+            'Search is a runtime-visible search/browser boundary. It exposes backend status, URL planning, and launcher-managed browser opening; it does not fetch, summarize, or persist search result content as product state.'
+        ),
         use_when=(
             'You need runtime search boundary metadata or explicit browser search actions.',
         ),
@@ -43,6 +46,22 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='none',
                 authority='profile.search_boundary',
+                visibility='active-buddy runtime orientation',
+                durability='none',
+                result_content_level='backend status',
+                success_effect='Returns configured search/backend/browser readiness metadata.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'search profile',
+                    'browser readiness',
+                ),
+                writes=(),
+                does_not_write=(
+                    'product objects',
+                    'runtime files',
+                    'browser page',
+                    'tokens',
+                ),
                 preconditions=(
                     'active instance is available',
                 ),
@@ -96,6 +115,23 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='none',
                 authority='profile.search_boundary',
+                visibility='active-buddy runtime orientation',
+                durability='none',
+                result_content_level='target URL plan',
+                success_effect='Resolves a target URL plan for a query; it does not fetch results and does not open a browser page.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'search profile',
+                    'query payload',
+                ),
+                writes=(),
+                does_not_write=(
+                    'product objects',
+                    'runtime files',
+                    'browser page',
+                    'tokens',
+                    'fetched results',
+                ),
                 preconditions=(
                     'query is non-empty',
                 ),
@@ -147,6 +183,25 @@ def _build_definition() -> ToolDefinition:
                 mutates='browser_session',
                 required_permission='none',
                 authority='profile.search_boundary',
+                visibility='launcher-managed browser session',
+                durability='transient',
+                result_content_level='browser open intent and target URL',
+                success_effect='Opens the planned search URL in the launcher-managed browser for browser-native discovery.',
+                failure_state_guarantee='Rejected browser actions do not open a page and do not mutate product state.',
+                reads=(
+                    'search profile',
+                    'query payload',
+                    'launcher browser endpoint',
+                ),
+                writes=(
+                    'browser session page open',
+                ),
+                does_not_write=(
+                    'product objects',
+                    'runtime files',
+                    'tokens',
+                    'fetched result summaries',
+                ),
                 preconditions=(
                     'query is non-empty',
                 ),

@@ -19,6 +19,9 @@ def _build_definition() -> ToolDefinition:
         command="python3 scripts/env/client.py comment <action> --payload '<json-object>'",
         scope='target-scoped plain-text comments on readable tracks and artifacts',
         capability_boundary='Comment scope requires active-buddy readability on the target object.',
+        object_model=(
+            'Comments are target-scoped discussion rows on readable track, artifact, or artifact_section targets. Comments support discussion and PM thread resolution, but they do not become canonical track timeline progress or direct inbox messages.'
+        ),
         use_when=(
             'You need target-scoped discussion on tracks or artifacts.',
         ),
@@ -77,6 +80,27 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='comment.add',
                 authority='target.read_boundary',
+                visibility='readable to buddies with target access',
+                durability='durable',
+                result_content_level='comment row and id',
+                success_effect='Adds one target-scoped discussion row to a track, artifact, or artifact_section thread.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'readable target thread',
+                    'optional parent comment',
+                    'manifest buddy ids',
+                ),
+                writes=(
+                    'comment row',
+                ),
+                does_not_write=(
+                    'track timeline',
+                    'track now-state',
+                    'artifact body',
+                    'task state',
+                    'request lifecycle',
+                    'message inbox',
+                ),
                 preconditions=(
                     'target_type is one of track, artifact, artifact_section',
                     'anchor is required when target_type is artifact_section',
@@ -135,6 +159,23 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='comment.list',
                 authority='target.read_boundary',
+                visibility='readable to buddies with target access',
+                durability='none',
+                result_content_level='comment rows',
+                success_effect='Lists comment rows for one readable target thread, optionally by status.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'readable target thread comments',
+                ),
+                writes=(),
+                does_not_write=(
+                    'comment state',
+                    'track timeline',
+                    'artifact body',
+                    'task state',
+                    'request lifecycle',
+                    'message inbox',
+                ),
                 preconditions=(
                     'target_type is one of track, artifact, artifact_section',
                     'anchor is required when target_type is artifact_section',
@@ -186,6 +227,25 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='comment.resolve',
                 authority='pm.review_closure',
+                visibility='readable to buddies with target access',
+                durability='durable',
+                result_content_level='resolved comment rows',
+                success_effect='PM marks all open rows in one reviewed comment thread as resolved with a closure summary.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'one readable comment thread',
+                ),
+                writes=(
+                    'comment thread status',
+                ),
+                does_not_write=(
+                    'track timeline',
+                    'track now-state',
+                    'artifact body',
+                    'task state',
+                    'request lifecycle',
+                    'message inbox',
+                ),
                 preconditions=(
                     'active buddy is pm',
                     'comment_id references an existing thread comment on a readable non-archived target',

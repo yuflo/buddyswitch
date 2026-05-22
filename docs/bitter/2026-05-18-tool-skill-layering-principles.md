@@ -126,7 +126,7 @@ When behavior is wrong, fix the layer that owns the wrong contract.
 
 - If a tool succeeds but does not mutate the state its contract implies, fix the service/store
   state transition.
-- If a tool is hard to choose, improve `semantics.py` and compact affordances.
+- If a tool is hard to choose, improve `ToolDefinition` semantics and generated compact affordances.
 - If a response leaves the host guessing, improve response fields and rejection feedback.
 - If a workflow repeats, encode it in a skill.
 - If AGENTS is growing to explain every case, move detail down into tools, responses, or skills.

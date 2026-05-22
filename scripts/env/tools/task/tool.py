@@ -19,6 +19,9 @@ def _build_definition() -> ToolDefinition:
         command="python3 scripts/env/client.py task <action> --payload '<json-object>'",
         scope='active-buddy private task work items',
         capability_boundary='Only active-buddy-owned tasks are readable and writable.',
+        object_model=(
+            'Tasks are active-buddy private work items. A task may link to a track as a context link, but task state does not define shared product state, publish artifacts, mutate track state, or change artifact readability.'
+        ),
         use_when=(
             'You need to create, list, read, update, or archive tasks owned by the active buddy.',
         ),
@@ -65,6 +68,27 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='task.create',
                 authority='task.buddy_scope',
+                visibility='active-buddy private',
+                durability='durable',
+                result_content_level='task row',
+                success_effect='Creates one private work item for the active buddy; track_id is a context link only.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'active-buddy task namespace',
+                    'optional track existence',
+                ),
+                writes=(
+                    'active-buddy private task',
+                ),
+                does_not_write=(
+                    'track state',
+                    'artifact state',
+                    'artifact visibility',
+                    'request lifecycle',
+                    'comments',
+                    'messages',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'active buddy owns task.create permission',
                 ),
@@ -121,6 +145,22 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='task.read',
                 authority='task.buddy_scope',
+                visibility='active-buddy private',
+                durability='none',
+                result_content_level='summary rows',
+                success_effect='Returns active-buddy private task rows for triage or filtering.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'active-buddy private task summaries',
+                ),
+                writes=(),
+                does_not_write=(
+                    'task state',
+                    'track state',
+                    'artifact visibility',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'active buddy owns task.read permission',
                 ),
@@ -166,6 +206,22 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='task.read',
                 authority='task.buddy_scope',
+                visibility='active-buddy private',
+                durability='none',
+                result_content_level='task row',
+                success_effect='Returns one active-buddy private task row by id.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'one active-buddy private task',
+                ),
+                writes=(),
+                does_not_write=(
+                    'task state',
+                    'track state',
+                    'artifact visibility',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'task_id references an active-buddy task',
                 ),
@@ -228,6 +284,27 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='task.update',
                 authority='task.buddy_scope',
+                visibility='active-buddy private',
+                durability='durable',
+                result_content_level='task row',
+                success_effect='Updates private task fields or lifecycle status; track_id remains context only.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'one active-buddy private task',
+                    'optional track existence',
+                ),
+                writes=(
+                    'active-buddy private task',
+                ),
+                does_not_write=(
+                    'track state',
+                    'artifact state',
+                    'artifact visibility',
+                    'request lifecycle',
+                    'comments',
+                    'messages',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'task_id references an active-buddy task',
                 ),
@@ -273,6 +350,25 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='task.archive',
                 authority='task.buddy_scope',
+                visibility='active-buddy private',
+                durability='durable',
+                result_content_level='task row',
+                success_effect='Archives one active-buddy private task without changing shared product state.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'one active-buddy private task',
+                ),
+                writes=(
+                    'active-buddy private task archived_at',
+                ),
+                does_not_write=(
+                    'track state',
+                    'artifact visibility',
+                    'request lifecycle',
+                    'comments',
+                    'messages',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'task_id references an active-buddy task',
                 ),

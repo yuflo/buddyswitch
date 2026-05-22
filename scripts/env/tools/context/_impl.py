@@ -284,6 +284,63 @@ def _candidate_request_row(*, request: dict[str, Any], active_buddy: str) -> dic
     }
 
 
+def _candidate_task_row(*, task: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "task_id": task.get("id"),
+        "title": task.get("title"),
+        "summary": task.get("summary"),
+        "status": task.get("status"),
+        "track_id": task.get("track_id"),
+        "updated_at": task.get("updated_at"),
+    }
+
+
+def _active_buddy_permissions(*, active_buddy: str, manifest: dict[str, Any]) -> set[str]:
+    buddies = manifest.get("buddies")
+    if not isinstance(buddies, list):
+        return set()
+    for buddy in buddies:
+        if not isinstance(buddy, dict) or buddy.get("id") != active_buddy:
+            continue
+        permissions = buddy.get("permissions")
+        if not isinstance(permissions, list):
+            return set()
+        return {row for row in permissions if isinstance(row, str)}
+    return set()
+
+
+def _capability_snapshot(*, active_buddy: str, manifest: dict[str, Any]) -> dict[str, str]:
+    permissions = _active_buddy_permissions(active_buddy=active_buddy, manifest=manifest)
+    operation_semantics = tool_registry.operation_semantics()
+    affordances = tool_registry.compact_tool_affordances()
+    artifact_create = operation_semantics["artifact.create_revision"]
+
+    can_create_track = "track.create" in permissions
+    can_archive_track = "track.archive" in permissions
+    if can_create_track and can_archive_track:
+        track_lifecycle_authority = "can create/archive PM-owned track lifecycle; shared mutation still follows readable track scope"
+    else:
+        track_lifecycle_authority = "cannot create/archive track lifecycle; may update shared tracks only through granted track actions"
+
+    return {
+        "active_buddy": active_buddy,
+        "track_lifecycle_authority": track_lifecycle_authority,
+        "task_visibility": str(operation_semantics["task.create"]["visibility"]),
+        "artifact_publication_path": " ".join(
+            [
+                str(artifact_create["success_effect"]),
+                "Does not write:",
+                ", ".join(str(row) for row in artifact_create["does_not_write"]),
+            ]
+        ),
+        "comment_target_support": str(affordances["comment"]["object_model"]),
+        "request_lifecycle_visibility": str(operation_semantics["request.create"]["visibility"]),
+        "search_boundary": str(affordances["search"]["object_model"]),
+        "evidence_boundary": str(affordances["evidence"]["object_model"]),
+        "buddybox_visibility": str(operation_semantics["buddybox.write"]["visibility"]),
+    }
+
+
 def _visible_tracks(*, track_filter: str | None, limit_value: int, context: ContextServiceContext) -> list[dict[str, Any]]:
     tracks = [row for row in context.repos.track.list_tracks() if row.get("archived_at") is None]
     if isinstance(track_filter, str) and track_filter.strip():
@@ -579,6 +636,7 @@ def _current_context_sections(
     buddybox_desc = context.rules.buddybox_workspace.build_buddybox_desc(active_buddy, instance_payload=instance_payload)
     candidate_tracks = [_candidate_track_row(track=row, active_buddy=active_buddy) for row in visible_tracks]
     candidate_requests = [_candidate_request_row(request=row, active_buddy=active_buddy) for row in visible_requests]
+    candidate_tasks = [_candidate_task_row(task=row) for row in visible_tasks]
 
     return {
         "tool_catalog": tool_registry.env_tools_description(),
@@ -591,11 +649,16 @@ def _current_context_sections(
         "buddybox_desc": buddybox_desc,
         "candidate_tracks": candidate_tracks,
         "candidate_requests": candidate_requests,
+        "candidate_tasks": candidate_tasks,
         "candidate_artifacts": visible_artifacts,
         "open_comment_threads": open_comment_threads,
         "recent_updates": recent_updates,
         "message_cues": message_cues,
         "source_workspace": source_workspace,
+        "capability_snapshot": _capability_snapshot(
+            active_buddy=active_buddy,
+            manifest=context["manifest"],
+        ),
         "decision_surface": {
             "binding_state": {"state": "runless", "enum_values": ["runless"]},
             "active_buddy_relation": {"role": "explicit-id-tools"},
@@ -747,12 +810,14 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "source_workspace": sections["source_workspace"],
         "candidate_tracks": sections["candidate_tracks"],
         "candidate_requests": sections["candidate_requests"],
+        "candidate_tasks": sections["candidate_tasks"],
         "candidate_artifacts": sections["candidate_artifacts"],
         "open_comment_threads": sections["open_comment_threads"],
         "recent_updates": sections["recent_updates"],
         "message_cues": sections["message_cues"],
         "buddybox_desc": sections["buddybox_desc"],
         "tool_affordances": tool_registry.compact_tool_affordances(),
+        "capability_snapshot": sections["capability_snapshot"],
         "decision_surface": sections["decision_surface"],
     }
 
@@ -765,7 +830,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         durability="none",
         read_scope="compact read-only orientation with source_workspace facts; not full catalog",
         allowed_next_actions=[
-            "Use explicit ids from candidate tracks/tasks/artifacts in subsequent tool calls.",
+            "Use explicit ids from candidate_tracks/candidate_tasks/candidate_artifacts/candidate_requests in subsequent tool calls.",
             "Use context.get for full sections when needed.",
         ],
         extra=summary,

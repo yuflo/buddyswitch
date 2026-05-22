@@ -55,6 +55,9 @@ def _build_definition() -> ToolDefinition:
         command="python3 scripts/env/client.py track <action> --payload '<json-object>'",
         scope='shared track progress pages and publication timeline',
         capability_boundary='Only PM can create/archive tracks; shared mutation requires readable track scope.',
+        object_model=(
+            'Track pages are shared product outcome threads. A track can cover a feature iteration, decision thread, delivery slice, or other coherent shared outcome; not every feature mention requires a new track. PM owns create/archive lifecycle; shared mutation publishes material, proof, timeline, or now-state on the track.'
+        ),
         use_when=(
             'You need to operate shared collaboration on a non-archived track.',
         ),
@@ -107,6 +110,24 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='track.create',
                 authority='pm.lifecycle_authority',
+                visibility='shared to buddies with track read access',
+                durability='durable',
+                result_content_level='track page',
+                success_effect='Creates one PM-owned shared product outcome thread with initial outcome, appetite, now focus, state, and health.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'manifest buddy permissions',
+                    'existing track ids',
+                ),
+                writes=(
+                    'shared track page',
+                ),
+                does_not_write=(
+                    'artifact body',
+                    'task state',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'active buddy is pm',
                 ),
@@ -158,6 +179,22 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='track.read',
                 authority='track.lookup',
+                visibility='active-buddy readable track summaries',
+                durability='none',
+                result_content_level='summary rows',
+                success_effect='Returns non-archived track summaries for choosing whether to reuse, split, or open a track.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'non-archived track summaries',
+                ),
+                writes=(),
+                does_not_write=(
+                    'track state',
+                    'artifact state',
+                    'task state',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'active buddy owns track.read permission',
                 ),
@@ -203,6 +240,22 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='track.read',
                 authority='track.lookup',
+                visibility='active-buddy readable track page',
+                durability='none',
+                result_content_level='track page with refs and summaries',
+                success_effect='Opens one shared track page with now-state, timeline, material refs, and proof refs; use artifact.get for full artifact bodies.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'one non-archived track page',
+                ),
+                writes=(),
+                does_not_write=(
+                    'track state',
+                    'artifact body',
+                    'task state',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'track_id references an existing non-archived track',
                 ),
@@ -259,6 +312,25 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='track.update_now',
                 authority='track.shared_mutation',
+                visibility='shared to buddies with track read access',
+                durability='durable',
+                result_content_level='track page',
+                success_effect='Updates shared track now/state/health and records the change on the track timeline.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'one non-archived track page',
+                ),
+                writes=(
+                    'track now/state/health',
+                    'track timeline update row',
+                ),
+                does_not_write=(
+                    'artifact body',
+                    'artifact publication slot',
+                    'task state',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'track_id references an existing non-archived track',
                 ),
@@ -316,6 +388,25 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='track.add_material',
                 authority='track.shared_mutation',
+                visibility='shared to buddies with track read access',
+                durability='durable',
+                result_content_level='track page plus artifact id',
+                success_effect='Publishes one draft artifact as current shared material on the track.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'one non-archived track page',
+                    'one publishable artifact',
+                ),
+                writes=(
+                    'track shared_materials',
+                    'artifact publication metadata',
+                ),
+                does_not_write=(
+                    'task state',
+                    'request lifecycle',
+                    'buddybox files',
+                    'comment threads',
+                ),
                 preconditions=(
                     'track_id references an existing non-archived track',
                     'artifact_id references an active-buddy-owned draft artifact',
@@ -380,6 +471,25 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='track.add_update',
                 authority='track.shared_mutation',
+                visibility='shared to buddies with track read access',
+                durability='durable',
+                result_content_level='timeline update row and track page',
+                success_effect='Appends one narrative progress, decision, blocker, or proof-note update to the track timeline.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'one non-archived track page',
+                    'optional readable artifact refs',
+                ),
+                writes=(
+                    'track timeline update row',
+                ),
+                does_not_write=(
+                    'artifact body',
+                    'artifact publication slot',
+                    'task state',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'track_id references an existing non-archived track',
                 ),
@@ -438,6 +548,26 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='track.add_proof',
                 authority='track.shared_mutation',
+                visibility='shared to buddies with track read access',
+                durability='durable',
+                result_content_level='track page plus artifact id and update id',
+                success_effect='Publishes one draft artifact as current close proof and records the proof event on the track timeline.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'one non-archived track page',
+                    'one publishable artifact',
+                ),
+                writes=(
+                    'track close_proof',
+                    'track timeline update row',
+                    'artifact publication metadata',
+                ),
+                does_not_write=(
+                    'task state',
+                    'request lifecycle',
+                    'buddybox files',
+                    'comment threads',
+                ),
                 preconditions=(
                     'track_id references an existing non-archived track',
                     'artifact_id references an active-buddy-owned draft artifact',
@@ -487,6 +617,24 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='track.archive',
                 authority='pm.lifecycle_authority',
+                visibility='shared to buddies with track read access until archived filters hide it',
+                durability='durable',
+                result_content_level='track page',
+                success_effect='Archives one PM-owned track so it leaves active collaboration flows and rejects routine shared mutations.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'one track page',
+                ),
+                writes=(
+                    'track archived_at',
+                ),
+                does_not_write=(
+                    'artifact body',
+                    'artifact publication metadata',
+                    'task state',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'active buddy is pm',
                     'track_id references an existing track',

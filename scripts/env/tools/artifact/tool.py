@@ -115,6 +115,9 @@ def _build_definition() -> ToolDefinition:
         command="python3 scripts/env/client.py artifact <action> --payload '<json-object>'",
         scope='private drafts and published track material/proof artifacts',
         capability_boundary='Private drafts are owner-scoped until published on a non-archived track.',
+        object_model=(
+            'Artifacts are buddy-authored product content records. Draft revisions are owner-scoped until track.add_material or track.add_proof publishes them to shared track state; artifact.get returns full body content only for readable artifact ids.'
+        ),
         use_when=(
             'You need full body reads or private draft artifact mutation.',
         ),
@@ -167,6 +170,23 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='artifact.read',
                 authority='artifact.owner_or_publication_boundary',
+                visibility='active-buddy readable artifact summaries',
+                durability='none',
+                result_content_level='summary rows only',
+                success_effect='Returns readable artifact summaries and filters without loading full markdown bodies.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'readable artifact summaries',
+                ),
+                writes=(),
+                does_not_write=(
+                    'artifact body',
+                    'artifact state',
+                    'track state',
+                    'task state',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'filters are valid and within readable scope boundaries',
                 ),
@@ -214,6 +234,22 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='artifact.read',
                 authority='artifact.owner_or_publication_boundary',
+                visibility='active-buddy readable artifact body',
+                durability='none',
+                result_content_level='full markdown body',
+                success_effect='Returns one readable artifact including full markdown body.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'one readable artifact body',
+                ),
+                writes=(),
+                does_not_write=(
+                    'artifact state',
+                    'track state',
+                    'task state',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'artifact_id references a readable artifact',
                 ),
@@ -291,6 +327,28 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='artifact.create',
                 authority='artifact.buddy_scope',
+                visibility='owner-scoped draft until track publication',
+                durability='durable',
+                result_content_level='artifact row with draft body',
+                success_effect='Creates one active-buddy private draft artifact revision; publication starts only with track.add_material or track.add_proof.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'optional superseded artifact',
+                    'source refs metadata',
+                ),
+                writes=(
+                    'active-buddy private draft artifact revision',
+                ),
+                does_not_write=(
+                    'track state',
+                    'track material slot',
+                    'track proof slot',
+                    'track.add_material publication path',
+                    'track.add_proof publication path',
+                    'task state',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'active buddy owns artifact.create permission',
                     'status and published_to_track are not accepted create_revision inputs',
@@ -366,6 +424,25 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_objects',
                 required_permission='artifact.update',
                 authority='artifact.buddy_scope',
+                visibility='owner-scoped unless already published through track state',
+                durability='durable',
+                result_content_level='artifact row',
+                success_effect='Patches metadata or body on one active-buddy-owned artifact without changing track publication slots.',
+                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                reads=(
+                    'one active-buddy-owned artifact',
+                ),
+                writes=(
+                    'active-buddy-owned artifact metadata/body',
+                ),
+                does_not_write=(
+                    'track state',
+                    'track material slot',
+                    'track proof slot',
+                    'task state',
+                    'request lifecycle',
+                    'buddybox files',
+                ),
                 preconditions=(
                     'artifact_id references an active-buddy-owned artifact',
                 ),

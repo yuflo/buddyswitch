@@ -693,7 +693,7 @@ def write_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSe
         active_buddy=active_buddy,
         effect_summary=f"{change_word.capitalize()} one private file '{logical_name}'.",
         state_changed=True,
-        durability="active_instance_local",
+        durability="durable",
         created_ids=[logical_name] if not existed else None,
         updated_ids=[logical_name] if existed else None,
         state_changes=[
@@ -764,7 +764,7 @@ def delete_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxS
             else f"Private file '{logical_name}' was already absent."
         ),
         state_changed=deleted,
-        durability="active_instance_local" if deleted else "none",
+        durability="durable" if deleted else "none",
         updated_ids=[logical_name] if deleted else None,
         state_changes=[
             {

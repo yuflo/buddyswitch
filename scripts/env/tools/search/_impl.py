@@ -578,7 +578,7 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
         active_buddy=context["active_buddy"],
         effect_summary="Opened the planned target URL in launcher-managed browser session without writing product objects.",
         state_changed=True,
-        durability="browser_session",
+        durability="transient",
         state_changes=[
             {
                 "object_type": "browser_session",

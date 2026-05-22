@@ -27,6 +27,14 @@ description: Use when PM must cut product work to the smallest valuable iteratio
 3. Separate scope decisions from design craft and implementation choices.
 4. Publish scope as shared material with `artifact.create_revision` and `track.add_material` when it governs downstream work.
 
+## Track Boundary Judgment
+- Use a track as a shared product outcome thread.
+- Reuse an active track when the work advances the same outcome, lifecycle, and proof path.
+- Create a new track when the outcome, lifecycle, collaborators, or proof path should be tracked independently.
+- Use private tasks for active-buddy work management under or outside a track.
+- Use requests for durable cross-buddy asks.
+- Use comments/messages for discussion, not product lifecycle state.
+
 ## Outputs
 - Scope section with in-scope items, non-goals, cut rationale, owner impact, and unresolved questions.
 

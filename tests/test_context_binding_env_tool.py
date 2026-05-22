@@ -19,6 +19,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
+from env.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -174,18 +175,102 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         affordances = summary.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=summary)
         assert isinstance(affordances, dict)
+        self.assertEqual(affordances, tool_registry.compact_tool_affordances())
         self.assertEqual(set(affordances), _EXPECTED_TOOLS)
         self.assertNotIn("handoff", affordances)
+        dumped = json.dumps(affordances, ensure_ascii=True)
+        self.assertNotIn("input_schemas", dumped)
+        self.assertNotIn("payload_fields", dumped)
+        self.assertNotIn("action_semantics", dumped)
+        self.assertNotIn('"properties"', dumped)
         for tool_name in ("track", "artifact", "task", "buddybox", "context"):
             with self.subTest(tool=tool_name):
                 compact = affordances.get(tool_name)
                 self.assertIsInstance(compact, dict, msg=summary)
                 assert isinstance(compact, dict)
+                self.assertIsInstance(compact.get("object_model"), str, msg=compact)
                 self.assertIsInstance(compact.get("capability"), str, msg=compact)
                 self.assertIsInstance(compact.get("returns"), str, msg=compact)
                 self.assertIsInstance(compact.get("state_effect"), str, msg=compact)
                 self.assertIsInstance(compact.get("when_to_use"), list, msg=compact)
                 self.assertIsInstance(compact.get("when_not_to_use"), list, msg=compact)
+
+    def test_context_summarize_candidate_keys_match_next_action_guidance(self) -> None:
+        self._seed_context_state()
+        instance_json = self._instance_json()
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
+        self.assertTrue(payload.get("ok"), msg=payload)
+
+        for key in ("candidate_tracks", "candidate_requests", "candidate_artifacts", "candidate_tasks"):
+            self.assertIn(key, payload, msg=payload)
+            self.assertIsInstance(payload.get(key), list, msg=payload)
+
+        key_expectations = {
+            "candidate_tracks": "track_id",
+            "candidate_requests": "request_id",
+            "candidate_artifacts": "artifact_id",
+            "candidate_tasks": "task_id",
+        }
+        for section, id_key in key_expectations.items():
+            for row in payload.get(section, []):
+                if not isinstance(row, dict):
+                    continue
+                with self.subTest(section=section):
+                    self.assertIn(id_key, row, msg=row)
+                    self.assertNotIn("body", row, msg=row)
+
+        next_text = " ".join(str(row) for row in payload.get("allowed_next_actions", [])).lower()
+        mentioned_groups = {
+            key
+            for word, key in (
+                ("tracks", "candidate_tracks"),
+                ("requests", "candidate_requests"),
+                ("artifacts", "candidate_artifacts"),
+                ("tasks", "candidate_tasks"),
+            )
+            if word in next_text
+        }
+        self.assertTrue(mentioned_groups.issubset(set(key_expectations)), msg=payload)
+
+    def test_context_summarize_includes_generated_capability_snapshot(self) -> None:
+        instance_json = self._instance_json(buddy="dev")
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+        self.assertTrue(payload.get("ok"), msg=payload)
+
+        snapshot = payload.get("capability_snapshot")
+        self.assertIsInstance(snapshot, dict, msg=payload)
+        assert isinstance(snapshot, dict)
+        self.assertEqual(
+            set(snapshot),
+            {
+                "active_buddy",
+                "track_lifecycle_authority",
+                "task_visibility",
+                "artifact_publication_path",
+                "comment_target_support",
+                "request_lifecycle_visibility",
+                "search_boundary",
+                "evidence_boundary",
+                "buddybox_visibility",
+            },
+        )
+        self.assertEqual(snapshot.get("active_buddy"), "dev")
+        self.assertIn("cannot create/archive", str(snapshot.get("track_lifecycle_authority")))
+        self.assertIn("active-buddy private", str(snapshot.get("task_visibility")))
+        artifact_create = tool_registry.operation_semantics()["artifact.create_revision"]
+        self.assertEqual(
+            snapshot.get("artifact_publication_path"),
+            " ".join(
+                [
+                    str(artifact_create["success_effect"]),
+                    "Does not write:",
+                    ", ".join(str(row) for row in artifact_create["does_not_write"]),
+                ]
+            ),
+        )
+        self.assertIn("track.add_material", str(snapshot.get("artifact_publication_path")))
+        self.assertIn("artifact_section", str(snapshot.get("comment_target_support")))
+        self.assertIn("browser", str(snapshot.get("search_boundary")).lower())
 
     def test_context_candidate_tracks_use_owner_buddy_only(self) -> None:
         self._seed_context_state()
@@ -477,6 +562,16 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         assert isinstance(operation_semantics, dict)
         self.assertIn("source_workspace", operation_semantics["context.get"]["returns"])
         self.assertIn("source_workspace", operation_semantics["context.summarize"]["returns"])
+        for key in ("context.get", "context.summarize"):
+            with self.subTest(operation=key):
+                self.assertIn("reads", operation_semantics[key])
+                self.assertIn("writes", operation_semantics[key])
+                self.assertIn("does_not_write", operation_semantics[key])
+                self.assertIn("visibility", operation_semantics[key])
+                self.assertIn("durability", operation_semantics[key])
+                self.assertIn("result_content_level", operation_semantics[key])
+                self.assertIn("success_effect", operation_semantics[key])
+                self.assertIn("failure_state_guarantee", operation_semantics[key])
 
         context_catalog = payload.get("tool_catalog", {}).get("context", {})
         self.assertIsInstance(context_catalog, dict, msg=payload)
@@ -487,6 +582,12 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         summarize_description = str(action_semantics.get("summarize", {}).get("plain_description", "")).lower()
         self.assertIn("source", summarize_description)
         self.assertIn("read-only", summarize_description)
+
+        track_catalog = payload.get("tool_catalog", {}).get("track", {})
+        self.assertIn("shared product outcome thread", str(track_catalog.get("object_model", "")).lower())
+        track_create = track_catalog.get("action_semantics", {}).get("create", {})
+        self.assertIn("visibility", track_create)
+        self.assertIn("failure_state_guarantee", track_create)
 
     def test_context_source_workspace_uses_profile_not_agents_text_and_profile_failure_is_explicit(self) -> None:
         instance_json = self._instance_json(buddy="dev")

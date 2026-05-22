@@ -476,7 +476,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"logical_name": "planes/private.txt", "content": "private"},
         )
         self.assertTrue(buddybox_write["ok"], msg=buddybox_write)
-        self.assertEqual(buddybox_write.get("durability"), "active_instance_local")
+        self.assertEqual(buddybox_write.get("durability"), "durable")
         self.assertFalse(buddybox_write.get("mutates_product_state"), msg=buddybox_write)
 
         published = self._dispatch(
@@ -494,7 +494,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"target_type": "artifact", "target_id": "art-e2e-planes-r1"},
         )
         self.assertTrue(evidence["ok"], msg=evidence)
-        self.assertEqual(evidence.get("durability"), "transient token")
+        self.assertEqual(evidence.get("durability"), "transient")
         self.assertFalse(evidence.get("mutates_product_state"), msg=evidence)
 
 

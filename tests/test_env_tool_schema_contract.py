@@ -284,6 +284,14 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             mutates="none",
             required_permission="none",
             authority="example.readonly",
+            visibility="example reader",
+            durability="none",
+            result_content_level="example row",
+            success_effect="Returns one example row without mutation.",
+            failure_state_guarantee="Rejected reads do not mutate runtime state.",
+            reads=("example rows",),
+            writes=(),
+            does_not_write=("example state",),
             use_when=("Use when example action is needed.",),
             do_not_use_when=("Do not use for write operations.",),
         )
@@ -295,6 +303,7 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             command="python3 scripts/env/client.py example do --payload '{}'",
             scope="example scope",
             capability_boundary="example capability boundary",
+            object_model="Example objects are test-only validation rows.",
             use_when=("Use for example checks.",),
             do_not_use_when=("Do not use for non-example work.",),
             actions=(action,),
@@ -305,6 +314,8 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             validate_definition(replace(valid, actions=(replace(action, use_when=()),)))
         with self.assertRaisesRegex(ValueError, "example.example_action.do_not_use_when"):
             validate_definition(replace(valid, actions=(replace(action, do_not_use_when=()),)))
+        with self.assertRaisesRegex(ValueError, "example.example_action.does_not_write"):
+            validate_definition(replace(valid, actions=(replace(action, does_not_write=()),)))
 
 
 if __name__ == "__main__":

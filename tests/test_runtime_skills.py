@@ -16,6 +16,8 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+from env.tool_runtime import registry as tool_registry  # noqa: E402
+
 
 class RuntimeSkillsTests(unittest.TestCase):
     _OLD_FLAG_PATTERNS = (
@@ -69,6 +71,13 @@ class RuntimeSkillsTests(unittest.TestCase):
         "comment-tool",
         "request-tool",
     }
+    BUDDY_AGENT_FILES = (
+        ROOT / "tools/launcher/assets/buddies/pm/AGENTS.md",
+        ROOT / "tools/launcher/assets/buddies/dev/AGENTS.md",
+        ROOT / "tools/launcher/assets/buddies/design/AGENTS.md",
+        ROOT / "tools/launcher/assets/buddies/market/AGENTS.md",
+        ROOT / "tools/launcher/assets/buddies/test/AGENTS.md",
+    )
     PM_SCENARIO_TERMS = (
         "wukong",
         "landing page",
@@ -197,6 +206,44 @@ class RuntimeSkillsTests(unittest.TestCase):
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("context.get.tool_catalog", text)
                 self.assertIn("turn_runtime.py status", text)
+
+    def test_buddy_agents_do_not_present_authoritative_hardcoded_tool_lists(self) -> None:
+        supported_tool_names = ", ".join(sorted(tool_registry.supported_tools()))
+        for path in self.BUDDY_AGENT_FILES:
+            text = path.read_text(encoding="utf-8")
+            lowered = text.lower()
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertIn(
+                    "Use context.get or python3 scripts/turn_runtime.py status for the authoritative runtime tool list.",
+                    text,
+                )
+                self.assertIn("Runtime tool examples include", text)
+                self.assertNotIn("Use explicit ids and env tools (`", text)
+                self.assertNotIn(f"env tools (`{supported_tool_names}`)", lowered)
+
+    def test_shared_comment_skill_target_support_matches_runtime_semantics(self) -> None:
+        comment_skill = self.SHARED_TOOL_SKILLS["comment"].read_text(encoding="utf-8").lower()
+        comment_model = tool_registry.compact_tool_affordances()["comment"]["object_model"].lower()
+        self.assertIn("artifact_section", comment_model)
+        self.assertIn("artifact_section", comment_skill)
+        self.assertNotIn("only `track` and `artifact`", comment_skill)
+        self.assertNotIn("only track and artifact", comment_skill)
+
+    def test_shared_skills_do_not_name_stale_actions_or_internal_contract_surfaces(self) -> None:
+        forbidden = (
+            "track.get",
+            "comment.reopen",
+            "scripts/env/tools/",
+            "contract.py",
+            "semantics.py",
+            "TOOL_SPEC",
+            "ACTION_SEMANTICS",
+        )
+        for path in self._active_skill_files():
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                for token in forbidden:
+                    self.assertNotIn(token.lower(), text.lower())
 
     def test_shared_tool_skills_name_only_runtime_discovery_surfaces_for_exact_contracts(self) -> None:
         required_refs = (
@@ -418,6 +465,30 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("launch-page", text)
                 self.assertNotIn("marketing surface", text)
                 self.assertNotIn("marketing-surface", text)
+
+    def test_pm_define_scope_teaches_track_boundary_heuristics_without_routing_rules(self) -> None:
+        text = self._pm_skill_file("define-scope").read_text(encoding="utf-8").lower()
+        for token in (
+            "use a track as a shared product outcome thread",
+            "reuse an active track when the work advances the same outcome, lifecycle, and proof path",
+            "create a new track when the outcome, lifecycle, collaborators, or proof path should be tracked independently",
+            "use private tasks for active-buddy work management",
+            "use requests for durable cross-buddy asks",
+            "use comments/messages for discussion, not product lifecycle state",
+            "context.get.tool_catalog",
+            "python3 scripts/turn_runtime.py status",
+        ):
+            self.assertIn(token, text)
+        for forbidden in (
+            "every feature phrase creates a track",
+            "every user request maps to exactly one track",
+            "always create a task after creating a track",
+            "always ask design/dev/test after pm writes requirements",
+            "one-track-per-feature",
+            "**payload:**",
+            "payload_fields",
+        ):
+            self.assertNotIn(forbidden, text)
 
     def test_dev_product_engineering_skill_chain_is_registered(self) -> None:
         skills_by_id = {row["id"]: row for row in self.manifest.get("skills", []) if isinstance(row, dict)}

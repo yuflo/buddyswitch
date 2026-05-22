@@ -80,6 +80,35 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                     for snippet in _PLACEHOLDER_SNIPPETS:
                         self.assertNotIn(snippet, text)
 
+    def test_every_tool_and_action_exposes_source_of_truth_semantic_fields(self) -> None:
+        desc = self._desc()
+        for tool in sorted(catalog.supported_tools()):
+            with self.subTest(tool=tool):
+                tool_desc = desc[tool]
+                self.assertIsInstance(tool_desc.get("object_model"), str, msg=tool_desc)
+                self.assertTrue(str(tool_desc.get("object_model", "")).strip(), msg=tool_desc)
+            for action in sorted(catalog.supported_actions(tool)):
+                with self.subTest(action=f"{tool}.{action}"):
+                    semantic = desc[tool]["action_semantics"][action]
+                    self.assertIsInstance(semantic.get("visibility"), str, msg=semantic)
+                    self.assertTrue(str(semantic.get("visibility", "")).strip(), msg=semantic)
+                    self.assertIn(semantic.get("durability"), {"none", "transient", "durable"}, msg=semantic)
+                    self.assertIsInstance(semantic.get("result_content_level"), str, msg=semantic)
+                    self.assertTrue(str(semantic.get("result_content_level", "")).strip(), msg=semantic)
+                    self.assertIsInstance(semantic.get("success_means"), str, msg=semantic)
+                    self.assertNotIn("completed under declared capability boundary", semantic["success_means"])
+                    self.assertIsInstance(semantic.get("failure_state_guarantee"), str, msg=semantic)
+                    self.assertTrue(str(semantic.get("failure_state_guarantee", "")).strip(), msg=semantic)
+                    side_effects = semantic.get("side_effects")
+                    self.assertIsInstance(side_effects, dict, msg=semantic)
+                    assert isinstance(side_effects, dict)
+                    for key in ("reads", "writes", "does_not_write"):
+                        self.assertIsInstance(side_effects.get(key), list, msg=semantic)
+                    self.assertTrue(
+                        side_effects.get("reads") or side_effects.get("writes") or side_effects.get("does_not_write"),
+                        msg=semantic,
+                    )
+
     def test_all_expected_actions_have_semantic_boundary_text(self) -> None:
         desc = self._desc()
         for tool, actions in _EXPECTED_ACTIONS_BY_TOOL.items():
@@ -173,6 +202,53 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertIsInstance(row.get("requires"), list)
                 self.assertIsInstance(row.get("returns"), list)
                 self.assertIsInstance(row.get("risk_hints"), dict)
+
+    def test_operation_semantics_include_generated_effect_fields(self) -> None:
+        op = catalog.operation_semantics()
+        for key, row in op.items():
+            with self.subTest(action=key):
+                self.assertIn("reads", row)
+                self.assertIn("writes", row)
+                self.assertIn("does_not_write", row)
+                self.assertIn("visibility", row)
+                self.assertIn("durability", row)
+                self.assertIn("result_content_level", row)
+                self.assertIn("success_effect", row)
+                self.assertIn("failure_state_guarantee", row)
+                self.assertIsInstance(row["reads"], list)
+                self.assertIsInstance(row["writes"], list)
+                self.assertIsInstance(row["does_not_write"], list)
+                self.assertIn(row["durability"], {"none", "transient", "durable"})
+
+    def test_high_risk_object_boundaries_are_explicit(self) -> None:
+        desc = self._desc()
+        track_model = str(desc["track"].get("object_model", "")).lower()
+        task_model = str(desc["task"].get("object_model", "")).lower()
+        artifact_model = str(desc["artifact"].get("object_model", "")).lower()
+        buddybox_model = str(desc["buddybox"].get("object_model", "")).lower()
+
+        self.assertIn("shared product outcome thread", track_model)
+        self.assertIn("feature iteration", track_model)
+        self.assertIn("not every feature", track_model)
+        self.assertIn("private work item", task_model)
+        self.assertIn("context link", task_model)
+        self.assertIn("draft", artifact_model)
+        self.assertIn("track.add_material", artifact_model)
+        self.assertIn("private file", buddybox_model)
+        self.assertIn("not product-readable", buddybox_model)
+
+        task_create = desc["task"]["action_semantics"]["create"]
+        task_side_effects = task_create["side_effects"]
+        self.assertIn("track state", " ".join(task_side_effects["does_not_write"]).lower())
+        self.assertIn("artifact visibility", " ".join(task_side_effects["does_not_write"]).lower())
+
+        artifact_create = desc["artifact"]["action_semantics"]["create_revision"]
+        self.assertIn("draft", artifact_create["success_means"].lower())
+        self.assertIn("track.add_material", " ".join(artifact_create["side_effects"]["does_not_write"]))
+
+        search_request = desc["search"]["action_semantics"]["request"]
+        self.assertIn("does not fetch", search_request["success_means"].lower())
+        self.assertEqual(search_request["durability"], "none")
 
     def test_broker_payload_action_ids_are_strict(self) -> None:
         hyphenated = catalog.dispatch_env_tool_request(

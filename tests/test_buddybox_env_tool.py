@@ -189,7 +189,7 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(text_write.get("ok"), msg=text_write)
         self.assertTrue(text_write.get("state_changed"), msg=text_write)
-        self.assertEqual(text_write.get("durability"), "active_instance_local")
+        self.assertEqual(text_write.get("durability"), "durable")
         self.assertEqual(text_write.get("logical_name"), "prototypes/hero.html")
         self.assertTrue(self._runtime_path("buddyswitch/local/buddybox/pm/prototypes/hero.html").exists())
         self.assertFalse(self._runtime_path(f"{_OLD_BUDDYBOX_ROOT}/pm/prototypes/hero.html").exists())
@@ -569,7 +569,7 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(write_payload.get("cross_buddy_readable"))
         self.assertFalse(write_payload.get("mutates_product_state"))
         self.assertEqual(write_payload.get("mutated_product_objects"), [])
-        self.assertEqual(write_payload.get("durability"), "active_instance_local")
+        self.assertEqual(write_payload.get("durability"), "durable")
 
         read_payload = self._dispatch(
             instance_json=instance_json,

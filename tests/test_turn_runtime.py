@@ -54,12 +54,22 @@ class TurnRuntimeRunlessTests(unittest.TestCase):
         self.assertNotIn("binding", tools)
         self.assertEqual(set(tools), set(tool_catalog.supported_tools()))
         self.assertEqual(tools, tool_catalog.env_tools_description())
+        desc = tool_catalog.env_tools_description()
+        self.assertIn("object_model", desc["track"])
         for tool_name, row in sorted(tools.items()):
             with self.subTest(tool=tool_name):
+                self.assertIn("object_model", row)
                 self.assertIn("action_semantics", row)
                 action_semantics = row["action_semantics"]
                 self.assertIsInstance(action_semantics, dict, msg=row)
                 self.assertTrue(action_semantics, msg=row)
+                for action_name, action_row in action_semantics.items():
+                    with self.subTest(action=f"{tool_name}.{action_name}"):
+                        self.assertIn("reads", action_row["side_effects"])
+                        self.assertNotIn(
+                            "completed under declared capability boundary",
+                            action_row["success_means"],
+                        )
         track_create = tools["track"]["input_schemas"]["create"]
         self.assertEqual(track_create["properties"]["now"]["type"], "object")
         self.assertEqual(track_create["properties"]["now"]["required"], ["next"])

@@ -169,15 +169,20 @@ def _action_semantic_row(tool: str, row: ActionDefinition) -> dict[str, Any]:
         "use_when": list(row.use_when),
         "do_not_use_when": list(row.do_not_use_when),
         "inputs_explained": inputs,
+        "visibility": row.visibility,
+        "durability": row.durability,
+        "result_content_level": row.result_content_level,
         "side_effects": {
             "mutates": row.mutates,
-            "writes": [],
-            "does_not_write": [],
-            "durability": "none" if row.mutates == "none" else "durable",
+            "reads": list(row.reads),
+            "writes": list(row.writes),
+            "does_not_write": list(row.does_not_write),
+            "durability": row.durability,
             "idempotency": "idempotent read" if row.mutates == "none" else "state mutation",
         },
         "risk_hints": dict(row.risk_hints),
-        "success_means": f"{tool}.{row.name} completed under declared capability boundary.",
+        "success_means": row.success_effect,
+        "failure_state_guarantee": row.failure_state_guarantee,
         "common_failures": list(row.preconditions),
     }
 
@@ -202,6 +207,7 @@ def env_tools_description() -> dict[str, dict[str, Any]]:
             "use_when": list(definition.use_when),
             "do_not_use_when": list(definition.do_not_use_when),
             "capability_boundary": definition.capability_boundary,
+            "object_model": definition.object_model,
             "command": definition.command,
             "scope": definition.scope,
             "broker_method": "env.tool",
@@ -237,6 +243,14 @@ def operation_semantics() -> dict[str, dict[str, Any]]:
                 "authority": action.authority,
                 "requires": list(action.preconditions),
                 "returns": list(action.returns),
+                "reads": list(action.reads),
+                "writes": list(action.writes),
+                "does_not_write": list(action.does_not_write),
+                "visibility": action.visibility,
+                "durability": action.durability,
+                "result_content_level": action.result_content_level,
+                "success_effect": action.success_effect,
+                "failure_state_guarantee": action.failure_state_guarantee,
                 "risk_hints": dict(action.risk_hints),
             }
     return rows
@@ -248,6 +262,7 @@ def compact_tool_affordances() -> dict[str, dict[str, Any]]:
         definition = load_definition(tool)
         rows[tool] = {
             "capability": definition.title,
+            "object_model": definition.object_model,
             "when_to_use": list(definition.use_when),
             "when_not_to_use": list(definition.do_not_use_when),
             "state_effect": definition.capability_boundary,

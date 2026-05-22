@@ -118,7 +118,7 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(issued.get("ok"), msg=issued)
         self.assertTrue(issued.get("state_changed"), msg=issued)
-        self.assertEqual(issued.get("durability"), "transient token")
+        self.assertEqual(issued.get("durability"), "transient")
         evidence = issued.get("tool_evidence")
         self.assertIsInstance(evidence, dict, msg=issued)
         assert isinstance(evidence, dict)

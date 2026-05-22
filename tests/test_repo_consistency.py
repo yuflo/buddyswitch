@@ -29,6 +29,17 @@ _FORBIDDEN_RUNTIME_SURFACES = {
     "review",
     "approval",
 }
+_DOC_SPEC_CONTEXT_MARKERS = (
+    "alignment",
+    "appendix",
+    "code-implementation-plan",
+    "completion-implementation-plan",
+    "implementation-plan",
+    "parallel-agent-execution-plan",
+    "scope",
+    "task-split",
+    "test-plan",
+)
 
 
 class RepoConsistencyTests(unittest.TestCase):
@@ -64,6 +75,14 @@ class RepoConsistencyTests(unittest.TestCase):
         )
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         return [line for line in completed.stdout.splitlines() if line.strip()]
+
+    @staticmethod
+    def _is_docs_spec_context_hit(line: str) -> bool:
+        path_text, _sep, _rest = line.partition(":")
+        if not path_text.startswith("docs/spec/"):
+            return False
+        name = Path(path_text).name
+        return any(marker in name for marker in _DOC_SPEC_CONTEXT_MARKERS)
 
     def test_active_runtime_modules_do_not_import_env_store(self) -> None:
         completed = subprocess.run(
@@ -127,6 +146,36 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertEqual(artifact_actions, {"list", "get", "create_revision", "update_metadata"})
         request_actions = set(tool_catalog.supported_actions("request"))
         self.assertEqual(request_actions, {"create", "list", "get", "accept", "block", "complete", "cancel"})
+
+    def test_registry_semantic_projections_are_generated_from_definitions(self) -> None:
+        desc = tool_catalog.env_tools_description()
+        operation_semantics = tool_catalog.operation_semantics()
+        compact = tool_catalog.compact_tool_affordances()
+
+        for tool in sorted(tool_catalog.supported_tools()):
+            definition = tool_catalog.get_definition(tool)
+            with self.subTest(tool=tool):
+                self.assertEqual(desc[tool]["object_model"], definition.object_model)
+                self.assertEqual(compact[tool]["object_model"], definition.object_model)
+                self.assertNotIn("input_schemas", compact[tool])
+                self.assertNotIn("payload_fields", compact[tool])
+                self.assertNotIn("action_semantics", compact[tool])
+            for action in definition.actions:
+                key = f"{tool}.{action.name}"
+                semantic = desc[tool]["action_semantics"][action.name]
+                operation = operation_semantics[key]
+                with self.subTest(action=key):
+                    self.assertEqual(semantic["visibility"], action.visibility)
+                    self.assertEqual(semantic["durability"], action.durability)
+                    self.assertEqual(semantic["result_content_level"], action.result_content_level)
+                    self.assertEqual(semantic["success_means"], action.success_effect)
+                    self.assertEqual(semantic["failure_state_guarantee"], action.failure_state_guarantee)
+                    self.assertEqual(semantic["side_effects"]["reads"], list(action.reads))
+                    self.assertEqual(semantic["side_effects"]["writes"], list(action.writes))
+                    self.assertEqual(semantic["side_effects"]["does_not_write"], list(action.does_not_write))
+                    self.assertEqual(operation["reads"], list(action.reads))
+                    self.assertEqual(operation["writes"], list(action.writes))
+                    self.assertEqual(operation["does_not_write"], list(action.does_not_write))
 
     def test_forbidden_runtime_surfaces_are_not_shipped(self) -> None:
         self.assertTrue(_FORBIDDEN_RUNTIME_SURFACES.isdisjoint(set(tool_catalog.supported_tools())))
@@ -211,6 +260,8 @@ class RepoConsistencyTests(unittest.TestCase):
             path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(buddy=buddy):
+                self.assertIn("authoritative runtime tool list", text)
+                self.assertIn("runtime tool examples include", text)
                 self.assertIn("context summarize --payload '{}'", text)
                 self.assertIn("context get --payload '{}'", text)
                 self.assertIn("track open --payload '{\"track_id\":\"<track-id>\"}'", text)
@@ -229,6 +280,46 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("track join", text)
                 self.assertNotIn("attach" + "-task", text)
                 self.assertNotIn("detach" + "-task", text)
+                self.assertNotIn("use explicit ids and env tools (`", text)
+
+    def test_stable_guidance_does_not_point_to_internal_tool_contract_surfaces(self) -> None:
+        targets = [
+            "tools/launcher/assets",
+            "buddyswitch/skills",
+            "docs/bitter",
+            "docs/spec",
+        ]
+        completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                "scripts/env/tools/.*/(contract|semantics)\\.py|contract\\.py|semantics\\.py|TOOL_SPEC|ACTION_SEMANTICS|track\\.get|comment\\.reopen",
+                *targets,
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [
+            line
+            for line in completed.stdout.splitlines()
+            if line.strip() and not self._is_docs_spec_context_hit(line)
+        ]
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_docs_spec_drift_filter_rejects_unmarked_live_guidance(self) -> None:
+        self.assertTrue(
+            self._is_docs_spec_context_hit(
+                "docs/spec/2026-05-22-tool-layer-semantic-source-of-truth-implementation-plan.md:1:TOOL_SPEC"
+            )
+        )
+        self.assertFalse(
+            self._is_docs_spec_context_hit(
+                "docs/spec/live-runtime-guidance.md:1:Use scripts/env/tools/task/contract.py"
+            )
+        )
 
     def test_runtime_buddy_agents_do_not_embed_project_source_facts(self) -> None:
         buddies = ("market", "pm", "design", "dev", "test")

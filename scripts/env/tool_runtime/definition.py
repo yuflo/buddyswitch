@@ -20,6 +20,7 @@ _ALLOWED_MUTATION_VALUES = {
     MUTATES_BROKER_TOKEN,
     MUTATES_BROWSER_SESSION,
 }
+_ALLOWED_DURABILITY_VALUES = {"none", "transient", "durable"}
 _TOOL_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _ACTION_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _ENUM_LIKE_FIELDS = {"status", "state", "health", "kind", "template", "target_type", "backend", "engine"}
@@ -36,6 +37,14 @@ class ActionDefinition:
     mutates: str
     required_permission: str
     authority: str
+    visibility: str
+    durability: str
+    result_content_level: str
+    success_effect: str
+    failure_state_guarantee: str
+    reads: tuple[str, ...]
+    writes: tuple[str, ...]
+    does_not_write: tuple[str, ...]
     preconditions: tuple[str, ...] = ()
     returns: tuple[str, ...] = ()
     use_when: tuple[str, ...] = ()
@@ -52,6 +61,7 @@ class ToolDefinition:
     command: str
     scope: str
     capability_boundary: str
+    object_model: str
     use_when: tuple[str, ...]
     do_not_use_when: tuple[str, ...]
     actions: tuple[ActionDefinition, ...]
@@ -204,6 +214,7 @@ def validate_definition(definition: ToolDefinition) -> None:
     _require_text(definition.command, field=f"{tool_id}.command")
     _require_text(definition.scope, field=f"{tool_id}.scope")
     _require_text(definition.capability_boundary, field=f"{tool_id}.capability_boundary")
+    _require_text(definition.object_model, field=f"{tool_id}.object_model")
     _validate_text_tuple(definition.use_when, field=f"{tool_id}.use_when", require_non_empty=True)
     _validate_text_tuple(definition.do_not_use_when, field=f"{tool_id}.do_not_use_when", require_non_empty=True)
 
@@ -223,6 +234,17 @@ def validate_definition(definition: ToolDefinition) -> None:
         _require_text(action.kind, field=f"{tool_id}.{name}.kind")
         _require_text(action.required_permission, field=f"{tool_id}.{name}.required_permission")
         _require_text(action.authority, field=f"{tool_id}.{name}.authority")
+        _require_text(action.visibility, field=f"{tool_id}.{name}.visibility")
+        _require_text(action.result_content_level, field=f"{tool_id}.{name}.result_content_level")
+        _require_text(action.success_effect, field=f"{tool_id}.{name}.success_effect")
+        _require_text(action.failure_state_guarantee, field=f"{tool_id}.{name}.failure_state_guarantee")
+        if action.durability not in _ALLOWED_DURABILITY_VALUES:
+            raise ValueError(f"{tool_id}.{name}.durability must be one of {_ALLOWED_DURABILITY_VALUES}")
+        _validate_text_tuple(action.reads, field=f"{tool_id}.{name}.reads")
+        _validate_text_tuple(action.writes, field=f"{tool_id}.{name}.writes")
+        _validate_text_tuple(action.does_not_write, field=f"{tool_id}.{name}.does_not_write", require_non_empty=True)
+        if not (action.reads or action.writes or action.does_not_write):
+            raise ValueError(f"{tool_id}.{name} must declare reads, writes, or does_not_write")
         _validate_text_tuple(action.use_when, field=f"{tool_id}.{name}.use_when", require_non_empty=True)
         _validate_text_tuple(
             action.do_not_use_when,

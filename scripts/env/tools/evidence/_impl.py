@@ -215,7 +215,7 @@ def issue_browser_for_active_instance(*, args: dict[str, Any], context: Evidence
         active_buddy=active_buddy,
         effect_summary=f"Issued transient target-scoped evidence token metadata for {target_type.strip()} '{target_id.strip()}'.",
         state_changed=True,
-        durability="transient token",
+        durability="transient",
         created_ids=[token["token_id"]],
         state_changes=[
             {
@@ -276,7 +276,7 @@ def approve_downgrade_for_active_instance(*, args: dict[str, Any], context: Evid
         active_buddy=active_buddy,
         effect_summary=f"Issued transient downgrade-approval token metadata for {target_type.strip()} '{target_id.strip()}'.",
         state_changed=True,
-        durability="transient token",
+        durability="transient",
         created_ids=[token["token_id"]],
         state_changes=[
             {

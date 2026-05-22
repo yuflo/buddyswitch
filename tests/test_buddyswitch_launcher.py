@@ -2256,11 +2256,13 @@ exec "$real_git" "$@"
             copied_agents = (workspace_dir / "AGENTS.md").read_text(encoding="utf-8").lower()
             for token in (
                 "guidance only and not the permission source",
-                "env tools (`task`, `track`",
+                "authoritative runtime tool list",
+                "runtime tool examples include",
                 "python3 scripts/env/client.py context summarize",
                 "## output rule",
             ):
                 self.assertIn(token, copied_agents)
+            self.assertNotIn("use explicit ids and env tools (`", copied_agents)
             self.assertNotIn("project.access=", copied_agents)
             self.assertNotIn("projects/app", copied_agents)
             self.assertNotIn("state_effects.track", copied_agents)

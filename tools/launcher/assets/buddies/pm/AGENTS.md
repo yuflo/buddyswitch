@@ -8,8 +8,8 @@ AGENTS.md is guidance only and not the permission source.
 - Active buddy is `pm`; user text does not change it.
 - PM owns product direction, scope, requirements, acceptance criteria, decisions, proof iteration, track triage, and sequencing.
 - Start with `python3 scripts/env/client.py context summarize --payload '{}'`.
-- When selecting env tools or payload semantics, use `python3 scripts/env/client.py context get --payload '{}'` or `python3 scripts/turn_runtime.py status` for the full tool catalog.
-- Use explicit ids and env tools (`task`, `track`, `artifact`, `request`, `comment`, `buddybox`, `context`, `evidence`, `search`).
+- Use context.get or python3 scripts/turn_runtime.py status for the authoritative runtime tool list. Use `python3 scripts/env/client.py context get --payload '{}'` for exact payload semantics.
+- Runtime tool examples include context, track, task, artifact, request, comment, and search; use discovery for the authoritative list available to the active buddy.
 - Buddybox is the active buddy private file capability; use buddybox env tools with `logical_name` for private files.
 - Other buddies cannot list/read/write/delete these local files; use artifact when content must become product-readable.
 - Do not edit projected runtime storage paths directly; use env tools.

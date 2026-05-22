@@ -19,6 +19,9 @@ def _build_definition() -> ToolDefinition:
         command="python3 scripts/env/client.py buddybox <action> --payload '<json-object>'",
         scope='active-buddy private local workspace files',
         capability_boundary='Only files under the active-buddy private file capability are allowed.',
+        object_model=(
+            'Buddybox files are active-buddy private file records in instance-local storage addressed by logical_name. They are not product-readable and do not mutate tracks, tasks, artifacts, requests, comments, or messages.'
+        ),
         use_when=(
             'You need active-buddy private file read/write/list/delete operations.',
         ),
@@ -43,6 +46,21 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='buddybox.read',
                 authority='buddybox.private_local_scope',
+                visibility='active-buddy private',
+                durability='none',
+                result_content_level='capability descriptor',
+                success_effect='Describes private buddybox file boundaries and logical-name addressing.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'active-buddy private file capability descriptor',
+                ),
+                writes=(),
+                does_not_write=(
+                    'private files',
+                    'product objects',
+                    'browser session',
+                    'tokens',
+                ),
                 preconditions=(
                     'active buddy is bound to an instance',
                 ),
@@ -97,6 +115,21 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='buddybox.read',
                 authority='buddybox.private_local_scope',
+                visibility='active-buddy private',
+                durability='none',
+                result_content_level='private file summary rows',
+                success_effect='Lists active-buddy private file summaries without reading product state.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'active-buddy private file summaries',
+                ),
+                writes=(),
+                does_not_write=(
+                    'private files',
+                    'product objects',
+                    'browser session',
+                    'tokens',
+                ),
                 preconditions=(
                     'logical_name stays within active buddy private file capability when provided',
                 ),
@@ -145,6 +178,21 @@ def _build_definition() -> ToolDefinition:
                 mutates='none',
                 required_permission='buddybox.read',
                 authority='buddybox.private_local_scope',
+                visibility='active-buddy private',
+                durability='none',
+                result_content_level='private file body',
+                success_effect='Reads one active-buddy private file by logical name.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and return no full object body beyond rejection metadata.',
+                reads=(
+                    'one active-buddy private file body',
+                ),
+                writes=(),
+                does_not_write=(
+                    'private files',
+                    'product objects',
+                    'browser session',
+                    'tokens',
+                ),
                 preconditions=(
                     'logical_name references one active buddy private file',
                 ),
@@ -201,6 +249,27 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_files',
                 required_permission='buddybox.write',
                 authority='buddybox.private_local_scope',
+                visibility='active-buddy private',
+                durability='durable',
+                result_content_level='private file row',
+                success_effect='Creates or replaces one active-buddy private file; content is not product-readable.',
+                failure_state_guarantee='Rejected file writes do not create, replace, or delete private files; response explains the private file boundary.',
+                reads=(
+                    'active-buddy private file namespace',
+                ),
+                writes=(
+                    'active-buddy private file',
+                ),
+                does_not_write=(
+                    'tracks',
+                    'tasks',
+                    'artifacts',
+                    'requests',
+                    'comments',
+                    'messages',
+                    'browser session',
+                    'tokens',
+                ),
                 preconditions=(
                     'logical_name stays inside active buddy private file capability',
                     'payload provides exactly one of content or content_base64',
@@ -245,6 +314,27 @@ def _build_definition() -> ToolDefinition:
                 mutates='runtime_files',
                 required_permission='buddybox.delete',
                 authority='buddybox.private_local_scope',
+                visibility='active-buddy private',
+                durability='durable',
+                result_content_level='delete result',
+                success_effect='Deletes one active-buddy private file without retracting published product content.',
+                failure_state_guarantee='Rejected file writes do not create, replace, or delete private files; response explains the private file boundary.',
+                reads=(
+                    'one active-buddy private file',
+                ),
+                writes=(
+                    'active-buddy private file deletion',
+                ),
+                does_not_write=(
+                    'tracks',
+                    'tasks',
+                    'artifacts',
+                    'requests',
+                    'comments',
+                    'messages',
+                    'browser session',
+                    'tokens',
+                ),
                 preconditions=(
                     'logical_name resolves inside active buddy private file capability',
                 ),
