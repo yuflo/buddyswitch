@@ -207,6 +207,21 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("**returns:**", text)
                 self.assertNotIn("## payload examples", text)
 
+    def test_shared_message_and_buddybox_skills_prevent_observed_invalid_calls(self) -> None:
+        message_skill = self.SHARED_TOOL_SKILLS["message"].read_text(encoding="utf-8").lower()
+        buddybox_skill = self.SHARED_TOOL_SKILLS["buddybox"].read_text(encoding="utf-8").lower()
+
+        self.assertIn("message list --payload '{}'", message_skill)
+        self.assertIn("does not accept `box`", message_skill)
+        self.assertIn("request.list", message_skill)
+        self.assertNotIn('message list --payload \'{"box":"inbox"}\'', message_skill)
+        self.assertNotIn('message list --payload "{\\"box\\":\\"inbox\\"}"', message_skill)
+
+        self.assertIn("do not use absolute paths, traversal", buddybox_skill)
+        self.assertIn("buddy id prefix", buddybox_skill)
+        self.assertIn("logical_name", buddybox_skill)
+        self.assertIn("heartbeats/b.md", buddybox_skill)
+
     def test_message_comment_shared_tool_skills_stay_atomic(self) -> None:
         """MCT-SURF-006: Message/comment skills don't teach non-goal features."""
         msg_skill = (ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md").read_text(encoding="utf-8").lower()

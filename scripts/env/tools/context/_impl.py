@@ -99,6 +99,47 @@ def _is_relative_to(path: Path, root: Path) -> bool:
     return True
 
 
+def _shared_root_from_instance_json_path(instance_json_path: Path) -> Path | None:
+    instance_root = instance_json_path.parent
+    if instance_root.parent.name != "instances":
+        return None
+    return instance_root.parent.parent.resolve(strict=False)
+
+
+def _launcher_project_workspace_from_context(
+    *,
+    context: ContextServiceContext,
+    runtime_workspace: Path,
+) -> Path | None:
+    instance_json_raw = context.get("instance_json")
+    if isinstance(instance_json_raw, Path):
+        shared_root = _shared_root_from_instance_json_path(instance_json_raw.resolve(strict=False))
+        if shared_root is not None:
+            return (shared_root / "project" / "workspace").resolve(strict=False)
+    if runtime_workspace.name == "workspace" and runtime_workspace.parent.parent.name == "instances":
+        shared_root = runtime_workspace.parent.parent.parent.resolve(strict=False)
+        return (shared_root / "project" / "workspace").resolve(strict=False)
+    return None
+
+
+def _source_root_from_runtime_projection(
+    *,
+    runtime_workspace: Path,
+    project_workspace: Path | None,
+    project_path: str,
+) -> Path:
+    runtime_source_root = runtime_workspace / project_path
+    resolved_source_root = runtime_source_root.resolve(strict=False)
+    if _is_relative_to(resolved_source_root, runtime_workspace):
+        return resolved_source_root
+    if project_workspace is None:
+        raise ValueError("source root symlink resolves outside runtime workspace and launcher project workspace")
+    expected_project_source_root = (project_workspace / project_path).resolve(strict=False)
+    if resolved_source_root != expected_project_source_root:
+        raise ValueError("source root symlink resolves outside launcher project workspace")
+    return resolved_source_root
+
+
 def _load_active_env_profile(
     context: ContextServiceContext,
     active_buddy: str,
@@ -175,9 +216,18 @@ def _build_source_workspace(
     if not isinstance(runtime_workspace_raw, str) or not runtime_workspace_raw.strip():
         raise ValueError("instance payload workspace path is missing")
     runtime_workspace = Path(runtime_workspace_raw).expanduser().resolve(strict=False)
-    source_root = (runtime_workspace / project_path).resolve(strict=False)
-    if not _is_relative_to(source_root, runtime_workspace):
+    runtime_source_raw = runtime_workspace / project_path
+    if not _is_relative_to(runtime_source_raw, runtime_workspace):
         raise ValueError("profile project.path resolves outside runtime workspace")
+    project_workspace = _launcher_project_workspace_from_context(
+        context=context,
+        runtime_workspace=runtime_workspace,
+    )
+    source_root = _source_root_from_runtime_projection(
+        runtime_workspace=runtime_workspace,
+        project_workspace=project_workspace,
+        project_path=project_path,
+    )
 
     state, entries, truncated = _classify_source_root(source_root)
     source_workspace: dict[str, Any] = {

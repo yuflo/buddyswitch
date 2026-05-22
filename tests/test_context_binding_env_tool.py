@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import tempfile
 import unittest
 import uuid
 from pathlib import Path
@@ -26,25 +27,31 @@ _EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(self, *, instance_id: str = "inst-dev-context", buddy: str = "dev", status: str = "active") -> Path:
-        path = self._runtime_path("instance.json")
-        path.write_text(
-            json.dumps(
-                {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
-                    "status": status,
-                    "workspace_dir": str(self.runtime_root),
-                    "browser_port": None,
-                    "updated_at": "2026-05-15T00:00:00Z",
-                },
-                ensure_ascii=True,
-                indent=2,
-            )
+    def _instance_json(
+        self,
+        *,
+        instance_id: str = "inst-dev-context",
+        buddy: str = "dev",
+        status: str = "active",
+        workspace_dir: Path | None = None,
+        path: Path | None = None,
+    ) -> Path:
+        instance_json_path = path if path is not None else self._runtime_path("instance.json")
+        payload: dict[str, object] = {
+            "instance_id": instance_id,
+            "buddy": buddy,
+            "status": status,
+            "workspace_dir": str(workspace_dir if workspace_dir is not None else self.runtime_root),
+            "browser_port": None,
+            "updated_at": "2026-05-15T00:00:00Z",
+        }
+        instance_json_path.parent.mkdir(parents=True, exist_ok=True)
+        instance_json_path.write_text(
+            json.dumps(payload, ensure_ascii=True, indent=2)
             + "\n",
             encoding="utf-8",
         )
-        return path
+        return instance_json_path
 
     def _dispatch(self, *, instance_json: Path, tool: str, action: str, args: dict[str, object], instance_id: str = "inst-dev-context", buddy: str = "dev") -> dict[str, object]:
         request = {
@@ -344,6 +351,64 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIs(source.get("can_write_source"), False)
         self.assertEqual(source.get("state"), "readme_only")
         self.assertIn("read-only", str(source.get("permission_boundary", "")).lower())
+
+    def test_context_summarize_accepts_launcher_project_symlink_source_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            shared_root = Path(temp_dir) / "shared-root"
+            runtime_workspace = shared_root / "instances" / "inst-dev-context" / "workspace"
+            runtime_workspace.mkdir(parents=True, exist_ok=True)
+            project_workspace = shared_root / "project" / "workspace"
+            shared_source_root = project_workspace / "projects" / "app"
+            shared_source_root.mkdir(parents=True, exist_ok=True)
+            (shared_source_root / "README.md").write_text("# App\n", encoding="utf-8")
+
+            runtime_source_root = runtime_workspace / "projects" / "app"
+            runtime_source_root.parent.mkdir(parents=True, exist_ok=True)
+            runtime_source_root.symlink_to(shared_source_root, target_is_directory=True)
+            instance_json = self._instance_json(
+                buddy="dev",
+                workspace_dir=runtime_workspace,
+                path=shared_root / "instances" / "inst-dev-context" / "instance.json",
+            )
+
+            payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+
+            self.assertTrue(payload.get("ok"), msg=payload)
+            source = payload.get("source_workspace")
+            self.assertIsInstance(source, dict, msg=payload)
+            assert isinstance(source, dict)
+            self.assertEqual(source.get("path"), "projects/app")
+            self.assertEqual(source.get("access"), "write")
+            self.assertIs(source.get("can_write_source"), True)
+            self.assertEqual(source.get("state"), "readme_only")
+            self.assertEqual(source.get("top_level_entries"), ["README.md"])
+
+    def test_context_summarize_rejects_source_symlink_outside_project_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            shared_root = Path(temp_dir) / "shared-root"
+            runtime_workspace = shared_root / "instances" / "inst-dev-context" / "workspace"
+            runtime_workspace.mkdir(parents=True, exist_ok=True)
+            project_workspace = shared_root / "project" / "workspace"
+            (project_workspace / "projects" / "app").mkdir(parents=True, exist_ok=True)
+
+            outside_source_root = Path(temp_dir) / "outside-source"
+            outside_source_root.mkdir(parents=True, exist_ok=True)
+            (outside_source_root / "README.md").write_text("# Outside\n", encoding="utf-8")
+
+            runtime_source_root = runtime_workspace / "projects" / "app"
+            runtime_source_root.parent.mkdir(parents=True, exist_ok=True)
+            runtime_source_root.symlink_to(outside_source_root, target_is_directory=True)
+            instance_json = self._instance_json(
+                buddy="dev",
+                workspace_dir=runtime_workspace,
+                path=shared_root / "instances" / "inst-dev-context" / "instance.json",
+            )
+
+            payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
+
+            self.assertFalse(payload.get("ok"), msg=payload)
+            self.assertEqual((payload.get("error") or {}).get("code"), "E_CONTEXT_SOURCE_WORKSPACE")
+            self.assertIn("project workspace", str((payload.get("error") or {}).get("message", "")).lower())
 
     def test_context_source_workspace_state_classification(self) -> None:
         instance_json = self._instance_json(buddy="dev")

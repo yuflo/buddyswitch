@@ -23,6 +23,8 @@ description: Use when the active buddy needs private files such as drafts, proto
 ## Logical Name Rules
 - Use `logical_name` relative to the active buddy private file capability.
 - Do not use absolute paths, traversal (`../`), or a buddy id prefix.
+- Good: `logical_name="heartbeats/b.md"`.
+- Bad: `logical_name="dev/b-heartbeat.md"` because `dev/` is a buddy id prefix.
 
 ## Operation Semantics
 - `desc`, `list`, and `read` are discovery/read paths for active-buddy private files.

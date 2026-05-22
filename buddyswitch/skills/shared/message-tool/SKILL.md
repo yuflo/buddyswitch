@@ -37,6 +37,7 @@ python3 scripts/env/client.py message send --payload '{"to_buddy":"design","cont
 - Active buddy cannot send to itself.
 - Reply envelopes must stay within the same conversation pair.
 - List returns only inbox (to_buddy = active_buddy), not outbox.
+- `message.list` does not accept `box`; it is always the active buddy inbox. Use `request.list` when you need inbox/outbox request filtering.
 
 ## Verification
 
