@@ -5,28 +5,64 @@ id = "buddyswitch"
 label = "BuddySwitch Env"
 
 [[skills]]
-id = "research-scan"
-path = "buddyswitch/skills/market/research-scan"
+id = "market-source-seed-atlas"
+path = "buddyswitch/skills/market/market-source-seed-atlas"
 
 [[skills]]
-id = "pmf-recon"
-path = "buddyswitch/skills/market/pmf-recon"
+id = "market-search-operator-builder"
+path = "buddyswitch/skills/market/market-search-operator-builder"
 
 [[skills]]
-id = "customer-discovery"
-path = "buddyswitch/skills/market/customer-discovery"
+id = "source-quality-rater"
+path = "buddyswitch/skills/market/source-quality-rater"
 
 [[skills]]
-id = "positioning-copy"
-path = "buddyswitch/skills/market/positioning-copy"
+id = "data-triangulator"
+path = "buddyswitch/skills/market/data-triangulator"
 
 [[skills]]
-id = "channel-discovery"
-path = "buddyswitch/skills/market/channel-discovery"
+id = "hallucination-guard"
+path = "buddyswitch/skills/market/hallucination-guard"
 
 [[skills]]
-id = "launch-prep"
-path = "buddyswitch/skills/market/launch-prep"
+id = "weak-signal-scout"
+path = "buddyswitch/skills/market/weak-signal-scout"
+
+[[skills]]
+id = "workaround-miner"
+path = "buddyswitch/skills/market/workaround-miner"
+
+[[skills]]
+id = "market-tension-finder"
+path = "buddyswitch/skills/market/market-tension-finder"
+
+[[skills]]
+id = "customer-voice-mining"
+path = "buddyswitch/skills/market/customer-voice-mining"
+
+[[skills]]
+id = "segment-map-builder"
+path = "buddyswitch/skills/market/segment-map-builder"
+
+[[skills]]
+id = "icp-scorer"
+path = "buddyswitch/skills/market/icp-scorer"
+
+[[skills]]
+id = "positioning-message-map"
+path = "buddyswitch/skills/market/positioning-message-map"
+
+[[skills]]
+id = "growth-bottleneck-diagnoser"
+path = "buddyswitch/skills/market/growth-bottleneck-diagnoser"
+
+[[skills]]
+id = "channel-strategy-mapper"
+path = "buddyswitch/skills/market/channel-strategy-mapper"
+
+[[skills]]
+id = "experiment-design-reviewer"
+path = "buddyswitch/skills/market/experiment-design-reviewer"
 
 [[skills]]
 id = "read-product-context"
@@ -145,12 +181,21 @@ id = "market"
 label = "Market"
 scope = "Research demand, users, and competition."
 skills = [
-  "research-scan",
-  "pmf-recon",
-  "customer-discovery",
-  "positioning-copy",
-  "channel-discovery",
-  "launch-prep",
+  "market-source-seed-atlas",
+  "market-search-operator-builder",
+  "source-quality-rater",
+  "data-triangulator",
+  "hallucination-guard",
+  "weak-signal-scout",
+  "workaround-miner",
+  "market-tension-finder",
+  "customer-voice-mining",
+  "segment-map-builder",
+  "icp-scorer",
+  "positioning-message-map",
+  "growth-bottleneck-diagnoser",
+  "channel-strategy-mapper",
+  "experiment-design-reviewer",
   "track-tool",
   "artifact-tool",
   "task-tool",

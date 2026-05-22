@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,6 +18,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.tool_runtime import registry as tool_registry  # noqa: E402
+import runtime_skills  # noqa: E402
 
 
 class RuntimeSkillsTests(unittest.TestCase):
@@ -62,6 +64,31 @@ class RuntimeSkillsTests(unittest.TestCase):
         "triage-track",
         "sequence-product-work",
     )
+    MARKET_P0_SKILLS = (
+        "market-source-seed-atlas",
+        "market-search-operator-builder",
+        "source-quality-rater",
+        "data-triangulator",
+        "hallucination-guard",
+        "weak-signal-scout",
+        "workaround-miner",
+        "market-tension-finder",
+        "customer-voice-mining",
+        "segment-map-builder",
+        "icp-scorer",
+        "positioning-message-map",
+        "growth-bottleneck-diagnoser",
+        "channel-strategy-mapper",
+        "experiment-design-reviewer",
+    )
+    OLD_MARKET_SKILLS = (
+        "research-scan",
+        "pmf-recon",
+        "customer-discovery",
+        "positioning-copy",
+        "channel-discovery",
+        "launch-prep",
+    )
     SHARED_RUNTIME_TOOL_SKILLS = {
         "track-tool",
         "artifact-tool",
@@ -103,6 +130,21 @@ class RuntimeSkillsTests(unittest.TestCase):
             for row in self.manifest.get("buddies", [])
             if isinstance(row, dict) and row.get("id") == "pm"
         )
+
+    def _market_buddy(self) -> dict:
+        return next(
+            row
+            for row in self.manifest.get("buddies", [])
+            if isinstance(row, dict) and row.get("id") == "market"
+        )
+
+    def _market_skill_file(self, skill_id: str) -> Path:
+        return ROOT / "buddyswitch" / "skills" / "market" / skill_id / "SKILL.md"
+
+    def _market_skill_text(self, skill_id: str) -> str:
+        path = self._market_skill_file(skill_id)
+        self.assertTrue(path.exists(), msg=path)
+        return path.read_text(encoding="utf-8")
 
     def _active_skill_files(self) -> list[Path]:
         files: list[Path] = []
@@ -165,21 +207,363 @@ class RuntimeSkillsTests(unittest.TestCase):
                     self.assertNotIn(pattern, text)
 
     def test_market_skills_use_payload_browser_entry(self) -> None:
-        market_files = [
-            ROOT / "buddyswitch/skills/market/research-scan/SKILL.md",
-            ROOT / "buddyswitch/skills/market/pmf-recon/SKILL.md",
-            ROOT / "buddyswitch/skills/market/customer-discovery/SKILL.md",
-            ROOT / "buddyswitch/skills/market/channel-discovery/SKILL.md",
-            ROOT / "buddyswitch/skills/market/positioning-copy/SKILL.md",
-            ROOT / "buddyswitch/skills/market/launch-prep/SKILL.md",
-        ]
-        for path in market_files:
-            text = path.read_text(encoding="utf-8").lower()
-            with self.subTest(path=str(path.relative_to(ROOT))):
+        for skill_id in self.MARKET_P0_SKILLS:
+            text = self._market_skill_text(skill_id).lower()
+            with self.subTest(skill=skill_id):
                 self.assertIn("search open-browser --payload", text)
                 self.assertIn("chrome-devtools-cockpit", text)
                 self.assertNotIn("search open-browser --query", text)
                 self.assertNotIn("search open_browser --query", text)
+
+    def test_market_p0_startup_marketer_skill_chain_is_registered(self) -> None:
+        lookup = {
+            row.get("id"): row
+            for row in self.manifest.get("skills", [])
+            if isinstance(row, dict)
+        }
+        market_skills = set(self._market_buddy().get("skills", []))
+        expected = set(self.MARKET_P0_SKILLS)
+
+        self.assertTrue(expected.issubset(market_skills), msg=sorted(expected - market_skills))
+        self.assertTrue(self.SHARED_RUNTIME_TOOL_SKILLS.issubset(market_skills))
+        for skill_id in self.MARKET_P0_SKILLS:
+            with self.subTest(skill=skill_id):
+                self.assertIn(skill_id, lookup)
+                self.assertTrue(self._market_skill_file(skill_id).exists())
+
+        for buddy in self.manifest.get("buddies", []):
+            assert isinstance(buddy, dict)
+            if buddy.get("id") == "market":
+                continue
+            with self.subTest(buddy=buddy.get("id")):
+                self.assertTrue(expected.isdisjoint(set(buddy.get("skills", []))))
+
+    def test_old_broad_market_skills_are_removed(self) -> None:
+        skill_ids = {
+            row.get("id")
+            for row in self.manifest.get("skills", [])
+            if isinstance(row, dict)
+        }
+        market_skills = set(self._market_buddy().get("skills", []))
+        for skill_id in self.OLD_MARKET_SKILLS:
+            with self.subTest(skill=skill_id):
+                self.assertNotIn(skill_id, skill_ids)
+                self.assertNotIn(skill_id, market_skills)
+                self.assertFalse((ROOT / "buddyswitch" / "skills" / "market" / skill_id).exists())
+
+    def test_market_p0_skills_have_valid_frontmatter_and_trigger_descriptions(self) -> None:
+        for skill_id in self.MARKET_P0_SKILLS:
+            text = self._market_skill_text(skill_id)
+            lowered = text.lower()
+            with self.subTest(skill=skill_id):
+                self.assertTrue(text.startswith("---\n"))
+                self.assertIn(f"name: {skill_id}", text)
+                description_line = next((line for line in text.splitlines() if line.startswith("description: ")), "")
+                self.assertTrue(description_line.startswith("description: Use when "), msg=description_line)
+                self.assertLessEqual(len(description_line), 500)
+                self.assertNotIn("python3 scripts/env/client.py", description_line)
+                self.assertNotIn("artifact.create_revision", description_line)
+                self.assertNotIn("##", description_line)
+                self.assertNotIn("1.", description_line)
+                self.assertNotIn(" then ", description_line.lower())
+                self.assertIn("## artifact", lowered)
+                self.assertIn("## verification", lowered)
+                self.assertIn("## guardrails", lowered)
+
+    def test_market_p0_skills_preserve_runtime_evidence_boundaries(self) -> None:
+        required = (
+            "search open-browser --payload",
+            "chrome-devtools-cockpit",
+            "artifact.create_revision",
+            "tool_evidence",
+            "do not invent",
+            "no silent downgrade",
+            "runtime discovery",
+        )
+        for skill_id in self.MARKET_P0_SKILLS:
+            text = self._market_skill_text(skill_id).lower()
+            with self.subTest(skill=skill_id):
+                for token in required:
+                    self.assertIn(token, text)
+
+    def test_market_source_seed_atlas_covers_seed_families_and_overclaim_caveats(self) -> None:
+        text = self._market_skill_text("market-source-seed-atlas").lower()
+        required = (
+            "user-language communities",
+            "review and comparison",
+            "official and competitor",
+            "search and content demand",
+            "ad and distribution",
+            "b2b structural",
+            "developer ecosystem",
+            "reddit",
+            "x.com",
+            "hacker news",
+            "github issues",
+            "g2",
+            "capterra",
+            "product hunt",
+            "chrome web store",
+            "google trends",
+            "meta ads library",
+            "google ads transparency",
+            "sec edgar",
+            "census",
+            "job posts",
+            "competitor pricing",
+            "competitor docs",
+            "competitor changelog",
+            "competitor careers",
+            "best for",
+            "bad for",
+            "query operators",
+            "access constraints",
+            "allowed claims",
+            "forbidden overclaims",
+            "not market size",
+            "not absolute demand",
+            "not confirmed product intent",
+        )
+        for token in required:
+            with self.subTest(token=token):
+                self.assertIn(token, text)
+        self.assertIn("reddit and x", text)
+        self.assertIn("review volume", text)
+        self.assertIn("homepage claims", text)
+        self.assertIn("normalized search interest", text)
+        self.assertIn("job posts and patents", text)
+
+    def test_market_search_operator_builder_requires_reproducible_query_plan(self) -> None:
+        text = self._market_skill_text("market-search-operator-builder").lower()
+        required = (
+            "discovery queries",
+            "validation queries",
+            "negative evidence",
+            "source-specific",
+            "freshness",
+            "query log",
+            "primary source",
+            "snippet",
+        )
+        for token in required:
+            with self.subTest(token=token):
+                self.assertIn(token, text)
+
+    def test_market_evidence_core_skills_cover_quality_triangulation_and_claim_audit(self) -> None:
+        skill_tokens = {
+            "source-quality-rater": (
+                "freshness",
+                "bias",
+                "source type",
+                "methodology",
+                "usable claims",
+            ),
+            "data-triangulator": (
+                "observed",
+                "inferred",
+                "hypothesized",
+                "two independent source families",
+                "directional",
+            ),
+            "hallucination-guard": (
+                "audit urls",
+                "dates",
+                "numbers",
+                "claim-source mapping",
+                "block them",
+                "cautious wording",
+            ),
+        }
+        forbidden = (
+            "single source is enough for high confidence",
+            "publish unsupported claims",
+        )
+        for skill_id, required in skill_tokens.items():
+            text = self._market_skill_text(skill_id).lower()
+            with self.subTest(skill=skill_id):
+                for token in required:
+                    self.assertIn(token, text)
+                for token in forbidden:
+                    self.assertNotIn(token, text)
+
+    def test_market_micro_signal_skills_capture_subtle_clues_with_guardrails(self) -> None:
+        required_sections = (
+            "micro signal",
+            "why it is interesting",
+            "possible hidden demand",
+            "alternative explanations",
+            "expansion queries",
+            "validation probe",
+            "confidence",
+            "spark",
+            "pattern",
+            "commitment",
+        )
+        guardrails = (
+            "do not generalize",
+            "do not treat likes",
+            "do not hide uncertainty",
+            "do not turn hunches into facts",
+            "always propose",
+        )
+        for skill_id in ("weak-signal-scout", "workaround-miner", "market-tension-finder"):
+            text = self._market_skill_text(skill_id).lower()
+            with self.subTest(skill=skill_id):
+                for token in required_sections:
+                    self.assertIn(token, text)
+                for token in guardrails:
+                    self.assertIn(token, text)
+
+    def test_workaround_miner_captures_behavior_linked_demand(self) -> None:
+        text = self._market_skill_text("workaround-miner").lower()
+        required = (
+            "spreadsheets",
+            "scripts",
+            "zapier",
+            "notion",
+            "airtable",
+            "manual services",
+            "internal tools",
+            "stitched-together products",
+            "copy-paste",
+            "current workaround",
+            "trigger moment",
+            "cost",
+            "owner",
+            "frequency",
+            "failure mode",
+            "switching implication",
+            "willingness to pay",
+            "commitment evidence",
+        )
+        for token in required:
+            with self.subTest(token=token):
+                self.assertIn(token, text)
+
+    def test_market_tension_finder_extracts_contradictions_and_probes(self) -> None:
+        text = self._market_skill_text("market-tension-finder").lower()
+        required = (
+            "stated",
+            "observed behavior",
+            "contradiction",
+            "continued usage",
+            "buyer confusion",
+            "market implication",
+            "validation probe",
+        )
+        for token in required:
+            with self.subTest(token=token):
+                self.assertIn(token, text)
+
+    def test_market_demand_discovery_skills_create_traceable_segment_and_icp_artifacts(self) -> None:
+        required_by_skill = {
+            "customer-voice-mining": (
+                "interviews",
+                "reviews",
+                "support notes",
+                "sales notes",
+                "community posts",
+                "pain themes",
+                "language patterns",
+                "traceable",
+                "do not invent quotes",
+            ),
+            "segment-map-builder": (
+                "role",
+                "business context",
+                "workflow context",
+                "trigger moment",
+                "workaround",
+                "exclusions",
+                "reachability",
+            ),
+            "icp-scorer": (
+                "pain urgency",
+                "reachability",
+                "ability to pay",
+                "switching trigger",
+                "referenceability",
+                "retention",
+                "expansion proxy",
+                "positive fit",
+                "negative fit",
+                "score bands",
+                "next validation action",
+            ),
+        }
+        for skill_id, required in required_by_skill.items():
+            text = self._market_skill_text(skill_id).lower()
+            with self.subTest(skill=skill_id):
+                for token in required:
+                    self.assertIn(token, text)
+
+    def test_market_action_skills_turn_evidence_into_one_runnable_experiment(self) -> None:
+        required_by_skill = {
+            "positioning-message-map": (
+                "who",
+                "alternative",
+                "differentiated value",
+                "proof",
+                "message hierarchy",
+                "testable angle",
+            ),
+            "growth-bottleneck-diagnoser": (
+                "one current growth bottleneck",
+                "broad marketing plan",
+            ),
+            "channel-strategy-mapper": (
+                "icp fit",
+                "intent fit",
+                "reachability",
+                "cac",
+                "payback",
+                "founder access",
+                "speed to learning",
+            ),
+            "experiment-design-reviewer": (
+                "hypothesis",
+                "primary metric",
+                "guardrail metric",
+                "duration",
+                "sample sanity",
+                "stop/scale rule",
+                "kill signal",
+            ),
+        }
+        for skill_id, required in required_by_skill.items():
+            text = self._market_skill_text(skill_id).lower()
+            with self.subTest(skill=skill_id):
+                for token in required:
+                    self.assertIn(token, text)
+        action_text = "\n".join(self._market_skill_text(skill_id).lower() for skill_id in required_by_skill)
+        self.assertIn("kill signal", action_text)
+        self.assertNotIn("generic multi-channel plan with no kill signal", action_text)
+
+    def test_runtime_skill_installer_materializes_market_p0_skill_set(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            workspace = Path(temp_dir) / "workspace"
+            workspace.mkdir()
+            installed = runtime_skills.install_runtime_skills(
+                manifest_path=ROOT / "buddyswitch" / "manifest.toml",
+                buddy_id="market",
+                workspace=workspace,
+            )
+            installed_set = set(installed)
+            expected = set(self.MARKET_P0_SKILLS) | self.SHARED_RUNTIME_TOOL_SKILLS
+            self.assertTrue(expected.issubset(installed_set), msg=sorted(expected - installed_set))
+            self.assertTrue(set(self.OLD_MARKET_SKILLS).isdisjoint(installed_set))
+            for skill_id in self.MARKET_P0_SKILLS:
+                self.assertTrue((workspace / ".agents" / "skills" / skill_id / "SKILL.md").exists(), msg=skill_id)
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            workspace = Path(temp_dir) / "pm-workspace"
+            workspace.mkdir()
+            installed = runtime_skills.install_runtime_skills(
+                manifest_path=ROOT / "buddyswitch" / "manifest.toml",
+                buddy_id="pm",
+                workspace=workspace,
+            )
+            self.assertTrue(set(self.MARKET_P0_SKILLS).isdisjoint(set(installed)))
 
     def test_design_shape_prototype_guidance_uses_generic_artifact_attachments(self) -> None:
         skill_text = (ROOT / "buddyswitch/skills/design/shape-prototype/SKILL.md").read_text(encoding="utf-8").lower()
@@ -340,7 +724,7 @@ class RuntimeSkillsTests(unittest.TestCase):
 
     def test_role_skills_remove_optional_handoff_guidance(self) -> None:
         role_skill_files = [
-            ROOT / "buddyswitch/skills/market/research-scan/SKILL.md",
+            *(self._market_skill_file(skill_id) for skill_id in self.MARKET_P0_SKILLS),
             *(self._pm_skill_file(skill_id) for skill_id in self.PM_PRODUCT_SKILLS),
             ROOT / "buddyswitch/skills/design/shape-prototype/SKILL.md",
             ROOT / "buddyswitch/skills/test/smoke-test/SKILL.md",
