@@ -23,7 +23,7 @@ def _build_definition() -> ToolDefinition:
             'Buddybox files are active-buddy private file records in instance-local storage addressed by logical_name. They are not product-readable and do not mutate tracks, tasks, artifacts, requests, comments, or messages.'
         ),
         use_when=(
-            'You need active-buddy private file read/write/list/delete operations.',
+            'You need active-buddy private file read/write/import/list/delete operations.',
         ),
         do_not_use_when=(
             'You need product-readable shared output; use artifact and track publication.',
@@ -282,6 +282,80 @@ def _build_definition() -> ToolDefinition:
                 ),
                 do_not_use_when=(
                     'You intend to share content across buddies or publish product-readable state; use artifact.create_revision and track publication actions.',
+                ),
+                risk_hints={
+                    'read_only': False,
+                    'destructive': False,
+                    'idempotent': False,
+                    'open_world': False,
+                    'requires_human_approval': False,
+                    'external_effect': False,
+                },
+            ),
+            ActionDefinition(
+                name='import_file',
+                title='buddybox.import_file',
+                description='Import one allowed local source file into the active-buddy private file workspace.',
+                input_schema={
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['logical_name', 'source_path'],
+                    'properties': {
+                        'logical_name': {
+                            'type': 'string',
+                            'description': 'Private logical_name to write inside the active buddy buddybox.',
+                        },
+                        'source_path': {
+                            'type': 'string',
+                            'description': 'Local file path produced by another tool; not stored or returned.',
+                        },
+                        'content_type': {
+                            'type': 'string',
+                            'description': 'Optional content type metadata for the imported file.',
+                        },
+                    },
+                },
+                output_schema={
+                    '$ref': 'ToolResult',
+                },
+                kind='write',
+                mutates='runtime_files',
+                required_permission='buddybox.write',
+                authority='buddybox.private_local_scope',
+                visibility='active-buddy private',
+                durability='durable',
+                result_content_level='private file row',
+                success_effect='Copies one allowed local source file into the active-buddy private file workspace without exposing filesystem paths.',
+                failure_state_guarantee='Rejected imports do not create, replace, or delete private files; response explains the local source or private boundary issue.',
+                reads=(
+                    'one allowed local source file',
+                ),
+                writes=(
+                    'active-buddy private file',
+                ),
+                does_not_write=(
+                    'tracks',
+                    'tasks',
+                    'artifacts',
+                    'requests',
+                    'comments',
+                    'messages',
+                    'browser session',
+                    'tokens',
+                ),
+                preconditions=(
+                    'logical_name stays inside active buddy private file capability',
+                    'source_path resolves to one allowed local regular file',
+                ),
+                returns=(
+                    'private_file',
+                ),
+                use_when=(
+                    'You have one local source_path for a tool-output file and need to import it into active-buddy private storage without relaying file bytes through the model.',
+                ),
+                do_not_use_when=(
+                    'You already have file bytes in content/content_base64 form; use buddybox.write.',
+                    'You need product-readable shared output; use artifact after private import when content must leave buddybox scope.',
                 ),
                 risk_hints={
                     'read_only': False,

@@ -181,6 +181,19 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("search open-browser --query", text)
                 self.assertNotIn("search open_browser --query", text)
 
+    def test_design_shape_prototype_guidance_uses_generic_artifact_attachments(self) -> None:
+        skill_text = (ROOT / "buddyswitch/skills/design/shape-prototype/SKILL.md").read_text(encoding="utf-8").lower()
+        template_text = (
+            ROOT / "buddyswitch/skills/design/shape-prototype/assets/design-handoff-template.md"
+        ).read_text(encoding="utf-8").lower()
+
+        self.assertIn("artifact attachment", template_text)
+        self.assertIn("attachment_id", template_text)
+        self.assertIn("chrome-devtools-cockpit", template_text)
+        self.assertIn("chrome-devtools-cockpit", skill_text)
+        self.assertIn("artifact.attach_file", skill_text)
+        self.assertIn("artifact.get_attachment", skill_text)
+
     def test_shared_tool_skill_env_client_examples_use_payload(self) -> None:
         for tool, path in self.SHARED_TOOL_SKILLS.items():
             text = path.read_text(encoding="utf-8")

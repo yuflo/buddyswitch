@@ -343,6 +343,68 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertIn("published_material", changes)
         self.assertIn("material_added", changes)
 
+    def test_artifact_template_permission_rejection_uses_structured_contract(self) -> None:
+        instance_id = "inst-pm-template-contract"
+        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-template-contract-denied",
+                "title": "Wrong template",
+                "summary": "deny",
+                "template": "design",
+                "body": "pm cannot write design",
+            },
+        )
+
+        self._assert_rejection_contract(rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_ARTIFACT_TEMPLATE_PERMISSION")
+        self.assertEqual(rejected.get("permission_boundary"), "artifact.template_permission")
+        self.assertEqual(rejected.get("correctable_fields"), ["template"])
+        self.assertEqual(rejected.get("durability"), "none")
+        self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
+
+    def test_artifact_attach_file_inline_blob_rejection_uses_structured_contract(self) -> None:
+        instance_id = "inst-design-attach-contract"
+        instance_json = self._instance_json(buddy="design", instance_id=instance_id)
+        created = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="design",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-design-attach-contract",
+                "title": "Design handoff",
+                "summary": "seed",
+                "template": "design",
+                "body": "# Handoff",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="design",
+            tool="artifact",
+            action="attach_file",
+            args={
+                "artifact_id": "art-design-attach-contract",
+                "filename": "desktop.png",
+                "source_buddybox_logical_name": "screenshots/desktop.png",
+                "content_base64": "aGVsbG8=",
+            },
+        )
+
+        self._assert_rejection_contract(rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_ARTIFACT_PAYLOAD")
+        self.assertEqual(rejected.get("permission_boundary"), "request-payload")
+
     def test_representative_responses_match_declared_effect_classes(self) -> None:
         instance_id = "inst-declared-effects"
         pm_instance = self._instance_json(buddy="pm", instance_id=instance_id)
@@ -453,9 +515,9 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
 
     def test_publication_success_responses_describe_object_mutations(self) -> None:
         instance_id = "inst-pm-mutation-response"
-        instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
+        pm_instance = self._instance_json(buddy="pm", instance_id=instance_id)
         track = self._dispatch(
-            instance_json=instance_json,
+            instance_json=pm_instance,
             instance_id=instance_id,
             buddy="pm",
             tool="track",
@@ -470,10 +532,11 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         )
         self.assertTrue(track.get("ok"), msg=track)
 
+        test_instance = self._instance_json(buddy="test", instance_id=instance_id)
         proof_draft = self._dispatch(
-            instance_json=instance_json,
+            instance_json=test_instance,
             instance_id=instance_id,
-            buddy="pm",
+            buddy="test",
             tool="artifact",
             action="create_revision",
             args={
@@ -487,9 +550,9 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         self.assertTrue(proof_draft.get("ok"), msg=proof_draft)
 
         proof = self._dispatch(
-            instance_json=instance_json,
+            instance_json=test_instance,
             instance_id=instance_id,
-            buddy="pm",
+            buddy="test",
             tool="track",
             action="add_proof",
             args={

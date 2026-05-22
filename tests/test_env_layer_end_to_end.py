@@ -175,7 +175,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         dev_draft = self._create_draft(
             buddy="dev",
             artifact_id="art-dev-r1",
-            template="proposal",
+            template="note",
             body="# Implementation Plan\n\nStep list",
             summary="dev plan",
         )
@@ -255,16 +255,114 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(track_ops, list, msg=track_catalog)
         assert isinstance(track_ops, list)
         self.assertIn("add_material", track_ops)
+        artifact_catalog = tool_catalog.get("artifact")
+        self.assertIsInstance(artifact_catalog, dict, msg=tool_catalog)
+        assert isinstance(artifact_catalog, dict)
+        artifact_ops = artifact_catalog.get("operations")
+        self.assertIsInstance(artifact_ops, list, msg=artifact_catalog)
+        assert isinstance(artifact_ops, list)
+        self.assertIn("attach_file", artifact_ops)
+        self.assertIn("list_attachments", artifact_ops)
+        self.assertIn("get_attachment", artifact_ops)
         op_semantics = context_full.get("operation_semantics")
         self.assertIsInstance(op_semantics, dict, msg=context_full)
         assert isinstance(op_semantics, dict)
         self.assertIn("track.add_material", op_semantics)
         self.assertIn("artifact.get", op_semantics)
+        self.assertIn("artifact.attach_file", op_semantics)
+        self.assertIn("artifact.list_attachments", op_semantics)
+        self.assertIn("artifact.get_attachment", op_semantics)
 
         for artifact_id in ("art-pm-brief-r1", "art-pm-brief-r2", "art-design-r1", "art-dev-r1", "art-test-proof-r1"):
             read = self._dispatch(buddy="dev", tool="artifact", action="get", args={"artifact_id": artifact_id})
             self.assertTrue(read.get("ok"), msg=read)
             self.assertIsInstance((read.get("artifact") or {}).get("body"), str, msg=read)
+
+    def test_track_open_attachment_discovery_flows_to_exact_attachment_read(self) -> None:
+        track_id = "track-e2e-attachments"
+        created = self._create_track(track_id)
+        self.assertTrue(created.get("ok"), msg=created)
+
+        design_draft = self._create_draft(
+            buddy="design",
+            artifact_id="art-design-attach-e2e-r1",
+            template="design",
+            body="# Design",
+            summary="design attachment",
+        )
+        self.assertTrue(design_draft.get("ok"), msg=design_draft)
+
+        source = self._runtime_path("tmp/chrome-devtools/desktop.png")
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"\x89PNG\r\n")
+        imported = self._dispatch(
+            buddy="design",
+            tool="buddybox",
+            action="import_file",
+            args={
+                "logical_name": "screenshots/desktop.png",
+                "source_path": str(source),
+                "content_type": "image/png",
+            },
+        )
+        self.assertTrue(imported.get("ok"), msg=imported)
+
+        attached = self._dispatch(
+            buddy="design",
+            tool="artifact",
+            action="attach_file",
+            args={
+                "artifact_id": "art-design-attach-e2e-r1",
+                "filename": "desktop.png",
+                "source_buddybox_logical_name": "screenshots/desktop.png",
+                "content_type": "image/png",
+            },
+        )
+        self.assertTrue(attached.get("ok"), msg=attached)
+        attachment = attached.get("attachment")
+        self.assertIsInstance(attachment, dict, msg=attached)
+        assert isinstance(attachment, dict)
+        attachment_id = str(attachment.get("attachment_id"))
+
+        published = self._dispatch(
+            buddy="design",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": track_id,
+                "artifact_id": "art-design-attach-e2e-r1",
+                "label": "Design",
+                "summary": "handoff",
+            },
+        )
+        self.assertTrue(published.get("ok"), msg=published)
+
+        opened = self._dispatch(buddy="dev", tool="track", action="open", args={"track_id": track_id})
+        self.assertTrue(opened.get("ok"), msg=opened)
+        track = opened.get("track")
+        self.assertIsInstance(track, dict, msg=opened)
+        assert isinstance(track, dict)
+        shared_materials = track.get("shared_materials")
+        self.assertIsInstance(shared_materials, list, msg=track)
+        assert isinstance(shared_materials, list)
+        self.assertEqual(len(shared_materials), 1)
+        material_ref = shared_materials[0]
+        self.assertEqual(material_ref.get("attachment_count"), 1)
+        ref_attachments = material_ref.get("attachments")
+        self.assertIsInstance(ref_attachments, list, msg=material_ref)
+        assert isinstance(ref_attachments, list)
+        self.assertEqual([row.get("attachment_id") for row in ref_attachments], [attachment_id])
+        self.assertNotIn("content_base64", ref_attachments[0])
+        self.assertNotIn("path", ref_attachments[0])
+
+        fetched = self._dispatch(
+            buddy="dev",
+            tool="artifact",
+            action="get_attachment",
+            args={"artifact_id": "art-design-attach-e2e-r1", "attachment_id": attachment_id},
+        )
+        self.assertTrue(fetched.get("ok"), msg=fetched)
+        self.assertEqual(fetched.get("content_base64"), "iVBORw0K")
 
     def test_cross_buddy_identity_scope_follows_service_permissions(self) -> None:
         env_store.create_artifact_revision(
@@ -355,7 +453,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         dev_result = self._create_draft(
             buddy="dev",
             artifact_id="art-dev-req-r1",
-            template="proposal",
+            template="note",
             body="# Implementation\n\nDelivered",
             summary="dev implementation",
         )

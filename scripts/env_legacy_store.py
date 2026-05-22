@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from env.repos import artifacts as artifact_repo
 from env.repos import runtime_files
 
 VALID_TRACK_STATE = ("active", "blocked", "review", "done")
@@ -372,117 +373,11 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
-    if _LEGACY_SOURCE_RUN in artifact:
-        raise ValueError("legacy artifact run lineage field is retired; use source_refs")
-    forbidden = sorted(field for field in artifact if field in _LEGACY_ARTIFACT_FIELDS)
-    legacy_fields_present = any(field in artifact for field in ("task_id", "kind", "content", "buddy"))
-    canonical_fields_present = any(
-        field in artifact for field in ("body", "template", "status", "published_to_track", "authors")
-    )
-    allow_legacy = legacy_fields_present and not canonical_fields_present
-    if forbidden:
-        if not allow_legacy:
-            raise ValueError(f"legacy artifact fields are retired: {', '.join(forbidden)}")
-        legacy_normalizable = {"task_id", "kind", "content"}
-        unsupported_legacy = [field for field in forbidden if field not in legacy_normalizable]
-        if unsupported_legacy:
-            raise ValueError(f"legacy artifact fields are retired: {', '.join(unsupported_legacy)}")
-
-    artifact_id = require_id(artifact.get("id", ""), "artifact.id")
-    title = _require_non_empty_text(artifact.get("title"), "artifact.title")
-
-    created_by_raw = artifact.get("created_by")
-    if not isinstance(created_by_raw, str) or not created_by_raw.strip():
-        created_by_raw = artifact.get("buddy") if allow_legacy else created_by_raw
-    created_by = _require_non_empty_text(created_by_raw, "artifact.created_by")
-    if created_by not in _KNOWN_BUDDY_IDS:
-        raise ValueError("artifact.created_by must be one of known buddy ids")
-
-    body = artifact.get("body")
-    if not isinstance(body, str) or not body.strip():
-        if allow_legacy:
-            content = artifact.get("content")
-            if isinstance(content, dict):
-                legacy_body = content.get("body")
-                if isinstance(legacy_body, str) and legacy_body.strip():
-                    body = legacy_body
-        if not isinstance(body, str) or not body.strip():
-            raise ValueError("artifact.body must be a non-empty string")
-
-    template = artifact.get("template")
-    if not isinstance(template, str) or not template.strip():
-        if allow_legacy:
-            kind = artifact.get("kind")
-            if isinstance(kind, str) and kind.strip():
-                template = _template_from_legacy_kind(kind)
-    if not isinstance(template, str) or template not in VALID_ARTIFACT_TEMPLATES:
-        raise ValueError(f"artifact.template must be one of {', '.join(VALID_ARTIFACT_TEMPLATES)}")
-
-    published_to_track = artifact.get("published_to_track")
-    if published_to_track is not None:
-        require_id(published_to_track, "artifact.published_to_track")
-
-    status = artifact.get("status")
-    if not isinstance(status, str):
-        if allow_legacy:
-            status = "draft" if published_to_track is None else "published"
-    if status not in VALID_ARTIFACT_STATUS:
-        raise ValueError(f"artifact.status must be one of {', '.join(VALID_ARTIFACT_STATUS)}")
-    if status == "draft" and published_to_track is not None:
-        raise ValueError("artifact.published_to_track must be null for draft artifacts")
-    if status in {"published", "archived"} and published_to_track is None:
-        raise ValueError("artifact.published_to_track is required for published/archived artifacts")
-
-    summary = artifact.get("summary", "")
-    if not isinstance(summary, str):
-        raise ValueError("artifact.summary must be a string")
-
-    source_refs = _normalize_source_refs(artifact.get("source_refs"), active_buddy=created_by, allow_buddybox=True)
-
-    revision = artifact.get("revision")
-    if not isinstance(revision, int) or revision <= 0:
-        raise ValueError("artifact.revision must be a positive integer")
-
-    supersedes_artifact_id = artifact.get("supersedes_artifact_id")
-    if supersedes_artifact_id is not None:
-        require_id(supersedes_artifact_id, "artifact.supersedes_artifact_id")
-
-    is_current = artifact.get("is_current")
-    if not isinstance(is_current, bool):
-        raise ValueError("artifact.is_current must be a boolean")
-
-    authors_raw = artifact.get("authors")
-    authors: list[str] = []
-    if isinstance(authors_raw, list):
-        for row in authors_raw:
-            if isinstance(row, str) and row in _KNOWN_BUDDY_IDS and row not in authors:
-                authors.append(row)
-    if created_by not in authors:
-        authors.insert(0, created_by)
-
-    created_at = _require_non_empty_text(artifact.get("created_at"), "artifact.created_at")
-    updated_at = _require_non_empty_text(artifact.get("updated_at"), "artifact.updated_at")
-
+    normalized = artifact_repo.validate_artifact(artifact)
+    published_to_track = normalized.get("published_to_track")
     if published_to_track is not None and get_track(published_to_track) is None:
         raise ValueError(f"track not found: {published_to_track}")
-
-    return {
-        "id": artifact_id,
-        "title": title,
-        "summary": summary,
-        "body": body,
-        "template": template,
-        "status": status,
-        "published_to_track": published_to_track,
-        "revision": revision,
-        "is_current": is_current,
-        "supersedes_artifact_id": supersedes_artifact_id,
-        "created_by": created_by,
-        "authors": authors,
-        "source_refs": source_refs,
-        "created_at": created_at,
-        "updated_at": updated_at,
-    }
+    return normalized
 
 
 def validate_message(message: dict[str, Any]) -> dict[str, Any]:

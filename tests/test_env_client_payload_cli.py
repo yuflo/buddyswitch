@@ -94,6 +94,34 @@ class EnvClientPayloadCliTests(unittest.TestCase):
             {"tool": "context", "action": "list_sources", "args": {}},
         )
 
+    def test_buddybox_import_file_cli_uses_hyphenated_command_and_canonical_action(self) -> None:
+        payload = {
+            "logical_name": "screenshots/desktop.png",
+            "source_path": "/tmp/desktop.png",
+            "content_type": "image/png",
+        }
+        code, output, broker = self._run_client(["buddybox", "import-file", "--payload", json.dumps(payload)])
+        self.assertEqual(code, 0, msg=output)
+        broker.assert_called_once_with(
+            "env.tool",
+            {"tool": "buddybox", "action": "import_file", "args": payload},
+        )
+
+    def test_artifact_attachment_cli_commands_use_hyphenated_spelling_and_canonical_actions(self) -> None:
+        cases = (
+            ("attach-file", "attach_file", {"artifact_id": "art-1", "filename": "desktop.png", "source_buddybox_logical_name": "shots/desktop.png"}),
+            ("list-attachments", "list_attachments", {"artifact_id": "art-1"}),
+            ("get-attachment", "get_attachment", {"artifact_id": "art-1", "attachment_id": "att-1"}),
+        )
+        for cli_action, action, payload in cases:
+            with self.subTest(action=action):
+                code, output, broker = self._run_client(["artifact", cli_action, "--payload", json.dumps(payload)])
+                self.assertEqual(code, 0, msg=output)
+                broker.assert_called_once_with(
+                    "env.tool",
+                    {"tool": "artifact", "action": action, "args": payload},
+                )
+
     def test_payload_file_path_string_is_rejected_without_file_read(self) -> None:
         with mock.patch.object(sys, "argv", ["client.py", "artifact", "create-revision", "--payload", "/tmp/artifact.json"]):
             with mock.patch.object(self.client, "request_runtime_broker") as broker:

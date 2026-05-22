@@ -588,6 +588,18 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         track_create = track_catalog.get("action_semantics", {}).get("create", {})
         self.assertIn("visibility", track_create)
         self.assertIn("failure_state_guarantee", track_create)
+        artifact_catalog = payload.get("tool_catalog", {}).get("artifact", {})
+        self.assertIsInstance(artifact_catalog, dict, msg=payload)
+        assert isinstance(artifact_catalog, dict)
+        artifact_ops = artifact_catalog.get("operations")
+        self.assertIsInstance(artifact_ops, list, msg=artifact_catalog)
+        assert isinstance(artifact_ops, list)
+        self.assertIn("attach_file", artifact_ops)
+        self.assertIn("list_attachments", artifact_ops)
+        self.assertIn("get_attachment", artifact_ops)
+        self.assertIn("artifact.attach_file", operation_semantics)
+        self.assertIn("artifact.list_attachments", operation_semantics)
+        self.assertIn("artifact.get_attachment", operation_semantics)
 
     def test_context_source_workspace_uses_profile_not_agents_text_and_profile_failure_is_explicit(self) -> None:
         instance_json = self._instance_json(buddy="dev")

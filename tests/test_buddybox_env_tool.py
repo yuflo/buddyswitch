@@ -293,6 +293,89 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_BUDDYBOX_PAYLOAD")
 
+    def test_import_file_writes_private_file_without_path_exposure(self) -> None:
+        instance_id = "inst-design-box-import"
+        instance_json = self._instance_json(buddy="design", instance_id=instance_id)
+        source = self._runtime_path("tmp/chrome-devtools/desktop.png")
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"\x89PNG\r\n")
+
+        imported = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="design",
+            action="import_file",
+            args={
+                "logical_name": "screenshots/desktop.png",
+                "source_path": str(source),
+                "content_type": "image/png",
+            },
+        )
+        self.assertTrue(imported.get("ok"), msg=imported)
+        self.assertEqual(imported.get("logical_name"), "screenshots/desktop.png")
+        self.assertEqual(imported.get("content_type"), "image/png")
+        self.assertNotIn("source_path", imported)
+        self.assertNotIn("path", imported)
+        self.assertNotIn(str(source), json.dumps(imported, ensure_ascii=True))
+        self.assertTrue(source.exists())
+        self.assertEqual(source.read_bytes(), b"\x89PNG\r\n")
+
+        read_back = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="design",
+            action="read",
+            args={"logical_name": "screenshots/desktop.png", "encoding": "base64"},
+        )
+        self.assertTrue(read_back.get("ok"), msg=read_back)
+        self.assertEqual(read_back.get("content_base64"), "iVBORw0K")
+
+    def test_import_file_rejects_invalid_sources_without_writing_private_file(self) -> None:
+        instance_id = "inst-design-box-import-reject"
+        instance_json = self._instance_json(buddy="design", instance_id=instance_id)
+
+        directory_source = self._runtime_path("tmp/import-invalid/dir-source")
+        directory_source.mkdir(parents=True, exist_ok=True)
+
+        runtime_object_source = self._runtime_path("buddyswitch/objects/tracks/leak.txt")
+        runtime_object_source.parent.mkdir(parents=True, exist_ok=True)
+        runtime_object_source.write_text("leak\n", encoding="utf-8")
+
+        runtime_local_source = self._runtime_path("buddyswitch/local/buddybox/design/private.txt")
+        runtime_local_source.parent.mkdir(parents=True, exist_ok=True)
+        runtime_local_source.write_text("private\n", encoding="utf-8")
+
+        symlink_source = self._runtime_path("tmp/import-invalid/manifest-link")
+        symlink_source.parent.mkdir(parents=True, exist_ok=True)
+        symlink_source.symlink_to(MANIFEST)
+
+        cases = (
+            ("missing", self._runtime_path("tmp/import-invalid/missing.txt")),
+            ("directory", directory_source),
+            ("runtime-objects", runtime_object_source),
+            ("runtime-local", runtime_local_source),
+            ("symlink-outside", symlink_source),
+        )
+
+        for case_name, source_path in cases:
+            logical_name = f"imports/{case_name}.txt"
+            rejected = self._dispatch(
+                instance_json=instance_json,
+                instance_id=instance_id,
+                buddy="design",
+                action="import_file",
+                args={
+                    "logical_name": logical_name,
+                    "source_path": str(source_path),
+                    "content_type": "text/plain",
+                },
+            )
+            with self.subTest(case=case_name):
+                self.assertFalse(rejected.get("ok"), msg=rejected)
+                self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
+                self.assertEqual(rejected.get("durability"), "none")
+                self.assertFalse(self._runtime_path(f"buddyswitch/local/buddybox/design/{logical_name}").exists())
+
     def test_buddybox_rejects_buddy_prefixed_logical_names(self) -> None:
         instance_id = "inst-pm-box-prefix"
         instance_json = self._instance_json(buddy="pm", instance_id=instance_id)

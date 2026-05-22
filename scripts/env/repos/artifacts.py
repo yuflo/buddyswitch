@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any
@@ -14,6 +17,7 @@ VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", 
 _LEGACY_SOURCE_RUN = "source" + "_run_id"
 _LEGACY_ARTIFACT_FIELDS = {"task_id", "kind", "content", "publication_role", "asset", "media", "material", "blocks", "figma_file"}
 _KNOWN_BUDDY_IDS = {"pm", "design", "dev", "market", "test"}
+_SHA256_HEX_LENGTH = 64
 
 
 def _template_from_legacy_kind(kind: str) -> str:
@@ -111,12 +115,66 @@ def _normalize_source_refs(
     return normalized
 
 
+def _normalize_attachment_filename(value: Any) -> str:
+    filename = _require_non_empty_text(value, "attachment.filename")
+    if filename in {".", ".."}:
+        raise ValueError("attachment.filename must not be '.' or '..'")
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise ValueError("attachment.filename must not include path separators or traversal")
+    return filename
+
+
+def _normalize_attachment_rows(raw_rows: Any) -> list[dict[str, Any]]:
+    if raw_rows is None:
+        return []
+    if not isinstance(raw_rows, list):
+        raise ValueError("artifact.attachments must be a list")
+
+    rows: list[dict[str, Any]] = []
+    for raw in raw_rows:
+        if not isinstance(raw, dict):
+            raise ValueError("artifact.attachments rows must be objects")
+        attachment_id = runtime_files.require_id(raw.get("attachment_id"), "attachment.attachment_id")
+        filename = _normalize_attachment_filename(raw.get("filename"))
+        content_type = _require_non_empty_text(raw.get("content_type"), "attachment.content_type")
+        size_bytes = raw.get("size_bytes")
+        if not isinstance(size_bytes, int) or size_bytes < 0:
+            raise ValueError("attachment.size_bytes must be a non-negative integer")
+        sha256 = _require_non_empty_text(raw.get("sha256"), "attachment.sha256")
+        if len(sha256) != _SHA256_HEX_LENGTH or any(ch not in "0123456789abcdef" for ch in sha256):
+            raise ValueError("attachment.sha256 must be 64 lowercase hex chars")
+        created_by = _require_non_empty_text(raw.get("created_by"), "attachment.created_by")
+        if created_by not in _KNOWN_BUDDY_IDS:
+            raise ValueError("attachment.created_by must be one of known buddy ids")
+        created_at = _require_non_empty_text(raw.get("created_at"), "attachment.created_at")
+        rows.append(
+            {
+                "attachment_id": attachment_id,
+                "filename": filename,
+                "content_type": content_type,
+                "size_bytes": size_bytes,
+                "sha256": sha256,
+                "created_by": created_by,
+                "created_at": created_at,
+            }
+        )
+    return rows
+
+
 def now_iso() -> str:
     return runtime_files.now_iso()
 
 
 def artifact_file(artifact_id: str) -> Path:
     return runtime_files.ARTIFACT_OBJECTS_DIR / f"{runtime_files.require_id(artifact_id, 'artifact id')}.json"
+
+
+def attachment_file(artifact_id: str, attachment_id: str) -> Path:
+    return (
+        runtime_files.ARTIFACT_ATTACHMENTS_DIR
+        / runtime_files.require_id(artifact_id, "artifact id")
+        / f"{runtime_files.require_id(attachment_id, 'attachment id')}.bin"
+    )
 
 
 def list_artifacts() -> list[dict[str, Any]]:
@@ -141,6 +199,14 @@ def save_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     runtime_files.ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
     runtime_files.write_json_object(artifact_file(normalized["id"]), normalized)
     return normalized
+
+
+def attachment_summaries(artifact_id: str) -> list[dict[str, Any]]:
+    artifact = get_artifact(artifact_id)
+    if artifact is None:
+        raise ValueError(f"artifact not found: {artifact_id}")
+    attachments = artifact.get("attachments")
+    return list(attachments) if isinstance(attachments, list) else []
 
 
 def create_artifact_revision(
@@ -226,6 +292,7 @@ def create_artifact_revision(
         "created_by": created_by,
         "authors": author_rows,
         "source_refs": normalized_refs,
+        "attachments": [],
         "created_at": timestamp,
         "updated_at": timestamp,
     }
@@ -265,6 +332,85 @@ def update_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         artifact[key] = value
     artifact["updated_at"] = now_iso()
     return save_artifact(artifact)
+
+
+def adopt_buddybox_attachment(
+    artifact_id: str,
+    filename: str,
+    created_by: str,
+    source_logical_name: str,
+    content_type: str | None,
+    context: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    artifact = get_artifact(artifact_id)
+    if artifact is None:
+        raise ValueError(f"artifact not found: {artifact_id}")
+
+    manifest = getattr(context, "manifest", None)
+    if manifest is None and isinstance(context, dict):
+        manifest = context.get("manifest")
+    buddies = manifest.get("buddies", []) if isinstance(manifest, dict) else []
+    buddy_ids = {
+        str(row.get("id")).strip()
+        for row in buddies
+        if isinstance(row, dict) and isinstance(row.get("id"), str) and str(row.get("id")).strip()
+    }
+    buddy_ids.add(created_by)
+
+    logical_name = context.repos.buddybox.normalize_logical_name(
+        source_logical_name,
+        active_buddy=created_by,
+        buddy_ids=buddy_ids,
+    )
+    root = context.repos.buddybox.ensure_active_buddy_root(
+        active_buddy=created_by,
+        instance_payload=context.instance_payload,
+    )
+    source_path = root / logical_name
+    raw, inferred_content_type = context.repos.buddybox.read_private_file(root=root, logical_name=logical_name)
+
+    attachment_id = f"att-{uuid.uuid4().hex[:10]}"
+    content_type_value = content_type.strip() if isinstance(content_type, str) and content_type.strip() else inferred_content_type
+    timestamp = now_iso()
+    attachment = {
+        "attachment_id": attachment_id,
+        "filename": _normalize_attachment_filename(filename),
+        "content_type": content_type_value,
+        "size_bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "created_by": created_by,
+        "created_at": timestamp,
+    }
+
+    target_path = attachment_file(artifact_id, attachment_id)
+    runtime_files.require_runtime_workspace_write_root()
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(source_path, target_path)
+    except OSError:
+        shutil.copyfile(source_path, target_path)
+
+    updated_artifact = dict(artifact)
+    updated_artifact["attachments"] = attachment_summaries(artifact_id) + [attachment]
+    updated_artifact["updated_at"] = timestamp
+    saved = save_artifact(updated_artifact)
+    return saved, attachment
+
+
+def get_attachment_content(artifact_id: str, attachment_id: str) -> tuple[dict[str, Any], bytes]:
+    artifact = get_artifact(artifact_id)
+    if artifact is None:
+        raise ValueError(f"artifact not found: {artifact_id}")
+
+    attachments = artifact.get("attachments")
+    rows = attachments if isinstance(attachments, list) else []
+    for row in rows:
+        if isinstance(row, dict) and row.get("attachment_id") == attachment_id:
+            path = attachment_file(artifact_id, attachment_id)
+            if not path.exists() or not path.is_file():
+                raise FileNotFoundError(attachment_id)
+            return row, path.read_bytes()
+    raise ValueError(f"attachment not found: {attachment_id}")
 
 
 def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
@@ -356,6 +502,7 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     if created_by not in authors:
         authors.insert(0, created_by)
 
+    attachments = _normalize_attachment_rows(artifact.get("attachments"))
     created_at = _require_non_empty_text(artifact.get("created_at"), "artifact.created_at")
     updated_at = _require_non_empty_text(artifact.get("updated_at"), "artifact.updated_at")
 
@@ -373,6 +520,7 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         "created_by": created_by,
         "authors": authors,
         "source_refs": source_refs,
+        "attachments": attachments,
         "created_at": created_at,
         "updated_at": updated_at,
     }

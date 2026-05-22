@@ -523,6 +523,165 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(bool(r2_store.get("is_current")), msg=r2_store)
         self.assertEqual(r2_store.get("published_to_track"), "track-material-main")
 
+    def test_track_open_exposes_attachment_summaries_for_readable_material_and_proof(self) -> None:
+        pm_instance = self._pm_instance()
+        self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-open-attachments").get("ok"))
+
+        pm_source = self._runtime_path("tmp/pm/brief-attachment.txt")
+        pm_source.parent.mkdir(parents=True, exist_ok=True)
+        pm_source.write_text("pm attachment", encoding="utf-8")
+        imported_pm = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-track",
+            buddy="pm",
+            tool="buddybox",
+            action="import_file",
+            args={
+                "logical_name": "evidence/brief-attachment.txt",
+                "source_path": str(pm_source),
+                "content_type": "text/plain",
+            },
+        )
+        self.assertTrue(imported_pm.get("ok"), msg=imported_pm)
+
+        pm_draft = self._create_draft(
+            instance_json=pm_instance,
+            instance_id="inst-pm-track",
+            buddy="pm",
+            artifact_id="art-track-open-brief-r1",
+            template="brief",
+            body="# Brief",
+        )
+        self.assertTrue(pm_draft.get("ok"), msg=pm_draft)
+        attached_pm = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-track",
+            buddy="pm",
+            tool="artifact",
+            action="attach_file",
+            args={
+                "artifact_id": "art-track-open-brief-r1",
+                "filename": "brief-attachment.txt",
+                "source_buddybox_logical_name": "evidence/brief-attachment.txt",
+                "content_type": "text/plain",
+            },
+        )
+        self.assertTrue(attached_pm.get("ok"), msg=attached_pm)
+        material_attachment_id = str((attached_pm.get("attachment") or {}).get("attachment_id"))
+
+        published_material = self._dispatch(
+            instance_json=pm_instance,
+            instance_id="inst-pm-track",
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": "track-open-attachments",
+                "artifact_id": "art-track-open-brief-r1",
+                "label": "Brief",
+                "summary": "brief publish",
+            },
+        )
+        self.assertTrue(published_material.get("ok"), msg=published_material)
+
+        test_instance = self._instance_json(instance_id="inst-test-track-open", buddy="test")
+        test_source = self._runtime_path("tmp/test/proof-attachment.txt")
+        test_source.parent.mkdir(parents=True, exist_ok=True)
+        test_source.write_text("proof attachment", encoding="utf-8")
+        imported_test = self._dispatch(
+            instance_json=test_instance,
+            instance_id="inst-test-track-open",
+            buddy="test",
+            tool="buddybox",
+            action="import_file",
+            args={
+                "logical_name": "evidence/proof-attachment.txt",
+                "source_path": str(test_source),
+                "content_type": "text/plain",
+            },
+        )
+        self.assertTrue(imported_test.get("ok"), msg=imported_test)
+
+        test_draft = self._create_draft(
+            instance_json=test_instance,
+            instance_id="inst-test-track-open",
+            buddy="test",
+            artifact_id="art-track-open-proof-r1",
+            template="proof",
+            body="# Proof",
+        )
+        self.assertTrue(test_draft.get("ok"), msg=test_draft)
+        attached_test = self._dispatch(
+            instance_json=test_instance,
+            instance_id="inst-test-track-open",
+            buddy="test",
+            tool="artifact",
+            action="attach_file",
+            args={
+                "artifact_id": "art-track-open-proof-r1",
+                "filename": "proof-attachment.txt",
+                "source_buddybox_logical_name": "evidence/proof-attachment.txt",
+                "content_type": "text/plain",
+            },
+        )
+        self.assertTrue(attached_test.get("ok"), msg=attached_test)
+        proof_attachment_id = str((attached_test.get("attachment") or {}).get("attachment_id"))
+
+        published_proof = self._dispatch(
+            instance_json=test_instance,
+            instance_id="inst-test-track-open",
+            buddy="test",
+            tool="track",
+            action="add_proof",
+            args={
+                "track_id": "track-open-attachments",
+                "artifact_id": "art-track-open-proof-r1",
+                "label": "Proof",
+                "summary": "proof publish",
+            },
+        )
+        self.assertTrue(published_proof.get("ok"), msg=published_proof)
+
+        dev_instance = self._instance_json(instance_id="inst-dev-track-open", buddy="dev")
+        opened = self._dispatch(
+            instance_json=dev_instance,
+            instance_id="inst-dev-track-open",
+            buddy="dev",
+            tool="track",
+            action="open",
+            args={"track_id": "track-open-attachments"},
+        )
+        self.assertTrue(opened.get("ok"), msg=opened)
+        track = opened.get("track")
+        self.assertIsInstance(track, dict, msg=opened)
+        assert isinstance(track, dict)
+
+        shared_materials = track.get("shared_materials")
+        self.assertIsInstance(shared_materials, list, msg=track)
+        assert isinstance(shared_materials, list)
+        self.assertEqual(len(shared_materials), 1)
+        material_ref = shared_materials[0]
+        self.assertEqual(material_ref.get("attachment_count"), 1)
+        material_attachments = material_ref.get("attachments")
+        self.assertIsInstance(material_attachments, list, msg=material_ref)
+        assert isinstance(material_attachments, list)
+        self.assertEqual([row.get("attachment_id") for row in material_attachments], [material_attachment_id])
+        self.assertNotIn("content_base64", material_attachments[0])
+        self.assertNotIn("path", material_attachments[0])
+
+        close_proof = track.get("close_proof")
+        self.assertIsInstance(close_proof, list, msg=track)
+        assert isinstance(close_proof, list)
+        self.assertEqual(len(close_proof), 1)
+        proof_ref = close_proof[0]
+        self.assertEqual(proof_ref.get("attachment_count"), 1)
+        proof_attachments = proof_ref.get("attachments")
+        self.assertIsInstance(proof_attachments, list, msg=proof_ref)
+        assert isinstance(proof_attachments, list)
+        self.assertEqual([row.get("attachment_id") for row in proof_attachments], [proof_attachment_id])
+        self.assertNotIn("content_base64", proof_attachments[0])
+        self.assertNotIn("path", proof_attachments[0])
+
     def test_add_material_rejects_duplicate_already_bound_and_cross_track_without_state_pollution(self) -> None:
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-material-a").get("ok"))

@@ -15,6 +15,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_legacy_store as env_store  # noqa: E402
+from env.repos import artifacts as artifact_repo  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -166,6 +167,56 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertEqual((payload.get("error") or {}).get("code"), "E_ARTIFACT_PAYLOAD")
                 self.assertFalse(bool(payload.get("state_changed")), msg=payload)
 
+    def test_validate_artifact_normalizes_missing_attachments_to_empty_list(self) -> None:
+        normalized = env_store.validate_artifact(
+            {
+                "id": "art-attachments-normalize-r1",
+                "title": "Normalize attachments",
+                "summary": "seed",
+                "body": "body",
+                "template": "brief",
+                "status": "draft",
+                "published_to_track": None,
+                "revision": 1,
+                "is_current": True,
+                "supersedes_artifact_id": None,
+                "created_by": "pm",
+                "authors": ["pm"],
+                "source_refs": None,
+                "created_at": "2026-05-22T10:00:00+08:00",
+                "updated_at": "2026-05-22T10:00:00+08:00",
+            }
+        )
+        self.assertEqual(normalized.get("attachments"), [])
+
+    def test_validate_artifact_rejects_unsafe_attachment_metadata(self) -> None:
+        base_artifact = {
+            "id": "art-attachments-invalid-r1",
+            "title": "Invalid attachments",
+            "summary": "seed",
+            "body": "body",
+            "template": "brief",
+            "status": "draft",
+            "published_to_track": None,
+            "revision": 1,
+            "is_current": True,
+            "supersedes_artifact_id": None,
+            "created_by": "pm",
+            "authors": ["pm"],
+            "source_refs": None,
+            "created_at": "2026-05-22T10:00:00+08:00",
+            "updated_at": "2026-05-22T10:00:00+08:00",
+        }
+        invalid_rows = (
+            {"attachment_id": "att-unsafe", "filename": "../escape.txt", "content_type": "text/plain", "size_bytes": 1, "sha256": "a" * 64, "created_by": "pm", "created_at": "2026-05-22T10:00:00+08:00"},
+            {"attachment_id": "att-missing-hash", "filename": "safe.txt", "content_type": "text/plain", "size_bytes": 1, "created_by": "pm", "created_at": "2026-05-22T10:00:00+08:00"},
+            {"attachment_id": "att-bad-buddy", "filename": "safe.txt", "content_type": "text/plain", "size_bytes": 1, "sha256": "a" * 64, "created_by": "unknown", "created_at": "2026-05-22T10:00:00+08:00"},
+        )
+        for row in invalid_rows:
+            with self.subTest(row=row):
+                with self.assertRaises(ValueError):
+                    env_store.validate_artifact({**base_artifact, "attachments": [row]})
+
     def test_create_revision_rejects_direct_publication_without_orphan(self) -> None:
         instance_json = self._instance_json(instance_id="inst-pm-art", buddy="pm")
         created_track = self._create_track(instance_json=instance_json, instance_id="inst-pm-art", track_id="track-orphan-guard")
@@ -265,6 +316,107 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("task_id", artifact)
         self.assertNotIn("kind", artifact)
         self.assertNotIn("content", artifact)
+
+    def test_create_revision_enforces_manifest_template_permissions(self) -> None:
+        buddy_cases = (
+            ("pm", ("brief", "decision", "note"), ("design", "proof")),
+            ("design", ("design", "brief"), ("decision", "note", "proof")),
+            ("dev", ("brief", "note"), ()),
+            ("test", ("proof",), ("brief",)),
+            ("market", ("brief",), ("design",)),
+        )
+
+        for buddy, allowed_templates, rejected_templates in buddy_cases:
+            for template in allowed_templates:
+                artifact_id = f"art-{buddy}-{template}-allowed"
+                instance_id = f"inst-{buddy}-{template}-allowed"
+                instance_json = self._instance_json(instance_id=instance_id, buddy=buddy)
+                created = self._dispatch(
+                    instance_json=instance_json,
+                    instance_id=instance_id,
+                    buddy=buddy,
+                    tool="artifact",
+                    action="create_revision",
+                    args={
+                        "artifact_id": artifact_id,
+                        "title": f"{buddy} {template} draft",
+                        "summary": "allowed template",
+                        "template": template,
+                        "body": f"{buddy} can write {template}",
+                    },
+                )
+                with self.subTest(buddy=buddy, template=template, expected="allowed"):
+                    self.assertTrue(created.get("ok"), msg=created)
+                    stored = env_store.get_artifact(artifact_id)
+                    self.assertIsInstance(stored, dict, msg=created)
+                    assert isinstance(stored, dict)
+                    self.assertEqual(stored.get("template"), template)
+                    self.assertEqual(stored.get("created_by"), buddy)
+
+            for template in rejected_templates:
+                artifact_id = f"art-{buddy}-{template}-denied"
+                instance_id = f"inst-{buddy}-{template}-denied"
+                instance_json = self._instance_json(instance_id=instance_id, buddy=buddy)
+                rejected = self._dispatch(
+                    instance_json=instance_json,
+                    instance_id=instance_id,
+                    buddy=buddy,
+                    tool="artifact",
+                    action="create_revision",
+                    args={
+                        "artifact_id": artifact_id,
+                        "title": f"{buddy} {template} denied",
+                        "summary": "rejected template",
+                        "template": template,
+                        "body": f"{buddy} should not write {template}",
+                    },
+                )
+                with self.subTest(buddy=buddy, template=template, expected="rejected"):
+                    self.assertFalse(rejected.get("ok"), msg=rejected)
+                    self.assertEqual((rejected.get("error") or {}).get("code"), "E_ARTIFACT_TEMPLATE_PERMISSION")
+                    self.assertEqual(rejected.get("permission_boundary"), "artifact.template_permission")
+                    self.assertEqual(rejected.get("correctable_fields"), ["template"])
+                    self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
+                    self.assertEqual(rejected.get("durability"), "none")
+                    self.assertFalse(env_store.artifact_file(artifact_id).exists())
+
+    def test_update_metadata_rejects_template_not_declared_for_active_buddy_without_mutation(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-pm-template-update", buddy="pm")
+        created = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-template-update",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-pm-template-update",
+                "title": "PM note",
+                "summary": "seed",
+                "template": "note",
+                "body": "seed",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-template-update",
+            buddy="pm",
+            tool="artifact",
+            action="update_metadata",
+            args={"artifact_id": "art-pm-template-update", "template": "design"},
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual((rejected.get("error") or {}).get("code"), "E_ARTIFACT_TEMPLATE_PERMISSION")
+        self.assertEqual(rejected.get("permission_boundary"), "artifact.template_permission")
+        self.assertEqual(rejected.get("correctable_fields"), ["template"])
+        self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
+        self.assertEqual(rejected.get("durability"), "none")
+
+        stored = env_store.get_artifact("art-pm-template-update")
+        self.assertIsInstance(stored, dict, msg=rejected)
+        assert isinstance(stored, dict)
+        self.assertEqual(stored.get("template"), "note")
 
     def test_draft_is_private_before_publication(self) -> None:
         instance_pm = self._instance_json(instance_id="inst-pm-art", buddy="pm")
@@ -411,7 +563,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "artifact_id": "art-pm-publish-r1",
                 "title": "Publish me",
                 "summary": "",
-                "template": "proposal",
+                "template": "brief",
                 "body": "public body",
             },
         )
@@ -523,7 +675,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "artifact_id": "art-source-derived-r1",
                 "title": "Derived from readable source",
                 "summary": "derived",
-                "template": "proposal",
+                "template": "note",
                 "body": "derived body",
                 "source_refs": [{"type": "artifact", "id": "art-source-readable-r1"}],
                 "read_claim": "summarized-full-content",
@@ -849,7 +1001,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "artifact_id": "art-list-dev-private",
                 "title": "Dev Private",
                 "summary": "Private to dev",
-                "template": "design",
+                "template": "note",
                 "body": "dev draft body",
             },
         )
@@ -936,10 +1088,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(published_r1.get("ok"), msg=published_r1)
 
+        instance_test = self._instance_json(instance_id="inst-pm-art-list-published", buddy="test")
         created_proof = self._dispatch(
-            instance_json=instance_pm,
+            instance_json=instance_test,
             instance_id="inst-pm-art-list-published",
-            buddy="pm",
+            buddy="test",
             tool="artifact",
             action="create_revision",
             args={
@@ -952,9 +1105,9 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(created_proof.get("ok"), msg=created_proof)
         published_proof = self._dispatch(
-            instance_json=instance_pm,
+            instance_json=instance_test,
             instance_id="inst-pm-art-list-published",
-            buddy="pm",
+            buddy="test",
             tool="track",
             action="add_proof",
             args={
@@ -966,6 +1119,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(published_proof.get("ok"), msg=published_proof)
 
+        instance_pm = self._instance_json(instance_id="inst-pm-art-list-published", buddy="pm")
         created_r2 = self._dispatch(
             instance_json=instance_pm,
             instance_id="inst-pm-art-list-published",
@@ -1102,10 +1256,11 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
         instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
+        instance_test = self._instance_json(instance_id=shared_instance_id, buddy="test")
         created_body_only = self._dispatch(
-            instance_json=instance_pm,
+            instance_json=instance_test,
             instance_id=shared_instance_id,
-            buddy="pm",
+            buddy="test",
             tool="artifact",
             action="create_revision",
             args={
@@ -1119,9 +1274,9 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(created_body_only.get("ok"), msg=created_body_only)
         self.assertTrue(
             self._dispatch(
-                instance_json=instance_pm,
+                instance_json=instance_test,
                 instance_id=shared_instance_id,
-                buddy="pm",
+                buddy="test",
                 tool="track",
                 action="add_proof",
                 args={
@@ -1133,6 +1288,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             ).get("ok")
         )
 
+        instance_pm = self._instance_json(instance_id=shared_instance_id, buddy="pm")
         created_draft = self._dispatch(
             instance_json=instance_pm,
             instance_id=shared_instance_id,
@@ -1357,6 +1513,284 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(track_filtered.get("ok"), msg=track_filtered)
         self.assertEqual(track_filtered.get("state_changed"), False, msg=track_filtered)
         self.assertEqual(track_filtered.get("durability"), "none", msg=track_filtered)
+
+    def test_attach_file_creates_artifact_owned_attachment_summary_without_body_blob(self) -> None:
+        instance_id = "inst-design-attach"
+        instance_json = self._instance_json(instance_id=instance_id, buddy="design")
+        source = self._runtime_path("tmp/chrome-devtools/desktop.png")
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        imported = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="design",
+            tool="buddybox",
+            action="import_file",
+            args={
+                "logical_name": "screenshots/desktop.png",
+                "source_path": str(source),
+                "content_type": "image/png",
+            },
+        )
+        self.assertTrue(imported.get("ok"), msg=imported)
+
+        created = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="design",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-design-attach-r1",
+                "title": "Design handoff",
+                "summary": "handoff",
+                "template": "design",
+                "body": "# Handoff",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        attached = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="design",
+            tool="artifact",
+            action="attach_file",
+            args={
+                "artifact_id": "art-design-attach-r1",
+                "filename": "desktop.png",
+                "content_type": "image/png",
+                "source_buddybox_logical_name": "screenshots/desktop.png",
+            },
+        )
+        self.assertTrue(attached.get("ok"), msg=attached)
+        self.assertTrue(attached.get("state_changed"), msg=attached)
+        attachment = attached.get("attachment")
+        self.assertIsInstance(attachment, dict, msg=attached)
+        assert isinstance(attachment, dict)
+        self.assertEqual(attachment.get("filename"), "desktop.png")
+        self.assertEqual(attachment.get("content_type"), "image/png")
+        self.assertIn("attachment_id", attachment)
+        self.assertIn("sha256", attachment)
+        self.assertNotIn("content", attachment)
+        self.assertNotIn("content_base64", attachment)
+        self.assertNotIn("source_buddybox_logical_name", attachment)
+        self.assertNotIn("path", attachment)
+
+        attachment_id = str(attachment.get("attachment_id"))
+        self.assertTrue(artifact_repo.attachment_file("art-design-attach-r1", attachment_id).exists())
+
+        read = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="design",
+            tool="artifact",
+            action="get",
+            args={"artifact_id": "art-design-attach-r1"},
+        )
+        self.assertTrue(read.get("ok"), msg=read)
+        artifact = read.get("artifact")
+        self.assertIsInstance(artifact, dict, msg=read)
+        assert isinstance(artifact, dict)
+        attachments = artifact.get("attachments")
+        self.assertIsInstance(attachments, list, msg=artifact)
+        assert isinstance(attachments, list)
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(attachments[0].get("attachment_id"), attachment_id)
+        self.assertNotIn("content_base64", attachments[0])
+        self.assertNotIn("source_buddybox_logical_name", attachments[0])
+        self.assertNotIn("path", attachments[0])
+
+    def test_list_attachments_returns_empty_list_for_readable_artifact_without_attachments(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-pm-empty-attachments", buddy="pm")
+        created = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-empty-attachments",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-pm-empty-attachments",
+                "title": "PM brief",
+                "summary": "seed",
+                "template": "brief",
+                "body": "# Brief",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        listed = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-empty-attachments",
+            buddy="pm",
+            tool="artifact",
+            action="list_attachments",
+            args={"artifact_id": "art-pm-empty-attachments"},
+        )
+        self.assertTrue(listed.get("ok"), msg=listed)
+        self.assertEqual(listed.get("attachments"), [])
+
+    def test_published_attachment_is_readable_by_other_buddy_through_artifact_visibility(self) -> None:
+        instance_id = "inst-attach-published"
+        instance_pm = self._instance_json(instance_id=instance_id, buddy="pm")
+        created_track = self._create_track(instance_json=instance_pm, instance_id=instance_id, track_id="track-attach-published")
+        self.assertTrue(created_track.get("ok"), msg=created_track)
+        created = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-pm-attach-published",
+                "title": "PM brief with attachment",
+                "summary": "brief",
+                "template": "brief",
+                "body": "# Brief",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+        source = self._runtime_path("tmp/pm/evidence.txt")
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("hello from PM", encoding="utf-8")
+        imported = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=instance_id,
+            buddy="pm",
+            tool="buddybox",
+            action="import_file",
+            args={
+                "logical_name": "evidence/evidence.txt",
+                "source_path": str(source),
+                "content_type": "text/plain",
+            },
+        )
+        self.assertTrue(imported.get("ok"), msg=imported)
+        attached = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=instance_id,
+            buddy="pm",
+            tool="artifact",
+            action="attach_file",
+            args={
+                "artifact_id": "art-pm-attach-published",
+                "filename": "evidence.txt",
+                "source_buddybox_logical_name": "evidence/evidence.txt",
+                "content_type": "text/plain",
+            },
+        )
+        self.assertTrue(attached.get("ok"), msg=attached)
+        attachment_id = attached["attachment"]["attachment_id"]
+        published = self._dispatch(
+            instance_json=instance_pm,
+            instance_id=instance_id,
+            buddy="pm",
+            tool="track",
+            action="add_material",
+            args={
+                "track_id": "track-attach-published",
+                "artifact_id": "art-pm-attach-published",
+                "label": "Brief",
+                "summary": "publish",
+            },
+        )
+        self.assertTrue(published.get("ok"), msg=published)
+
+        instance_dev = self._instance_json(instance_id=instance_id, buddy="dev")
+        listed = self._dispatch(
+            instance_json=instance_dev,
+            instance_id=instance_id,
+            buddy="dev",
+            tool="artifact",
+            action="list_attachments",
+            args={"artifact_id": "art-pm-attach-published"},
+        )
+        self.assertTrue(listed.get("ok"), msg=listed)
+        self.assertEqual([row["attachment_id"] for row in listed["attachments"]], [attachment_id])
+
+        fetched = self._dispatch(
+            instance_json=instance_dev,
+            instance_id=instance_id,
+            buddy="dev",
+            tool="artifact",
+            action="get_attachment",
+            args={
+                "artifact_id": "art-pm-attach-published",
+                "attachment_id": attachment_id,
+            },
+        )
+        self.assertTrue(fetched.get("ok"), msg=fetched)
+        self.assertEqual(fetched.get("content_base64"), "aGVsbG8gZnJvbSBQTQ==")
+
+    def test_attach_file_rejects_inline_blob_payload_without_mutation(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-attach-inline-reject", buddy="design")
+        created = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-attach-inline-reject",
+            buddy="design",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-attach-inline-reject",
+                "title": "Design handoff",
+                "summary": "seed",
+                "template": "design",
+                "body": "# Handoff",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-attach-inline-reject",
+            buddy="design",
+            tool="artifact",
+            action="attach_file",
+            args={
+                "artifact_id": "art-attach-inline-reject",
+                "filename": "desktop.png",
+                "source_buddybox_logical_name": "screenshots/desktop.png",
+                "content_base64": "aGVsbG8=",
+            },
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual(rejected.get("state_changed"), False, msg=rejected)
+        self.assertEqual(rejected.get("durability"), "none")
+        stored = env_store.get_artifact("art-attach-inline-reject")
+        self.assertIsInstance(stored, dict, msg=rejected)
+        assert isinstance(stored, dict)
+        self.assertEqual(stored.get("attachments"), [])
+
+    def test_get_attachment_rejects_unknown_attachment_id_without_mutation(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-unknown-attachment", buddy="pm")
+        created = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-unknown-attachment",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-unknown-attachment",
+                "title": "PM brief",
+                "summary": "seed",
+                "template": "brief",
+                "body": "# Brief",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-unknown-attachment",
+            buddy="pm",
+            tool="artifact",
+            action="get_attachment",
+            args={"artifact_id": "art-unknown-attachment", "attachment_id": "att-missing"},
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual(rejected.get("state_changed"), False, msg=rejected)
+        self.assertEqual(rejected.get("durability"), "none")
 
     def test_get_relation_summary_includes_publication_and_lineage(self) -> None:
         shared_instance_id = "inst-art-rel-lineage"

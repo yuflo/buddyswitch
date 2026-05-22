@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import tempfile
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -173,6 +174,10 @@ def _delete_options() -> list[dict[str, Any]]:
     ]
 
 
+def _import_options() -> list[dict[str, Any]]:
+    return _write_options()
+
+
 def _private_file_state_fields(logical_name: str | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "object_kind": "private_file",
@@ -191,7 +196,7 @@ def _private_file_state_fields(logical_name: str | None = None) -> dict[str, Any
 
 def _available_affordances(action: str, *, include_artifact: bool) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    if action in {"desc", "list", "read", "write", "delete"}:
+    if action in {"desc", "list", "read", "write", "import_file", "delete"}:
         rows.append(
             tool_results.tool_affordance(
                 "buddybox",
@@ -274,6 +279,15 @@ def _encoding_field_error() -> dict[str, Any]:
         "message": "encoding must be one of auto, utf-8, base64",
         "allowed_values": ["auto", "utf-8", "base64"],
         "example": "utf-8",
+    }
+
+
+def _source_path_field_error() -> dict[str, Any]:
+    return {
+        "path": "source_path",
+        "message": "source_path must resolve to one allowed local regular file",
+        "expected": "existing local file path under runtime workspace root or system tempdir",
+        "example": "/tmp/chrome-devtools/desktop.png",
     }
 
 
@@ -709,6 +723,115 @@ def write_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxSe
     )
 
 
+def import_buddybox_file_for_active_buddy(*, args: dict[str, Any], context: BuddyboxServiceContext) -> dict[str, Any]:
+    action = "buddybox.import_file"
+    active_buddy = context["active_buddy"]
+    payload_error = _require_allowed_fields(action, args, active_buddy)
+    if payload_error is not None:
+        return payload_error
+
+    root, boundary_error = _active_root_for_request(action=action, active_buddy=active_buddy, context=context)
+    if boundary_error is not None:
+        return boundary_error
+    assert root is not None
+
+    buddy_ids = _manifest_buddy_ids(context)
+    try:
+        logical_name = context.repos.buddybox.normalize_logical_name(
+            args.get("logical_name"),
+            active_buddy=active_buddy,
+            buddy_ids=buddy_ids,
+        )
+    except context.repos.buddybox.BuddyboxLogicalNameError as exc:
+        return _reject_logical_name(action=action, active_buddy=active_buddy, message=str(exc))
+
+    source_path = args.get("source_path")
+    if not isinstance(source_path, str) or not source_path.strip():
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="source_path must be a non-empty string",
+            correctable_fields=["source_path"],
+            field_errors=[_source_path_field_error()],
+        )
+
+    try:
+        existed, inferred_content_type, size_bytes = context.repos.buddybox.import_private_file(
+            root=root,
+            logical_name=logical_name,
+            source_path=Path(source_path.strip()),
+            allowed_roots=(
+                context.repos.runtime_files.runtime_workspace_root(context["instance_payload"]),
+                Path(tempfile.gettempdir()),
+            ),
+            blocked_roots=(
+                context.repos.runtime_files.OBJECTS_ROOT,
+                context.repos.runtime_files.LOCAL_ROOT,
+            ),
+        )
+    except FileNotFoundError:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="source_path must resolve to an existing file",
+            correctable_fields=["source_path"],
+            field_errors=[_source_path_field_error()],
+        )
+    except IsADirectoryError:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="source_path must point to a file, not a directory",
+            correctable_fields=["source_path"],
+            field_errors=[_source_path_field_error()],
+        )
+    except context.repos.buddybox.BuddyboxBoundaryError as exc:
+        return _reject_boundary(action=action, active_buddy=active_buddy, message=str(exc))
+    except ValueError as exc:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=str(exc),
+            correctable_fields=["source_path"],
+            field_errors=[_source_path_field_error()],
+        )
+
+    content_type = args.get("content_type")
+    if not isinstance(content_type, str) or not content_type.strip():
+        content_type = inferred_content_type
+
+    payload = {
+        **_private_file_state_fields(logical_name),
+        "size_bytes": size_bytes,
+        "content_type": content_type,
+        "private_to_buddy": active_buddy,
+        "created": not existed,
+        "overwrote": existed,
+        "available_affordances": _available_affordances("import_file", include_artifact=True),
+    }
+    change_word = "overwrote" if existed else "imported"
+    return tool_results.success(
+        tool="buddybox",
+        action=action,
+        active_buddy=active_buddy,
+        effect_summary=f"{change_word.capitalize()} one private file '{logical_name}' from local source_path.",
+        state_changed=True,
+        durability="durable",
+        created_ids=[logical_name] if not existed else None,
+        updated_ids=[logical_name] if existed else None,
+        state_changes=[
+            {
+                "object_type": "private_file",
+                "change": "overwritten" if existed else "created",
+                "logical_name": logical_name,
+            }
+        ],
+        allowed_next_actions=[],
+        allowed_next_action_options=_import_options(),
+        extra=payload,
+    )
+
+
 def delete_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxServiceContext) -> dict[str, Any]:
     action = "buddybox.delete"
     active_buddy = context["active_buddy"]
@@ -782,6 +905,7 @@ def delete_buddybox_for_active_buddy(*, args: dict[str, Any], context: BuddyboxS
 _ACTION_HANDLERS = {
     'delete': delete_buddybox_for_active_buddy,
     'desc': describe_buddybox_for_active_buddy,
+    'import_file': import_buddybox_file_for_active_buddy,
     'list': list_buddybox_for_active_buddy,
     'read': read_buddybox_for_active_buddy,
     'write': write_buddybox_for_active_buddy,

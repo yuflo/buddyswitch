@@ -60,6 +60,93 @@ def _source_refs_field_error() -> dict[str, Any]:
     }
 
 
+def _attachment_filename_field_error() -> dict[str, Any]:
+    return {
+        "path": "filename",
+        "message": "filename must be a non-empty display name without path separators or traversal",
+        "example": "desktop.png",
+    }
+
+
+def _source_buddybox_logical_name_field_error() -> dict[str, Any]:
+    return {
+        "path": "source_buddybox_logical_name",
+        "message": "source_buddybox_logical_name must reference one active-buddy private buddybox file",
+        "example": "screenshots/desktop.png",
+    }
+
+
+def _attachment_id_field_error() -> dict[str, Any]:
+    return {
+        "path": "attachment_id",
+        "message": "attachment_id must reference one attachment owned by the selected artifact",
+        "example": "att-example",
+    }
+
+
+def _manifest_buddy_ids(context: ArtifactServiceContext) -> set[str]:
+    buddy_ids: set[str] = set()
+    for row in context.get("manifest", {}).get("buddies", []):
+        if isinstance(row, dict):
+            buddy_id = row.get("id")
+            if isinstance(buddy_id, str) and buddy_id.strip():
+                buddy_ids.add(buddy_id.strip())
+    buddy_ids.add(context["active_buddy"])
+    return buddy_ids
+
+
+def _allowed_templates_for_active_buddy(context: ArtifactServiceContext) -> tuple[str, ...]:
+    active_buddy = context["active_buddy"]
+    buddies = context.get("manifest", {}).get("buddies", [])
+    if not isinstance(buddies, list):
+        return ()
+    for buddy in buddies:
+        if not isinstance(buddy, dict) or buddy.get("id") != active_buddy:
+            continue
+        templates = buddy.get("artifact_templates")
+        if not isinstance(templates, list):
+            return ()
+        return tuple(row for row in templates if isinstance(row, str) and row.strip())
+    return ()
+
+
+def _reject_template_permission(
+    *,
+    action: str,
+    active_buddy: str,
+    template: str,
+    allowed_templates: tuple[str, ...],
+) -> dict[str, Any]:
+    allowed = ", ".join(allowed_templates) if allowed_templates else "none"
+    return tool_results.rejection(
+        tool="artifact",
+        action=action,
+        active_buddy=active_buddy,
+        code="E_ARTIFACT_TEMPLATE_PERMISSION",
+        message=f"template '{template}' is not declared for active buddy '{active_buddy}'",
+        permission_boundary="artifact.template_permission",
+        human_summary="Artifact template is not allowed for the active buddy.",
+        why_blocked=f"Active buddy '{active_buddy}' may create or update only these artifact templates: {allowed}.",
+        impact="No artifact state changed.",
+        state_changed=False,
+        retryable=True,
+        retry_guidance="Use one template declared for the active buddy in manifest artifact_templates.",
+        allowed_next_actions=[
+            "Use context.get to inspect active buddy capabilities.",
+            "Retry artifact.create_revision or artifact.update_metadata with an allowed template.",
+        ],
+        correctable_fields=["template"],
+        field_errors=[
+            {
+                "path": "template",
+                "message": "template must be declared for the active buddy",
+                "allowed_values": list(allowed_templates),
+                "example": allowed_templates[0] if allowed_templates else "brief",
+            }
+        ],
+    )
+
+
 def _reject_payload(
     *,
     action: str,
@@ -73,7 +160,18 @@ def _reject_payload(
         if suffix:
             correctable_fields = [row.strip() for row in suffix.split(",") if row.strip()]
     else:
-        for field in ("artifact_id", "title", "summary", "template", "body", "supersedes_artifact_id", "source_refs"):
+        for field in (
+            "artifact_id",
+            "title",
+            "summary",
+            "template",
+            "body",
+            "supersedes_artifact_id",
+            "source_refs",
+            "filename",
+            "source_buddybox_logical_name",
+            "attachment_id",
+        ):
             if field in message:
                 correctable_fields = [field]
                 break
@@ -447,6 +545,14 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
             message=f"template must be one of {', '.join(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)}",
             field_errors=[_template_field_error(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)],
         )
+    allowed_templates = _allowed_templates_for_active_buddy(context)
+    if template not in allowed_templates:
+        return _reject_template_permission(
+            action=action,
+            active_buddy=active_buddy,
+            template=template,
+            allowed_templates=allowed_templates,
+        )
     if supersedes_artifact_id is not None and (not isinstance(supersedes_artifact_id, str) or not supersedes_artifact_id.strip()):
         return _reject_payload(
             action=action,
@@ -584,6 +690,15 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
             message=f"template must be one of {', '.join(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)}",
             field_errors=[_template_field_error(context.repos.artifact.VALID_ARTIFACT_TEMPLATES)],
         )
+    if isinstance(patch.get("template"), str):
+        allowed_templates = _allowed_templates_for_active_buddy(context)
+        if patch["template"] not in allowed_templates:
+            return _reject_template_permission(
+                action=action,
+                active_buddy=active_buddy,
+                template=patch["template"],
+                allowed_templates=allowed_templates,
+            )
     if "body" in patch and (not isinstance(patch["body"], str) or not patch["body"].strip()):
         return _reject_payload(action=action, active_buddy=active_buddy, message="body must be a non-empty string")
 
@@ -641,10 +756,259 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
     )
 
 
+def attach_file_to_artifact(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
+    action = "artifact.attach_file"
+    active_buddy = context["active_buddy"]
+    payload_error = _require_allowed_fields(action, args, active_buddy)
+    if payload_error is not None:
+        return payload_error
+
+    artifact_id = args.get("artifact_id")
+    if not isinstance(artifact_id, str) or not artifact_id.strip():
+        return _reject_payload(action=action, active_buddy=active_buddy, message="artifact_id is required")
+    artifact_id = artifact_id.strip()
+
+    filename = args.get("filename")
+    if not isinstance(filename, str) or not filename.strip():
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="filename is required",
+            field_errors=[_attachment_filename_field_error()],
+        )
+
+    source_logical_name = args.get("source_buddybox_logical_name")
+    if not isinstance(source_logical_name, str) or not source_logical_name.strip():
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="source_buddybox_logical_name is required",
+            field_errors=[_source_buddybox_logical_name_field_error()],
+        )
+
+    artifact = context.repos.artifact.get_artifact(artifact_id)
+    if artifact is None:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {artifact_id}")
+    if artifact.get("created_by") != active_buddy:
+        return _reject_scope(
+            action=action,
+            active_buddy=active_buddy,
+            boundary="artifact.buddy_scope",
+            message=f"artifact '{artifact_id}' is owned by buddy '{artifact.get('created_by')}'",
+            code="E_ARTIFACT_SCOPE",
+        )
+    if artifact.get("status") != "draft":
+        return _reject_scope(
+            action=action,
+            active_buddy=active_buddy,
+            boundary="artifact.lifecycle_status",
+            message=f"artifact '{artifact_id}' is {artifact.get('status')} and attachments can only be added to drafts",
+            code="E_ARTIFACT_SCOPE",
+        )
+
+    buddy_ids = _manifest_buddy_ids(context)
+    try:
+        normalized_logical_name = context.repos.buddybox.normalize_logical_name(
+            source_logical_name,
+            active_buddy=active_buddy,
+            buddy_ids=buddy_ids,
+        )
+        root = context.repos.buddybox.ensure_active_buddy_root(
+            active_buddy=active_buddy,
+            instance_payload=context["instance_payload"],
+        )
+        raw, _content_type = context.repos.buddybox.read_private_file(root=root, logical_name=normalized_logical_name)
+    except context.repos.buddybox.BuddyboxLogicalNameError as exc:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=str(exc),
+            field_errors=[_source_buddybox_logical_name_field_error()],
+        )
+    except FileNotFoundError:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=f"source_buddybox_logical_name not found: {source_logical_name}",
+            field_errors=[_source_buddybox_logical_name_field_error()],
+        )
+    except context.repos.buddybox.BuddyboxBoundaryError as exc:
+        return _reject_scope(
+            action=action,
+            active_buddy=active_buddy,
+            boundary="artifact.buddy_scope",
+            message=str(exc),
+            code="E_ARTIFACT_SCOPE",
+            correctable_fields=["source_buddybox_logical_name"],
+            field_errors=[_source_buddybox_logical_name_field_error()],
+        )
+    if not raw:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="source_buddybox_logical_name must reference a non-empty private file",
+            field_errors=[_source_buddybox_logical_name_field_error()],
+        )
+
+    try:
+        updated_artifact, attachment = context.repos.artifact.adopt_buddybox_attachment(
+            artifact_id=artifact_id,
+            filename=filename,
+            created_by=active_buddy,
+            source_logical_name=normalized_logical_name,
+            content_type=args.get("content_type") if isinstance(args.get("content_type"), str) else None,
+            context=context,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        field_errors = [_attachment_filename_field_error()] if "attachment.filename" in message or "filename" in message else None
+        if field_errors is None and "source_buddybox_logical_name" in message:
+            field_errors = [_source_buddybox_logical_name_field_error()]
+        return _reject_payload(action=action, active_buddy=active_buddy, message=message, field_errors=field_errors)
+
+    row = _artifact_response_row(updated_artifact, active_buddy, context)
+    return tool_results.success(
+        tool="artifact",
+        action=action,
+        active_buddy=active_buddy,
+        effect_summary=f"Attached one private file to artifact '{artifact_id}' as attachment '{attachment['attachment_id']}'.",
+        state_changed=True,
+        durability="durable",
+        updated_ids=[artifact_id],
+        state_changes=[{"object_type": "artifact", "change": "attachment_added", "artifact_id": artifact_id}],
+        allowed_next_actions=[
+            "Use artifact.list_attachments with this artifact_id to inspect attachment summaries.",
+            "Use artifact.get_attachment with artifact_id and attachment_id to fetch exact file content.",
+            "Use artifact.get with this artifact_id to inspect the full artifact plus attachment summaries.",
+        ],
+        extra={"artifact_id": artifact_id, "artifact": row, "attachment": attachment},
+    )
+
+
+def list_artifact_attachments(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
+    action = "artifact.list_attachments"
+    active_buddy = context["active_buddy"]
+    payload_error = _require_allowed_fields(action, args, active_buddy)
+    if payload_error is not None:
+        return payload_error
+
+    artifact_id = args.get("artifact_id")
+    if not isinstance(artifact_id, str) or not artifact_id.strip():
+        return _reject_payload(action=action, active_buddy=active_buddy, message="artifact_id is required")
+    artifact_id = artifact_id.strip()
+
+    artifact = context.repos.artifact.get_artifact(artifact_id)
+    if artifact is None:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {artifact_id}")
+
+    decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_buddy)
+    if not bool(decision.get("allowed")):
+        return _reject_scope(
+            action=action,
+            active_buddy=active_buddy,
+            boundary=str(decision.get("permission_boundary", "artifact.read_scope")),
+            message=str(decision.get("why", "artifact read denied")),
+            code="E_ARTIFACT_READ_SCOPE",
+        )
+
+    attachments = context.repos.artifact.attachment_summaries(artifact_id)
+    return tool_results.success(
+        tool="artifact",
+        action=action,
+        active_buddy=active_buddy,
+        effect_summary=f"Listed {len(attachments)} attachment summary row(s) for artifact '{artifact_id}'.",
+        state_changed=False,
+        durability="none",
+        read_scope="attachment summaries for one readable artifact",
+        allowed_next_actions=[
+            "Use artifact.get_attachment with artifact_id and attachment_id to fetch exact content.",
+            "Use artifact.get with this artifact_id to inspect the full artifact body.",
+        ],
+        extra={"artifact_id": artifact_id, "attachments": attachments},
+    )
+
+
+def get_artifact_attachment(*, args: dict[str, Any], context: ArtifactServiceContext) -> dict[str, Any]:
+    action = "artifact.get_attachment"
+    active_buddy = context["active_buddy"]
+    payload_error = _require_allowed_fields(action, args, active_buddy)
+    if payload_error is not None:
+        return payload_error
+
+    artifact_id = args.get("artifact_id")
+    if not isinstance(artifact_id, str) or not artifact_id.strip():
+        return _reject_payload(action=action, active_buddy=active_buddy, message="artifact_id is required")
+    artifact_id = artifact_id.strip()
+    attachment_id = args.get("attachment_id")
+    if not isinstance(attachment_id, str) or not attachment_id.strip():
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message="attachment_id is required",
+            field_errors=[_attachment_id_field_error()],
+        )
+    attachment_id = attachment_id.strip()
+
+    artifact = context.repos.artifact.get_artifact(artifact_id)
+    if artifact is None:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=f"artifact not found: {artifact_id}")
+
+    decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_buddy)
+    if not bool(decision.get("allowed")):
+        return _reject_scope(
+            action=action,
+            active_buddy=active_buddy,
+            boundary=str(decision.get("permission_boundary", "artifact.read_scope")),
+            message=str(decision.get("why", "artifact read denied")),
+            code="E_ARTIFACT_READ_SCOPE",
+        )
+
+    try:
+        attachment, raw = context.repos.artifact.get_attachment_content(artifact_id, attachment_id)
+    except FileNotFoundError:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=f"attachment not found: {attachment_id}",
+            field_errors=[_attachment_id_field_error()],
+        )
+    except ValueError as exc:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=str(exc),
+            field_errors=[_attachment_id_field_error()],
+        )
+
+    import base64
+
+    return tool_results.success(
+        tool="artifact",
+        action=action,
+        active_buddy=active_buddy,
+        effect_summary=f"Read attachment '{attachment_id}' from artifact '{artifact_id}'.",
+        state_changed=False,
+        durability="none",
+        read_scope="one attachment body for one readable artifact",
+        allowed_next_actions=[
+            "Use artifact.list_attachments to inspect other attachment summaries on this artifact.",
+            "Use artifact.get with this artifact_id to inspect the full artifact body.",
+        ],
+        extra={
+            "artifact_id": artifact_id,
+            "attachment": attachment,
+            "content_base64": base64.b64encode(raw).decode("ascii"),
+        },
+    )
+
+
 _ACTION_HANDLERS = {
+    'attach_file': attach_file_to_artifact,
     'create_revision': create_artifact_revision,
     'get': get_artifact_for_active_buddy,
+    'get_attachment': get_artifact_attachment,
     'list': list_artifacts_for_active_buddy,
+    'list_attachments': list_artifact_attachments,
     'update_metadata': update_artifact_metadata,
 }
 

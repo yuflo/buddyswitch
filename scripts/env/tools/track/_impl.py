@@ -222,14 +222,61 @@ def _require_track_id(action: str, args: dict[str, Any], active_buddy: str) -> t
     return track_id.strip(), None
 
 
-def _track_page(track: dict[str, Any]) -> dict[str, Any]:
+def _attachment_projection_for_ref(
+    *,
+    artifact_id: str,
+    active_buddy: str,
+    context: TrackServiceContext,
+) -> tuple[int, list[dict[str, Any]]]:
+    artifact = context.repos.artifact.get_artifact(artifact_id)
+    if not isinstance(artifact, dict):
+        return 0, []
+    decision = context.rules.artifact_visibility.artifact_read_decision(artifact, active_buddy)
+    if not bool(decision.get("allowed")):
+        return 0, []
+    attachments = context.rules.artifact_visibility.attachment_summary_rows(artifact)
+    return len(attachments), attachments
+
+
+def _project_track_artifact_ref(
+    *,
+    ref: dict[str, Any],
+    active_buddy: str,
+    context: TrackServiceContext,
+) -> dict[str, Any]:
+    projected = dict(ref)
+    artifact_id = ref.get("artifact_id")
+    if not isinstance(artifact_id, str) or not artifact_id:
+        projected["attachment_count"] = 0
+        projected["attachments"] = []
+        return projected
+    attachment_count, attachments = _attachment_projection_for_ref(
+        artifact_id=artifact_id,
+        active_buddy=active_buddy,
+        context=context,
+    )
+    projected["attachment_count"] = attachment_count
+    projected["attachments"] = attachments
+    return projected
+
+
+def _track_page(
+    track: dict[str, Any],
+    *,
+    active_buddy: str,
+    context: TrackServiceContext,
+) -> dict[str, Any]:
     page = dict(track)
     page["shared_materials"] = [
-        row for row in track.get("shared_materials", []) if isinstance(row, dict) and bool(row.get("current"))
+        _project_track_artifact_ref(ref=row, active_buddy=active_buddy, context=context)
+        for row in track.get("shared_materials", [])
+        if isinstance(row, dict) and bool(row.get("current"))
     ]
     page["updates"] = [row for row in track.get("updates", []) if isinstance(row, dict)]
     page["close_proof"] = [
-        row for row in track.get("close_proof", []) if isinstance(row, dict) and bool(row.get("current", True))
+        _project_track_artifact_ref(ref=row, active_buddy=active_buddy, context=context)
+        for row in track.get("close_proof", [])
+        if isinstance(row, dict) and bool(row.get("current", True))
     ]
     return page
 
@@ -299,7 +346,7 @@ def open_track_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCo
     if track.get("archived_at") is not None:
         return _reject_archived(action=action, active_buddy=active_buddy, track_id=track_id)
 
-    page = _track_page(track)
+    page = _track_page(track, active_buddy=active_buddy, context=context)
     return tool_results.success(
         tool="track",
         action=action,
@@ -406,7 +453,7 @@ def create_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) -
             "Use track.add_material to publish first shared artifact.",
             "Use track.open to verify page contents.",
         ],
-        extra={"track_id": track_id, "track": _track_page(track)},
+        extra={"track_id": track_id, "track": _track_page(track, active_buddy=active_buddy, context=context)},
     )
 
 
@@ -516,7 +563,7 @@ def update_now_for_active_buddy(*, args: dict[str, Any], context: TrackServiceCo
         updated_ids=[track_id],
         state_changes=[{"object_type": "track", "change": "updated", "track_id": track_id}],
         allowed_next_actions=["Use track.open to verify now-state and timeline updates."],
-        extra={"track_id": track_id, "track": _track_page(updated)},
+        extra={"track_id": track_id, "track": _track_page(updated, active_buddy=active_buddy, context=context)},
     )
 
 
@@ -599,7 +646,11 @@ def add_material_to_track(*, args: dict[str, Any], context: TrackServiceContext)
             "Use track.open to inspect current shared materials.",
             "Use artifact.get to read full artifact body.",
         ],
-        extra={"track_id": track_id, "artifact_id": updated_artifact["id"], "track": _track_page(updated_track)},
+        extra={
+            "track_id": track_id,
+            "artifact_id": updated_artifact["id"],
+            "track": _track_page(updated_track, active_buddy=active_buddy, context=context),
+        },
     )
 
 
@@ -692,7 +743,7 @@ def add_update_to_track(*, args: dict[str, Any], context: TrackServiceContext) -
         updated_ids=[track_id],
         state_changes=[{"object_type": "track", "change": "update_added", "track_id": track_id, "update_id": update["id"]}],
         allowed_next_actions=["Use track.open to inspect timeline updates."],
-        extra={"track_id": track_id, "update": update, "track": _track_page(track)},
+        extra={"track_id": track_id, "update": update, "track": _track_page(track, active_buddy=active_buddy, context=context)},
     )
 
 
@@ -779,7 +830,12 @@ def add_proof_to_track(*, args: dict[str, Any], context: TrackServiceContext) ->
             "Use artifact.get to read proof body.",
             "Use track.update_now when proof changes track close readiness.",
         ],
-        extra={"track_id": track_id, "artifact_id": updated_artifact["id"], "update_id": update["id"], "track": _track_page(updated_track)},
+        extra={
+            "track_id": track_id,
+            "artifact_id": updated_artifact["id"],
+            "update_id": update["id"],
+            "track": _track_page(updated_track, active_buddy=active_buddy, context=context),
+        },
     )
 
 
@@ -818,7 +874,7 @@ def archive_track_for_pm(*, args: dict[str, Any], context: TrackServiceContext) 
         updated_ids=[track_id],
         state_changes=[{"object_type": "track", "change": "archived", "track_id": track_id}] if state_changed else [],
         allowed_next_actions=["Use track.list to continue with non-archived tracks."],
-        extra={"track_id": track_id, "track": _track_page(track)},
+        extra={"track_id": track_id, "track": _track_page(track, active_buddy=active_buddy, context=context)},
     )
 
 

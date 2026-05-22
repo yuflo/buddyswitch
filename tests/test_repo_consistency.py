@@ -143,7 +143,10 @@ class RepoConsistencyTests(unittest.TestCase):
             {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
         )
         artifact_actions = set(tool_catalog.supported_actions("artifact"))
-        self.assertEqual(artifact_actions, {"list", "get", "create_revision", "update_metadata"})
+        self.assertEqual(
+            artifact_actions,
+            {"list", "get", "create_revision", "update_metadata", "attach_file", "list_attachments", "get_attachment"},
+        )
         request_actions = set(tool_catalog.supported_actions("request"))
         self.assertEqual(request_actions, {"create", "list", "get", "accept", "block", "complete", "cancel"})
 
@@ -315,6 +318,42 @@ class RepoConsistencyTests(unittest.TestCase):
                 "docs/spec/2026-05-22-tool-layer-semantic-source-of-truth-implementation-plan.md:1:TOOL_SPEC"
             )
         )
+
+    def test_active_guidance_does_not_reference_capture_as_env_tool(self) -> None:
+        completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                r"python3 scripts/env/client\.py\s+capture\b|context\.get\.tool_catalog\[['\"]capture['\"]|\"tool\"\s*:\s*\"capture\"",
+                "buddyswitch/skills",
+                "framework/contracts",
+                "tools/launcher/assets/buddies",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_artifact_tool_files_do_not_add_design_specific_attachment_schema(self) -> None:
+        completed = subprocess.run(
+            [
+                "rg",
+                "-n",
+                r"design_handoff|ux_flow|screen_state|screenshot_ref",
+                "scripts/env/tools/artifact",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(hits, [], msg="\n".join(hits))
         self.assertFalse(
             self._is_docs_spec_context_hit(
                 "docs/spec/live-runtime-guidance.md:1:Use scripts/env/tools/task/contract.py"

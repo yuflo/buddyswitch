@@ -219,6 +219,7 @@ def artifact_summary_row(
         "created_by": artifact.get("created_by"),
         "authors": artifact.get("authors"),
         "source_refs": artifact.get("source_refs"),
+        "attachments": attachment_summary_rows(artifact),
         "revision": artifact.get("revision"),
         "currentness": currentness,
         "readable_by_active_buddy": bool(decision.get("allowed")),
@@ -247,6 +248,25 @@ def _relation_and_currentness_for_decision(
     else:
         currentness = "superseded"
     return str(relation), currentness
+
+
+def attachment_summary_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in artifact.get("attachments", []):
+        if not isinstance(row, dict):
+            continue
+        rows.append(
+            {
+                "attachment_id": row.get("attachment_id"),
+                "filename": row.get("filename"),
+                "content_type": row.get("content_type"),
+                "size_bytes": row.get("size_bytes"),
+                "sha256": row.get("sha256"),
+                "created_by": row.get("created_by"),
+                "created_at": row.get("created_at"),
+            }
+        )
+    return rows
 
 
 def artifact_list_row(

@@ -38,6 +38,7 @@ def _recompute_runtime_roots() -> None:
     global TRACKS_DIR
     global TASKS_DIR
     global ARTIFACT_OBJECTS_DIR
+    global ARTIFACT_ATTACHMENTS_DIR
     global MESSAGES_DIR
     global COMMENTS_DIR
     global REQUESTS_DIR
@@ -57,6 +58,7 @@ def _recompute_runtime_roots() -> None:
     TRACKS_DIR = OBJECTS_ROOT / "tracks"
     TASKS_DIR = OBJECTS_ROOT / "tasks"
     ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
+    ARTIFACT_ATTACHMENTS_DIR = OBJECTS_ROOT / "artifact-attachments"
     MESSAGES_DIR = OBJECTS_ROOT / "messages"
     COMMENTS_DIR = OBJECTS_ROOT / "comments"
     REQUESTS_DIR = OBJECTS_ROOT / "requests"
@@ -166,6 +168,7 @@ def ensure_runtime_dirs() -> None:
     TRACKS_DIR.mkdir(parents=True, exist_ok=True)
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    ARTIFACT_ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
     MESSAGES_DIR.mkdir(parents=True, exist_ok=True)
     COMMENTS_DIR.mkdir(parents=True, exist_ok=True)
     REQUESTS_DIR.mkdir(parents=True, exist_ok=True)

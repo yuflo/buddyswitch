@@ -74,6 +74,10 @@ def _path_is_within(path: Path, root: Path) -> bool:
     return True
 
 
+def _resolved_path_within_any_root(path: Path, roots: tuple[Path, ...]) -> bool:
+    return any(_path_is_within(path, root.resolve(strict=False)) for root in roots)
+
+
 def _resolved_existing_path_stays_in_root(path: Path, *, root: Path) -> bool:
     try:
         resolved = path.resolve(strict=True)
@@ -182,6 +186,34 @@ def write_private_file(*, root: Path, logical_name: str, content: bytes) -> tupl
     os.replace(temp_name, path)
     content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return existed, content_type
+
+
+def import_private_file(
+    *,
+    root: Path,
+    logical_name: str,
+    source_path: Path,
+    allowed_roots: tuple[Path, ...],
+    blocked_roots: tuple[Path, ...],
+) -> tuple[bool, str, int]:
+    try:
+        resolved_source = source_path.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(str(source_path)) from exc
+
+    if resolved_source.is_dir():
+        raise IsADirectoryError(str(source_path))
+    if not resolved_source.is_file():
+        raise ValueError("source_path must resolve to an existing regular file")
+
+    if not _resolved_path_within_any_root(resolved_source, allowed_roots):
+        raise ValueError("source_path must stay inside one allowed local import root")
+    if _resolved_path_within_any_root(resolved_source, blocked_roots):
+        raise ValueError("source_path must not resolve inside runtime objects or runtime local storage")
+
+    raw = resolved_source.read_bytes()
+    existed, content_type = write_private_file(root=root, logical_name=logical_name, content=raw)
+    return existed, content_type, len(raw)
 
 
 def delete_private_file(*, root: Path, logical_name: str) -> bool:
