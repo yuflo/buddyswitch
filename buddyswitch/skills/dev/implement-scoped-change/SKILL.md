@@ -23,23 +23,27 @@ description: Use when Dev has approved scope and must change source behavior und
 
 ## Steps
 1. Map requested behavior to concrete files under the locked source root.
-2. Add/adjust a failing test first when practical for behavior change.
-3. Implement the smallest direct change.
-4. Keep refactors local to the scoped behavior.
-5. Run focused verification and collect evidence.
-6. Record changed files and rationale for reporting.
+2. Write or adjust a failing test first by default for behavior changes, then run it and confirm the failure proves the intended behavior.
+3. If test-first is blocked, record the exception reason before editing production code.
+4. Implement the smallest direct change under the locked source root.
+5. Run focused verification until green.
+6. Refactor only after green verification and keep the refactor inside the same scoped behavior.
+7. Record changed files and rationale for reporting.
 
 ## Outputs
 - Scoped code change with evidence and changed files list.
 
 ## Guardrails
 - Changed files outside locked root are not allowed.
+- Tests-after is an exception path, not the default.
 - Do not silently change product scope.
+- Do not widen scope because a nearby cleanup looks tempting.
 - Do not write runtime report noise into source directories.
 - Reuse local project conventions before introducing new patterns.
 
 ## Verification
-- Focused tests fail first (when practical), then pass after implementation.
+- Focused tests fail first, Dev must confirm the failure, then pass after implementation.
+- Any exception reason for skipping failing test first is recorded.
 - Changed files list confirms no path escapes.
 
 ## Examples
