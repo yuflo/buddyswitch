@@ -24,15 +24,46 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         super().setUp()
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
-        self.instance_json = self._runtime_path("instance.json")
+        self.instance_root = self._runtime_path("instances/inst-market-decision-surface")
+        self.instance_json = self.instance_root / "instance.json"
         self.instance_payload = {
             "instance_id": "inst-market-decision-surface",
             "buddy": "market",
             "status": "active",
-            "workspace_dir": str(self.runtime_root),
+            "instance_root": str(self.instance_root),
+            "workspace_dir": str(self.instance_root / "workspace"),
             "browser_port": 9555,
         }
+        (self.instance_root / "workspace").mkdir(parents=True, exist_ok=True)
+        taskbox_root = self.instance_root / "taskbox" / "market"
+        (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
+        (taskbox_root / "history.md").write_text("", encoding="utf-8")
         self.instance_json.write_text(json.dumps(self.instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+    def _seed_taskbox_task(self, *, buddy: str, task_id: str, title: str, track_id: str | None = None) -> None:
+        path = self.instance_root / "taskbox" / buddy / "tasks" / f"{task_id}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "id": task_id,
+                    "owner_buddy": buddy,
+                    "title": title,
+                    "summary": "",
+                    "status": "active",
+                    "priority": "normal",
+                    "track_id": track_id,
+                    "refs": [],
+                    "created_at": "2026-05-23T12:00:00+08:00",
+                    "updated_at": "2026-05-23T12:00:00+08:00",
+                    "closed_at": None,
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
     def _dispatch(self, *, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
         return tool_router.dispatch_env_tool_request(
@@ -54,7 +85,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             appetite="1 day",
             now={"next": "Scan market", "blocker": None},
         )
-        env_store.create_task("task-market-decision", "Scan market", buddy="market", track_id=track["id"])
+        self._seed_taskbox_task(buddy="market", task_id="task-market-decision", title="Scan market", track_id=str(track["id"]))
         request_created = self._dispatch(
             buddy="pm",
             tool="request",
@@ -78,6 +109,8 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertTrue(any(row.get("track_id") == "track-market-decision" for row in response["candidate_tracks"]))
         self.assertIn("candidate_requests", response)
         self.assertTrue(any(row.get("track_id") == "track-market-decision" for row in response["candidate_requests"]))
+        self.assertIn("candidate_tasks", response)
+        self.assertTrue(any(row.get("task_id") == "task-market-decision" for row in response["candidate_tasks"]))
         self.assertGreaterEqual(int((response.get("current_context_summary") or {}).get("requests", 0)), 1)
         affordances = response.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=response)

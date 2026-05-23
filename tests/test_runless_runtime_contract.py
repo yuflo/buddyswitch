@@ -111,14 +111,12 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return response
 
     def _seed_pm_task(self, task_id: str) -> None:
-        env_store.create_task(
-            task_id,
-            "Runless Task",
+        self._write_taskbox_task(
+            instance_id="inst-pm-runless",
             buddy="pm",
-            track_id=None,
-            status="active",
+            task_id=task_id,
+            title="Runless Task",
             summary="runless contract seed",
-            initial_run_id=None,
         )
 
     def test_instance_record_contains_execution_identity_only(self) -> None:

@@ -230,6 +230,26 @@ buddyswitch_env_bind_instance() {
   export BUDDYSWITCH_XDG_CONFIG_HOME="${instance_root}/xdg-config"
 }
 
+buddyswitch_instance_ensure_taskbox() {
+  local buddy="${1:-}"
+  local taskbox_root
+
+  if [[ -z "${buddy}" ]]; then
+    echo "buddyswitch: buddy is required to create taskbox" >&2
+    return 2
+  fi
+  if [[ -z "${BUDDYSWITCH_INSTANCE_ROOT:-}" ]]; then
+    echo "buddyswitch: BUDDYSWITCH_INSTANCE_ROOT is not set" >&2
+    return 2
+  fi
+
+  taskbox_root="${BUDDYSWITCH_INSTANCE_ROOT}/taskbox/${buddy}"
+  mkdir -p "${taskbox_root}/tasks"
+  if [[ ! -e "${taskbox_root}/history.md" ]]; then
+    : > "${taskbox_root}/history.md"
+  fi
+}
+
 buddyswitch_generate_instance_id() {
   local buddy="$1"
   python3 -c 'import sys, uuid; print(f"inst-{sys.argv[1]}-{uuid.uuid4().hex[:12]}")' "${buddy}"

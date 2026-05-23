@@ -285,12 +285,16 @@ def _candidate_request_row(*, request: dict[str, Any], active_buddy: str) -> dic
 
 
 def _candidate_task_row(*, task: dict[str, Any]) -> dict[str, Any]:
+    refs = task.get("refs")
     return {
         "task_id": task.get("id"),
         "title": task.get("title"),
         "summary": task.get("summary"),
         "status": task.get("status"),
+        "priority": task.get("priority"),
         "track_id": task.get("track_id"),
+        "closed_at": task.get("closed_at"),
+        "ref_count": len(refs) if isinstance(refs, list) else 0,
         "updated_at": task.get("updated_at"),
     }
 
@@ -356,7 +360,11 @@ def _visible_tasks(
     limit_value: int,
     context: ContextServiceContext,
 ) -> list[dict[str, Any]]:
-    tasks = [row for row in context.repos.task.list_tasks() if row.get("buddy") == active_buddy]
+    tasks = context.repos.task.list_tasks(
+        active_buddy=active_buddy,
+        instance_json=context["instance_json"],
+        instance_payload=context["instance_payload"],
+    )
     if isinstance(task_filter, str) and task_filter.strip():
         tasks = [row for row in tasks if row.get("id") == task_filter.strip()]
     rows: list[dict[str, Any]] = []

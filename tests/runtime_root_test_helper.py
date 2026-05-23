@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -79,3 +80,60 @@ class RuntimeWorkspaceTestMixin:
 
     def _state_path(self, repo_path: str) -> Path:
         return self.runtime_state_root / repo_path
+
+    def _instance_root(self, instance_id: str) -> Path:
+        return self.runtime_root / "instances" / instance_id
+
+    def _taskbox_root(self, *, instance_id: str, buddy: str) -> Path:
+        return self._instance_root(instance_id) / "taskbox" / buddy
+
+    def _ensure_taskbox(self, *, instance_id: str, buddy: str) -> Path:
+        root = self._taskbox_root(instance_id=instance_id, buddy=buddy)
+        (root / "tasks").mkdir(parents=True, exist_ok=True)
+        history_file = root / "history.md"
+        if not history_file.exists():
+            history_file.write_text("", encoding="utf-8")
+        return root
+
+    def _write_taskbox_task(
+        self,
+        *,
+        instance_id: str,
+        buddy: str,
+        task_id: str,
+        title: str,
+        summary: str = "",
+        status: str = "active",
+        priority: str = "normal",
+        track_id: str | None = None,
+        refs: list[dict[str, object]] | None = None,
+        created_at: str = "2026-05-23T12:00:00+08:00",
+        updated_at: str = "2026-05-23T12:00:00+08:00",
+        closed_at: str | None = None,
+    ) -> Path:
+        if closed_at is None and status in {"done", "archived"}:
+            closed_at = updated_at
+        root = self._ensure_taskbox(instance_id=instance_id, buddy=buddy)
+        task_path = root / "tasks" / f"{task_id}.json"
+        task_path.write_text(
+            json.dumps(
+                {
+                    "id": task_id,
+                    "owner_buddy": buddy,
+                    "title": title,
+                    "summary": summary,
+                    "status": status,
+                    "priority": priority,
+                    "track_id": track_id,
+                    "refs": refs or [],
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                    "closed_at": closed_at,
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return task_path

@@ -70,7 +70,13 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_context_summarize_exposes_runless_decision_surface(self) -> None:
         track = env_store.create_track("track-runless-router", "Runless Router", owner_buddy="pm")
-        task = env_store.create_task("task-pm-router", "Prepare design intake", buddy="pm", track_id=track["id"])
+        self._write_taskbox_task(
+            instance_id="inst-pm-runless",
+            buddy="pm",
+            task_id="task-pm-router",
+            title="Prepare design intake",
+            track_id=track["id"],
+        )
         artifact = env_store.create_artifact_revision(
             artifact_id="art-pm-router-r1",
             title="Router PRD",

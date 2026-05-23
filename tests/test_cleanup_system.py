@@ -49,32 +49,6 @@ class CleanupSystemTests(unittest.TestCase):
             },
         )
         self._write_json(
-            "buddyswitch/objects/tasks/task-pm.json",
-            {
-                "id": "task-pm",
-                "buddy": "pm",
-                "title": "PM task",
-                "summary": "",
-                "status": "active",
-                "track_id": "track-demo",
-                "created_at": "2026-05-15T00:00:00+00:00",
-                "updated_at": "2026-05-15T00:00:00+00:00",
-            },
-        )
-        self._write_json(
-            "buddyswitch/objects/tasks/task-dev.json",
-            {
-                "id": "task-dev",
-                "buddy": "dev",
-                "title": "DEV task",
-                "summary": "",
-                "status": "active",
-                "track_id": "track-demo",
-                "created_at": "2026-05-15T00:00:00+00:00",
-                "updated_at": "2026-05-15T00:00:00+00:00",
-            },
-        )
-        self._write_json(
             "buddyswitch/objects/artifacts/art-pm-r1.json",
             {
                 "id": "art-pm-r1",
@@ -120,6 +94,8 @@ class CleanupSystemTests(unittest.TestCase):
                 "target_buddy": "dev",
             },
         )
+        self._write_taskbox_task(instance_id="inst-pm-clean", buddy="pm", task_id="task-pm")
+        self._write_taskbox_task(instance_id="inst-dev-clean", buddy="dev", task_id="task-dev")
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -154,6 +130,27 @@ class CleanupSystemTests(unittest.TestCase):
         )
         return workspace
 
+    def _write_taskbox_task(self, *, instance_id: str, buddy: str, task_id: str) -> None:
+        taskbox_root = self.shared_root / "instances" / instance_id / "taskbox" / buddy
+        (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
+        (taskbox_root / "history.md").write_text("", encoding="utf-8")
+        self._write_json(
+            f"../instances/{instance_id}/taskbox/{buddy}/tasks/{task_id}.json",
+            {
+                "id": task_id,
+                "owner_buddy": buddy,
+                "title": f"{buddy} task",
+                "summary": "",
+                "status": "active",
+                "priority": "normal",
+                "track_id": "track-demo",
+                "refs": [],
+                "created_at": "2026-05-15T00:00:00+00:00",
+                "updated_at": "2026-05-15T00:00:00+00:00",
+                "closed_at": None,
+            },
+        )
+
     def test_cleanup_plan_excludes_handoff_indexing(self) -> None:
         plan = env_cleanup.build_cleanup_plan(
             scope="buddy",
@@ -162,11 +159,13 @@ class CleanupSystemTests(unittest.TestCase):
             manifest_path=self.manifest_path,
         )
         self.assertEqual(plan["scope"], "buddy")
-        self.assertIn("task-pm", plan["task_object_ids"])
         self.assertIn("art-pm-r1", plan["artifact_object_ids"])
+        self.assertNotIn("task_" + "object_ids", plan)
+        self.assertNotIn("task_" + "records", plan)
         self.assertNotIn("handoff_object_ids", plan)
         self.assertNotIn("handoff_records", plan)
         self.assertNotIn("handoff_objects", plan.get("counts_by_category", {}))
+        self.assertNotIn("task_" + "objects", plan.get("counts_by_category", {}))
 
     def test_execute_all_data_cleanup_recreates_active_skeleton_only(self) -> None:
         plan = env_cleanup.build_cleanup_plan(
@@ -180,12 +179,12 @@ class CleanupSystemTests(unittest.TestCase):
 
         for directory in (
             "buddyswitch/objects/tracks",
-            "buddyswitch/objects/tasks",
             "buddyswitch/objects/artifacts",
             "buddyswitch/objects/messages",
             "buddyswitch/objects/comments",
         ):
             self.assertTrue(self._path(directory).is_dir(), f"missing recreated dir: {directory}")
+        self.assertFalse(self._path("buddyswitch/objects" + "/tasks").exists())
 
     def test_cleanup_plan_includes_message_and_comment_objects(self) -> None:
         """MCT-RUN-003: All-data cleanup plan discovers message and comment objects."""

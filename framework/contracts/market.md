@@ -29,6 +29,7 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 
 ## Durable Output Targets
 
-- `buddyswitch/objects/tasks/<task-id>.json`
+- `instances/<instance-id>/taskbox/<buddy>/tasks/<task-id>.json`
+- `instances/<instance-id>/taskbox/<buddy>/history.md`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - Active-buddy-private files via `buddybox.*` logical names (instance-local, not product-readable).

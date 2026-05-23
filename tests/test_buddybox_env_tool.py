@@ -728,15 +728,17 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(objects_root.exists())
 
     def test_buddybox_operations_do_not_mutate_product_objects(self) -> None:
+        instance_id = "inst-pm-box-no-product-mutation"
         track = env_store.create_track(
             "track-pm-buddybox-product-state",
             "Buddybox Product Boundary",
             owner_buddy="pm",
         )
-        task = env_store.create_task(
-            "task-pm-buddybox-product-state",
-            "Buddybox Product Boundary Task",
+        task_path = self._write_taskbox_task(
+            instance_id=instance_id,
             buddy="pm",
+            task_id="task-pm-buddybox-product-state",
+            title="Buddybox Product Boundary Task",
             track_id=track["id"],
         )
         artifact = env_store.create_artifact_revision(
@@ -759,12 +761,11 @@ class BuddyboxEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         object_paths = (
             env_store.track_file(track["id"]),
-            env_store.task_file(task["id"]),
+            task_path,
             env_store.artifact_file(artifact["id"]),
         )
         before = {path: path.read_text(encoding="utf-8") for path in object_paths}
 
-        instance_id = "inst-pm-box-no-product-mutation"
         instance_json = self._instance_json(buddy="pm", instance_id=instance_id)
         writes = [
             self._dispatch(

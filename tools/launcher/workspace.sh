@@ -811,7 +811,6 @@ buddyswitch_workspace_ensure_state_skeleton() {
     mkdir -p "${workspace_dir}/${relative_dir}"
   done <<'EOF'
 buddyswitch/objects/tracks
-buddyswitch/objects/tasks
 buddyswitch/objects/artifacts
 buddyswitch/objects/messages
 buddyswitch/objects/comments

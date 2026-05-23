@@ -40,37 +40,6 @@ def _load_registry_module():
 class RuntimeObjectAccess:
     """Concrete runtime-object helpers for tool implementations."""
 
-    def list_tasks(self) -> list[dict[str, Any]]:
-        return _task_repo.list_tasks()
-
-    def create_task(self, task_id: str, title: str, summary: str, status: str, track_id: str | None) -> dict[str, Any]:
-        return _task_repo.create_task(
-            task_id=task_id,
-            title=title,
-            buddy="",
-            track_id=track_id,
-            status=status,
-            summary=summary,
-        )
-
-    def get_task(self, task_id: str) -> dict[str, Any] | None:
-        return _task_repo.get_task(task_id)
-
-    def update_task(self, task_id: str, title: str | None, summary: str | None, status: str | None, track_id: str | None) -> dict[str, Any]:
-        patch: dict[str, Any] = {}
-        if title is not None:
-            patch["title"] = title
-        if summary is not None:
-            patch["summary"] = summary
-        if status is not None:
-            patch["status"] = status
-        if track_id is not None:
-            patch["track_id"] = track_id
-        return _task_repo.update_task(task_id, patch)
-
-    def archive_task(self, task_id: str) -> dict[str, Any]:
-        return _task_repo.update_task(task_id, {"status": "archived"})
-
     def list_tracks(self) -> list[dict[str, Any]]:
         return _track_repo.list_tracks()
 

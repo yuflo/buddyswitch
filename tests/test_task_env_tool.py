@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Task env.tool tests for private task model."""
+"""Task env.tool tests for instance-local taskbox behavior."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import sys
 import unittest
 import uuid
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -23,33 +24,50 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _snapshot_json_dir(self, relative_dir: str) -> dict[str, str]:
-        root = self._runtime_path(relative_dir)
-        if not root.exists():
-            return {}
-        return {path.name: path.read_text(encoding="utf-8") for path in sorted(root.glob("*.json"))}
+    def _taskbox_root(self, instance_root: Path, buddy: str) -> Path:
+        return instance_root / "taskbox" / buddy
 
-    def _instance_json(self, *, instance_id: str, buddy: str) -> Path:
-        path = self._runtime_path(f"instance-{instance_id}.json")
-        path.write_text(
-            json.dumps(
-                {
-                    "instance_id": instance_id,
-                    "buddy": buddy,
-                    "status": "active",
-                    "workspace_dir": str(self.runtime_root),
-                    "browser_port": None,
-                    "updated_at": "2026-05-17T00:00:00Z",
-                },
-                ensure_ascii=True,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        return path
+    def _taskbox_tasks_dir(self, instance_root: Path, buddy: str) -> Path:
+        return self._taskbox_root(instance_root, buddy) / "tasks"
 
-    def _assert_publication_field_rejected_without_state_mutation(
+    def _history_file(self, instance_root: Path, buddy: str) -> Path:
+        return self._taskbox_root(instance_root, buddy) / "history.md"
+
+    def _task_file(self, instance_root: Path, buddy: str, task_id: str) -> Path:
+        return self._taskbox_tasks_dir(instance_root, buddy) / f"{task_id}.json"
+
+    def _legacy_task_file(self, task_id: str) -> Path:
+        return self._runtime_path(f"{'buddyswitch/objects'}/tasks/{task_id}.json")
+
+    def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+    def _make_instance_context(self, *, instance_id: str = "instance-a", buddy: str = "dev") -> dict[str, Any]:
+        instance_root = self._runtime_path(f"instances/{instance_id}")
+        workspace_dir = instance_root / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        taskbox_root = self._taskbox_root(instance_root, buddy)
+        (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
+        self._history_file(instance_root, buddy).write_text("", encoding="utf-8")
+        instance_payload = {
+            "instance_id": instance_id,
+            "buddy": buddy,
+            "status": "active",
+            "instance_root": str(instance_root),
+            "workspace_dir": str(workspace_dir),
+            "browser_port": None,
+            "updated_at": "2026-05-23T00:00:00+08:00",
+        }
+        instance_json = instance_root / "instance.json"
+        self._write_json(instance_json, instance_payload)
+        return {
+            "instance_root": instance_root,
+            "instance_json": instance_json,
+            "instance_payload": instance_payload,
+        }
+
+    def _dispatch(
         self,
         *,
         instance_json: Path,
@@ -57,29 +75,7 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         buddy: str,
         action: str,
         args: dict[str, object],
-        field: str,
-        before_tracks: dict[str, str],
-        before_tasks: dict[str, str],
-        before_artifacts: dict[str, str],
-    ) -> None:
-        rejected = self._dispatch(
-            instance_json=instance_json,
-            instance_id=instance_id,
-            buddy=buddy,
-            tool="task",
-            action=action,
-            args=args,
-        )
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual(rejected.get("permission_boundary"), "request-payload")
-        blocked = str(rejected.get("why_blocked"))
-        self.assertIn("publication-style payload fields:", blocked)
-        self.assertIn(field, blocked)
-        self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/tracks"), before_tracks)
-        self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/tasks"), before_tasks)
-        self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/artifacts"), before_artifacts)
-
-    def _dispatch(self, *, instance_json: Path, instance_id: str, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+    ) -> dict[str, object]:
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-task-{uuid.uuid4().hex}",
@@ -87,7 +83,7 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "params": {
                 "instance_id": instance_id,
                 "active_buddy": buddy,
-                "tool": tool,
+                "tool": "task",
                 "action": action,
                 "args": args,
             },
@@ -120,423 +116,448 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
-    def _create_track(self) -> None:
-        pm_instance = self._instance_json(instance_id="inst-pm-task", buddy="pm")
-        created = self._dispatch(
-            instance_json=pm_instance,
-            instance_id="inst-pm-task",
-            buddy="pm",
-            tool="track",
-            action="create",
-            args={
-                "track_id": "track-task-private",
-                "title": "Private hint",
-                "outcome": "outcome",
-                "appetite": "1 day",
-                "now": {"next": "x", "blocker": None},
+    def _snapshot_taskbox_task_ids(self, instance_root: Path, buddy: str) -> list[str]:
+        tasks_dir = self._taskbox_tasks_dir(instance_root, buddy)
+        if not tasks_dir.exists():
+            return []
+        return sorted(path.stem for path in tasks_dir.glob("*.json"))
+
+    def _seed_track(self, track_id: str) -> None:
+        env_store.create_track(track_id, f"{track_id} title", owner_buddy="pm")
+
+    def _seed_legacy_shared_task(self, *, task_id: str = "task-legacy-shared", buddy: str = "dev") -> None:
+        self._write_json(
+            self._legacy_task_file(task_id),
+            {
+                "id": task_id,
+                "buddy": buddy,
+                "title": "Legacy shared task",
+                "status": "active",
+                "track_id": None,
+                "summary": "This must not appear.",
+                "created_at": "2026-05-23T00:00:00+08:00",
+                "updated_at": "2026-05-23T00:00:00+08:00",
             },
         )
-        self.assertTrue(created.get("ok"), msg=created)
 
-    def test_task_track_id_hint_does_not_mutate_track(self) -> None:
-        self._create_track()
-        before = env_store.get_track("track-task-private")
-        self.assertIsInstance(before, dict)
+    def _seed_taskbox_task(
+        self,
+        *,
+        instance_root: Path,
+        buddy: str,
+        task_id: str,
+        title: str,
+        status: str = "active",
+        priority: str = "normal",
+        track_id: str | None = None,
+        summary: str = "",
+        refs: list[dict[str, object]] | None = None,
+        created_at: str = "2026-05-23T12:00:00+08:00",
+        updated_at: str = "2026-05-23T12:00:00+08:00",
+        closed_at: str | None = None,
+    ) -> None:
+        if closed_at is None and status in {"done", "archived"}:
+            closed_at = updated_at
+        self._write_json(
+            self._task_file(instance_root, buddy, task_id),
+            {
+                "id": task_id,
+                "owner_buddy": buddy,
+                "title": title,
+                "summary": summary,
+                "status": status,
+                "priority": priority,
+                "track_id": track_id,
+                "refs": refs or [],
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "closed_at": closed_at,
+            },
+        )
 
-        dev_instance = self._instance_json(instance_id="inst-dev-task", buddy="dev")
-        created = self._dispatch(
-            instance_json=dev_instance,
-            instance_id="inst-dev-task",
+    def _history_lines(self, instance_root: Path, buddy: str) -> list[str]:
+        return self._history_file(instance_root, buddy).read_text(encoding="utf-8").splitlines()
+
+    def test_create_writes_instance_local_task_with_priority_refs_and_history(self) -> None:
+        self._seed_track("track-alpha")
+        instance = self._make_instance_context(instance_id="instance-a", buddy="dev")
+
+        payload = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
             buddy="dev",
-            tool="task",
             action="create",
             args={
-                "task_id": "task-dev-private",
-                "title": "Private task",
-                "track_id": "track-task-private",
-                "summary": "hint only",
+                "task_id": "task-dev-high",
+                "title": "Inspect design handoff",
+                "summary": "Review artifact references and risks.",
+                "priority": "high",
+                "track_id": "track-alpha",
+                "refs": [
+                    {"type": "track", "id": "track-alpha", "label": "Primary track"},
+                    {"type": "buddybox", "logical_name": "prototype/index.html", "label": "Prototype"},
+                ],
             },
         )
-        self.assertTrue(created.get("ok"), msg=created)
 
-        after = env_store.get_track("track-task-private")
-        self.assertEqual(before, after)
+        self.assertTrue(payload.get("ok"), msg=payload)
+        task = payload["task"]
+        self.assertEqual(task["id"], "task-dev-high")
+        self.assertEqual(task["owner_buddy"], "dev")
+        self.assertEqual(task["priority"], "high")
+        self.assertEqual(task["track_id"], "track-alpha")
+        self.assertEqual(task["refs"][1]["logical_name"], "prototype/index.html")
+        self.assertIsNone(task["closed_at"])
 
-    def test_task_track_context_validates_read_only_track_state(self) -> None:
-        track = env_store.create_track(
-            "track-task-context-readonly",
-            "Task Context",
-            owner_buddy="pm",
-            outcome="Track remains unchanged",
-            appetite="1 day",
-            now={"next": "seed", "blocker": None},
-        )
-        before_track = json.dumps(env_store.get_track(str(track["id"])), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-        instance_json = self._instance_json(buddy="dev", instance_id="inst-dev-task-context-readonly")
+        task_file = self._task_file(instance["instance_root"], "dev", "task-dev-high")
+        self.assertTrue(task_file.is_file())
+        self.assertFalse(self._legacy_task_file("task-dev-high").exists())
+        stored = json.loads(task_file.read_text(encoding="utf-8"))
+        self.assertEqual(stored["owner_buddy"], "dev")
+        self.assertNotIn("buddy", stored)
+        self.assertIn("task.create task-dev-high", self._history_file(instance["instance_root"], "dev").read_text(encoding="utf-8"))
 
-        created = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-dev-task-context-readonly",
+    def test_list_and_get_ignore_legacy_shared_task_files(self) -> None:
+        instance = self._make_instance_context(instance_id="instance-a", buddy="dev")
+        self._seed_taskbox_task(
+            instance_root=instance["instance_root"],
             buddy="dev",
-            tool="task",
-            action="create",
-            args={
-                "task_id": "task-dev-track-context-readonly",
-                "title": "Use track as private context",
-                "summary": "Task only",
-                "track_id": str(track["id"]),
-            },
+            task_id="task-dev-local",
+            title="Local task",
+            priority="normal",
         )
-        self.assertTrue(created.get("ok"), msg=created)
-        after_track = json.dumps(env_store.get_track(str(track["id"])), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-        self.assertEqual(after_track, before_track)
+        self._seed_legacy_shared_task()
 
-    def test_task_get_rejects_foreign_private_task(self) -> None:
-        self._create_track()
-        dev_instance = self._instance_json(instance_id="inst-dev-task", buddy="dev")
-        self.assertTrue(
-            self._dispatch(
-                instance_json=dev_instance,
-                instance_id="inst-dev-task",
-                buddy="dev",
-                tool="task",
-                action="create",
-                args={
-                    "task_id": "task-dev-private-2",
-                    "title": "Private task",
-                    "summary": "private",
-                },
-            ).get("ok")
+        listed = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
+            buddy="dev",
+            action="list",
+            args={"include_archived": True},
         )
+        self.assertTrue(listed.get("ok"), msg=listed)
+        self.assertEqual([task["id"] for task in listed["tasks"]], ["task-dev-local"])
 
-        pm_instance = self._instance_json(instance_id="inst-pm-task", buddy="pm")
-        denied = self._dispatch(
-            instance_json=pm_instance,
-            instance_id="inst-pm-task",
-            buddy="pm",
-            tool="task",
+        missing = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
+            buddy="dev",
             action="get",
-            args={"task_id": "task-dev-private-2"},
+            args={"task_id": "task-legacy-shared"},
         )
-        self.assertFalse(denied.get("ok"), msg=denied)
-        self.assertEqual(denied.get("permission_boundary"), "task.buddy_scope")
+        self.assertFalse(missing.get("ok"), msg=missing)
+        self.assertIn("task not found", str((missing.get("error") or {}).get("message")))
 
-    def test_task_create_rejects_buddy_field_without_state_mutation(self) -> None:
-        before_tasks = self._snapshot_json_dir("buddyswitch/objects/tasks")
-        instance_json = self._instance_json(instance_id="inst-dev-task-buddy-field", buddy="dev")
-        rejected = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-dev-task-buddy-field",
+    def test_same_task_id_isolated_across_instances(self) -> None:
+        instance_a = self._make_instance_context(instance_id="instance-a", buddy="dev")
+        instance_b = self._make_instance_context(instance_id="instance-b", buddy="dev")
+
+        created_a = self._dispatch(
+            instance_json=instance_a["instance_json"],
+            instance_id="instance-a",
             buddy="dev",
-            tool="task",
             action="create",
-            args={
-                "task_id": "task-dev-reject-buddy",
-                "title": "Reject buddy field",
-                "summary": "should not create",
-                "buddy": "design",
-            },
+            args={"task_id": "task-dev-high", "title": "Instance A title"},
         )
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TASK_PAYLOAD")
-        self.assertEqual(rejected.get("permission_boundary"), "request-payload")
-        self.assertIs(rejected.get("state_changed"), False)
-        self.assertIn("buddy", str(rejected.get("why_blocked")))
-        self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/tasks"), before_tasks)
-        self.assertFalse(self._runtime_path("buddyswitch/objects/tasks/task-dev-reject-buddy.json").exists())
-
-    def test_task_create_rejects_active_buddy_field_without_state_mutation(self) -> None:
-        before_tasks = self._snapshot_json_dir("buddyswitch/objects/tasks")
-        instance_json = self._instance_json(instance_id="inst-dev-task-active-buddy-field", buddy="dev")
-        rejected = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-dev-task-active-buddy-field",
+        created_b = self._dispatch(
+            instance_json=instance_b["instance_json"],
+            instance_id="instance-b",
             buddy="dev",
-            tool="task",
             action="create",
-            args={
-                "task_id": "task-dev-reject-active-buddy",
-                "title": "Reject active buddy field",
-                "summary": "should not create",
-                "active_buddy": "pm",
-            },
+            args={"task_id": "task-dev-high", "title": "Instance B title"},
         )
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual((rejected.get("error") or {}).get("code"), "E_TASK_PAYLOAD")
-        self.assertEqual(rejected.get("permission_boundary"), "request-payload")
-        self.assertIs(rejected.get("state_changed"), False)
-        self.assertIn("active_buddy", str(rejected.get("why_blocked")))
-        self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/tasks"), before_tasks)
-        self.assertFalse(self._runtime_path("buddyswitch/objects/tasks/task-dev-reject-active-buddy.json").exists())
+        self.assertTrue(created_a.get("ok"), msg=created_a)
+        self.assertTrue(created_b.get("ok"), msg=created_b)
+        self.assertEqual(created_a["task"]["title"], "Instance A title")
+        self.assertEqual(created_b["task"]["title"], "Instance B title")
 
-    def test_task_rows_omit_artifact_linkage_fields(self) -> None:
-        dev_instance = self._instance_json(instance_id="inst-dev-task", buddy="dev")
-        created = self._dispatch(
-            instance_json=dev_instance,
-            instance_id="inst-dev-task",
+        listed_a = self._dispatch(
+            instance_json=instance_a["instance_json"],
+            instance_id="instance-a",
             buddy="dev",
-            tool="task",
-            action="create",
-            args={"task_id": "task-dev-no-art", "title": "No artifact fields", "summary": "x"},
-        )
-        self.assertTrue(created.get("ok"), msg=created)
-
-        one = self._dispatch(
-            instance_json=dev_instance,
-            instance_id="inst-dev-task",
-            buddy="dev",
-            tool="task",
-            action="get",
-            args={"task_id": "task-dev-no-art"},
-        )
-        many = self._dispatch(
-            instance_json=dev_instance,
-            instance_id="inst-dev-task",
-            buddy="dev",
-            tool="task",
             action="list",
             args={},
         )
-        self.assertTrue(one.get("ok"), msg=one)
-        self.assertTrue(many.get("ok"), msg=many)
-        row = one["task"]
-        encoded = json.dumps(row, ensure_ascii=True)
-        self.assertNotIn("artifact_ids", encoded)
-        self.assertNotIn("artifact" + "_slots", encoded)
-        self.assertNotIn("current_artifacts", encoded)
-        self.assertNotIn("shared_materials", encoded)
-
-    def test_task_track_id_hint_does_not_mutate_track_state(self) -> None:
-        env_store.create_track("track-task-hint-envtool", "Track Hint Env Tool", owner_buddy="pm")
-        env_store.create_artifact_revision(
-            artifact_id="art-dev-track-hint-envtool",
-            title="Track hint artifact",
-            created_by="dev",
-            body="draft body",
-            template="note",
-            summary="artifact should stay untouched",
+        listed_b = self._dispatch(
+            instance_json=instance_b["instance_json"],
+            instance_id="instance-b",
+            buddy="dev",
+            action="list",
+            args={},
         )
-        before_track = json.loads(env_store.track_file("track-task-hint-envtool").read_text(encoding="utf-8"))
-        before_artifact = json.loads(env_store.artifact_file("art-dev-track-hint-envtool").read_text(encoding="utf-8"))
-        instance_json = self._instance_json(instance_id="inst-dev-task", buddy="dev")
+        self.assertEqual([task["id"] for task in listed_a["tasks"]], ["task-dev-high"])
+        self.assertEqual([task["id"] for task in listed_b["tasks"]], ["task-dev-high"])
+        self.assertTrue(self._task_file(instance_a["instance_root"], "dev", "task-dev-high").is_file())
+        self.assertTrue(self._task_file(instance_b["instance_root"], "dev", "task-dev-high").is_file())
+
+    def test_active_buddy_cannot_read_or_mutate_other_taskbox_tasks(self) -> None:
+        instance = self._make_instance_context(instance_id="instance-a", buddy="dev")
+        self._seed_taskbox_task(
+            instance_root=instance["instance_root"],
+            buddy="design",
+            task_id="task-design-private",
+            title="Design private task",
+        )
+
+        listed = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
+            buddy="dev",
+            action="list",
+            args={"include_archived": True},
+        )
+        self.assertTrue(listed.get("ok"), msg=listed)
+        self.assertNotIn("task-design-private", {task["id"] for task in listed["tasks"]})
+
+        for action, args in (
+            ("get", {"task_id": "task-design-private"}),
+            ("update", {"task_id": "task-design-private", "title": "Nope"}),
+            ("archive", {"task_id": "task-design-private"}),
+        ):
+            with self.subTest(action=action):
+                rejected = self._dispatch(
+                    instance_json=instance["instance_json"],
+                    instance_id="instance-a",
+                    buddy="dev",
+                    action=action,
+                    args=args,
+                )
+                self.assertFalse(rejected.get("ok"), msg=rejected)
+                message = str((rejected.get("error") or {}).get("message"))
+                self.assertTrue(
+                    "task not found" in message or "owned by buddy" in message,
+                    msg=rejected,
+                )
+
+    def test_list_filters_sort_by_priority_updated_time_and_id(self) -> None:
+        instance = self._make_instance_context(instance_id="instance-a", buddy="dev")
+        self._seed_taskbox_task(
+            instance_root=instance["instance_root"],
+            buddy="dev",
+            task_id="task-dev-low",
+            title="Low",
+            priority="low",
+            status="active",
+            track_id="track-alpha",
+            updated_at="2026-05-23T12:03:00+08:00",
+        )
+        self._seed_taskbox_task(
+            instance_root=instance["instance_root"],
+            buddy="dev",
+            task_id="task-dev-high",
+            title="High",
+            priority="high",
+            status="active",
+            track_id="track-beta",
+            updated_at="2026-05-23T12:01:00+08:00",
+        )
+        self._seed_taskbox_task(
+            instance_root=instance["instance_root"],
+            buddy="dev",
+            task_id="task-dev-high-b",
+            title="High B",
+            priority="high",
+            status="active",
+            track_id="track-beta",
+            updated_at="2026-05-23T12:01:00+08:00",
+        )
+        self._seed_taskbox_task(
+            instance_root=instance["instance_root"],
+            buddy="dev",
+            task_id="task-dev-normal",
+            title="Normal",
+            priority="normal",
+            status="blocked",
+            track_id="track-alpha",
+            updated_at="2026-05-23T12:02:00+08:00",
+        )
+        self._seed_taskbox_task(
+            instance_root=instance["instance_root"],
+            buddy="dev",
+            task_id="task-dev-archived",
+            title="Archived",
+            priority="high",
+            status="archived",
+            track_id="track-alpha",
+            updated_at="2026-05-23T12:04:00+08:00",
+        )
+
+        default_list = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
+            buddy="dev",
+            action="list",
+            args={},
+        )
+        self.assertTrue(default_list.get("ok"), msg=default_list)
+        self.assertEqual(
+            [task["id"] for task in default_list["tasks"]],
+            ["task-dev-high", "task-dev-high-b", "task-dev-normal", "task-dev-low"],
+        )
+
+        high_list = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
+            buddy="dev",
+            action="list",
+            args={"priority": "high", "include_archived": True},
+        )
+        self.assertTrue(high_list.get("ok"), msg=high_list)
+        self.assertEqual(
+            [task["id"] for task in high_list["tasks"]],
+            ["task-dev-archived", "task-dev-high", "task-dev-high-b"],
+        )
+
+        alpha_list = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
+            buddy="dev",
+            action="list",
+            args={"track_id": "track-alpha"},
+        )
+        self.assertTrue(alpha_list.get("ok"), msg=alpha_list)
+        self.assertEqual([task["id"] for task in alpha_list["tasks"]], ["task-dev-normal", "task-dev-low"])
+
+        blocked_list = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
+            buddy="dev",
+            action="list",
+            args={"status": "blocked"},
+        )
+        self.assertTrue(blocked_list.get("ok"), msg=blocked_list)
+        self.assertEqual([task["id"] for task in blocked_list["tasks"]], ["task-dev-normal"])
+
+    def test_task_lifecycle_updates_closed_at_and_appends_history(self) -> None:
+        instance = self._make_instance_context(instance_id="instance-a", buddy="dev")
 
         created = self._dispatch(
-            instance_json=instance_json,
-            tool="task",
-            action="create",
-            args={
-                "task_id": "task-dev-track-hint-envtool",
-                "title": "Track hint task",
-                "track_id": "track-task-hint-envtool",
-            },
-            instance_id="inst-dev-task",
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
             buddy="dev",
+            action="create",
+            args={"task_id": "task-dev-high", "title": "Lifecycle task"},
         )
         self.assertTrue(created.get("ok"), msg=created)
-
-        after_track = json.loads(env_store.track_file("track-task-hint-envtool").read_text(encoding="utf-8"))
-        after_artifact = json.loads(env_store.artifact_file("art-dev-track-hint-envtool").read_text(encoding="utf-8"))
-        self.assertEqual(after_track, before_track)
-        self.assertEqual(after_artifact, before_artifact)
-
-        stored_task = env_store.get_task("task-dev-track-hint-envtool")
-        self.assertIsInstance(stored_task, dict)
-        assert isinstance(stored_task, dict)
-        self.assertEqual(stored_task.get("track_id"), "track-task-hint-envtool")
-        self.assertNotIn("artifact_ids", stored_task)
-        self.assertNotIn("artifact_slots", stored_task)
-
-    def test_task_rejects_publication_style_payload_without_state_mutation(self) -> None:
-        env_store.create_track("track-task-pub-reject", "Task pub reject track", owner_buddy="pm")
-        env_store.create_artifact_revision(
-            artifact_id="art-dev-pub-reject",
-            title="Publication guard artifact",
-            created_by="dev",
-            body="draft body",
-            template="note",
-            summary="artifact baseline",
-        )
-        before_tracks = self._snapshot_json_dir("buddyswitch/objects/tracks")
-        before_tasks = self._snapshot_json_dir("buddyswitch/objects/tasks")
-        before_artifacts = self._snapshot_json_dir("buddyswitch/objects/artifacts")
-
-        instance_json = self._instance_json(instance_id="inst-dev-task", buddy="dev")
-        rejected = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-dev-task",
-            buddy="dev",
-            tool="task",
-            action="create",
-            args={
-                "task_id": "task-dev-pub-reject",
-                "title": "Reject publication payload",
-                "track_id": "track-task-pub-reject",
-                "artifact_id": "art-dev-pub-reject",
-                "published_to_track": "track-task-pub-reject",
-                "shared_materials": [],
-            },
-        )
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual(rejected.get("permission_boundary"), "request-payload")
-        self.assertIn("publication-style payload fields:", str(rejected.get("why_blocked")))
-
-        after_tracks = self._snapshot_json_dir("buddyswitch/objects/tracks")
-        after_tasks = self._snapshot_json_dir("buddyswitch/objects/tasks")
-        after_artifacts = self._snapshot_json_dir("buddyswitch/objects/artifacts")
-        self.assertEqual(after_tracks, before_tracks)
-        self.assertEqual(after_tasks, before_tasks)
-        self.assertEqual(after_artifacts, before_artifacts)
-
-    def test_task_rejects_remaining_publication_style_fields_without_state_mutation(self) -> None:
-        env_store.create_track("track-task-pub-remaining", "Task pub remaining track", owner_buddy="pm")
-        env_store.create_artifact_revision(
-            artifact_id="art-dev-pub-remaining",
-            title="Publication remaining guard artifact",
-            created_by="dev",
-            body="draft body",
-            template="note",
-            summary="artifact baseline",
-        )
-        before_tracks = self._snapshot_json_dir("buddyswitch/objects/tracks")
-        before_tasks = self._snapshot_json_dir("buddyswitch/objects/tasks")
-        before_artifacts = self._snapshot_json_dir("buddyswitch/objects/artifacts")
-        instance_json = self._instance_json(instance_id="inst-dev-task", buddy="dev")
-
-        field_values: dict[str, object] = {
-            "current_artifacts": [],
-            "updates": [],
-            "source_refs": [],
-            "body": "draft body",
-            "template": "note",
-            "supersedes_artifact_id": "art-dev-pub-remaining",
-        }
-        for index, (field, value) in enumerate(field_values.items(), start=1):
-            with self.subTest(action="create", field=field):
-                self._assert_publication_field_rejected_without_state_mutation(
-                    instance_json=instance_json,
-                    instance_id="inst-dev-task",
-                    buddy="dev",
-                    action="create",
-                    args={
-                        "task_id": f"task-dev-pub-remaining-{index}",
-                        "title": f"Reject publication payload {index}",
-                        "track_id": "track-task-pub-remaining",
-                        field: value,
-                    },
-                    field=field,
-                    before_tracks=before_tracks,
-                    before_tasks=before_tasks,
-                    before_artifacts=before_artifacts,
-                )
-
-    def test_task_update_track_id_change_does_not_mutate_track_or_artifact_state(self) -> None:
-        env_store.create_track("track-task-update-context-a", "Task update context A", owner_buddy="pm")
-        env_store.create_track("track-task-update-context-b", "Task update context B", owner_buddy="pm")
-        env_store.create_artifact_revision(
-            artifact_id="art-dev-task-update-context",
-            title="Task update context artifact",
-            created_by="dev",
-            body="draft body",
-            template="note",
-            summary="artifact baseline",
-        )
-        env_store.create_task(
-            "task-dev-track-update-context",
-            "Track update context task",
-            buddy="dev",
-            track_id="track-task-update-context-a",
-            status="active",
-            summary="before update",
-            initial_run_id=None,
-        )
-        before_track_a = json.loads(env_store.track_file("track-task-update-context-a").read_text(encoding="utf-8"))
-        before_track_b = json.loads(env_store.track_file("track-task-update-context-b").read_text(encoding="utf-8"))
-        before_artifact = json.loads(env_store.artifact_file("art-dev-task-update-context").read_text(encoding="utf-8"))
-        instance_json = self._instance_json(instance_id="inst-dev-task", buddy="dev")
+        self.assertIsNone(created["task"]["closed_at"])
 
         updated = self._dispatch(
-            instance_json=instance_json,
-            instance_id="inst-dev-task",
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
             buddy="dev",
-            tool="task",
             action="update",
-            args={
-                "task_id": "task-dev-track-update-context",
-                "track_id": "track-task-update-context-b",
-            },
+            args={"task_id": "task-dev-high", "priority": "high"},
         )
         self.assertTrue(updated.get("ok"), msg=updated)
+        self.assertEqual(updated["task"]["priority"], "high")
 
-        after_track_a = json.loads(env_store.track_file("track-task-update-context-a").read_text(encoding="utf-8"))
-        after_track_b = json.loads(env_store.track_file("track-task-update-context-b").read_text(encoding="utf-8"))
-        after_artifact = json.loads(env_store.artifact_file("art-dev-task-update-context").read_text(encoding="utf-8"))
-        self.assertEqual(after_track_a, before_track_a)
-        self.assertEqual(after_track_b, before_track_b)
-        self.assertEqual(after_artifact, before_artifact)
-
-        stored_task = env_store.get_task("task-dev-track-update-context")
-        self.assertIsInstance(stored_task, dict)
-        assert isinstance(stored_task, dict)
-        self.assertEqual(stored_task.get("track_id"), "track-task-update-context-b")
-
-    def test_task_update_and_archive_reject_publication_fields_without_state_mutation(self) -> None:
-        env_store.create_track("track-task-action-pub-reject", "Task action pub reject track", owner_buddy="pm")
-        env_store.create_artifact_revision(
-            artifact_id="art-dev-action-pub-reject",
-            title="Task action pub reject artifact",
-            created_by="dev",
-            body="draft body",
-            template="note",
-            summary="artifact baseline",
-        )
-        env_store.create_task(
-            "task-dev-action-pub-reject",
-            "Task action pub reject",
+        blocked = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
             buddy="dev",
-            track_id="track-task-action-pub-reject",
-            status="active",
-            summary="before action",
-            initial_run_id=None,
+            action="update",
+            args={"task_id": "task-dev-high", "status": "blocked"},
         )
-        before_tracks = self._snapshot_json_dir("buddyswitch/objects/tracks")
-        before_tasks = self._snapshot_json_dir("buddyswitch/objects/tasks")
-        before_artifacts = self._snapshot_json_dir("buddyswitch/objects/artifacts")
-        instance_json = self._instance_json(instance_id="inst-dev-task", buddy="dev")
+        self.assertTrue(blocked.get("ok"), msg=blocked)
+        self.assertEqual(blocked["task"]["status"], "blocked")
+        self.assertIsNone(blocked["task"]["closed_at"])
 
-        field_values: dict[str, object] = {
-            "current_artifacts": [],
-            "updates": [],
-            "source_refs": [],
-            "body": "draft body",
-            "template": "note",
-            "supersedes_artifact_id": "art-dev-action-pub-reject",
-        }
-        for field, value in field_values.items():
-            with self.subTest(action="update", field=field):
-                self._assert_publication_field_rejected_without_state_mutation(
-                    instance_json=instance_json,
-                    instance_id="inst-dev-task",
+        done = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
+            buddy="dev",
+            action="update",
+            args={"task_id": "task-dev-high", "status": "done"},
+        )
+        self.assertTrue(done.get("ok"), msg=done)
+        self.assertEqual(done["task"]["status"], "done")
+        self.assertIsNotNone(done["task"]["closed_at"])
+
+        reopened = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
+            buddy="dev",
+            action="update",
+            args={"task_id": "task-dev-high", "status": "active"},
+        )
+        self.assertTrue(reopened.get("ok"), msg=reopened)
+        self.assertEqual(reopened["task"]["status"], "active")
+        self.assertIsNone(reopened["task"]["closed_at"])
+
+        archived = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
+            buddy="dev",
+            action="archive",
+            args={"task_id": "task-dev-high"},
+        )
+        self.assertTrue(archived.get("ok"), msg=archived)
+        self.assertEqual(archived["task"]["status"], "archived")
+        self.assertIsNotNone(archived["task"]["closed_at"])
+
+        history_before_repeat = self._history_lines(instance["instance_root"], "dev")
+        archived_again = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
+            buddy="dev",
+            action="archive",
+            args={"task_id": "task-dev-high"},
+        )
+        self.assertTrue(archived_again.get("ok"), msg=archived_again)
+        self.assertEqual(self._history_lines(instance["instance_root"], "dev"), history_before_repeat)
+
+        history_lines = self._history_lines(instance["instance_root"], "dev")
+        for marker in (
+            "task.create task-dev-high",
+            "task.update task-dev-high",
+            "task.block task-dev-high",
+            "task.close task-dev-high",
+            "task.reopen task-dev-high",
+            "task.archive task-dev-high",
+        ):
+            with self.subTest(marker=marker):
+                self.assertEqual(sum(marker in line for line in history_lines), 1, msg=history_lines)
+
+        history_payload = self._dispatch(
+            instance_json=instance["instance_json"],
+            instance_id="instance-a",
+            buddy="dev",
+            action="history",
+            args={"limit": 3},
+        )
+        self.assertTrue(history_payload.get("ok"), msg=history_payload)
+        self.assertEqual(len(history_payload["entries"]), 3)
+        self.assertTrue(all(str(entry["line"]).startswith("- ") for entry in history_payload["entries"]))
+
+    def test_validation_rejects_invalid_task_payloads_without_creating_files(self) -> None:
+        instance = self._make_instance_context(instance_id="instance-a", buddy="dev")
+        before_task_ids = self._snapshot_taskbox_task_ids(instance["instance_root"], "dev")
+
+        cases = (
+            {"title": "Missing task id"},
+            {"task_id": "task-dev-invalid-priority", "title": "Bad priority", "priority": "urgent"},
+            {"task_id": "task-dev-invalid-status", "title": "Bad status", "status": "waiting"},
+            {"task_id": "task-dev-invalid-refs", "title": "Bad refs type", "refs": "track-alpha"},
+            {"task_id": "task-dev-missing-ref-id", "title": "Missing ref id", "refs": [{"type": "track"}]},
+            {"task_id": "task-dev-bad-buddybox-ref", "title": "Bad buddybox ref", "refs": [{"type": "buddybox", "id": "file"}]},
+            {"task_id": "task-dev-source-refs", "title": "Reject source_refs", "source_refs": []},
+            {"task_id": "task-dev-visibility", "title": "Reject visibility", "visibility": "public"},
+            {"task_id": "../escape", "title": "Reject traversal"},
+        )
+
+        for args in cases:
+            with self.subTest(args=args):
+                rejected = self._dispatch(
+                    instance_json=instance["instance_json"],
+                    instance_id="instance-a",
                     buddy="dev",
-                    action="update",
-                    args={"task_id": "task-dev-action-pub-reject", field: value},
-                    field=field,
-                    before_tracks=before_tracks,
-                    before_tasks=before_tasks,
-                    before_artifacts=before_artifacts,
+                    action="create",
+                    args=args,
                 )
-
-        with self.subTest(action="archive", field="body"):
-            self._assert_publication_field_rejected_without_state_mutation(
-                instance_json=instance_json,
-                instance_id="inst-dev-task",
-                buddy="dev",
-                action="archive",
-                args={"task_id": "task-dev-action-pub-reject", "body": "draft body"},
-                field="body",
-                before_tracks=before_tracks,
-                before_tasks=before_tasks,
-                before_artifacts=before_artifacts,
-            )
+                self.assertFalse(rejected.get("ok"), msg=rejected)
+                self.assertEqual(rejected.get("permission_boundary"), "request-payload")
+                self.assertIs(rejected.get("state_changed"), False)
+                self.assertEqual(self._snapshot_taskbox_task_ids(instance["instance_root"], "dev"), before_task_ids)
 
 
 if __name__ == "__main__":

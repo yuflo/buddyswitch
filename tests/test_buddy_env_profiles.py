@@ -75,6 +75,10 @@ class BuddyEnvProfilesTests(unittest.TestCase):
             self.assertNotIn("default_engine", search)
             self.assertNotIn("preferred_backend", search)
             self.assertNotIn("market_workflow", search)
+            self.assertEqual(
+                profile["state_capability"]["task_effects"],
+                ["create", "update", "priority", "status", "archive", "history"],
+            )
             if buddy_id == "market":
                 self.assertEqual(search["browser_cockpit"], "required")
                 self.assertEqual(search["search_api"], "user-approved-only")

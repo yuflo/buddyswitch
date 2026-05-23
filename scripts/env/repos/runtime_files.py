@@ -9,7 +9,7 @@ import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 
 RUNTIME_WORKSPACE_AGENTS_HEADER = "# BuddySwitch Runtime Workspace"
@@ -36,7 +36,6 @@ def _recompute_runtime_roots() -> None:
     global STATE_ROOT
     global OBJECTS_ROOT
     global TRACKS_DIR
-    global TASKS_DIR
     global ARTIFACT_OBJECTS_DIR
     global ARTIFACT_ATTACHMENTS_DIR
     global MESSAGES_DIR
@@ -56,7 +55,6 @@ def _recompute_runtime_roots() -> None:
 
     OBJECTS_ROOT = STATE_ROOT / "buddyswitch" / "objects"
     TRACKS_DIR = OBJECTS_ROOT / "tracks"
-    TASKS_DIR = OBJECTS_ROOT / "tasks"
     ARTIFACT_OBJECTS_DIR = OBJECTS_ROOT / "artifacts"
     ARTIFACT_ATTACHMENTS_DIR = OBJECTS_ROOT / "artifact-attachments"
     MESSAGES_DIR = OBJECTS_ROOT / "messages"
@@ -116,6 +114,59 @@ def buddybox_local_dir(instance_payload: dict[str, Any] | None = None) -> Path:
     return BUDDYBOX_LOCAL_DIR
 
 
+def instance_root_from_context(
+    *,
+    instance_json: Path | str | None,
+    instance_payload: Mapping[str, object] | None,
+) -> Path:
+    if instance_payload is not None:
+        raw_root = instance_payload.get("instance_root")
+        if isinstance(raw_root, str) and raw_root.strip():
+            return Path(raw_root.strip()).expanduser().resolve(strict=False)
+    if instance_json is not None:
+        return Path(instance_json).expanduser().resolve(strict=False).parent
+    raise ValueError("instance context is required for taskbox access")
+
+
+def taskbox_root(
+    *,
+    active_buddy: str,
+    instance_json: Path | str | None,
+    instance_payload: Mapping[str, object] | None,
+) -> Path:
+    require_id(active_buddy, "buddy")
+    return instance_root_from_context(
+        instance_json=instance_json,
+        instance_payload=instance_payload,
+    ) / "taskbox" / active_buddy
+
+
+def taskbox_tasks_dir(
+    *,
+    active_buddy: str,
+    instance_json: Path | str | None,
+    instance_payload: Mapping[str, object] | None,
+) -> Path:
+    return taskbox_root(
+        active_buddy=active_buddy,
+        instance_json=instance_json,
+        instance_payload=instance_payload,
+    ) / "tasks"
+
+
+def taskbox_history_file(
+    *,
+    active_buddy: str,
+    instance_json: Path | str | None,
+    instance_payload: Mapping[str, object] | None,
+) -> Path:
+    return taskbox_root(
+        active_buddy=active_buddy,
+        instance_json=instance_json,
+        instance_payload=instance_payload,
+    ) / "history.md"
+
+
 def rel(path: Path) -> str:
     for candidate_root in (ROOT, STATE_ROOT):
         try:
@@ -166,7 +217,6 @@ def require_runtime_workspace_write_root(root: Path | None = None) -> None:
 def ensure_runtime_dirs() -> None:
     require_runtime_workspace_write_root()
     TRACKS_DIR.mkdir(parents=True, exist_ok=True)
-    TASKS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_OBJECTS_DIR.mkdir(parents=True, exist_ok=True)
     ARTIFACT_ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
     MESSAGES_DIR.mkdir(parents=True, exist_ok=True)

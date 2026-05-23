@@ -3,27 +3,26 @@
 
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 from typing import Any, TypedDict
 
 from .tool import DEFINITION
 from env.tool_runtime import results as tool_results
 
-
 _ACTION_DEFINITION_MAP = {
-    'actions': [
+    "actions": [
         {
-            'name': row.name,
-            'payload_fields': [
+            "name": row.name,
+            "payload_fields": [
                 field
-                for field in (row.input_schema.get('properties') or {})
+                for field in (row.input_schema.get("properties") or {})
                 if isinstance(field, str)
             ],
         }
         for row in DEFINITION.actions
     ]
 }
+
 
 class TaskServiceContext(TypedDict):
     active_buddy: str
@@ -41,6 +40,14 @@ def _allowed_set(action: str) -> set[str]:
     return set()
 
 
+def _task_repo_kwargs(context: TaskServiceContext) -> dict[str, Any]:
+    return {
+        "active_buddy": context["active_buddy"],
+        "instance_json": context["instance_json"],
+        "instance_payload": context["instance_payload"],
+    }
+
+
 def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str, Any]:
     alternative_capabilities = [
         tool_results.alternative_capability(
@@ -55,15 +62,11 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         ),
     ]
     correctable_fields: list[str] | None = None
-    if "title" in message:
-        correctable_fields = ["title"]
-    elif "status" in message:
-        correctable_fields = ["status"]
-    elif "track_id" in message:
-        correctable_fields = ["track_id"]
-    elif "task_id" in message:
-        correctable_fields = ["task_id"]
-    elif "unsupported payload fields:" in message:
+    for field in ("title", "summary", "status", "priority", "track_id", "task_id", "refs", "include_archived", "limit"):
+        if field in message:
+            correctable_fields = [field]
+            break
+    if "unsupported payload fields:" in message:
         suffix = message.split("unsupported payload fields:", 1)[1].strip()
         if suffix:
             correctable_fields = [row.strip() for row in suffix.split(",") if row.strip()]
@@ -80,7 +83,7 @@ def _reject_payload(*, action: str, active_buddy: str, message: str) -> dict[str
         permission_boundary="request-payload",
         human_summary="Task request payload is invalid.",
         why_blocked=message,
-        impact="No task, track, or artifact state changed.",
+        impact="No taskbox, track, or artifact state changed.",
         state_changed=False,
         retryable=True,
         retry_guidance="Fix task payload fields and retry.",
@@ -103,7 +106,7 @@ def _reject_scope(*, action: str, active_buddy: str, task_id: str, message: str)
         permission_boundary="task.buddy_scope",
         human_summary="Task belongs to another buddy.",
         why_blocked=message,
-        impact="No task or track state changed.",
+        impact="No taskbox state changed.",
         state_changed=False,
         retryable=False,
         retry_guidance="Use a task owned by the active buddy.",
@@ -126,13 +129,16 @@ def _reject_scope(*, action: str, active_buddy: str, task_id: str, message: str)
 def _normalize_task_summary(task: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": task.get("id"),
-        "buddy": task.get("buddy"),
+        "owner_buddy": task.get("owner_buddy"),
         "title": task.get("title"),
         "summary": task.get("summary", ""),
         "status": task.get("status"),
+        "priority": task.get("priority"),
         "track_id": task.get("track_id"),
+        "refs": task.get("refs", []),
         "created_at": task.get("created_at"),
         "updated_at": task.get("updated_at"),
+        "closed_at": task.get("closed_at"),
     }
 
 
@@ -169,45 +175,29 @@ def create_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCo
         return payload_error
 
     try:
-        title = context.rules.task.require_title(args.get("title"))
-        task_id = context.rules.task.optional_task_id(args.get("task_id"))
-        summary = context.rules.task.require_summary(args.get("summary"))
-        status = context.rules.task.optional_status(args.get("status"))
-        track_id = context.rules.task.optional_track_context(args.get("track_id"))
+        payload = context.rules.task.create_payload(args)
     except context.rules.task.TaskPayloadError as exc:
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
-    if task_id is None:
-        slug = context.repos.task.slugify(title)
-        task_id = f"task-{active_buddy}-{slug}-{uuid.uuid4().hex[:8]}"
-
     try:
-        task = context.repos.task.create_task(
-            task_id=task_id,
-            title=title,
-            buddy=active_buddy,
-            track_id=track_id,
-            status=status,
-            summary=summary,
-        )
+        task = context.repos.task.create_task(**payload, **_task_repo_kwargs(context))
     except ValueError as exc:
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
-    created = _normalize_task_summary(task)
     return tool_results.success(
         tool="task",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Created one active-buddy durable task '{task['id']}' with optional track relation support.",
+        effect_summary=f"Created one instance-local taskbox task '{task['id']}'.",
         state_changed=True,
         durability="durable",
         created_ids=[task["id"]],
         state_changes=[{"object_type": "task", "change": "created", "task_id": task["id"]}],
         allowed_next_actions=[
-            "Use artifact.create_revision to draft or publish shared artifacts.",
-            "Use task.update to refine task status or summary.",
+            "Use task.update to refine task status, priority, or refs.",
+            "Use task.history to inspect lifecycle lines.",
         ],
-        extra={"task_id": task["id"], "task": created},
+        extra={"task_id": task["id"], "task": _normalize_task_summary(task)},
     )
 
 
@@ -218,32 +208,38 @@ def list_tasks_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCon
     if payload_error is not None:
         return payload_error
 
-    rows = [task for task in context.repos.task.list_tasks() if task.get("buddy") == active_buddy]
+    try:
+        status = context.rules.task.optional_status_filter(args.get("status"))
+        priority = context.rules.task.optional_priority_filter(args.get("priority"))
+        track_id = context.rules.task.optional_track_filter(args.get("track_id"))
+        include_archived = context.rules.task.include_archived_flag(args.get("include_archived"))
+        limit = context.rules.task.normalize_limit(args.get("limit"))
+    except context.rules.task.TaskPayloadError as exc:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
-    status = args.get("status")
-    if isinstance(status, str) and status:
+    rows = context.repos.task.list_tasks(
+        include_archived=include_archived,
+        **_task_repo_kwargs(context),
+    )
+    if status is not None:
         rows = [row for row in rows if row.get("status") == status]
-
-    track_id = args.get("track_id")
-    if isinstance(track_id, str) and track_id:
+    if priority is not None:
+        rows = [row for row in rows if row.get("priority") == priority]
+    if track_id is not None:
         rows = [row for row in rows if row.get("track_id") == track_id]
+    payload_rows = [_normalize_task_summary(row) for row in rows[:limit]]
 
-    limit = args.get("limit")
-    if isinstance(limit, int) and limit > 0:
-        rows = rows[:limit]
-
-    payload_rows = [_normalize_task_summary(row) for row in rows]
     return tool_results.success(
         tool="task",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Returned {len(payload_rows)} active-buddy task summary row(s).",
+        effect_summary=f"Returned {len(payload_rows)} active-buddy taskbox row(s).",
         state_changed=False,
         durability="none",
-        read_scope="active-buddy task summaries",
+        read_scope="instance-local active-buddy taskbox summaries",
         allowed_next_actions=[
             "Use task.get with task_id for one task detail.",
-            "Use artifact.create_revision to draft or publish shared artifacts.",
+            "Use task.history for lifecycle history.",
         ],
         extra={"tasks": payload_rows, "relation": "owner"},
     )
@@ -261,30 +257,25 @@ def get_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceConte
     except context.rules.task.TaskPayloadError as exc:
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
-    task = context.repos.task.get_task(task_id)
+    task = context.repos.task.get_task(task_id, **_task_repo_kwargs(context))
     if task is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"task not found: {task_id}")
     try:
         context.rules.task.ensure_active_buddy_ownership(task=task, task_id=task_id, active_buddy=active_buddy)
     except context.rules.task.TaskScopeError as exc:
-        return _reject_scope(
-            action=action,
-            active_buddy=active_buddy,
-            task_id=task_id,
-            message=str(exc),
-        )
+        return _reject_scope(action=action, active_buddy=active_buddy, task_id=task_id, message=str(exc))
 
     return tool_results.success(
         tool="task",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Read one active-buddy task record '{task_id}'.",
+        effect_summary=f"Read one instance-local taskbox task '{task_id}'.",
         state_changed=False,
         durability="none",
-        read_scope="one active-buddy task record",
+        read_scope="one instance-local active-buddy taskbox task",
         allowed_next_actions=[
-            "Use artifact.create_revision to draft or publish shared artifacts.",
-            "Use task.update to change title/summary/status.",
+            "Use task.update to change task fields or lifecycle state.",
+            "Use task.history to inspect lifecycle lines.",
         ],
         extra={"task_id": task_id, "task": _normalize_task_summary(task), "relation": "owner"},
     )
@@ -299,29 +290,20 @@ def update_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCo
 
     try:
         task_id = context.rules.task.require_task_id(args.get("task_id"))
+        patch = context.rules.task.update_patch(args)
     except context.rules.task.TaskPayloadError as exc:
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
-    task = context.repos.task.get_task(task_id)
+    task = context.repos.task.get_task(task_id, **_task_repo_kwargs(context))
     if task is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"task not found: {task_id}")
     try:
         context.rules.task.ensure_active_buddy_ownership(task=task, task_id=task_id, active_buddy=active_buddy)
     except context.rules.task.TaskScopeError as exc:
-        return _reject_scope(
-            action=action,
-            active_buddy=active_buddy,
-            task_id=task_id,
-            message=str(exc),
-        )
+        return _reject_scope(action=action, active_buddy=active_buddy, task_id=task_id, message=str(exc))
 
     try:
-        patch = context.rules.task.update_patch(args)
-    except context.rules.task.TaskPayloadError as exc:
-        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
-
-    try:
-        updated = context.repos.task.update_task(task_id, patch)
+        updated, changed, event = context.repos.task.update_task(task_id, patch, **_task_repo_kwargs(context))
     except ValueError as exc:
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
@@ -329,14 +311,18 @@ def update_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceCo
         tool="task",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Updated one active-buddy task '{task_id}' and persisted patched task fields.",
-        state_changed=True,
-        durability="durable",
-        updated_ids=[task_id],
-        state_changes=[{"object_type": "task", "change": "updated_fields", "task_id": task_id}],
+        effect_summary=(
+            f"Updated one instance-local taskbox task '{task_id}'."
+            if changed
+            else f"Task '{task_id}' already matched the requested fields."
+        ),
+        state_changed=changed,
+        durability="durable" if changed else "none",
+        updated_ids=[task_id] if changed else [],
+        state_changes=[{"object_type": "task", "change": event or "unchanged", "task_id": task_id}],
         allowed_next_actions=[
-            "Use task.get to verify updated fields.",
-            "Use artifact.create_revision to write task deliverables.",
+            "Use task.get to verify current task state.",
+            "Use task.history to inspect lifecycle lines.",
         ],
         extra={"task_id": task_id, "task": _normalize_task_summary(updated)},
     )
@@ -354,18 +340,13 @@ def archive_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceC
     except context.rules.task.TaskPayloadError as exc:
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
-    task = context.repos.task.get_task(task_id)
+    task = context.repos.task.get_task(task_id, **_task_repo_kwargs(context))
     if task is None:
         return _reject_payload(action=action, active_buddy=active_buddy, message=f"task not found: {task_id}")
     try:
         context.rules.task.ensure_active_buddy_ownership(task=task, task_id=task_id, active_buddy=active_buddy)
     except context.rules.task.TaskScopeError as exc:
-        return _reject_scope(
-            action=action,
-            active_buddy=active_buddy,
-            task_id=task_id,
-            message=str(exc),
-        )
+        return _reject_scope(action=action, active_buddy=active_buddy, task_id=task_id, message=str(exc))
 
     if task.get("status") == "archived":
         return tool_results.success(
@@ -380,27 +361,61 @@ def archive_task_for_active_buddy(*, args: dict[str, Any], context: TaskServiceC
             extra={"task_id": task_id, "task": _normalize_task_summary(task)},
         )
 
-    updated = context.repos.task.update_task(task_id, {"status": "archived"})
+    updated, changed, _event = context.repos.task.update_task(
+        task_id,
+        {"status": "archived"},
+        **_task_repo_kwargs(context),
+    )
     return tool_results.success(
         tool="task",
         action=action,
         active_buddy=active_buddy,
-        effect_summary=f"Archived one active-buddy task '{task_id}' in durable product state.",
-        state_changed=True,
-        durability="durable",
-        updated_ids=[task_id],
+        effect_summary=f"Archived one instance-local taskbox task '{task_id}'.",
+        state_changed=changed,
+        durability="durable" if changed else "none",
+        updated_ids=[task_id] if changed else [],
         state_changes=[{"object_type": "task", "change": "archived", "task_id": task_id}],
         allowed_next_actions=["Use task.list to inspect remaining active tasks."],
         extra={"task_id": task_id, "task": _normalize_task_summary(updated)},
     )
 
 
+def history_for_active_buddy(*, args: dict[str, Any], context: TaskServiceContext) -> dict[str, Any]:
+    action = "task.history"
+    active_buddy = context["active_buddy"]
+    payload_error = _require_allowed_fields(action=action, args=args, active_buddy=active_buddy, context=context)
+    if payload_error is not None:
+        return payload_error
+
+    try:
+        limit = context.rules.task.history_limit(args)
+    except context.rules.task.TaskPayloadError as exc:
+        return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
+
+    entries = context.repos.task.read_history(limit=limit, **_task_repo_kwargs(context))
+    return tool_results.success(
+        tool="task",
+        action=action,
+        active_buddy=active_buddy,
+        effect_summary=f"Returned {len(entries)} taskbox history entrie(s).",
+        state_changed=False,
+        durability="none",
+        read_scope="instance-local taskbox history",
+        allowed_next_actions=[
+            "Use task.list to inspect current task rows.",
+            "Use task.get with task_id for one task detail.",
+        ],
+        extra={"entries": entries},
+    )
+
+
 _ACTION_HANDLERS = {
-    'archive': archive_task_for_active_buddy,
-    'create': create_task_for_active_buddy,
-    'get': get_task_for_active_buddy,
-    'list': list_tasks_for_active_buddy,
-    'update': update_task_for_active_buddy,
+    "archive": archive_task_for_active_buddy,
+    "create": create_task_for_active_buddy,
+    "get": get_task_for_active_buddy,
+    "history": history_for_active_buddy,
+    "list": list_tasks_for_active_buddy,
+    "update": update_task_for_active_buddy,
 }
 
 

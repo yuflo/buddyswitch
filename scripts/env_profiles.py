@@ -267,9 +267,10 @@ def validate_env_profile(
         label="state_capability.artifact_templates",
     )
     task_effects = _require_string_list(state_capability.get("task_effects"), "state_capability.task_effects")
-    if task_effects != ["status", "summary"]:
+    expected_task_effects = ["create", "update", "priority", "status", "archive", "history"]
+    if task_effects != expected_task_effects:
         raise EnvProfileError(
-            "state_capability.task_effects must be exactly ['status', 'summary']"
+            f"state_capability.task_effects must be exactly {expected_task_effects}"
         )
     track_effects = _require_string_list(state_capability.get("track_effects"), "state_capability.track_effects")
     expected_track_effects = ["update_now", "add_material", "add_update", "add_proof"]

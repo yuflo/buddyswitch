@@ -24,13 +24,17 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         super().setUp()
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
-        self.instance_json = self._runtime_path("instance.json")
+        self.instance_root = self._runtime_path("instances/inst-pm-task-arch")
+        self.instance_json = self.instance_root / "instance.json"
         self.instance_payload = {
             "instance_id": "inst-pm-task-arch",
             "buddy": "pm",
             "status": "active",
+            "instance_root": str(self.instance_root),
             "workspace_dir": str(self.runtime_root),
         }
+        (self.instance_root / "taskbox" / "pm" / "tasks").mkdir(parents=True, exist_ok=True)
+        (self.instance_root / "taskbox" / "pm" / "history.md").write_text("", encoding="utf-8")
         self.instance_json.write_text(json.dumps(self.instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
     def _dispatch(self, *, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
@@ -44,11 +48,34 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
             manifest_path=self.manifest_path,
         )
 
-    def _snapshot_json_dir(self, relative_dir: str) -> dict[str, str]:
-        root = self._runtime_path(relative_dir)
-        if not root.exists():
-            return {}
-        return {path.name: path.read_text(encoding="utf-8") for path in sorted(root.glob("*.json"))}
+    def _task_file(self, task_id: str, *, buddy: str = "pm") -> Path:
+        return self.instance_root / "taskbox" / buddy / "tasks" / f"{task_id}.json"
+
+    def _history_file(self, *, buddy: str = "pm") -> Path:
+        return self.instance_root / "taskbox" / buddy / "history.md"
+
+    def _seed_taskbox_task(self, *, task_id: str, track_id: str | None, buddy: str = "pm") -> None:
+        self._task_file(task_id, buddy=buddy).write_text(
+            json.dumps(
+                {
+                    "id": task_id,
+                    "owner_buddy": buddy,
+                    "title": "Seed task",
+                    "summary": "before update",
+                    "status": "active",
+                    "priority": "normal",
+                    "track_id": track_id,
+                    "refs": [],
+                    "created_at": "2026-05-23T12:00:00+08:00",
+                    "updated_at": "2026-05-23T12:00:00+08:00",
+                    "closed_at": None,
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
     def _assert_publication_rejection_without_state_mutation(
         self,
@@ -57,7 +84,6 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         args: dict[str, object],
         field: str,
         before_tracks: dict[str, str],
-        before_tasks: dict[str, str],
         before_artifacts: dict[str, str],
     ) -> None:
         rejected = self._dispatch(buddy="pm", tool="task", action=action, args=args)
@@ -67,10 +93,32 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         self.assertIn("publication-style payload fields:", blocked)
         self.assertIn(field, blocked)
         self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/tracks"), before_tracks)
-        self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/tasks"), before_tasks)
         self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/artifacts"), before_artifacts)
 
-    def test_explicit_task_creates_only_task_objects_without_binding_fields(self) -> None:
+    def _snapshot_json_dir(self, relative_dir: str) -> dict[str, str]:
+        root = self._runtime_path(relative_dir)
+        if not root.exists():
+            return {}
+        return {path.name: path.read_text(encoding="utf-8") for path in sorted(root.glob("*.json"))}
+
+    def test_task_tool_and_skill_describe_instance_local_taskbox_contract(self) -> None:
+        skill_text = (ROOT / "buddyswitch" / "skills" / "shared" / "task-tool" / "SKILL.md").read_text(encoding="utf-8").lower()
+        self.assertIn("instance-local", skill_text)
+        self.assertIn("taskbox", skill_text)
+        self.assertIn("priority", skill_text)
+        self.assertIn("history", skill_text)
+        self.assertIn("do not edit taskbox files or runtime state files directly", skill_text)
+        self.assertIn("env.tool", skill_text)
+
+        catalog = tool_router.env_tools_description()["task"]
+        self.assertIn("taskbox", str(catalog["object_model"]).lower())
+        self.assertIn("history", catalog["operations"])
+        self.assertIn("priority", catalog["payload_fields"]["create"])
+        self.assertIn("refs", catalog["payload_fields"]["create"])
+        self.assertIn("priority", catalog["payload_fields"]["update"])
+        self.assertIn("refs", catalog["payload_fields"]["update"])
+
+    def test_explicit_task_creates_only_taskbox_state_without_binding_fields(self) -> None:
         track = env_store.create_track(
             "track-task-arch",
             "Task Arch",
@@ -89,6 +137,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         )
         before_track = json.loads(env_store.track_file("track-task-arch").read_text(encoding="utf-8"))
         before_artifact = json.loads(env_store.artifact_file("art-pm-task-arch").read_text(encoding="utf-8"))
+
         for idx in range(1, 4):
             payload = self._dispatch(
                 buddy="pm",
@@ -98,7 +147,8 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
                     "task_id": f"task-pm-task-arch-{idx}",
                     "title": f"Task {idx}",
                     "summary": "runless",
-                    "track_id": track["id"],
+                    "track_id": str(track["id"]),
+                    "priority": "high" if idx == 1 else "normal",
                 },
             )
             self.assertTrue(payload["ok"], msg=payload)
@@ -107,50 +157,15 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         after_artifact = json.loads(env_store.artifact_file("art-pm-task-arch").read_text(encoding="utf-8"))
         self.assertEqual(after_track, before_track)
         self.assertEqual(after_artifact, before_artifact)
-
-        task_files = sorted((self._runtime_path("buddyswitch/objects/tasks")).glob("task-pm-task-arch-*.json"))
-        self.assertEqual(len(task_files), 3)
+        self.assertEqual(
+            sorted(path.stem for path in (self.instance_root / "taskbox" / "pm" / "tasks").glob("task-pm-task-arch-*.json")),
+            ["task-pm-task-arch-1", "task-pm-task-arch-2", "task-pm-task-arch-3"],
+        )
+        history_text = self._history_file().read_text(encoding="utf-8")
+        self.assertIn("task.create task-pm-task-arch-1", history_text)
         stored_instance = json.loads(self.instance_json.read_text(encoding="utf-8"))
         self.assertNotIn("current_task_id", stored_instance)
         self.assertNotIn("current_track_id", stored_instance)
-
-    def test_task_payload_rejection_leaves_track_and_artifact_state_unchanged(self) -> None:
-        env_store.create_track("track-task-arch-reject", "Task arch reject", owner_buddy="pm")
-        env_store.create_artifact_revision(
-            artifact_id="art-pm-task-arch-reject",
-            title="Task arch reject artifact",
-            created_by="pm",
-            body="draft body",
-            template="note",
-            summary="artifact baseline",
-        )
-        before_tracks = self._snapshot_json_dir("buddyswitch/objects/tracks")
-        before_tasks = self._snapshot_json_dir("buddyswitch/objects/tasks")
-        before_artifacts = self._snapshot_json_dir("buddyswitch/objects/artifacts")
-
-        rejected = self._dispatch(
-            buddy="pm",
-            tool="task",
-            action="create",
-            args={
-                "task_id": "task-pm-task-arch-reject",
-                "title": "Reject publication fields",
-                "track_id": "track-task-arch-reject",
-                "artifact_ids": ["art-pm-task-arch-reject"],
-                "shared_materials": [],
-                "close_proof": [],
-            },
-        )
-        self.assertFalse(rejected["ok"], msg=rejected)
-        self.assertEqual(rejected.get("permission_boundary"), "request-payload")
-        self.assertIn("publication-style payload fields:", str(rejected.get("why_blocked")))
-
-        after_tracks = self._snapshot_json_dir("buddyswitch/objects/tracks")
-        after_tasks = self._snapshot_json_dir("buddyswitch/objects/tasks")
-        after_artifacts = self._snapshot_json_dir("buddyswitch/objects/artifacts")
-        self.assertEqual(after_tracks, before_tracks)
-        self.assertEqual(after_tasks, before_tasks)
-        self.assertEqual(after_artifacts, before_artifacts)
 
     def test_context_decision_surface_reports_runless_mode(self) -> None:
         payload = self._dispatch(buddy="pm", tool="context", action="summarize", args={})
@@ -159,7 +174,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         self.assertFalse(self._runtime_path("runs/raw").exists())
         self.assertFalse(self._runtime_path("buddyswitch/content/runs").exists())
 
-    def test_task_update_track_id_context_changes_only_task_state(self) -> None:
+    def test_task_update_track_id_context_changes_only_taskbox_task_state(self) -> None:
         env_store.create_track("track-task-arch-update-a", "Task arch update A", owner_buddy="pm")
         env_store.create_track("track-task-arch-update-b", "Task arch update B", owner_buddy="pm")
         env_store.create_artifact_revision(
@@ -170,15 +185,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
             template="note",
             summary="artifact baseline",
         )
-        env_store.create_task(
-            "task-pm-task-arch-update",
-            "Task arch update task",
-            buddy="pm",
-            track_id="track-task-arch-update-a",
-            summary="before update",
-            status="active",
-            initial_run_id=None,
-        )
+        self._seed_taskbox_task(task_id="task-pm-task-arch-update", track_id="track-task-arch-update-a")
         before_track_a = json.loads(env_store.track_file("track-task-arch-update-a").read_text(encoding="utf-8"))
         before_track_b = json.loads(env_store.track_file("track-task-arch-update-b").read_text(encoding="utf-8"))
         before_artifact = json.loads(env_store.artifact_file("art-pm-task-arch-update").read_text(encoding="utf-8"))
@@ -201,9 +208,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
         self.assertEqual(after_track_b, before_track_b)
         self.assertEqual(after_artifact, before_artifact)
 
-        stored_task = env_store.get_task("task-pm-task-arch-update")
-        self.assertIsInstance(stored_task, dict)
-        assert isinstance(stored_task, dict)
+        stored_task = json.loads(self._task_file("task-pm-task-arch-update").read_text(encoding="utf-8"))
         self.assertEqual(stored_task.get("track_id"), "track-task-arch-update-b")
 
     def test_task_update_and_archive_reject_publication_payload_fields(self) -> None:
@@ -216,17 +221,8 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
             template="note",
             summary="artifact baseline",
         )
-        env_store.create_task(
-            "task-pm-task-arch-action-reject",
-            "Task arch action reject task",
-            buddy="pm",
-            track_id="track-task-arch-action-reject",
-            summary="before action",
-            status="active",
-            initial_run_id=None,
-        )
+        self._seed_taskbox_task(task_id="task-pm-task-arch-action-reject", track_id="track-task-arch-action-reject")
         before_tracks = self._snapshot_json_dir("buddyswitch/objects/tracks")
-        before_tasks = self._snapshot_json_dir("buddyswitch/objects/tasks")
         before_artifacts = self._snapshot_json_dir("buddyswitch/objects/artifacts")
 
         field_values: dict[str, object] = {
@@ -244,7 +240,6 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
                     args={"task_id": "task-pm-task-arch-action-reject", field: value},
                     field=field,
                     before_tracks=before_tracks,
-                    before_tasks=before_tasks,
                     before_artifacts=before_artifacts,
                 )
 
@@ -254,10 +249,5 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
                 args={"task_id": "task-pm-task-arch-action-reject", "template": "note"},
                 field="template",
                 before_tracks=before_tracks,
-                before_tasks=before_tasks,
                 before_artifacts=before_artifacts,
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

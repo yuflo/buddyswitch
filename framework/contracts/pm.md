@@ -37,6 +37,7 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 ## Durable Output Targets
 
 - `buddyswitch/objects/tracks/<track-id>.json`
-- `buddyswitch/objects/tasks/<task-id>.json`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
+- `instances/<instance-id>/taskbox/<buddy>/tasks/<task-id>.json`
+- `instances/<instance-id>/taskbox/<buddy>/history.md`
 - Active-buddy-private files via `buddybox.*` logical names (instance-local, not product-readable).

@@ -28,6 +28,67 @@ _EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
+    def _taskbox_root(self, *, instance_id: str, buddy: str) -> Path:
+        return self._runtime_path(f"instances/{instance_id}/taskbox/{buddy}")
+
+    def _write_json(self, path: Path, payload: dict[str, object]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+    def _seed_taskbox_task(
+        self,
+        *,
+        instance_id: str,
+        buddy: str,
+        task_id: str,
+        title: str,
+        summary: str = "",
+        status: str = "active",
+        priority: str = "normal",
+        track_id: str | None = None,
+        refs: list[dict[str, object]] | None = None,
+        updated_at: str = "2026-05-23T12:00:00+08:00",
+        closed_at: str | None = None,
+    ) -> None:
+        if closed_at is None and status in {"done", "archived"}:
+            closed_at = updated_at
+        taskbox_root = self._taskbox_root(instance_id=instance_id, buddy=buddy)
+        (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
+        history_file = taskbox_root / "history.md"
+        if not history_file.exists():
+            history_file.write_text("", encoding="utf-8")
+        self._write_json(
+            taskbox_root / "tasks" / f"{task_id}.json",
+            {
+                "id": task_id,
+                "owner_buddy": buddy,
+                "title": title,
+                "summary": summary,
+                "status": status,
+                "priority": priority,
+                "track_id": track_id,
+                "refs": refs or [],
+                "created_at": "2026-05-23T12:00:00+08:00",
+                "updated_at": updated_at,
+                "closed_at": closed_at,
+            },
+        )
+
+    def _seed_legacy_shared_task(self) -> None:
+        self._write_json(
+            self._runtime_path("buddyswitch/objects" + "/tasks/task-legacy-shared.json"),
+            {
+                "id": "task-legacy-shared",
+                "buddy": "dev",
+                "title": "Legacy shared task",
+                "status": "active",
+                "track_id": "track-context-active",
+                "summary": "legacy",
+                "created_at": "2026-05-23T12:00:00+08:00",
+                "updated_at": "2026-05-23T12:00:00+08:00",
+            },
+        )
+
     def _instance_json(
         self,
         *,
@@ -37,12 +98,21 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         workspace_dir: Path | None = None,
         path: Path | None = None,
     ) -> Path:
-        instance_json_path = path if path is not None else self._runtime_path("instance.json")
+        instance_root = self._runtime_path(f"instances/{instance_id}")
+        instance_json_path = path if path is not None else instance_root / "instance.json"
+        resolved_workspace_dir = workspace_dir if workspace_dir is not None else self.runtime_root
+        resolved_workspace_dir.mkdir(parents=True, exist_ok=True)
+        taskbox_root = self._taskbox_root(instance_id=instance_id, buddy=buddy)
+        (taskbox_root / "tasks").mkdir(parents=True, exist_ok=True)
+        history_file = taskbox_root / "history.md"
+        if not history_file.exists():
+            history_file.write_text("", encoding="utf-8")
         payload: dict[str, object] = {
             "instance_id": instance_id,
             "buddy": buddy,
             "status": status,
-            "workspace_dir": str(workspace_dir if workspace_dir is not None else self.runtime_root),
+            "instance_root": str(instance_root),
+            "workspace_dir": str(resolved_workspace_dir),
             "browser_port": None,
             "updated_at": "2026-05-15T00:00:00Z",
         }
@@ -98,7 +168,16 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def _seed_context_state(self) -> None:
         env_store.create_track("track-context-active", "Context Track", owner_buddy="pm")
-        env_store.create_task("task-dev-context", "Context Task", buddy="dev", track_id="track-context-active", summary="seed")
+        self._seed_taskbox_task(
+            instance_id="inst-dev-context",
+            buddy="dev",
+            task_id="task-dev-context",
+            title="Context Task",
+            summary="seed",
+            priority="high",
+            track_id="track-context-active",
+            refs=[{"type": "track", "id": "track-context-active"}],
+        )
         env_store.create_artifact_revision(
             artifact_id="art-task-dev-context-note-r1",
             title="Context Artifact v1",
@@ -143,7 +222,16 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             state="done",
             health="ok",
         )
-        env_store.create_task("task-dev-archived", "Archived task", buddy="dev", track_id="track-context-archived")
+        self._seed_taskbox_task(
+            instance_id="inst-dev-context",
+            buddy="dev",
+            task_id="task-dev-archived",
+            title="Archived task",
+            status="archived",
+            priority="low",
+            track_id="track-context-archived",
+            updated_at="2026-05-23T12:05:00+08:00",
+        )
         archived_artifact = env_store.create_artifact_revision(
             artifact_id="art-task-dev-archived-r1",
             title="Archived Artifact",
@@ -166,6 +254,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "track-context-archived",
             {"archived_at": "2026-05-18T10:00:00+08:00"},
         )
+        self._seed_legacy_shared_task()
 
     def test_context_summarize_exposes_compact_tool_affordances(self) -> None:
         instance_json = self._instance_json()
@@ -309,6 +398,25 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("track-context-archived", track_ids)
         self.assertIn("task-dev-context", task_ids)
         self.assertNotIn("task-dev-archived", task_ids)
+
+    def test_context_candidate_tasks_use_instance_taskbox_metadata_and_ignore_legacy_shared_tasks(self) -> None:
+        self._seed_context_state()
+        instance_json = self._instance_json()
+
+        payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
+        self.assertTrue(payload.get("ok"), msg=payload)
+
+        candidate_tasks = payload.get("candidate_tasks")
+        self.assertIsInstance(candidate_tasks, list, msg=payload)
+        assert isinstance(candidate_tasks, list)
+        task_ids = {row.get("task_id") for row in candidate_tasks if isinstance(row, dict)}
+        self.assertIn("task-dev-context", task_ids)
+        self.assertNotIn("task-legacy-shared", task_ids)
+
+        candidate_task = next(row for row in candidate_tasks if isinstance(row, dict) and row.get("task_id") == "task-dev-context")
+        self.assertEqual(candidate_task.get("priority"), "high")
+        self.assertIsNone(candidate_task.get("closed_at"))
+        self.assertEqual(candidate_task.get("ref_count"), 1)
 
     def test_context_artifact_summaries_are_current_only(self) -> None:
         self._seed_context_state()

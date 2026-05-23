@@ -205,9 +205,16 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
-    def _seed_market_task_and_artifact(self) -> tuple[str, str]:
+    def _seed_market_task_and_artifact(self, *, instance_id: str = "inst-market") -> tuple[str, str]:
         track = env_store.create_track("track-market-evidence", "Market Evidence", owner_buddy="market")
-        task = env_store.create_task("task-market-evidence", "Market evidence task", buddy="market", track_id=track["id"])
+        task_id = "task-market-evidence"
+        self._write_taskbox_task(
+            instance_id=instance_id,
+            buddy="market",
+            task_id=task_id,
+            title="Market evidence task",
+            track_id=track["id"],
+        )
         artifact = env_store.create_artifact_revision(
             artifact_id="art-market-evidence-r1",
             title="Market Evidence Brief",
@@ -226,11 +233,11 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             from_buddy="market",
             summary="seed",
         )
-        return task["id"], artifact["id"]
+        return task_id, artifact["id"]
 
     def test_market_evidence_requires_artifact_target(self) -> None:
         instance_json = self._instance_json(instance_id="inst-market-target")
-        _, artifact_id = self._seed_market_task_and_artifact()
+        _, artifact_id = self._seed_market_task_and_artifact(instance_id="inst-market-target")
 
         missing_target = self._dispatch(
             instance_json=instance_json,
@@ -297,7 +304,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_market_artifact_write_with_browser_evidence_is_runless(self) -> None:
         instance_id = "inst-market-write"
         instance_json = self._instance_json(instance_id=instance_id)
-        _, artifact_id = self._seed_market_task_and_artifact()
+        _, artifact_id = self._seed_market_task_and_artifact(instance_id=instance_id)
 
         issued = self._dispatch(
             instance_json=instance_json,
@@ -338,7 +345,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_approved_downgrade_records_reason_on_target_token(self) -> None:
         instance_json = self._instance_json(instance_id="inst-market-downgrade")
-        _, artifact_id = self._seed_market_task_and_artifact()
+        _, artifact_id = self._seed_market_task_and_artifact(instance_id="inst-market-downgrade")
 
         approved = self._dispatch(
             instance_json=instance_json,

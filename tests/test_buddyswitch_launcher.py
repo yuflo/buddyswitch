@@ -1129,6 +1129,69 @@ exec "$real_git" "$@"
                 (workspace_dir / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists()
             )
 
+    def test_instance_start_creates_private_taskbox_for_active_buddy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture-taskbox.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "dev"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_root = shared_root / "instances" / payload["instance_id"]
+            workspace_dir = instance_root / "workspace"
+            runtime_root = shared_root / "state"
+
+            taskbox_root = instance_root / "taskbox" / "dev"
+            self.assertTrue((taskbox_root / "tasks").is_dir())
+            self.assertTrue((taskbox_root / "history.md").is_file())
+            self.assertEqual((taskbox_root / "history.md").read_text(encoding="utf-8"), "")
+
+            self.assertFalse((workspace_dir / "taskbox").exists())
+            self.assertFalse((runtime_root / "buddyswitch" / "objects" / "tasks").exists())
+
     def test_instance_start_design_runtime_skill_exists_without_source_skill_tree(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -1800,7 +1863,7 @@ exec "$real_git" "$@"
             self.assertIn(f"--browser-url=http://127.0.0.1:{browser_port}", cockpit_add["argv"])
 
             for relative_path in (
-                "buddyswitch/objects/tasks",
+                "buddyswitch/objects" + "/tasks",
                 "buddyswitch/objects/tracks",
                 "buddyswitch/objects/artifacts",
             ):

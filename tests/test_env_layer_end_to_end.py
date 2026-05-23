@@ -83,6 +83,15 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args["supersedes_artifact_id"] = supersedes_artifact_id
         return self._dispatch(buddy=buddy, tool="artifact", action="create_revision", args=args)
 
+    def _instance_task_snapshot(self) -> dict[str, str]:
+        taskbox_root = self._instance_root("inst-e2e-runless") / "taskbox"
+        if not taskbox_root.exists():
+            return {}
+        return {
+            path.relative_to(taskbox_root).as_posix(): path.read_text(encoding="utf-8")
+            for path in sorted(taskbox_root.rglob("*.json"))
+        }
+
     def test_pm_design_dev_test_track_artifact_publication_flow(self) -> None:
         track_id = "track-e2e-publication-flow"
         created = self._create_track(track_id)
@@ -413,7 +422,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(pm_scope_pub.get("ok"), msg=pm_scope_pub)
 
         before_messages = list(env_store.list_messages())
-        before_tasks = list(env_store.list_tasks())
+        before_tasks = self._instance_task_snapshot()
 
         request_created = self._dispatch(
             buddy="pm",
@@ -527,7 +536,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(request_row.get("status"), "done")
 
         after_messages = list(env_store.list_messages())
-        after_tasks = list(env_store.list_tasks())
+        after_tasks = self._instance_task_snapshot()
         self.assertEqual(before_messages, after_messages)
         self.assertEqual(before_tasks, after_tasks)
 

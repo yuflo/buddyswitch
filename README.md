@@ -50,8 +50,9 @@ Launcher product mode:
 Canonical product state and private local paths:
 
 - `buddyswitch/objects/tracks/*.json`
-- `buddyswitch/objects/tasks/*.json`
 - `buddyswitch/objects/artifacts/*.json`
+- `instances/<instance-id>/taskbox/<buddy>/tasks/*.json`
+- `instances/<instance-id>/taskbox/<buddy>/history.md`
 
 Buddybox private files are active-instance-local and tool-managed through `buddybox.*` with `logical_name`; they are not product-readable object state.
 

@@ -24,8 +24,12 @@
   "state_capability": {
     "artifact_templates": "from-manifest",
     "task_effects": [
+      "create",
+      "update",
+      "priority",
       "status",
-      "summary"
+      "archive",
+      "history"
     ],
     "track_effects": [
       "update_now",

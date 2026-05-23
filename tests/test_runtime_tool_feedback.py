@@ -385,12 +385,13 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             owner_buddy="pm",
             outcome="scope",
         )
-        env_store.create_task(
-            "task-pm-feedback-foreign",
-            "PM foreign task",
+        self._write_taskbox_task(
+            instance_id="inst-feedback-runless",
             buddy="pm",
-            track_id=None,
+            task_id="task-pm-feedback-foreign",
+            title="PM foreign task",
             summary="scope",
+            track_id=None,
         )
         for action in ("join", "attach_task", "detach_task"):
             payload = self._dispatch(

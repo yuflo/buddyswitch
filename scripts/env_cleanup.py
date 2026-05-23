@@ -25,7 +25,6 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in shell integration
 ROOT = Path(__file__).resolve().parents[1]
 CATEGORY_ORDER = (
     "artifact_objects",
-    "task_objects",
     "track_objects",
     "message_objects",
     "comment_objects",
@@ -38,7 +37,6 @@ def _runtime_relative_path(path: Path) -> str:
 
 
 TRACK_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.TRACKS_DIR)
-TASK_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.TASKS_DIR)
 ARTIFACT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.ARTIFACT_OBJECTS_DIR)
 MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.MESSAGES_DIR)
 COMMENT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.COMMENTS_DIR)
@@ -258,13 +256,11 @@ def new_plan(scope: str, *, buddy: str | None = None) -> dict[str, Any]:
         "buddy": buddy,
         "delete_paths": [],
         "artifact_object_ids": [],
-        "task_object_ids": [],
         "message_object_ids": [],
         "comment_object_ids": [],
         "warnings": [],
         "counts_by_category": counts,
         "artifact_records": [],
-        "task_records": [],
         "message_records": [],
         "comment_records": [],
         "direct_delete_paths": [],
@@ -321,37 +317,6 @@ def discover_artifact_objects(root: Path) -> tuple[list[dict[str, Any]], list[di
             "object_path": relative,
         }
         valid.append(record)
-    return valid, invalid
-
-
-def discover_task_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    valid: list[dict[str, Any]] = []
-    invalid: list[dict[str, Any]] = []
-    for path in iter_files(root, TASK_OBJECTS_RELATIVE_DIR):
-        relative = rel(root, path)
-        try:
-            payload = read_json(path)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            invalid.append({"path": relative, "reason": f"invalid task object JSON: {exc}"})
-            continue
-
-        task_id = payload.get("id")
-        task_buddy = payload.get("buddy")
-        if not isinstance(task_id, str) or not task_id:
-            invalid.append({"path": relative, "reason": "task object is missing id"})
-            continue
-        if not isinstance(task_buddy, str) or not task_buddy:
-            invalid.append({"path": relative, "reason": f"task '{task_id}' is missing buddy"})
-            continue
-
-        valid.append(
-            {
-                "id": task_id,
-                "buddy": task_buddy,
-                "track_id": payload.get("track_id"),
-                "object_path": relative,
-            }
-        )
     return valid, invalid
 
 
@@ -575,8 +540,6 @@ def add_instance_workspace_dir_files(
 def object_category_relative_dir(category: str) -> str:
     if category == "artifact_objects":
         return ARTIFACT_OBJECTS_RELATIVE_DIR
-    if category == "task_objects":
-        return TASK_OBJECTS_RELATIVE_DIR
     if category == "message_objects":
         return MESSAGE_OBJECTS_RELATIVE_DIR
     if category == "comment_objects":
@@ -641,20 +604,6 @@ def add_indexed_artifact(plan: dict[str, Any], record: dict[str, Any]) -> None:
     add_path(plan, object_path, "artifact_objects")
 
 
-def add_indexed_task(plan: dict[str, Any], record: dict[str, Any]) -> None:
-    root = Path(plan["repo_root"])
-    if record["id"] not in plan["task_object_ids"]:
-        plan["task_object_ids"].append(record["id"])
-        plan["task_records"].append(record)
-
-    object_path, blocked_reason = owner_object_json_path(root, category="task_objects", object_id=str(record["id"]))
-    if object_path is None:
-        if blocked_reason is not None:
-            add_warning(plan, f"Skipping task cleanup for '{record['id']}': {blocked_reason}")
-        return
-    add_path(plan, object_path, "task_objects")
-
-
 def add_indexed_message(plan: dict[str, Any], record: dict[str, Any]) -> None:
     root = Path(plan["repo_root"])
     if record["id"] not in plan["message_object_ids"]:
@@ -705,7 +654,6 @@ def delete_absolute_path(path: Path) -> None:
 def ensure_required_skeleton(root: Path, *, warnings: list[str] | None = None) -> None:
     for relative_dir in (
         TRACK_OBJECTS_RELATIVE_DIR,
-        TASK_OBJECTS_RELATIVE_DIR,
         ARTIFACT_OBJECTS_RELATIVE_DIR,
         MESSAGE_OBJECTS_RELATIVE_DIR,
         COMMENT_OBJECTS_RELATIVE_DIR,
@@ -758,16 +706,12 @@ def build_cleanup_plan(
     plan["_path_categories"] = {}
 
     artifact_objects, invalid_artifact_objects = discover_artifact_objects(repo_root)
-    task_objects, invalid_task_objects = discover_task_objects(repo_root)
     message_objects, invalid_message_objects = discover_message_objects(repo_root)
     comment_objects, invalid_comment_objects = discover_comment_objects(repo_root)
     if scope == "buddy":
         for record in artifact_objects:
             if record["producer_buddy"] == buddy:
                 add_indexed_artifact(plan, record)
-        for record in task_objects:
-            if record["buddy"] == buddy:
-                add_indexed_task(plan, record)
         for record in message_objects:
             if record.get("from_buddy") == buddy or record.get("to_buddy") == buddy:
                 add_indexed_message(plan, record)
@@ -796,11 +740,6 @@ def build_cleanup_plan(
                 plan,
                 f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
             )
-        for item in invalid_task_objects:
-            add_warning(
-                plan,
-                f"{item['path']} cannot be safely attributed to buddy '{buddy}' and will be skipped in scoped cleanup ({item['reason']}).",
-            )
         for item in invalid_message_objects:
             add_warning(
                 plan,
@@ -814,7 +753,6 @@ def build_cleanup_plan(
 
     elif scope == "all-data":
         add_dir_files(plan, TRACK_OBJECTS_RELATIVE_DIR, "track_objects")
-        add_dir_files(plan, TASK_OBJECTS_RELATIVE_DIR, "task_objects")
         add_dir_files(plan, ARTIFACT_OBJECTS_RELATIVE_DIR, "artifact_objects")
         add_dir_files(plan, MESSAGE_OBJECTS_RELATIVE_DIR, "message_objects")
         add_dir_files(plan, COMMENT_OBJECTS_RELATIVE_DIR, "comment_objects")
@@ -838,10 +776,6 @@ def build_cleanup_plan(
             if record["id"] not in plan["artifact_object_ids"]:
                 plan["artifact_object_ids"].append(record["id"])
                 plan["artifact_records"].append(record)
-        for record in task_objects:
-            if record["id"] not in plan["task_object_ids"]:
-                plan["task_object_ids"].append(record["id"])
-                plan["task_records"].append(record)
         for record in message_objects:
             if record["id"] not in plan["message_object_ids"]:
                 plan["message_object_ids"].append(record["id"])
@@ -852,8 +786,6 @@ def build_cleanup_plan(
                 plan["comment_records"].append(record)
         for item in invalid_artifact_objects:
             add_warning(plan, f"All-data cleanup will delete malformed artifact object: {item['path']} ({item['reason']}).")
-        for item in invalid_task_objects:
-            add_warning(plan, f"All-data cleanup will delete malformed task object: {item['path']} ({item['reason']}).")
         for item in invalid_message_objects:
             add_warning(plan, f"All-data cleanup will delete malformed message object: {item['path']} ({item['reason']}).")
         for item in invalid_comment_objects:
@@ -863,7 +795,6 @@ def build_cleanup_plan(
 
     plan["delete_paths"].sort()
     plan["artifact_object_ids"].sort()
-    plan["task_object_ids"].sort()
     plan["message_object_ids"].sort()
     plan["comment_object_ids"].sort()
     plan["direct_delete_paths"] = sorted(set(plan["direct_delete_paths"]))
@@ -892,7 +823,6 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
 
     indexed_sets: tuple[tuple[str, str], ...] = (
         ("artifact_objects", "artifact_records"),
-        ("task_objects", "task_records"),
         ("message_objects", "message_records"),
         ("comment_objects", "comment_records"),
     )
@@ -946,7 +876,6 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "deleted_paths": deleted_paths,
         "deleted_count": len(deleted_paths),
         "artifact_object_ids": plan["artifact_object_ids"],
-        "task_object_ids": plan["task_object_ids"],
         "message_object_ids": plan["message_object_ids"],
         "comment_object_ids": plan["comment_object_ids"],
         "warnings": plan["warnings"],

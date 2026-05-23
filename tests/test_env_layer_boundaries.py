@@ -305,14 +305,14 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_env_tool_rejects_payload_paths_instead_of_bypassing_project_or_raw_state_boundaries(self) -> None:
         project_probe = self._runtime_path("projects/app/env-tool-bypass.txt")
-        raw_probe = self._runtime_path("buddyswitch/objects/tasks/env-tool-bypass.json")
+        raw_probe = self._runtime_path("instances/inst-dev-boundary/taskbox/dev/tasks/env-tool-bypass.json")
 
         response = self._dispatch_dev_task_create(
             {
                 "title": "Boundary bypass attempt",
                 "summary": "should reject before write",
                 "project_path": "projects/app/env-tool-bypass.txt",
-                "raw_state_path": "buddyswitch/objects/tasks/env-tool-bypass.json",
+                "raw_state_path": "instances/inst-dev-boundary/taskbox/dev/tasks/env-tool-bypass.json",
             }
         )
 

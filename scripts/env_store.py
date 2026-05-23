@@ -17,7 +17,6 @@ WORKSPACE_ROOT: Path
 STATE_ROOT: Path
 OBJECTS_ROOT: Path
 TRACKS_DIR: Path
-TASKS_DIR: Path
 ARTIFACT_OBJECTS_DIR: Path
 MESSAGES_DIR: Path
 COMMENTS_DIR: Path
@@ -34,7 +33,6 @@ def refresh_runtime_root_bindings() -> None:
     global STATE_ROOT
     global OBJECTS_ROOT
     global TRACKS_DIR
-    global TASKS_DIR
     global ARTIFACT_OBJECTS_DIR
     global MESSAGES_DIR
     global COMMENTS_DIR
@@ -47,7 +45,6 @@ def refresh_runtime_root_bindings() -> None:
     STATE_ROOT = runtime_files.STATE_ROOT
     OBJECTS_ROOT = runtime_files.OBJECTS_ROOT
     TRACKS_DIR = runtime_files.TRACKS_DIR
-    TASKS_DIR = runtime_files.TASKS_DIR
     ARTIFACT_OBJECTS_DIR = runtime_files.ARTIFACT_OBJECTS_DIR
     MESSAGES_DIR = runtime_files.MESSAGES_DIR
     COMMENTS_DIR = runtime_files.COMMENTS_DIR
@@ -74,39 +71,44 @@ slugify = runtime_files.slugify
 set_runtime_root_override = runtime_files.set_runtime_root_override
 reset_runtime_root_override = runtime_files.reset_runtime_root_override
 
+_RETIRED_TASK_APIS = frozenset(
+    {
+        "VALID_TASK_STATUS",
+        "task_file",
+        "validate_task",
+        "list_tasks",
+        "get_task",
+        "save_task",
+        "create_task",
+        "update_task",
+    }
+)
+
 _RETIRED_OBJECT_APIS = frozenset(
     {
         "VALID_TRACK_STATE",
         "VALID_TRACK_HEALTH",
         "VALID_UPDATE_KIND",
-        "VALID_TASK_STATUS",
         "VALID_ARTIFACT_STATUS",
         "VALID_ARTIFACT_TEMPLATES",
         "track_file",
-        "task_file",
         "artifact_file",
         "message_file",
         "comment_file",
         "validate_track",
-        "validate_task",
         "validate_artifact",
         "validate_message",
         "validate_comment",
         "list_tracks",
-        "list_tasks",
         "list_artifacts",
         "artifact_revision_chain",
         "build_track_artifact_index",
         "get_track",
-        "get_task",
         "get_artifact",
         "save_track",
-        "save_task",
         "save_artifact",
         "create_track",
         "update_track",
-        "create_task",
-        "update_task",
         "create_artifact_revision",
         "update_artifact",
         "publish_track_material",
@@ -130,6 +132,10 @@ _RETIRED_OBJECT_APIS = frozenset(
 
 
 def __getattr__(name: str) -> Any:
+    if name in _RETIRED_TASK_APIS:
+        raise AttributeError(
+            f"env_store.{name} is retired; use env.repos.tasks with explicit instance context"
+        )
     if name in _RETIRED_OBJECT_APIS:
         raise AttributeError(
             f"env_store.{name} is retired; import env_legacy_store.{name} for legacy object APIs"
@@ -143,7 +149,6 @@ __all__ = [
     "STATE_ROOT",
     "OBJECTS_ROOT",
     "TRACKS_DIR",
-    "TASKS_DIR",
     "ARTIFACT_OBJECTS_DIR",
     "MESSAGES_DIR",
     "COMMENTS_DIR",

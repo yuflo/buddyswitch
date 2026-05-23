@@ -42,7 +42,6 @@ def refresh_runtime_root_bindings() -> None:
     global STATE_ROOT
     global OBJECTS_ROOT
     global TRACKS_DIR
-    global TASKS_DIR
     global ARTIFACT_OBJECTS_DIR
     global MESSAGES_DIR
     global COMMENTS_DIR
@@ -56,7 +55,6 @@ def refresh_runtime_root_bindings() -> None:
     STATE_ROOT = runtime_files.STATE_ROOT
     OBJECTS_ROOT = runtime_files.OBJECTS_ROOT
     TRACKS_DIR = runtime_files.TRACKS_DIR
-    TASKS_DIR = runtime_files.TASKS_DIR
     ARTIFACT_OBJECTS_DIR = runtime_files.ARTIFACT_OBJECTS_DIR
     MESSAGES_DIR = runtime_files.MESSAGES_DIR
     COMMENTS_DIR = runtime_files.COMMENTS_DIR
@@ -102,10 +100,6 @@ def _template_from_legacy_kind(kind: str) -> str:
 
 def track_file(track_id: str) -> Path:
     return TRACKS_DIR / f"{require_id(track_id, 'track id')}.json"
-
-
-def task_file(task_id: str) -> Path:
-    return TASKS_DIR / f"{require_id(task_id, 'task id')}.json"
 
 
 def artifact_file(artifact_id: str) -> Path:
@@ -500,15 +494,6 @@ def list_tracks() -> list[dict[str, Any]]:
     return rows
 
 
-def list_tasks() -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    if TASKS_DIR.exists():
-        for path in TASKS_DIR.glob("*.json"):
-            rows.append(validate_task(_read_json(path)))
-    rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
-    return rows
-
-
 def list_artifacts() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if ARTIFACT_OBJECTS_DIR.exists():
@@ -570,13 +555,6 @@ def get_track(track_id: str) -> dict[str, Any] | None:
     return validate_track(_read_json(path))
 
 
-def get_task(task_id: str) -> dict[str, Any] | None:
-    path = task_file(task_id)
-    if not path.exists():
-        return None
-    return validate_task(_read_json(path))
-
-
 def get_artifact(artifact_id: str) -> dict[str, Any] | None:
     path = artifact_file(artifact_id)
     if not path.exists():
@@ -588,13 +566,6 @@ def save_track(track: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_track(track)
     ensure_runtime_dirs()
     _write_json(track_file(normalized["id"]), normalized)
-    return normalized
-
-
-def save_task(task: dict[str, Any]) -> dict[str, Any]:
-    normalized = validate_task(task)
-    ensure_runtime_dirs()
-    _write_json(task_file(normalized["id"]), normalized)
     return normalized
 
 
@@ -650,53 +621,6 @@ def update_track(track_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         track[key] = value
     track["updated_at"] = now_iso()
     return save_track(track)
-
-
-def create_task(
-    task_id: str,
-    title: str,
-    *,
-    buddy: str,
-    track_id: str | None = None,
-    status: str = "active",
-    summary: str = "",
-    initial_run_id: str | None = None,
-) -> dict[str, Any]:
-    require_id(task_id, "task id")
-    if initial_run_id is not None:
-        raise ValueError("task.initial_run_id is retired in runless runtime")
-    if get_task(task_id):
-        raise ValueError(f"task already exists: {task_id}")
-    if track_id is not None and get_track(track_id) is None:
-        raise ValueError(f"track not found: {track_id}")
-    timestamp = now_iso()
-    task = {
-        "id": task_id,
-        "buddy": buddy,
-        "title": title,
-        "status": status,
-        "track_id": track_id,
-        "summary": summary,
-        "created_at": timestamp,
-        "updated_at": timestamp,
-    }
-    return save_task(task)
-
-
-def update_task(task_id: str, patch: dict[str, Any]) -> dict[str, Any]:
-    task = get_task(task_id)
-    if task is None:
-        raise ValueError(f"task not found: {task_id}")
-    allowed = {"title", "status", "track_id", "summary"}
-    for key, value in patch.items():
-        if key not in allowed:
-            raise ValueError(f"unsupported task field: {key}")
-        task[key] = value
-    track_id = task.get("track_id")
-    if track_id is not None and get_track(track_id) is None:
-        raise ValueError(f"track not found: {track_id}")
-    task["updated_at"] = now_iso()
-    return save_task(task)
 
 
 def create_artifact_revision(

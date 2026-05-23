@@ -15,6 +15,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import env_legacy_store as env_store  # noqa: E402
+from env.repos import tasks as task_repo  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
@@ -51,6 +52,7 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "created_by",
             "authors",
             "source_refs",
+            "attachments",
             "created_at",
             "updated_at",
         }
@@ -59,6 +61,7 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(artifact["status"], "draft")
         self.assertIsNone(artifact["published_to_track"])
         self.assertEqual(artifact["authors"], ["pm"])
+        self.assertEqual(artifact["attachments"], [])
         self.assertEqual(artifact["body"], "## Context\n\nSeed")
 
         stored = json.loads(self._artifact_path("art-pm-canonical-r1").read_text(encoding="utf-8"))
@@ -199,11 +202,18 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         env_store.create_track("track-task-hint", "Task Hint", owner_buddy="pm")
         before = json.loads(env_store.track_file("track-task-hint").read_text(encoding="utf-8"))
 
-        task = env_store.create_task(
-            "task-dev-track-hint",
-            "Task hint",
-            buddy="dev",
+        instance_root = self._instance_root("inst-task-track-hint")
+        task = task_repo.create_task(
+            task_id="task-dev-track-hint",
+            title="Task hint",
+            active_buddy="dev",
+            instance_json=None,
+            instance_payload={"instance_root": str(instance_root)},
             track_id="track-task-hint",
+            status="active",
+            priority="normal",
+            summary="",
+            refs=[],
         )
 
         after = json.loads(env_store.track_file("track-task-hint").read_text(encoding="utf-8"))
@@ -212,7 +222,12 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("artifact_ids", task)
         self.assertNotIn("artifact_slots", task)
 
-        stored = env_store.get_task("task-dev-track-hint")
+        stored = task_repo.get_task(
+            "task-dev-track-hint",
+            active_buddy="dev",
+            instance_json=None,
+            instance_payload={"instance_root": str(instance_root)},
+        )
         self.assertIsNotNone(stored)
         assert isinstance(stored, dict)
         self.assertNotIn("artifact_ids", stored)
