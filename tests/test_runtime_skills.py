@@ -909,10 +909,11 @@ class RuntimeSkillsTests(unittest.TestCase):
         dev = next(row for row in self.manifest.get("buddies", []) if isinstance(row, dict) and row.get("id") == "dev")
         dev_skills = set(dev.get("skills", []))
         expected = set(self.DEV_PRODUCT_SKILLS)
+        removed_importer = "-".join(("skill", "creator", "importer"))
         self.assertTrue(expected.issubset(dev_skills))
         self.assertTrue(self.DEV_STARTUP_SKILLS.issubset(dev_skills))
         self.assertTrue(self.SHARED_RUNTIME_TOOL_SKILLS.issubset(dev_skills))
-        self.assertIn("skill-creator-importer", dev_skills)
+        self.assertNotIn(removed_importer, dev_skills)
         self.assertNotIn("implement-task", dev_skills)
         for skill_id in expected:
             self.assertIn(skill_id, skills_by_id, msg=skill_id)
@@ -1101,7 +1102,7 @@ class RuntimeSkillsTests(unittest.TestCase):
             self.assertIn(token, text)
 
     def test_runtime_skill_installer_materializes_expanded_dev_skill_set(self) -> None:
-        expected = set(self.DEV_PRODUCT_SKILLS) | self.SHARED_RUNTIME_TOOL_SKILLS | {"skill-creator-importer"}
+        expected = set(self.DEV_PRODUCT_SKILLS) | self.SHARED_RUNTIME_TOOL_SKILLS
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             workspace = Path(temp_dir) / "workspace"
             workspace.mkdir()

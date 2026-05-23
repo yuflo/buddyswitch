@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 import unittest
@@ -36,6 +35,7 @@ _DOC_SPEC_CONTEXT_MARKERS = (
     "completion-implementation-plan",
     "implementation-plan",
     "parallel-agent-execution-plan",
+    "remove-" + "dash" + "board-and-skill-create",
     "scope",
     "task-split",
     "test-plan",
@@ -63,7 +63,6 @@ class RepoConsistencyTests(unittest.TestCase):
             "tools/launcher/assets/buddies",
             "framework/contracts",
             "framework/schemas",
-            "framework/console/app.js",
             "tests",
         ]
         completed = subprocess.run(
@@ -103,6 +102,62 @@ class RepoConsistencyTests(unittest.TestCase):
         self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
         hits = [line for line in completed.stdout.splitlines() if line.strip()]
         self.assertEqual(hits, [], msg="\n".join(hits))
+
+    def test_removed_visual_panel_and_import_surfaces_are_absent(self) -> None:
+        panel_server = "_".join(("serve", "context", "panel"))
+        projection_contract = "-".join(("workspace", "projection"))
+        console_dir = "/".join(("framework", "console"))
+        importer_dir = "-".join(("skill", "creator", "importer"))
+        importer_module = "_".join(("skill", "creator", "importer"))
+        fixture_dir = "-".join(("community", "skills"))
+        console_contract_test = "_".join(("console", "app", "contract"))
+        parallel_contracts_test = "_".join(("parallel", "contracts"))
+        removed_paths = [
+            f"scripts/{panel_server}.py",
+            console_dir,
+            f"framework/contracts/{projection_contract}.json",
+            "scripts/workspace_data.py",
+            "scripts/runtime_store/projections.py",
+            f"scripts/{importer_module}.py",
+            f"buddyswitch/skills/dev/{importer_dir}",
+            f"tests/test_{console_contract_test}.py",
+            f"tests/test_{parallel_contracts_test}.py",
+            f"tests/test_{importer_module}.py",
+            f"tests/fixtures/{fixture_dir}/dev-summary",
+        ]
+        for relative in removed_paths:
+            with self.subTest(path=relative):
+                self.assertFalse((ROOT / relative).exists())
+
+    def test_removed_visual_panel_and_import_names_are_not_referenced(self) -> None:
+        forbidden = (
+            "_".join(("serve", "context", "panel")),
+            " ".join(("Context", "Panel")),
+            "-".join(("workspace", "projection")),
+            "/".join(("framework", "console")),
+            "_".join(("skill", "creator", "importer")),
+            "-".join(("skill", "creator", "importer")),
+            "-".join(("community", "skills")),
+        )
+        scan_targets = [
+            "README.md",
+            "AGENTS.md",
+            "scripts",
+            "buddyswitch",
+            "tools",
+            "framework",
+            "tests",
+        ]
+        for token in forbidden:
+            completed = subprocess.run(
+                ["rg", "-n", "-i", token, *scan_targets, "-g", "!**/__pycache__/**", "-g", "!**/*.pyc"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+            self.assertEqual(completed.stdout.strip(), "", msg=f"{token}\n{completed.stdout}")
 
     def test_env_store_module_is_runtime_root_compat_only(self) -> None:
         retired_api = (
@@ -217,30 +272,6 @@ class RepoConsistencyTests(unittest.TestCase):
         for tool in tool_catalog.supported_tools():
             with self.subTest(tool=tool):
                 self.assertTrue(forbidden_actions.isdisjoint(set(tool_catalog.supported_actions(tool))))
-
-    def test_workspace_projection_contract_uses_track_page_shape(self) -> None:
-        payload = json.loads((ROOT / "framework" / "contracts" / "workspace-projection.json").read_text(encoding="utf-8"))
-        top = set(payload.get("top_level_key_order", []))
-        self.assertIn("tracks", top)
-        self.assertIn("tasks", top)
-        self.assertIn("artifacts", top)
-        self.assertNotIn("handoffs", top)
-
-        track_keys = set(payload["view_shapes"]["track"]["key_order"])
-        self.assertIn("outcome", track_keys)
-        self.assertIn("state", track_keys)
-        self.assertIn("health", track_keys)
-        self.assertIn("shared_materials", track_keys)
-        self.assertNotIn("task_ids", track_keys)
-        self.assertNotIn("tasks", track_keys)
-
-        task_keys = set(payload["view_shapes"]["task"]["key_order"])
-        self.assertNotIn("artifact_ids", task_keys)
-        self.assertNotIn("artifact" + "_slots", task_keys)
-
-        artifact_keys = set(payload["view_shapes"]["artifact"]["key_order"])
-        self.assertIn("published_to_track", artifact_keys)
-        self.assertNotIn("task_id", artifact_keys)
 
     def test_role_contracts_teach_direct_track_material_path(self) -> None:
         for name in ("pm", "design", "dev", "market", "test"):
@@ -492,9 +523,6 @@ class RepoConsistencyTests(unittest.TestCase):
                 allowed.append(line)
                 continue
             if line.startswith("scripts/artifact_selection.py:"):
-                allowed.append(line)
-                continue
-            if line.startswith("scripts/workspace_data.py:"):
                 allowed.append(line)
                 continue
         disallowed = [line for line in hits if line not in allowed]

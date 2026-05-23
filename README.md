@@ -55,21 +55,12 @@ Canonical product state and private local paths:
 
 Buddybox private files are active-instance-local and tool-managed through `buddybox.*` with `logical_name`; they are not product-readable object state.
 
-## Context Panel
-
-```bash
-python3 scripts/serve_context_panel.py
-```
-
-Open `http://127.0.0.1:8765/` and click `Refresh workspace`.
-
 ## Manage Instances
 
 ```bash
 ./buddyswitch-codex instance buddies
 ./buddyswitch-codex instance start --buddy <buddy>
 ./buddyswitch-codex instance list
-./buddyswitch-codex instance open <instance-id>
 ./buddyswitch-codex instance delete <instance-id>
 ```
 
@@ -84,6 +75,5 @@ Open `http://127.0.0.1:8765/` and click `Refresh workspace`.
 - `scripts/runtime_kernel/protocol.py` for runtime broker protocol envelope.
 - `scripts/runtime_kernel/dispatcher.py` for supported broker methods: `env.tool`, `ping`, `status`.
 - `framework/contracts/prepare-turn-context.json` for context payload contract compatibility.
-- `framework/contracts/workspace-projection.json` for context panel workspace projection shape.
 - `framework/contracts/{pm,design,dev,market,test}.md` for role-specific runtime boundaries.
 - `tests/` for behavior and consistency gates.

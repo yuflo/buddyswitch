@@ -76,7 +76,6 @@ Key paths:
 
 - Shared product-source mount point: `projects/app/`
 - Env manifest: `buddyswitch/manifest.toml`
-- Context panel: `python3 scripts/serve_context_panel.py`
 - Product runtime launcher: `./buddyswitch-codex instance start --buddy <buddy>`
 - Buddy host instructions: `tools/launcher/assets/buddies/<buddy>/AGENTS.md`
 

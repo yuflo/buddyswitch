@@ -173,10 +173,6 @@ id = "prepare-review-readiness"
 path = "buddyswitch/skills/dev/prepare-review-readiness"
 
 [[skills]]
-id = "skill-creator-importer"
-path = "buddyswitch/skills/dev/skill-creator-importer"
-
-[[skills]]
 id = "smoke-test"
 path = "buddyswitch/skills/test/smoke-test"
 
@@ -317,7 +313,6 @@ skills = [
   "parallelize-independent-dev-work",
   "write-implementation-report",
   "prepare-review-readiness",
-  "skill-creator-importer",
   "track-tool",
   "artifact-tool",
   "task-tool",

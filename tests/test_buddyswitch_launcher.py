@@ -1538,6 +1538,7 @@ exec "$real_git" "$@"
                     self._assert_directory_file_bytes_equal(source=source_dir, target=target_dir)
 
                 if buddy_id == "dev":
+                    removed_importer = "-".join(("skill", "creator", "importer"))
                     for skill_id in (
                         "enter-dev-workspace",
                         "read-implementation-context",
@@ -1550,10 +1551,7 @@ exec "$real_git" "$@"
                     ):
                         self.assertTrue((runtime_skills / skill_id / "SKILL.md").exists())
                     self.assertFalse((runtime_skills / "implement-task").exists())
-                    self.assertTrue((runtime_skills / "skill-creator-importer" / "SKILL.md").exists())
-                    self.assertTrue(
-                        (runtime_skills / "skill-creator-importer" / "assets" / "skill-import-report-template.md").exists()
-                    )
+                    self.assertFalse((runtime_skills / removed_importer).exists())
 
     def test_start_with_buddy_wires_instance_env_and_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

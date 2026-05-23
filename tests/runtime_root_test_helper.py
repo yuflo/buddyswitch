@@ -16,21 +16,10 @@ if str(SCRIPTS) not in sys.path:
 
 import env_legacy_store as env_store  # noqa: E402
 import turn_runtime  # noqa: E402
-import workspace_data  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 
 
 RUNTIME_WORKSPACE_HEADER = "# BuddySwitch Runtime Workspace\n"
-
-
-def _relative_to_runtime_or_repo(path: Path) -> str:
-    candidate = path.resolve()
-    for base in (workspace_data.ROOT, ROOT):
-        try:
-            return candidate.relative_to(base.resolve()).as_posix()
-        except ValueError:
-            continue
-    return candidate.as_posix()
 
 
 class RuntimeWorkspaceSandbox:
@@ -54,8 +43,6 @@ class RuntimeWorkspaceSandbox:
 
         patches = [
             patch.object(turn_runtime, "ROOT", self.root),
-            patch.object(workspace_data, "ROOT", self.root),
-            patch.object(workspace_data, "rel", _relative_to_runtime_or_repo),
         ]
         self._patchers = patches
         for patcher in self._patchers:

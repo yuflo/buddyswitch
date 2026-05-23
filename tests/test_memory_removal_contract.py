@@ -19,7 +19,6 @@ if str(SCRIPTS) not in sys.path:
 import env_cleanup  # noqa: E402
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
-import workspace_data  # noqa: E402
 from env.domain import source_refs  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
@@ -172,13 +171,9 @@ class MemoryRemovalContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                         active_buddy="pm",
                     )
 
-    def test_workspace_projection_and_cleanup_ignore_old_memory_files(self) -> None:
+    def test_cleanup_ignores_old_memory_files(self) -> None:
         runtime_manifest = self._copy_manifest_into_runtime()
         self._write_old_memory_file(memory_id="mem-old-projection", buddy="pm")
-
-        projection = workspace_data.build_workspace_data()
-        self.assertNotIn("memories", projection)
-        self.assertNotIn("handoffs", projection)
 
         cleanup_plan = env_cleanup.build_cleanup_plan(
             scope="all-data",
