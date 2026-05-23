@@ -62,7 +62,7 @@ def broker_unavailable_feedback(*, socket_path: Path | None = None) -> dict[str,
             "Do not write raw BuddySwitch state directly.",
             "Do not bypass product-mode runtime safeguards via debug APIs.",
         ],
-        "command_hint": f"./buddyswitch-codex instance open {instance_id}",
+        "command_hint": f"./buddyswitch-codex instance attach {instance_id}",
     }
     if socket_path is not None:
         feedback["socket_path"] = str(socket_path)

@@ -946,7 +946,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         self.assertEqual(raised.exception.details.get("socket_path"), "/tmp/missing-runtime-broker.sock")
         self.assertEqual(
             raised.exception.details.get("command_hint"),
-            "./buddyswitch-codex instance open inst-pm-example",
+            "./buddyswitch-codex instance attach inst-pm-example",
         )
 
     def test_client_retries_read_only_env_tool_once_without_ensure(self) -> None:
