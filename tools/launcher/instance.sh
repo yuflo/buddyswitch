@@ -5,17 +5,25 @@ buddyswitch_instance_usage() {
   cat <<EOF
 Usage:
   buddyswitch-codex instance buddies
-  buddyswitch-codex instance start --buddy <buddy> [-- codex args...]
+  buddyswitch-codex instance start --buddy <buddy>
+  buddyswitch-codex instance input <instance-id> --text <text>
+  buddyswitch-codex instance attach <instance-id>
+  buddyswitch-codex instance stop <instance-id>
+  buddyswitch-codex instance status <instance-id> [--json]
+  buddyswitch-codex instance interrupt <instance-id>
   buddyswitch-codex instance list [--buddy <buddy>]
-  buddyswitch-codex instance open <instance-id> [-- codex args...]
   buddyswitch-codex instance delete <instance-id> [--yes]
   buddyswitch-codex instance help
 
 Commands:
   buddies Print valid buddies from buddyswitch/manifest.toml.
-  start   Launch Codex in a fresh product-mode instance.
+  start   Start a fresh product-mode app-server service.
+  input   Send text to a running product-mode instance.
+  attach  Attach a TUI to a running product-mode instance.
+  stop    Stop a running product-mode instance service.
+  status  Show product-mode instance service state.
+  interrupt Interrupt the active turn on a running product-mode instance.
   list    List stored product-mode instances.
-  open    Launch Codex in an existing inactive instance.
   delete  Delete one stored inactive instance without deleting shared state.
   help    Show this help message.
 EOF
@@ -61,6 +69,7 @@ buddyswitch_instance_json_files() {
 
 buddyswitch_instance_list() {
   local buddy_filter=""
+  local found=0 printed_header=0 instance_json meta kind instance_id status_json
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --buddy)
@@ -81,43 +90,73 @@ buddyswitch_instance_list() {
     esac
   done
 
-  python3 - "${BUDDYSWITCH_SHARED_ROOT}" "${buddy_filter}" <<'PY'
+  while IFS= read -r instance_json; do
+    meta="$(
+      python3 - "${instance_json}" "${buddy_filter}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-shared_root = Path(sys.argv[1])
+instance_json = Path(sys.argv[1])
 buddy_filter = sys.argv[2]
-rows = []
-for instance_json in sorted((shared_root / "instances").glob("*/instance.json")):
-    try:
-        payload = json.loads(instance_json.read_text(encoding="utf-8"))
-    except Exception as exc:
-        rows.append((instance_json.parent.name, "invalid", "invalid", "", "", "", "", f"invalid-json:{exc}"))
-        continue
-    buddy = payload.get("buddy")
-    if buddy_filter and buddy != buddy_filter:
-        continue
-    rows.append(
-        (
-            payload.get("instance_id", instance_json.parent.name),
-            buddy or "",
-            payload.get("status", ""),
-            str(payload.get("browser_port") or ""),
-            payload.get("updated_at", ""),
-            payload.get("workspace_dir", ""),
-        )
-    )
 
-if not rows:
-    print("No BuddySwitch instances found.")
-    print("Start one with: ./buddyswitch-codex instance start --buddy <buddy>")
+try:
+    payload = json.loads(instance_json.read_text(encoding="utf-8"))
+except Exception as exc:
+    print(f"invalid\t{instance_json.parent.name}\tinvalid-json:{exc}")
     raise SystemExit(0)
 
-print("instance_id\tbuddy\tstatus\tbrowser_port\tupdated_at\tworkspace_dir")
-for row in rows:
-    print("\t".join(str(item) for item in row))
+buddy = payload.get("buddy")
+if buddy_filter and buddy != buddy_filter:
+    raise SystemExit(0)
+
+instance_id = payload.get("instance_id", instance_json.parent.name)
+print(f"ok\t{instance_id}")
 PY
+    )"
+    [[ -n "${meta}" ]] || continue
+    kind="${meta%%$'\t'*}"
+    if [[ "${kind}" == "invalid" ]]; then
+      instance_id="${meta#*$'\t'}"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${instance_id%%$'\t'*}" "invalid" "invalid" "invalid" "" "" "" "${instance_id#*$'\t'}"
+      found=1
+      continue
+    fi
+    instance_id="${meta#*$'\t'}"
+    status_json="$(instance_status_json "${instance_id}")" || return $?
+    if [[ "${printed_header}" -eq 0 ]]; then
+      printf 'instance_id\tbuddy\tstatus\tapp_server_health\tthread_id\tbrowser_port\tupdated_at\tworkspace_dir\n'
+      printed_header=1
+    fi
+    python3 - "${status_json}" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+app_server = payload.get("app_server")
+healthy = False
+if isinstance(app_server, dict):
+    healthy = bool(app_server.get("healthy"))
+thread_id = payload.get("thread_id")
+row = (
+    payload.get("instance_id", ""),
+    payload.get("buddy", ""),
+    payload.get("status", ""),
+    "healthy" if healthy else "unhealthy",
+    thread_id if isinstance(thread_id, str) else "",
+    str(payload.get("browser_port") or ""),
+    payload.get("updated_at", ""),
+    payload.get("workspace_dir", ""),
+)
+print("\t".join(str(item) for item in row))
+PY
+    found=1
+  done < <(buddyswitch_instance_json_files)
+
+  if [[ "${found}" -eq 0 ]]; then
+    echo "No BuddySwitch instances found."
+    echo "Start one with: ./buddyswitch-codex instance start --buddy <buddy>"
+  fi
 }
 
 buddyswitch_instance_record_json() {
@@ -182,59 +221,6 @@ print(buddy)
 PY
 }
 
-buddyswitch_instance_live_target_launcher_marker_exists() {
-  local instance_id="$1"
-  python3 - "${BUDDYSWITCH_RUN_STATE_DIR}" "${instance_id}" <<'PY'
-import json
-import os
-import sys
-from pathlib import Path
-
-run_dir = Path(sys.argv[1])
-instance_id = sys.argv[2]
-found = False
-
-for marker in run_dir.glob("launcher-*.json"):
-    try:
-        payload = json.loads(marker.read_text(encoding="utf-8"))
-        pid = payload.get("pid")
-    except Exception:
-        marker.unlink(missing_ok=True)
-        continue
-    if not isinstance(pid, int) or pid <= 0:
-        marker.unlink(missing_ok=True)
-        continue
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        marker.unlink(missing_ok=True)
-        continue
-    if payload.get("instance_id") == instance_id:
-        found = True
-
-raise SystemExit(0 if found else 1)
-PY
-}
-
-buddyswitch_instance_live_legacy_launcher_marker_exists() {
-  local marker_file marker_pid
-
-  if [[ ! -d "${BUDDYSWITCH_RUN_STATE_DIR}" ]]; then
-    return 1
-  fi
-
-  for marker_file in "${BUDDYSWITCH_RUN_STATE_DIR}"/launcher-*.pid; do
-    [[ -e "${marker_file}" ]] || continue
-    marker_pid="$(cat "${marker_file}" 2>/dev/null || true)"
-    if [[ -n "${marker_pid}" ]] && kill -0 "${marker_pid}" 2>/dev/null; then
-      return 0
-    fi
-    rm -f "${marker_file}"
-  done
-
-  return 1
-}
-
 buddyswitch_instance_require_safe_delete_root() {
   local instance_id="$1"
   local instances_root="${BUDDYSWITCH_SHARED_ROOT}/instances"
@@ -287,14 +273,50 @@ buddyswitch_instance_main() {
       shift || true
       buddyswitch_instance_list "$@"
       ;;
-    open)
+    input)
       shift || true
       if [[ $# -lt 1 ]]; then
         echo "instance id is required" >&2
         buddyswitch_instance_usage >&2
         return 2
       fi
-      instance_open "$@"
+      instance_input "$@"
+      ;;
+    attach)
+      shift || true
+      if [[ $# -lt 1 ]]; then
+        echo "instance id is required" >&2
+        buddyswitch_instance_usage >&2
+        return 2
+      fi
+      instance_attach "$@"
+      ;;
+    stop)
+      shift || true
+      if [[ $# -lt 1 ]]; then
+        echo "instance id is required" >&2
+        buddyswitch_instance_usage >&2
+        return 2
+      fi
+      instance_stop "$@"
+      ;;
+    status)
+      shift || true
+      if [[ $# -lt 1 ]]; then
+        echo "instance id is required" >&2
+        buddyswitch_instance_usage >&2
+        return 2
+      fi
+      instance_status "$@"
+      ;;
+    interrupt)
+      shift || true
+      if [[ $# -lt 1 ]]; then
+        echo "instance id is required" >&2
+        buddyswitch_instance_usage >&2
+        return 2
+      fi
+      instance_interrupt "$@"
       ;;
     delete)
       shift || true

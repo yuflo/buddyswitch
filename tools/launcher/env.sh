@@ -336,6 +336,164 @@ temp_path.replace(instance_json)
 PY
 }
 
+buddyswitch_instance_set_app_server() {
+  local instance_id="$1"
+  local thread_id="$2"
+  local app_server_pid="$3"
+  local app_server_socket="$4"
+  local app_server_log="$5"
+  local status="${6:-active}"
+  local instance_json
+
+  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+
+  python3 - "${instance_json}" "${instance_id}" "${thread_id}" "${app_server_pid}" "${app_server_socket}" "${app_server_log}" "${status}" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+instance_json = Path(sys.argv[1])
+instance_id = sys.argv[2]
+thread_id = sys.argv[3]
+app_server_pid_text = sys.argv[4]
+app_server_socket = sys.argv[5]
+app_server_log = sys.argv[6]
+status = sys.argv[7]
+
+if not instance_json.exists():
+    raise SystemExit(f"Instance record missing: {instance_json}")
+
+payload = json.loads(instance_json.read_text(encoding="utf-8"))
+if payload.get("instance_id") != instance_id:
+    raise SystemExit(f"Instance id mismatch in {instance_json}")
+
+try:
+    app_server_pid = int(app_server_pid_text)
+except ValueError as exc:
+    raise SystemExit(f"Invalid app-server pid: {app_server_pid_text}") from exc
+
+payload["thread_id"] = thread_id or payload.get("thread_id")
+payload["app_server_pid"] = app_server_pid
+payload["app_server_socket"] = app_server_socket
+payload["app_server_log"] = app_server_log
+payload["status"] = status
+payload["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+temp_path = instance_json.with_suffix(".tmp")
+temp_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+temp_path.replace(instance_json)
+PY
+}
+
+buddyswitch_instance_clear_app_server() {
+  local instance_id="$1"
+  local status="${2:-inactive}"
+  local instance_json
+
+  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+
+  python3 - "${instance_json}" "${instance_id}" "${status}" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+instance_json = Path(sys.argv[1])
+instance_id = sys.argv[2]
+status = sys.argv[3]
+
+if not instance_json.exists():
+    raise SystemExit(f"Instance record missing: {instance_json}")
+
+payload = json.loads(instance_json.read_text(encoding="utf-8"))
+if payload.get("instance_id") != instance_id:
+    raise SystemExit(f"Instance id mismatch in {instance_json}")
+
+payload["app_server_pid"] = None
+payload["app_server_socket"] = None
+payload["app_server_log"] = None
+payload["status"] = status
+payload["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+temp_path = instance_json.with_suffix(".tmp")
+temp_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+temp_path.replace(instance_json)
+PY
+}
+
+buddyswitch_instance_app_server_is_active() {
+  local instance_id="$1"
+  if [[ -z "${instance_id}" ]]; then
+    return 1
+  fi
+  (
+    buddyswitch_validate_instance_id "${instance_id}" || exit $?
+    if [[ ! -f "$(buddyswitch_instance_json_path "${instance_id}")" ]]; then
+      exit 1
+    fi
+    buddyswitch_env_bind_instance "${instance_id}" || exit $?
+    buddyswitch_app_server_is_active
+  )
+}
+
+_buddyswitch_list_instance_ids_for_buddy() {
+  local target_buddy="${1:-}"
+  local instance_json instance_id
+
+  for instance_json in "${BUDDYSWITCH_SHARED_ROOT}"/instances/*/instance.json; do
+    [[ -f "${instance_json}" ]] || continue
+    instance_id="$(
+      python3 - "${instance_json}" "${target_buddy}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+instance_json = Path(sys.argv[1])
+target_buddy = sys.argv[2]
+
+try:
+    payload = json.loads(instance_json.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+
+buddy = payload.get("buddy")
+if target_buddy and buddy != target_buddy:
+    raise SystemExit(0)
+
+instance_id = payload.get("instance_id", instance_json.parent.name)
+if isinstance(instance_id, str) and instance_id:
+    print(instance_id)
+PY
+    )"
+    [[ -n "${instance_id}" ]] || continue
+    printf '%s\n' "${instance_id}"
+  done
+}
+
+buddyswitch_count_active_app_servers() {
+  local count=0 instance_id
+  while IFS= read -r instance_id; do
+    [[ -n "${instance_id}" ]] || continue
+    if buddyswitch_instance_app_server_is_active "${instance_id}"; then
+      count=$((count + 1))
+    fi
+  done < <(_buddyswitch_list_instance_ids_for_buddy)
+  echo "${count}"
+}
+
+buddyswitch_count_active_app_servers_for_buddy() {
+  local buddy="$1"
+  local count=0 instance_id
+  while IFS= read -r instance_id; do
+    [[ -n "${instance_id}" ]] || continue
+    if buddyswitch_instance_app_server_is_active "${instance_id}"; then
+      count=$((count + 1))
+    fi
+  done < <(_buddyswitch_list_instance_ids_for_buddy "${buddy}")
+  echo "${count}"
+}
+
 buddyswitch_arg_sets_native_web_search() {
   local value="$1"
   case "${value}" in
@@ -394,89 +552,6 @@ buddyswitch_run_codex() {
   CODEX_HOME="${BUDDYSWITCH_CODEX_HOME}" \
   XDG_CONFIG_HOME="${BUDDYSWITCH_XDG_CONFIG_HOME}" \
   codex "$@"
-}
-
-buddyswitch_write_launcher_marker() {
-  local marker_pid="${1:-${BUDDYSWITCH_LAUNCHER_MARKER_PID:-$$}}"
-  local marker_path="${BUDDYSWITCH_RUN_STATE_DIR}/launcher-${marker_pid}.json"
-  mkdir -p "${BUDDYSWITCH_RUN_STATE_DIR}"
-  python3 - \
-    "${marker_path}" \
-    "${marker_pid}" \
-    "${BUDDYSWITCH_START_INSTANCE_ID:-${BUDDYSWITCH_INSTANCE_ID:-}}" \
-    "${BUDDYSWITCH_START_BUDDY:-${BUDDYSWITCH_ACTIVE_BUDDY:-}}" \
-    "${BUDDYSWITCH_WORKSPACE_DIR:-}" <<'PY'
-import json
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-path = Path(sys.argv[1])
-payload = {
-    "pid": int(sys.argv[2]),
-    "instance_id": sys.argv[3] or None,
-    "buddy": sys.argv[4] or None,
-    "workspace_dir": sys.argv[5] or None,
-    "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-}
-path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-PY
-  printf '%s\n' "${marker_path}"
-}
-
-buddyswitch_cleanup_pid_marker() {
-  local marker_path="$1"
-  rm -f "${marker_path}"
-}
-
-buddyswitch_count_active_launchers() {
-  if [[ ! -d "${BUDDYSWITCH_RUN_STATE_DIR}" ]]; then
-    echo "0"
-    return
-  fi
-
-  python3 - "${BUDDYSWITCH_RUN_STATE_DIR}" <<'PY'
-import json
-import os
-import sys
-from pathlib import Path
-
-run_dir = Path(sys.argv[1])
-live_pids = set()
-
-
-def pid_is_live(pid):
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
-
-
-def mark_pid(path, pid):
-    if pid is not None and pid > 0 and pid_is_live(pid):
-        live_pids.add(pid)
-        return
-    path.unlink(missing_ok=True)
-
-
-for marker in run_dir.glob("launcher-*.json"):
-    try:
-        payload = json.loads(marker.read_text(encoding="utf-8"))
-        pid = payload.get("pid")
-    except Exception:
-        pid = None
-    mark_pid(marker, pid if isinstance(pid, int) else None)
-
-for marker in run_dir.glob("launcher-*.pid"):
-    try:
-        pid = int(marker.read_text(encoding="utf-8").strip())
-    except Exception:
-        pid = None
-    mark_pid(marker, pid)
-
-print(len(live_pids))
-PY
 }
 
 buddyswitch_validate_reset_root() {

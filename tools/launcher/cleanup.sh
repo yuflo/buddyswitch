@@ -124,78 +124,6 @@ buddyswitch_cleanup_run_env_cleanup() {
   fi
 }
 
-buddyswitch_count_active_launchers_for_buddy() {
-  local buddy="$1"
-  if [[ ! -d "${BUDDYSWITCH_RUN_STATE_DIR}" ]]; then
-    echo "0"
-    return
-  fi
-
-  python3 - "${BUDDYSWITCH_RUN_STATE_DIR}" "${BUDDYSWITCH_SHARED_ROOT}" "${buddy}" <<'PY'
-import json
-import os
-import sys
-from pathlib import Path
-
-run_dir = Path(sys.argv[1])
-shared_root = Path(sys.argv[2])
-target_buddy = sys.argv[3]
-live_pids = set()
-
-
-def pid_is_live(pid):
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
-
-
-def marker_matches_target(payload):
-    buddy = payload.get("buddy")
-    if buddy == target_buddy:
-        return True
-    if isinstance(buddy, str) and buddy:
-        return False
-    instance_id = payload.get("instance_id")
-    if not isinstance(instance_id, str) or not instance_id:
-        return True
-    instance_json = shared_root / "instances" / instance_id / "instance.json"
-    try:
-        instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
-    except Exception:
-        return True
-    return instance_payload.get("buddy") == target_buddy
-
-
-for marker in run_dir.glob("launcher-*.json"):
-    try:
-        payload = json.loads(marker.read_text(encoding="utf-8"))
-        pid = payload.get("pid")
-    except Exception:
-        marker.unlink(missing_ok=True)
-        continue
-    if not isinstance(pid, int) or pid <= 0 or not pid_is_live(pid):
-        marker.unlink(missing_ok=True)
-        continue
-    if marker_matches_target(payload):
-        live_pids.add(pid)
-
-for marker in run_dir.glob("launcher-*.pid"):
-    try:
-        pid = int(marker.read_text(encoding="utf-8").strip())
-    except Exception:
-        marker.unlink(missing_ok=True)
-        continue
-    if not pid_is_live(pid):
-        marker.unlink(missing_ok=True)
-        continue
-    live_pids.add(pid)
-
-print(len(live_pids))
-PY
-}
-
 buddyswitch_count_active_browsers() {
   if buddyswitch_browser_pid_marker_is_active "$(buddyswitch_browser_pid_marker)"; then
     echo "1"
@@ -290,9 +218,9 @@ buddyswitch_cleanup_run_locked() {
   buddyswitch_cleanup_parse_args "$@" || return $?
 
   if [[ "${BUDDYSWITCH_CLEANUP_SCOPE}" == "buddy" ]]; then
-    active_count="$(buddyswitch_count_active_launchers_for_buddy "${BUDDYSWITCH_CLEANUP_BUDDY}")"
+    active_count="$(buddyswitch_count_active_app_servers_for_buddy "${BUDDYSWITCH_CLEANUP_BUDDY}")"
   else
-    active_count="$(buddyswitch_count_active_launchers)"
+    active_count="$(buddyswitch_count_active_app_servers)"
   fi
   if [[ "${active_count}" -gt 0 ]]; then
     echo "Cleanup blocked: ${active_count} active buddyswitch-codex instance(s) detected." >&2

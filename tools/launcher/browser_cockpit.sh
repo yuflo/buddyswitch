@@ -614,6 +614,31 @@ buddyswitch_browser_bootstrap() {
   return 0
 }
 
+buddyswitch_browser_instance_stop() {
+  local instance_id="$1"
+  local marker_file marker_pid
+
+  if [[ -z "${instance_id}" ]]; then
+    echo "instance id is required" >&2
+    return 2
+  fi
+
+  marker_file="${BUDDYSWITCH_SHARED_ROOT}/instances/${instance_id}/browser/chrome.pid"
+  if [[ ! -f "${marker_file}" ]]; then
+    return 0
+  fi
+
+  marker_pid="$(cat "${marker_file}" 2>/dev/null || true)"
+  if [[ -n "${marker_pid}" && "${marker_pid}" =~ ^[0-9]+$ ]] && kill -0 "${marker_pid}" 2>/dev/null; then
+    kill "${marker_pid}" 2>/dev/null || true
+    sleep 0.2
+    if kill -0 "${marker_pid}" 2>/dev/null; then
+      kill -9 "${marker_pid}" 2>/dev/null || true
+    fi
+  fi
+  rm -f "${marker_file}"
+}
+
 buddyswitch_browser_main() {
   local command arg
 
