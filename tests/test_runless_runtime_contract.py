@@ -183,7 +183,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_tool_registry_exposes_runless_tools_and_excludes_memory_run_and_binding(self) -> None:
         tools = tool_catalog.supported_tools()
         self.assertNotIn("memory", tools)
-        self.assertIn("buddybox", tools)
+        self.assertNotIn("buddybox", tools)
         self.assertNotIn("run", tools)
         self.assertNotIn("binding", tools)
 
@@ -200,18 +200,8 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         env_tools = payload.get("env_tools")
         self.assertIsInstance(env_tools, dict, msg=payload)
         assert isinstance(env_tools, dict)
-        self.assertIn("buddybox", env_tools)
+        self.assertNotIn("buddybox", env_tools)
         self.assertIn("context", env_tools)
-        buddybox = env_tools["buddybox"]
-        self.assertIsInstance(buddybox, dict, msg=payload)
-        assert isinstance(buddybox, dict)
-        self.assertIn("action_semantics", buddybox)
-        self.assertIn("write", buddybox["action_semantics"])
-        self.assertIn("inputs_explained", buddybox["action_semantics"]["write"])
-        operations = buddybox.get("operations")
-        self.assertIsInstance(operations, list, msg=buddybox)
-        assert isinstance(operations, list)
-        self.assertNotIn("search", operations)
         context_catalog = env_tools["context"]
         self.assertIsInstance(context_catalog, dict, msg=payload)
         assert isinstance(context_catalog, dict)
@@ -356,45 +346,22 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         help_text = completed.stdout
         self.assertNotIn("memory", help_text)
-        self.assertIn("buddybox", help_text)
+        self.assertNotIn("buddybox", help_text)
         self.assertNotIn("binding", help_text)
         self.assertNotIn(" run ", f" {help_text} ")
         self.assertNotIn("get-current", help_text)
         self.assertNotIn("set-current", help_text)
 
-    def test_env_client_buddybox_help_exposes_desc_subcommand(self) -> None:
-        buddybox_help = subprocess.run(
+    def test_env_client_buddybox_is_not_registered(self) -> None:
+        completed = subprocess.run(
             ["python3", "scripts/env/client.py", "buddybox", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
-            check=True,
+            check=False,
         )
-        self.assertIn("desc", buddybox_help.stdout)
-
-        desc_help = subprocess.run(
-            ["python3", "scripts/env/client.py", "buddybox", "desc", "--help"],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-        self.assertIn("usage:", desc_help.stdout.lower())
-
-    def test_env_client_buddybox_file_subcommands_use_payload_json(self) -> None:
-        for operation in ("list", "read", "delete"):
-            with self.subTest(operation=operation):
-                completed = subprocess.run(
-                    ["python3", "scripts/env/client.py", "buddybox", operation, "--help"],
-                    cwd=ROOT,
-                    text=True,
-                    capture_output=True,
-                    check=True,
-                )
-                help_text = completed.stdout.lower()
-                self.assertIn("--payload", help_text)
-                self.assertNotIn("--path", help_text)
-                self.assertNotIn("--logical-name", help_text)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("invalid choice", completed.stderr)
 
 
 if __name__ == "__main__":

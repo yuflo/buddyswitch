@@ -60,7 +60,7 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("binding", tools)
         self.assertIn("context", tools)
         self.assertNotIn("memory", tools)
-        self.assertIn("buddybox", tools)
+        self.assertNotIn("buddybox", tools)
 
     def test_router_rejects_retired_run_tool(self) -> None:
         payload = self._dispatch(tool="run", action="commit")
@@ -96,7 +96,7 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             summary="router artifact",
         )
 
-        buddybox = self._runtime_path("buddyswitch/local/buddybox/pm")
+        buddybox = self._runtime_path("buddybox")
         buddybox.mkdir(parents=True, exist_ok=True)
         (buddybox / "notes.md").write_text("# notes\n", encoding="utf-8")
 
@@ -105,7 +105,16 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         decision_surface = payload["decision_surface"]
         self.assertEqual(decision_surface["binding_state"]["state"], "runless")
         self.assertNotIn("memory_summaries", payload)
-        self.assertIn("buddybox_desc", payload)
+        surfaces = payload.get("writable_surfaces")
+        self.assertIsInstance(surfaces, dict, msg=payload)
+        assert isinstance(surfaces, dict)
+        persistent = surfaces.get("persistent_files")
+        self.assertIsInstance(persistent, dict, msg=payload)
+        assert isinstance(persistent, dict)
+        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_BUDDYBOX_DIR")
+        self.assertEqual(persistent.get("workspace_relative_root"), "buddybox")
+        self.assertFalse(persistent.get("mutates_product_state"))
+        self.assertNotIn("buddybox_desc", payload)
         self.assertNotIn(_RETIRED_BUDDYBOX_FILE_ROWS_FIELD, payload)
 
 

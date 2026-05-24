@@ -190,7 +190,7 @@ class RuntimeObjectAccess:
             "messages": "message.list",
             "comments": "comment.list",
             "requests": "request.list / request.get",
-            "buddybox": "buddybox list/read/write/delete",
+            "writable_surfaces": "context.get / context.summarize",
         }
 
 

@@ -119,8 +119,6 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         track_update_now = catalog.get_action_definition("track", "update_now").input_schema
         track_add_update = catalog.get_action_definition("track", "add_update").input_schema
         artifact_create = catalog.get_action_definition("artifact", "create_revision").input_schema
-        buddybox_list = catalog.get_action_definition("buddybox", "list").input_schema
-        buddybox_read = catalog.get_action_definition("buddybox", "read").input_schema
         comment_add = catalog.get_action_definition("comment", "add").input_schema
         task_create = catalog.get_action_definition("task", "create").input_schema
         task_list = catalog.get_action_definition("task", "list").input_schema
@@ -176,7 +174,7 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         variants = source_ref_items.get("anyOf")
         self.assertIsInstance(variants, list)
         assert isinstance(variants, list)
-        self.assertGreaterEqual(len(variants), 6)
+        self.assertGreaterEqual(len(variants), 5)
         variant_by_type: dict[str, dict[str, Any]] = {}
         for variant in variants:
             if not isinstance(variant, dict):
@@ -187,22 +185,15 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             type_enum = props.get("type", {}).get("enum")
             if isinstance(type_enum, list) and len(type_enum) == 1 and isinstance(type_enum[0], str):
                 variant_by_type[type_enum[0]] = variant
-        for required_type in ("artifact", "track", "task", "buddybox", "external", "note"):
+        for required_type in ("artifact", "track", "task", "external", "note"):
             self.assertIn(required_type, variant_by_type, msg=f"source_refs missing {required_type}")
+        self.assertNotIn("buddybox", variant_by_type)
         self.assertEqual(set(variant_by_type["artifact"]["required"]), {"type", "id"})
         self.assertEqual(set(variant_by_type["track"]["required"]), {"type", "id"})
         self.assertEqual(set(variant_by_type["task"]["required"]), {"type", "id"})
-        self.assertEqual(set(variant_by_type["buddybox"]["required"]), {"type", "logical_name"})
         self.assertEqual(set(variant_by_type["external"]["required"]), {"type", "label"})
         self.assertEqual(set(variant_by_type["note"]["required"]), {"type", "label"})
         self.assertEqual(artifact_create["properties"]["read_claim"].get("type"), "string")
-
-        self.assertEqual(buddybox_list["properties"]["recursive"].get("type"), "boolean")
-        self.assertEqual(buddybox_list["properties"]["recursive"].get("default"), False)
-        self.assertEqual(buddybox_list["properties"]["limit"].get("type"), "integer")
-        self.assertEqual(buddybox_list["properties"]["limit"].get("minimum"), 1)
-        self.assertEqual(buddybox_list["properties"]["limit"].get("default"), 200)
-        self.assertEqual(buddybox_read["properties"]["encoding"].get("enum"), ["auto", "utf-8", "base64"])
 
         mentions = comment_add["properties"]["mentions"]
         self.assertEqual(mentions.get("type"), "array")

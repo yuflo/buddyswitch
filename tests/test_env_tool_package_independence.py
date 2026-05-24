@@ -24,7 +24,6 @@ SHIPPED_TOOLS = {
     "task",
     "track",
     "artifact",
-    "buddybox",
     "context",
     "evidence",
     "message",

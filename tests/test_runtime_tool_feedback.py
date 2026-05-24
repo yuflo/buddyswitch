@@ -122,7 +122,7 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         has_next_options = isinstance(payload.get("allowed_next_action_options"), list) and len(payload["allowed_next_action_options"]) > 0
         self.assertTrue(has_next_actions or has_next_options, msg=payload)
 
-    def test_buddybox_traversal_rejection_has_structured_feedback(self) -> None:
+    def test_buddybox_tool_rejection_has_structured_feedback(self) -> None:
         payload = self._dispatch(
             buddy="pm",
             tool="buddybox",
@@ -130,15 +130,14 @@ class RuntimeToolFeedbackTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"logical_name": "../escape.txt", "content": "x"},
         )
         self.assertFalse(payload.get("ok"), msg=payload)
-        self.assertEqual(payload.get("permission_boundary"), "logical-name")
+        self.assertEqual(payload.get("permission_boundary"), "env.tool")
         self.assertTrue(str(payload.get("why_blocked", "")).strip(), msg=payload)
         self.assertTrue(str(payload.get("impact", "")).strip(), msg=payload)
         self.assertTrue(str(payload.get("retry_guidance", "")).strip(), msg=payload)
         self.assertIs(payload.get("state_changed"), False, msg=payload)
         self.assertEqual(payload.get("durability"), "none", msg=payload)
         self.assertIsInstance(payload.get("allowed_next_actions"), list, msg=payload)
-        self.assertEqual(payload.get("allowed_next_actions"), [], msg=payload)
-        self.assertEqual(payload["permission_boundary"], "logical-name")
+        self.assertEqual(payload["permission_boundary"], "env.tool")
         self.assertFalse(payload["state_changed"])
 
     def test_artifact_owner_scope_rejection_has_structured_feedback(self) -> None:

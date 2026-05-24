@@ -569,15 +569,11 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(reject_direct_publish.get("durability"), "none")
         self.assertFalse(bool(reject_direct_publish.get("state_changed")), msg=reject_direct_publish)
 
-        buddybox_write = self._dispatch(
-            buddy="pm",
-            tool="buddybox",
-            action="write",
-            args={"logical_name": "planes/private.txt", "content": "private"},
-        )
-        self.assertTrue(buddybox_write["ok"], msg=buddybox_write)
-        self.assertEqual(buddybox_write.get("durability"), "durable")
-        self.assertFalse(buddybox_write.get("mutates_product_state"), msg=buddybox_write)
+        private_file = self.workspace_dir / "buddybox" / "planes" / "private.txt"
+        private_file.parent.mkdir(parents=True, exist_ok=True)
+        private_file.write_text("private", encoding="utf-8")
+        self.assertEqual(private_file.read_text(encoding="utf-8"), "private")
+        self.assertFalse((self.runtime_root / "buddyswitch/local/buddybox/pm/planes/private.txt").exists())
 
         published = self._dispatch(
             buddy="pm",

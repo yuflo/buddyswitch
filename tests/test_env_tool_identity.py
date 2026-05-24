@@ -71,10 +71,11 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(payload["ok"], msg=payload)
         sources = payload["sources"]
         self.assertNotIn("memories", sources)
-        self.assertIn("buddybox", sources)
-        buddybox = sources["buddybox"] or {}
-        self.assertEqual(buddybox.get("capability"), "private_file_workspace")
-        self.assertNotIn("source_of_truth", buddybox)
+        self.assertNotIn("buddybox", sources)
+        self.assertIn("writable_surfaces", sources)
+        writable = sources["writable_surfaces"] or {}
+        self.assertFalse(writable.get("mutates_product_state"))
+        self.assertFalse(writable.get("grants_write_authority"))
         self.assertNotIn("runs", sources)
 
 

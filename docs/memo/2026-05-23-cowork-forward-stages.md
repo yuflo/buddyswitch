@@ -8,11 +8,11 @@ This memo records the current direction only. It is not a full architecture spec
 
 BuddySwitch co-work should move forward in stages:
 
-1. Complete Codex app-server service mode for BuddySwitch buddies.
-2. Then design the daemon layer, including the co-work message upgrade and how the daemon can intervene in active Codex work.
+1. Codex app-server service mode for BuddySwitch buddies is now the main path.
+2. Next, design the daemon layer, including the co-work message upgrade and how the daemon can intervene in active Codex work.
 3. Iterate based on verified behavior.
 
-The first stage is the immediate focus.
+The immediate focus is Stage 2 design. Do not start daemon implementation before the design is confirmed.
 
 ## Core Problem
 
@@ -37,6 +37,8 @@ Task remains primarily a buddy-private self-management tool. Co-work coordinatio
 ## Stage 1: Codex App-server Service Mode
 
 Goal: make each buddy controllable through a Codex app-server API instead of relying on a TUI session as the primary control plane.
+
+Status: implemented as the current BuddySwitch service-mode path.
 
 Expected shape:
 
@@ -88,12 +90,12 @@ Do not design these deeply before the service-mode control loop works.
 
 ## Immediate Next Step
 
-Return to Stage 1 and implement the shortest verified path for BuddySwitch Codex app-server service mode.
+Enter Stage 2 and investigate the daemon/co-work message design before implementation.
 
-The first implementation slice should prove:
+The design investigation should cover:
 
-- launcher can start one buddy app-server
-- BuddySwitch can send a turn through the app-server API
-- BuddySwitch can steer or interrupt that buddy
-- a human can attach through remote TUI
-- the behavior is verified by a concrete smoke test or main-path run
+- current BuddySwitch track/artifact/comment/message/runtime surfaces
+- current app-server service-mode control capabilities
+- local Codex app-server and remote TUI source behavior
+- internet-sourced upstream docs or references relevant to Codex control and agent coordination
+- a shortest verified Stage 2 slice that can be reviewed before coding

@@ -182,7 +182,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response["error"]["code"], "E_ENV_TOOL", msg=response)
         self.assertEqual(response.get("permission_boundary"), "env.tool", msg=response)
 
-    def test_env_tool_buddybox_write_uses_shared_state_root(self) -> None:
+    def test_context_reports_direct_buddybox_writable_surface(self) -> None:
         instance_root = self._instance_root("inst-pm-alt-workspace")
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -209,25 +209,37 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             encoding="utf-8",
         )
 
-        written = self._dispatch(
+        summarized = self._dispatch(
             method="env.tool",
             params={
-                "tool": "buddybox",
-                "action": "write",
-                "args": {"logical_name": "broker/out.txt", "content": "broker\n"},
+                "tool": "context",
+                "action": "summarize",
+                "args": {},
             },
             instance_id="inst-pm-alt-workspace",
             buddy="pm",
             instance_json=instance_json,
         )
-        self.assertTrue(written.get("ok"), msg=written)
+        self.assertTrue(summarized.get("ok"), msg=summarized)
+        surfaces = summarized.get("writable_surfaces")
+        self.assertIsInstance(surfaces, dict, msg=summarized)
+        assert isinstance(surfaces, dict)
+        persistent = surfaces.get("persistent_files")
+        self.assertIsInstance(persistent, dict, msg=summarized)
+        assert isinstance(persistent, dict)
+        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_BUDDYBOX_DIR")
+        self.assertEqual(persistent.get("workspace_relative_root"), "buddybox")
+        self.assertFalse(persistent.get("mutates_product_state"))
+
         target = workspace_dir / "buddybox" / "broker" / "out.txt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("broker\n", encoding="utf-8")
         self.assertTrue(target.exists(), msg=target)
         self.assertEqual(target.read_text(encoding="utf-8"), "broker\n")
         self.assertFalse(self._runtime_path("buddyswitch/local/buddybox/pm/broker/out.txt").exists())
         self.assertFalse(self._runtime_path("state/buddyswitch/local/buddybox/pm/broker/out.txt").exists())
 
-    def test_env_tool_buddybox_lifecycle_uses_shared_state_root(self) -> None:
+    def test_direct_buddybox_files_use_shared_state_root(self) -> None:
         instance_root = self._instance_root("inst-pm-alt-workspace-lifecycle")
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -254,67 +266,14 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             encoding="utf-8",
         )
 
-        write_payload = self._dispatch(
-            method="env.tool",
-            params={
-                "tool": "buddybox",
-                "action": "write",
-                "args": {"logical_name": "broker/lifecycle.txt", "content": "lifecycle\n"},
-            },
-            instance_id="inst-pm-alt-workspace-lifecycle",
-            buddy="pm",
-            instance_json=instance_json,
-        )
-        self.assertTrue(write_payload.get("ok"), msg=write_payload)
-
         target = workspace_dir / "buddybox" / "broker" / "lifecycle.txt"
         wrong_runtime_root = self._runtime_path("state/buddyswitch/local/buddybox/pm/broker/lifecycle.txt")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("lifecycle\n", encoding="utf-8")
         self.assertTrue(target.exists(), msg=target)
         self.assertFalse(wrong_runtime_root.exists(), msg=wrong_runtime_root)
-
-        read_payload = self._dispatch(
-            method="env.tool",
-            params={
-                "tool": "buddybox",
-                "action": "read",
-                "args": {"logical_name": "broker/lifecycle.txt"},
-            },
-            instance_id="inst-pm-alt-workspace-lifecycle",
-            buddy="pm",
-            instance_json=instance_json,
-        )
-        self.assertTrue(read_payload.get("ok"), msg=read_payload)
-        self.assertEqual(read_payload.get("content"), "lifecycle\n")
-
-        list_payload = self._dispatch(
-            method="env.tool",
-            params={
-                "tool": "buddybox",
-                "action": "list",
-                "args": {"recursive": True},
-            },
-            instance_id="inst-pm-alt-workspace-lifecycle",
-            buddy="pm",
-            instance_json=instance_json,
-        )
-        self.assertTrue(list_payload.get("ok"), msg=list_payload)
-        files = list_payload.get("files")
-        self.assertIsInstance(files, list, msg=list_payload)
-        assert isinstance(files, list)
-        self.assertIn("broker/lifecycle.txt", {row.get("logical_name") for row in files if isinstance(row, dict)})
-
-        delete_payload = self._dispatch(
-            method="env.tool",
-            params={
-                "tool": "buddybox",
-                "action": "delete",
-                "args": {"logical_name": "broker/lifecycle.txt"},
-            },
-            instance_id="inst-pm-alt-workspace-lifecycle",
-            buddy="pm",
-            instance_json=instance_json,
-        )
-        self.assertTrue(delete_payload.get("ok"), msg=delete_payload)
+        self.assertEqual(target.read_text(encoding="utf-8"), "lifecycle\n")
+        target.unlink()
         self.assertFalse(target.exists(), msg=target)
 
     def test_env_tool_requests_enter_shared_runtime_lock(self) -> None:

@@ -40,7 +40,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         "source_refs",
         "buddybox_workspace",
     }
-    _SHIPPED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "message", "comment", "search"}
+    _SHIPPED_TOOLS = {"task", "track", "artifact", "context", "evidence", "message", "comment", "search"}
 
     def _legacy_store_import_violations(self, roots: list[Path]) -> list[str]:
         violations: list[str] = []

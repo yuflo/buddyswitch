@@ -120,8 +120,9 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         affordances = context_summary.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=context_summary)
         assert isinstance(affordances, dict)
-        for tool_name in ("track", "artifact", "buddybox", "context"):
+        for tool_name in ("track", "artifact", "context"):
             self.assertIn(tool_name, affordances)
+        self.assertNotIn("buddybox", affordances)
 
         opened = self._dispatch(
             buddy="pm",

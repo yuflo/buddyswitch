@@ -23,10 +23,6 @@ _SOURCE_REF_ITEMS_SCHEMA = {
             'type': 'string',
             'description': 'Referenced artifact/track/task id when type uses ids.',
         },
-        'logical_name': {
-            'type': 'string',
-            'description': 'Referenced private buddybox logical_name when type is buddybox.',
-        },
         'label': {
             'type': 'string',
             'description': 'Human label for note/external references.',
@@ -65,16 +61,6 @@ _SOURCE_REF_ITEMS_SCHEMA = {
             'properties': {
                 'type': {'type': 'string', 'description': 'Task source reference.', 'enum': ['task']},
                 'id': {'type': 'string', 'description': 'Task id.'},
-            },
-        },
-        {
-            'type': 'object',
-            'description': 'Buddybox private provenance reference.',
-            'additionalProperties': False,
-            'required': ['type', 'logical_name'],
-            'properties': {
-                'type': {'type': 'string', 'description': 'Buddybox source reference.', 'enum': ['buddybox']},
-                'logical_name': {'type': 'string', 'description': 'Private buddybox logical_name.'},
             },
         },
         {
