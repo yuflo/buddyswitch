@@ -1907,6 +1907,75 @@ exec "$real_git" "$@"
             for retired_relative_path in ("runs/raw", "buddyswitch/content/runs"):
                 self.assertFalse((workspace_dir / retired_relative_path).exists())
 
+    def test_start_with_buddy_returns_json_metadata_when_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            capture_path = temp_root_path / "capture.json"
+            ready_file = temp_root_path / "browser-ready.flag"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_PORT"] = "1"
+            env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(ready_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "pm", "--json"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(
+                completed.returncode,
+                0,
+                msg=f"launcher failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+            )
+
+            payload = json.loads(completed.stdout)
+            capture_payload = json.loads(capture_path.read_text(encoding="utf-8"))
+            stored_instance = json.loads(Path(capture_payload["instance_json"]).read_text(encoding="utf-8"))
+
+            self.assertTrue(payload["instance_id"].startswith("inst-pm-"))
+            self.assertEqual(payload["buddy"], "pm")
+            self.assertEqual(payload["workspace_dir"], stored_instance["workspace_dir"])
+            self.assertEqual(payload["project_workspace_dir"], capture_payload["project_workspace_dir"])
+            self.assertEqual(payload["instance_record"], capture_payload["instance_json"])
+            self.assertNotIn("Input: ./buddyswitch-codex", completed.stdout)
+            self.assertEqual(stored_instance["instance_id"], payload["instance_id"])
+            self.assertEqual(stored_instance["status"], "active")
+            self.assertIn("thread_id", stored_instance)
+            self.assertIn("app_server_pid", stored_instance)
+
     def test_start_with_buddy_starts_app_server_service_and_returns(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -2165,6 +2234,37 @@ exec "$real_git" "$@"
             self.assertNotIn("sandboxPolicy", turn_start["params"])
             self.assertIn("turn-test", input_result.stdout)
 
+    def test_input_json_starts_turn_when_thread_idle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            input_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "input",
+                    ctx["instance_id"],
+                    "--text",
+                    "Draft brief",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
+            payload = json.loads(input_result.stdout)
+            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(payload["action"], "start")
+            self.assertTrue(payload["turn_id"])
+            self.assertNotIn("Started turn:", input_result.stdout)
+
     def test_input_steers_in_progress_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
@@ -2220,6 +2320,57 @@ exec "$real_git" "$@"
             self.assertNotIn("turn/start", methods)
             steer = next(row for row in rpc_rows if row["rpc_method"] == "turn/steer")
             self.assertEqual(steer["params"]["expectedTurnId"], "turn-123")
+
+    def test_input_json_includes_expected_turn_id_when_steering(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={
+                    "thread_status": {"type": "active", "activeFlags": []},
+                    "turns": [
+                        {
+                            "id": "turn-123",
+                            "items": [],
+                            "itemsView": "summary",
+                            "status": "inProgress",
+                            "error": None,
+                            "startedAt": 0,
+                            "completedAt": None,
+                            "durationMs": None,
+                        }
+                    ],
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            input_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "input",
+                    ctx["instance_id"],
+                    "--text",
+                    "Steer current turn",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
+            payload = json.loads(input_result.stdout)
+            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(payload["action"], "steer")
+            self.assertEqual(payload["turn_id"], "turn-123")
+            self.assertEqual(payload["expected_turn_id"], "turn-123")
+            self.assertNotIn("Steered turn:", input_result.stdout)
 
     def test_input_reports_non_steerable_active_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -2488,6 +2639,56 @@ exec "$real_git" "$@"
             self.assertFalse(broker_socket.exists())
             self.assertFalse(browser_pid.exists())
 
+    def test_stop_json_marks_instance_inactive_after_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            instance_payload = ctx["instance_payload"]
+            assert isinstance(instance_payload, dict)
+            app_server_socket = Path(str(instance_payload["app_server_socket"]))
+            app_server_pid_file = Path(str(ctx["instance_root"])) / "runtime" / "app-server.pid"
+            app_server_marker = Path(str(ctx["instance_root"])) / "runtime" / "app-server.socket"
+            broker_pid = Path(str(ctx["instance_root"])) / "runtime" / "runtime-broker.pid"
+            broker_marker = Path(str(ctx["instance_root"])) / "runtime" / "runtime-broker.socket"
+            broker_socket = Path(str(ctx["instance_root"])) / "runtime" / "runtime-broker.sock"
+            browser_pid = Path(str(ctx["instance_root"])) / "browser" / "chrome.pid"
+
+            stop_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "stop",
+                    ctx["instance_id"],
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+            self.assertEqual(
+                json.loads(stop_result.stdout),
+                {"instance_id": ctx["instance_id"], "status": "inactive"},
+            )
+
+            stored = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
+            self.assertEqual(stored["status"], "inactive")
+            self.assertIsNone(stored["app_server_pid"])
+            self.assertIsNone(stored["app_server_socket"])
+            self.assertIsNone(stored["app_server_log"])
+            self.assertFalse(app_server_socket.exists())
+            self.assertFalse(app_server_pid_file.exists())
+            self.assertFalse(app_server_marker.exists())
+            self.assertFalse(broker_pid.exists())
+            self.assertFalse(broker_marker.exists())
+            self.assertFalse(broker_socket.exists())
+            self.assertFalse(browser_pid.exists())
+
     def test_stop_is_idempotent_for_stale_service(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
@@ -2654,6 +2855,53 @@ exec "$real_git" "$@"
             state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
             self.assertEqual(state_payload["thread_status"]["type"], "idle")
             self.assertEqual(state_payload["turns"][0]["status"], "interrupted")
+
+    def test_interrupt_json_returns_interrupted_turn(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={
+                    "thread_status": {"type": "active", "activeFlags": []},
+                    "turns": [
+                        {
+                            "id": "turn-123",
+                            "items": [],
+                            "itemsView": "summary",
+                            "status": "inProgress",
+                            "error": None,
+                            "startedAt": 0,
+                            "completedAt": None,
+                            "durationMs": None,
+                        }
+                    ],
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            interrupt_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "interrupt",
+                    ctx["instance_id"],
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(interrupt_result.returncode, 0, msg=interrupt_result.stderr)
+            payload = json.loads(interrupt_result.stdout)
+            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(payload["turn_id"], "turn-123")
+            self.assertNotIn("Interrupted turn:", interrupt_result.stdout)
 
     def test_interrupt_rejects_when_no_active_turn_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -3973,6 +4221,35 @@ exec "$real_git" "$@"
             self.assertIn("market", completed.stdout)
             self.assertFalse(shared_root.exists(), "instance buddies must not create runtime state")
 
+    def test_instance_buddies_json_is_structured_and_read_only(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "buddies", "--json"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            payload = json.loads(completed.stdout)
+            buddy_ids = {row["id"] for row in payload["buddies"]}
+            self.assertIn("pm", buddy_ids)
+            self.assertIn("dev", buddy_ids)
+            self.assertIn("market", buddy_ids)
+            for row in payload["buddies"]:
+                self.assertIsInstance(row["id"], str)
+                self.assertIsInstance(row["label"], str)
+                self.assertIsInstance(row["scope"], str)
+            self.assertFalse(shared_root.exists(), "instance buddies --json must not create runtime state")
+
     def test_instance_list_empty_points_to_start_buddy(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             env = os.environ.copy()
@@ -3991,6 +4268,25 @@ exec "$real_git" "$@"
             self.assertEqual(completed.returncode, 0)
             self.assertIn("No BuddySwitch instances found.", completed.stdout)
             self.assertIn("./buddyswitch-codex instance start --buddy <buddy>", completed.stdout)
+
+    def test_instance_list_json_empty_returns_empty_array(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            env = os.environ.copy()
+            env["HOME"] = str(Path(source_home))
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "list", "--json"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(json.loads(completed.stdout), {"instances": []})
+            self.assertNotIn("No BuddySwitch instances found.", completed.stdout)
 
     def test_instance_list_prints_stored_instances_and_filters_by_buddy(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -4038,6 +4334,58 @@ exec "$real_git" "$@"
             self.assertIn("pm", completed.stdout)
             self.assertNotIn("inst-dev-b", completed.stdout)
 
+    def test_instance_list_json_filters_by_buddy(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            for instance_id, buddy in (
+                ("inst-pm-a", "pm"),
+                ("inst-dev-b", "dev"),
+            ):
+                instance_root = shared_root / "instances" / instance_id
+                instance_root.mkdir(parents=True, exist_ok=True)
+                (instance_root / "instance.json").write_text(
+                    json.dumps(
+                        {
+                            "instance_id": instance_id,
+                            "buddy": buddy,
+                            "status": "inactive",
+                            "workspace_dir": str(instance_root / "workspace"),
+                            "browser_port": None,
+                            "created_at": "2026-04-26T00:00:00Z",
+                            "updated_at": "2026-04-26T00:00:01Z",
+                        },
+                        ensure_ascii=True,
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "list", "--json", "--buddy", "pm"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            payload = json.loads(completed.stdout)
+            self.assertEqual(len(payload["instances"]), 1)
+            row = payload["instances"][0]
+            self.assertEqual(row["instance_id"], "inst-pm-a")
+            self.assertEqual(row["buddy"], "pm")
+            self.assertEqual(row["status"], "inactive")
+            self.assertEqual(row["app_server_health"], "unhealthy")
+            self.assertIsNone(row["thread_id"])
+            self.assertIsNone(row["browser_port"])
+
     def test_instance_delete_removes_only_target_instance_without_shared_state(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
@@ -4064,6 +4412,47 @@ exec "$real_git" "$@"
 
             self.assertEqual(delete_result.returncode, 0, msg=delete_result.stderr)
             self.assertIn("Instance deleted: inst-pm-delete", delete_result.stdout)
+            self.assertFalse(target_root.exists())
+            self.assertTrue(other_root.exists())
+            self.assertTrue(state_task.exists())
+            worktree_list = subprocess.run(
+                ["git", "-C", str(ROOT), "worktree", "list", "--porcelain"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotIn(str(target_workspace), worktree_list.stdout)
+
+    def test_instance_delete_json_removes_only_target_instance_without_shared_state(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            target_root, target_workspace = self._write_instance_record(shared_root, "inst-pm-delete")
+            other_root, _ = self._write_instance_record(shared_root, "inst-dev-keep", buddy="dev")
+            state_task = shared_root / "state" / "buddyswitch" / "objects" / "tasks" / "task-keep.json"
+            state_task.parent.mkdir(parents=True, exist_ok=True)
+            state_task.write_text('{"id":"task-keep"}\n', encoding="utf-8")
+            self._add_test_worktree(target_workspace)
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            delete_result = subprocess.run(
+                [str(LAUNCHER), "instance", "delete", "inst-pm-delete", "--yes", "--json"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(delete_result.returncode, 0, msg=delete_result.stderr)
+            self.assertEqual(
+                json.loads(delete_result.stdout),
+                {"instance_id": "inst-pm-delete", "deleted": True},
+            )
             self.assertFalse(target_root.exists())
             self.assertTrue(other_root.exists())
             self.assertTrue(state_task.exists())

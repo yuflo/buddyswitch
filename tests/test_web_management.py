@@ -104,86 +104,6 @@ class WebManagementUnitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "local"):
             WEB_MANAGEMENT.validate_bind_host("0.0.0.0")
 
-    def test_parse_buddies_tsv_returns_expected_rows(self) -> None:
-        payload = WEB_MANAGEMENT.parse_buddies_tsv(
-            "pm\tPM\tOwn product iteration and track progression.\n"
-            "dev\tDev\tImplement approved scope in project code.\n"
-        )
-        self.assertEqual(
-            payload,
-            [
-                {
-                    "id": "pm",
-                    "label": "PM",
-                    "scope": "Own product iteration and track progression.",
-                },
-                {
-                    "id": "dev",
-                    "label": "Dev",
-                    "scope": "Implement approved scope in project code.",
-                },
-            ],
-        )
-
-    def test_parse_instance_list_handles_empty_and_rows(self) -> None:
-        self.assertEqual(
-            WEB_MANAGEMENT.parse_instance_list_tsv(
-                "No BuddySwitch instances found.\n"
-                "Start one with: ./buddyswitch-codex instance start --buddy <buddy>\n"
-            ),
-            [],
-        )
-        payload = WEB_MANAGEMENT.parse_instance_list_tsv(
-            "instance_id\tbuddy\tstatus\tapp_server_health\tthread_id\tbrowser_port\tupdated_at\tworkspace_dir\n"
-            "inst-pm-demo\tpm\tactive\thealthy\tthread-pm\t9222\t2026-05-24T10:00:00Z\t/tmp/shared/instances/inst-pm-demo/workspace\n"
-            "inst-dev-demo\tdev\tinactive\tunhealthy\t\t9223\t2026-05-24T10:01:00Z\t/tmp/shared/instances/inst-dev-demo/workspace\n"
-        )
-        self.assertEqual(
-            payload,
-            [
-                {
-                    "instance_id": "inst-pm-demo",
-                    "buddy": "pm",
-                    "status": "active",
-                    "app_server_health": "healthy",
-                    "thread_id": "thread-pm",
-                    "browser_port": 9222,
-                    "updated_at": "2026-05-24T10:00:00Z",
-                    "workspace_dir": "/tmp/shared/instances/inst-pm-demo/workspace",
-                },
-                {
-                    "instance_id": "inst-dev-demo",
-                    "buddy": "dev",
-                    "status": "inactive",
-                    "app_server_health": "unhealthy",
-                    "thread_id": None,
-                    "browser_port": 9223,
-                    "updated_at": "2026-05-24T10:01:00Z",
-                    "workspace_dir": "/tmp/shared/instances/inst-dev-demo/workspace",
-                },
-            ],
-        )
-
-    def test_parse_start_and_turn_output(self) -> None:
-        self.assertEqual(
-            WEB_MANAGEMENT.parse_started_instance_id(
-                "BuddySwitch instance: inst-pm-20260524-demo (pm)\nWorkspace: /tmp/demo\n"
-            ),
-            "inst-pm-20260524-demo",
-        )
-        self.assertEqual(
-            WEB_MANAGEMENT.parse_turn_action_output("Started turn: turn-demo\n"),
-            {"action": "start", "turn_id": "turn-demo"},
-        )
-        self.assertEqual(
-            WEB_MANAGEMENT.parse_turn_action_output("Steered turn: turn-demo\n"),
-            {"action": "steer", "turn_id": "turn-demo"},
-        )
-        self.assertEqual(
-            WEB_MANAGEMENT.parse_interrupt_turn_id("Interrupted turn: turn-demo\n"),
-            "turn-demo",
-        )
-
     def test_validate_instance_id_rejects_traversal_like_values(self) -> None:
         for instance_id in ("", "../bad", "/tmp/inst-demo", "inst bad", "demo"):
             with self.subTest(instance_id=instance_id):
@@ -261,15 +181,28 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(payload, {"ok": True})
         self.assertEqual(runner.calls, [])
 
-    def test_buddies_route_comes_from_cli_tsv(self) -> None:
+    def test_buddies_route_comes_from_launcher_json(self) -> None:
         runner = FakeRunner()
         runner.add(
-            ["instance", "buddies"],
+            ["instance", "buddies", "--json"],
             WEB_MANAGEMENT.CommandResult(
                 returncode=0,
-                stdout=(
-                    "pm\tPM\tOwn product iteration and track progression.\n"
-                    "dev\tDev\tImplement approved scope in project code.\n"
+                stdout=json.dumps(
+                    {
+                        "buddies": [
+                            {
+                                "id": "pm",
+                                "label": "PM",
+                                "scope": "Own product iteration and track progression.",
+                            },
+                            {
+                                "id": "dev",
+                                "label": "Dev",
+                                "scope": "Implement approved scope in project code.",
+                            },
+                        ]
+                    },
+                    ensure_ascii=True,
                 ),
                 stderr="",
                 timed_out=False,
@@ -296,17 +229,46 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 ],
             },
         )
-        self.assertEqual(runner.calls, [["instance", "buddies"]])
+        self.assertEqual(runner.calls, [["instance", "buddies", "--json"]])
 
-    def test_instances_route_returns_empty_array_for_empty_cli_output(self) -> None:
+    def test_buddies_route_returns_structured_error_for_malformed_launcher_json(self) -> None:
         runner = FakeRunner()
         runner.add(
-            ["instance", "list"],
+            ["instance", "buddies", "--json"],
             WEB_MANAGEMENT.CommandResult(
                 returncode=0,
-                stdout=(
-                    "No BuddySwitch instances found.\n"
-                    "Start one with: ./buddyswitch-codex instance start --buddy <buddy>\n"
+                stdout="{bad json",
+                stderr="",
+                timed_out=False,
+            ),
+        )
+        _, base_url = self._start_server(runner)
+        status, payload = self._request_json(base_url, method="GET", path="/api/buddies")
+        self.assertEqual(status, 502)
+        self.assertEqual(payload["error"]["code"], "COMMAND_FAILED")
+
+    def test_instances_route_preserves_launcher_json_summary_shape(self) -> None:
+        runner = FakeRunner()
+        runner.add(
+            ["instance", "list", "--json"],
+            WEB_MANAGEMENT.CommandResult(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "instances": [
+                            {
+                                "instance_id": "inst-pm-demo",
+                                "buddy": "pm",
+                                "status": "active",
+                                "app_server_health": "healthy",
+                                "thread_id": "thread-pm",
+                                "browser_port": 9222,
+                                "updated_at": "2026-05-24T10:00:00Z",
+                                "workspace_dir": "/tmp/shared/instances/inst-pm-demo/workspace",
+                            }
+                        ]
+                    },
+                    ensure_ascii=True,
                 ),
                 stderr="",
                 timed_out=False,
@@ -315,7 +277,41 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         _, base_url = self._start_server(runner)
         status, payload = self._request_json(base_url, method="GET", path="/api/instances")
         self.assertEqual(status, 200)
-        self.assertEqual(payload, {"ok": True, "instances": []})
+        self.assertEqual(
+            payload,
+            {
+                "ok": True,
+                "instances": [
+                    {
+                        "instance_id": "inst-pm-demo",
+                        "buddy": "pm",
+                        "status": "active",
+                        "app_server_health": "healthy",
+                        "thread_id": "thread-pm",
+                        "browser_port": 9222,
+                        "updated_at": "2026-05-24T10:00:00Z",
+                        "workspace_dir": "/tmp/shared/instances/inst-pm-demo/workspace",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(runner.calls, [["instance", "list", "--json"]])
+
+    def test_instances_route_returns_structured_error_for_malformed_launcher_json(self) -> None:
+        runner = FakeRunner()
+        runner.add(
+            ["instance", "list", "--json"],
+            WEB_MANAGEMENT.CommandResult(
+                returncode=0,
+                stdout="{bad json",
+                stderr="",
+                timed_out=False,
+            ),
+        )
+        _, base_url = self._start_server(runner)
+        status, payload = self._request_json(base_url, method="GET", path="/api/instances")
+        self.assertEqual(status, 502)
+        self.assertEqual(payload["error"]["code"], "COMMAND_FAILED")
 
     def test_status_route_preserves_cli_json_shape(self) -> None:
         runner = FakeRunner()
@@ -352,10 +348,21 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_create_route_validates_buddy_before_start(self) -> None:
         runner = FakeRunner()
         runner.add(
-            ["instance", "buddies"],
+            ["instance", "buddies", "--json"],
             WEB_MANAGEMENT.CommandResult(
                 returncode=0,
-                stdout="pm\tPM\tOwn product iteration and track progression.\n",
+                stdout=json.dumps(
+                    {
+                        "buddies": [
+                            {
+                                "id": "pm",
+                                "label": "PM",
+                                "scope": "Own product iteration and track progression.",
+                            }
+                        ]
+                    },
+                    ensure_ascii=True,
+                ),
                 stderr="",
                 timed_out=False,
             ),
@@ -369,26 +376,43 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         )
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
-        self.assertEqual(runner.calls, [["instance", "buddies"]])
+        self.assertEqual(runner.calls, [["instance", "buddies", "--json"]])
 
     def test_create_route_starts_instance_and_refreshes_status(self) -> None:
         runner = FakeRunner()
         runner.add(
-            ["instance", "buddies"],
+            ["instance", "buddies", "--json"],
             WEB_MANAGEMENT.CommandResult(
                 returncode=0,
-                stdout="pm\tPM\tOwn product iteration and track progression.\n",
+                stdout=json.dumps(
+                    {
+                        "buddies": [
+                            {
+                                "id": "pm",
+                                "label": "PM",
+                                "scope": "Own product iteration and track progression.",
+                            }
+                        ]
+                    },
+                    ensure_ascii=True,
+                ),
                 stderr="",
                 timed_out=False,
             ),
         )
         runner.add(
-            ["instance", "start", "--buddy", "pm"],
+            ["instance", "start", "--buddy", "pm", "--json"],
             WEB_MANAGEMENT.CommandResult(
                 returncode=0,
-                stdout=(
-                    "BuddySwitch instance: inst-pm-demo (pm)\n"
-                    "Workspace: /tmp/shared/instances/inst-pm-demo/workspace\n"
+                stdout=json.dumps(
+                    {
+                        "instance_id": "inst-pm-demo",
+                        "buddy": "pm",
+                        "workspace_dir": "/tmp/shared/instances/inst-pm-demo/workspace",
+                        "project_workspace_dir": "/tmp/shared/project/workspace",
+                        "instance_record": "/tmp/shared/instances/inst-pm-demo/instance.json",
+                    },
+                    ensure_ascii=True,
                 ),
                 stderr="",
                 timed_out=False,
@@ -429,11 +453,52 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(
             runner.calls,
             [
-                ["instance", "buddies"],
-                ["instance", "start", "--buddy", "pm"],
+                ["instance", "buddies", "--json"],
+                ["instance", "start", "--buddy", "pm", "--json"],
                 ["instance", "status", "inst-pm-demo", "--json"],
             ],
         )
+
+    def test_create_route_returns_structured_error_for_malformed_launcher_json(self) -> None:
+        runner = FakeRunner()
+        runner.add(
+            ["instance", "buddies", "--json"],
+            WEB_MANAGEMENT.CommandResult(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "buddies": [
+                            {
+                                "id": "pm",
+                                "label": "PM",
+                                "scope": "Own product iteration and track progression.",
+                            }
+                        ]
+                    },
+                    ensure_ascii=True,
+                ),
+                stderr="",
+                timed_out=False,
+            ),
+        )
+        runner.add(
+            ["instance", "start", "--buddy", "pm", "--json"],
+            WEB_MANAGEMENT.CommandResult(
+                returncode=0,
+                stdout="{bad json",
+                stderr="",
+                timed_out=False,
+            ),
+        )
+        _, base_url = self._start_server(runner)
+        status, payload = self._request_json(
+            base_url,
+            method="POST",
+            path="/api/instances",
+            payload={"buddy": "pm"},
+        )
+        self.assertEqual(status, 502)
+        self.assertEqual(payload["error"]["code"], "COMMAND_FAILED")
 
     def test_input_route_rejects_empty_text(self) -> None:
         runner, base_url = self._start_server()
@@ -448,17 +513,36 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(runner.calls, [])
 
     def test_input_route_delegates_and_reports_started_vs_steered_turn(self) -> None:
-        for stdout, expected_action in (
-            ("Started turn: turn-demo\n", "start"),
-            ("Steered turn: turn-steer\n", "steer"),
+        for command_payload, expected_action, expected_turn_id in (
+            (
+                {
+                    "instance_id": "inst-pm-demo",
+                    "thread_id": "thread-demo",
+                    "action": "start",
+                    "turn_id": "turn-demo",
+                },
+                "start",
+                None,
+            ),
+            (
+                {
+                    "instance_id": "inst-pm-demo",
+                    "thread_id": "thread-demo",
+                    "action": "steer",
+                    "turn_id": "turn-steer",
+                    "expected_turn_id": "turn-steer",
+                },
+                "steer",
+                "turn-steer",
+            ),
         ):
-            with self.subTest(stdout=stdout):
+            with self.subTest(command_payload=command_payload):
                 runner = FakeRunner()
                 runner.add(
-                    ["instance", "input", "inst-pm-demo", "--text", "Advance the brief"],
+                    ["instance", "input", "inst-pm-demo", "--text", "Advance the brief", "--json"],
                     WEB_MANAGEMENT.CommandResult(
                         returncode=0,
-                        stdout=stdout,
+                        stdout=json.dumps(command_payload, ensure_ascii=True),
                         stderr="",
                         timed_out=False,
                     ),
@@ -494,25 +578,41 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 )
                 self.assertEqual(status, 200)
                 self.assertEqual(payload["action"], expected_action)
+                if expected_turn_id is None:
+                    self.assertNotIn("expected_turn_id", payload)
+                else:
+                    self.assertEqual(payload["expected_turn_id"], expected_turn_id)
                 self.assertEqual(
                     runner.calls,
                     [
-                        ["instance", "input", "inst-pm-demo", "--text", "Advance the brief"],
+                        ["instance", "input", "inst-pm-demo", "--text", "Advance the brief", "--json"],
                         ["instance", "status", "inst-pm-demo", "--json"],
                     ],
                 )
 
-    def test_interrupt_route_delegates_and_parses_turn_id(self) -> None:
+    def test_input_route_returns_structured_error_for_malformed_launcher_json(self) -> None:
         runner = FakeRunner()
         runner.add(
-            ["instance", "interrupt", "inst-pm-demo"],
+            ["instance", "input", "inst-pm-demo", "--text", "Advance the brief", "--json"],
             WEB_MANAGEMENT.CommandResult(
                 returncode=0,
-                stdout="Interrupted turn: turn-demo\n",
+                stdout="{bad json",
                 stderr="",
                 timed_out=False,
             ),
         )
+        _, base_url = self._start_server(runner)
+        status, payload = self._request_json(
+            base_url,
+            method="POST",
+            path="/api/instances/inst-pm-demo/input",
+            payload={"text": "Advance the brief"},
+        )
+        self.assertEqual(status, 502)
+        self.assertEqual(payload["error"]["code"], "COMMAND_FAILED")
+
+    def test_interrupt_route_delegates_and_parses_turn_id(self) -> None:
+        runner = FakeRunner()
         runner.add(
             ["instance", "status", "inst-pm-demo", "--json"],
             WEB_MANAGEMENT.CommandResult(
@@ -535,6 +635,22 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 timed_out=False,
             ),
         )
+        runner.add(
+            ["instance", "interrupt", "inst-pm-demo", "--json"],
+            WEB_MANAGEMENT.CommandResult(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "instance_id": "inst-pm-demo",
+                        "thread_id": "thread-demo",
+                        "turn_id": "turn-demo",
+                    },
+                    ensure_ascii=True,
+                ),
+                stderr="",
+                timed_out=False,
+            ),
+        )
         _, base_url = self._start_server(runner)
         status, payload = self._request_json(
             base_url,
@@ -544,14 +660,24 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["turn_id"], "turn-demo")
         self.assertEqual(payload["instance"]["thread"]["status"], "interrupted")
+        self.assertEqual(
+            runner.calls,
+            [
+                ["instance", "interrupt", "inst-pm-demo", "--json"],
+                ["instance", "status", "inst-pm-demo", "--json"],
+            ],
+        )
 
     def test_stop_route_delegates_and_refreshes_status(self) -> None:
         runner = FakeRunner()
         runner.add(
-            ["instance", "stop", "inst-pm-demo"],
+            ["instance", "stop", "inst-pm-demo", "--json"],
             WEB_MANAGEMENT.CommandResult(
                 returncode=0,
-                stdout="Instance stopped: inst-pm-demo\n",
+                stdout=json.dumps(
+                    {"instance_id": "inst-pm-demo", "status": "inactive"},
+                    ensure_ascii=True,
+                ),
                 stderr="",
                 timed_out=False,
             ),
@@ -589,7 +715,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(
             runner.calls,
             [
-                ["instance", "stop", "inst-pm-demo"],
+                ["instance", "stop", "inst-pm-demo", "--json"],
                 ["instance", "status", "inst-pm-demo", "--json"],
             ],
         )
@@ -597,10 +723,13 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_delete_route_delegates_and_maps_active_block(self) -> None:
         runner = FakeRunner()
         runner.add(
-            ["instance", "delete", "inst-pm-demo", "--yes"],
+            ["instance", "delete", "inst-pm-demo", "--yes", "--json"],
             WEB_MANAGEMENT.CommandResult(
                 returncode=0,
-                stdout="Instance deleted: inst-pm-demo\n",
+                stdout=json.dumps(
+                    {"instance_id": "inst-pm-demo", "deleted": True},
+                    ensure_ascii=True,
+                ),
                 stderr="",
                 timed_out=False,
             ),
@@ -613,11 +742,11 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(payload, {"ok": True, "instance_id": "inst-pm-demo"})
-        self.assertEqual(runner.calls, [["instance", "delete", "inst-pm-demo", "--yes"]])
+        self.assertEqual(runner.calls, [["instance", "delete", "inst-pm-demo", "--yes", "--json"]])
 
         blocked_runner = FakeRunner()
         blocked_runner.add(
-            ["instance", "delete", "inst-pm-demo", "--yes"],
+            ["instance", "delete", "inst-pm-demo", "--yes", "--json"],
             WEB_MANAGEMENT.CommandResult(
                 returncode=3,
                 stdout="",

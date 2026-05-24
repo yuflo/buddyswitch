@@ -4,15 +4,15 @@ set -euo pipefail
 buddyswitch_instance_usage() {
   cat <<EOF
 Usage:
-  buddyswitch-codex instance buddies
-  buddyswitch-codex instance start --buddy <buddy>
-  buddyswitch-codex instance input <instance-id> --text <text>
+  buddyswitch-codex instance buddies [--json]
+  buddyswitch-codex instance start --buddy <buddy> [--json]
+  buddyswitch-codex instance input <instance-id> --text <text> [--json]
   buddyswitch-codex instance attach <instance-id>
-  buddyswitch-codex instance stop <instance-id>
+  buddyswitch-codex instance stop <instance-id> [--json]
   buddyswitch-codex instance status <instance-id> [--json]
-  buddyswitch-codex instance interrupt <instance-id>
-  buddyswitch-codex instance list [--buddy <buddy>]
-  buddyswitch-codex instance delete <instance-id> [--yes]
+  buddyswitch-codex instance interrupt <instance-id> [--json]
+  buddyswitch-codex instance list [--buddy <buddy>] [--json]
+  buddyswitch-codex instance delete <instance-id> [--yes] [--json]
   buddyswitch-codex instance help
 
 Commands:
@@ -30,6 +30,30 @@ EOF
 }
 
 buddyswitch_instance_buddies() {
+  local json=0 arg
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    case "${arg}" in
+      --json)
+        json=1
+        shift
+        ;;
+      help|-h|--help)
+        buddyswitch_instance_usage
+        return 0
+        ;;
+      *)
+        echo "Unknown instance buddies option: ${arg}" >&2
+        buddyswitch_instance_usage >&2
+        return 2
+        ;;
+    esac
+  done
+
+  if [[ "${json}" -eq 1 ]]; then
+    python3 "${REPO_ROOT}/scripts/env_manifest.py" list-buddies --json
+    return 0
+  fi
   python3 "${REPO_ROOT}/scripts/env_manifest.py" list-buddies
 }
 
@@ -68,8 +92,9 @@ buddyswitch_instance_json_files() {
 }
 
 buddyswitch_instance_list() {
-  local buddy_filter=""
-  local found=0 printed_header=0 instance_json meta kind instance_id status_json
+  local buddy_filter="" json=0
+  local found=0 printed_header=0 instance_json meta kind instance_id status_json row_json
+  local -a instance_rows=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --buddy)
@@ -81,6 +106,10 @@ buddyswitch_instance_list() {
         buddy_filter="$2"
         buddyswitch_validate_buddy_id "${buddy_filter}" || return $?
         shift 2
+        ;;
+      --json)
+        json=1
+        shift
         ;;
       *)
         echo "Unknown instance list option: $1" >&2
@@ -118,17 +147,67 @@ PY
     kind="${meta%%$'\t'*}"
     if [[ "${kind}" == "invalid" ]]; then
       instance_id="${meta#*$'\t'}"
-      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${instance_id%%$'\t'*}" "invalid" "invalid" "invalid" "" "" "" "${instance_id#*$'\t'}"
+      if [[ "${json}" -eq 1 ]]; then
+        row_json="$(
+          python3 - "${instance_id%%$'\t'*}" "${instance_id#*$'\t'}" <<'PY'
+import json
+import sys
+
+payload = {
+    "instance_id": sys.argv[1],
+    "buddy": "invalid",
+    "status": "invalid",
+    "app_server_health": "invalid",
+    "thread_id": None,
+    "browser_port": None,
+    "updated_at": "",
+    "workspace_dir": sys.argv[2],
+}
+print(json.dumps(payload, ensure_ascii=True))
+PY
+        )"
+        instance_rows+=("${row_json}")
+      else
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${instance_id%%$'\t'*}" "invalid" "invalid" "invalid" "" "" "" "${instance_id#*$'\t'}"
+      fi
       found=1
       continue
     fi
     instance_id="${meta#*$'\t'}"
     status_json="$(instance_status_json "${instance_id}")" || return $?
-    if [[ "${printed_header}" -eq 0 ]]; then
-      printf 'instance_id\tbuddy\tstatus\tapp_server_health\tthread_id\tbrowser_port\tupdated_at\tworkspace_dir\n'
-      printed_header=1
-    fi
-    python3 - "${status_json}" <<'PY'
+    if [[ "${json}" -eq 1 ]]; then
+      row_json="$(
+        python3 - "${status_json}" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+app_server = payload.get("app_server")
+healthy = False
+if isinstance(app_server, dict):
+    healthy = bool(app_server.get("healthy"))
+thread_id = payload.get("thread_id")
+browser_port = payload.get("browser_port")
+row = {
+    "instance_id": payload.get("instance_id", ""),
+    "buddy": payload.get("buddy", ""),
+    "status": payload.get("status", ""),
+    "app_server_health": "healthy" if healthy else "unhealthy",
+    "thread_id": thread_id if isinstance(thread_id, str) else None,
+    "browser_port": browser_port if isinstance(browser_port, int) else None,
+    "updated_at": payload.get("updated_at", ""),
+    "workspace_dir": payload.get("workspace_dir", ""),
+}
+print(json.dumps(row, ensure_ascii=True))
+PY
+      )"
+      instance_rows+=("${row_json}")
+    else
+      if [[ "${printed_header}" -eq 0 ]]; then
+        printf 'instance_id\tbuddy\tstatus\tapp_server_health\tthread_id\tbrowser_port\tupdated_at\tworkspace_dir\n'
+        printed_header=1
+      fi
+      python3 - "${status_json}" <<'PY'
 import json
 import sys
 
@@ -150,8 +229,24 @@ row = (
 )
 print("\t".join(str(item) for item in row))
 PY
+    fi
     found=1
   done < <(buddyswitch_instance_json_files)
+
+  if [[ "${json}" -eq 1 ]]; then
+    if [[ "${#instance_rows[@]}" -eq 0 ]]; then
+      printf '%s\n' '{"instances":[]}'
+      return 0
+    fi
+    python3 - "${instance_rows[@]}" <<'PY'
+import json
+import sys
+
+rows = [json.loads(arg) for arg in sys.argv[1:]]
+print(json.dumps({"instances": rows}, ensure_ascii=True))
+PY
+    return 0
+  fi
 
   if [[ "${found}" -eq 0 ]]; then
     echo "No BuddySwitch instances found."
@@ -258,12 +353,7 @@ buddyswitch_instance_main() {
   case "${command}" in
     buddies)
       shift || true
-      if [[ $# -gt 0 ]]; then
-        echo "Unknown instance buddies option: $1" >&2
-        buddyswitch_instance_usage >&2
-        return 2
-      fi
-      buddyswitch_instance_buddies
+      buddyswitch_instance_buddies "$@"
       ;;
     start)
       shift || true

@@ -441,7 +441,18 @@ def _cmd_print(args: argparse.Namespace) -> int:
 
 def _cmd_list_buddies(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
-    for buddy in manifest["buddies"]:
+    buddies = [
+        {
+            "id": buddy["id"],
+            "label": buddy["label"],
+            "scope": buddy["scope"],
+        }
+        for buddy in manifest["buddies"]
+    ]
+    if args.json:
+        print(json.dumps({"buddies": buddies}, ensure_ascii=True))
+        return 0
+    for buddy in buddies:
         print(f"{buddy['id']}\t{buddy['label']}\t{buddy['scope']}")
     return 0
 
@@ -465,6 +476,7 @@ def build_parser() -> argparse.ArgumentParser:
     cmd_print.set_defaults(func=_cmd_print)
 
     cmd_list = subparsers.add_parser("list-buddies", help="List buddies")
+    cmd_list.add_argument("--json", action="store_true")
     cmd_list.set_defaults(func=_cmd_list_buddies)
 
     cmd_show = subparsers.add_parser("show-buddy", help="Show one buddy profile")

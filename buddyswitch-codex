@@ -30,15 +30,15 @@ buddyswitch_env_init
 print_help() {
   cat <<EOF
 Usage:
-  buddyswitch-codex instance buddies
-  buddyswitch-codex instance start --buddy <buddy>
-  buddyswitch-codex instance input <instance-id> --text <text>
+  buddyswitch-codex instance buddies [--json]
+  buddyswitch-codex instance start --buddy <buddy> [--json]
+  buddyswitch-codex instance input <instance-id> --text <text> [--json]
   buddyswitch-codex instance attach <instance-id>
-  buddyswitch-codex instance stop <instance-id>
+  buddyswitch-codex instance stop <instance-id> [--json]
   buddyswitch-codex instance status <instance-id> [--json]
-  buddyswitch-codex instance interrupt <instance-id>
-  buddyswitch-codex instance list [--buddy <buddy>]
-  buddyswitch-codex instance delete <instance-id> [--yes]
+  buddyswitch-codex instance interrupt <instance-id> [--json]
+  buddyswitch-codex instance list [--buddy <buddy>] [--json]
+  buddyswitch-codex instance delete <instance-id> [--yes] [--json]
   buddyswitch-codex web [--host 127.0.0.1] [--port 8765]
 
   buddyswitch-codex data cleanup --buddy <buddy> [--yes] [--json]
@@ -76,45 +76,58 @@ EOF
 }
 
 start_codex() {
-  local buddy instance_id instance_json
+  local buddy instance_id instance_json json arg bootstrap_stdout
 
   buddy=""
   instance_id=""
   instance_json=""
+  json=0
   if [[ $# -eq 0 ]]; then
     echo "instance start requires --buddy <buddy>" >&2
     print_help >&2
     return 2
   fi
 
-  case "${1}" in
-    --buddy)
-      if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
-        echo "Missing value for --buddy" >&2
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    case "${arg}" in
+      --buddy)
+        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+          echo "Missing value for --buddy" >&2
+          print_help >&2
+          return 2
+        fi
+        buddy="${2}"
+        shift 2
+        ;;
+      --buddy=*)
+        buddy="${arg#--buddy=}"
+        if [[ -z "${buddy}" ]]; then
+          echo "Missing value for --buddy" >&2
+          print_help >&2
+          return 2
+        fi
+        shift
+        ;;
+      --json)
+        json=1
+        shift
+        ;;
+      --)
+        echo "instance start no longer accepts Codex args; use instance input after the service starts." >&2
+        return 2
+        ;;
+      *)
+        echo "Unknown instance start option: ${arg}" >&2
         print_help >&2
         return 2
-      fi
-      buddy="${2}"
-      shift 2
-      ;;
-    --buddy=*)
-      buddy="${1#--buddy=}"
-      if [[ -z "${buddy}" ]]; then
-        echo "Missing value for --buddy" >&2
-        print_help >&2
-        return 2
-      fi
-      shift
-      ;;
-    *)
-      echo "instance start requires --buddy <buddy>" >&2
-      print_help >&2
-      return 2
-      ;;
-  esac
+        ;;
+    esac
+  done
 
-  if [[ $# -gt 0 ]]; then
-    echo "instance start no longer accepts Codex args; use instance input after the service starts." >&2
+  if [[ -z "${buddy}" ]]; then
+    echo "instance start requires --buddy <buddy>" >&2
+    print_help >&2
     return 2
   fi
 
@@ -123,14 +136,49 @@ start_codex() {
   buddyswitch_env_bind_instance "${instance_id}" || return $?
   instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
 
-  (
-    unset BUDDYSWITCH_ACTIVE_BUDDY
-    unset BUDDYSWITCH_INSTANCE_ID
-    unset BUDDYSWITCH_INSTANCE_JSON
-    BUDDYSWITCH_START_BUDDY="${buddy}" \
-    BUDDYSWITCH_START_INSTANCE_ID="${instance_id}" \
-      buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-start-bootstrap"
-  )
+  if [[ "${json}" -eq 1 ]]; then
+    if ! bootstrap_stdout="$(
+      (
+        unset BUDDYSWITCH_ACTIVE_BUDDY
+        unset BUDDYSWITCH_INSTANCE_ID
+        unset BUDDYSWITCH_INSTANCE_JSON
+        BUDDYSWITCH_START_BUDDY="${buddy}" \
+        BUDDYSWITCH_START_INSTANCE_ID="${instance_id}" \
+          buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-start-bootstrap"
+      )
+    )"; then
+      if [[ -n "${bootstrap_stdout}" ]]; then
+        printf '%s\n' "${bootstrap_stdout}" >&2
+      fi
+      return 1
+    fi
+  else
+    (
+      unset BUDDYSWITCH_ACTIVE_BUDDY
+      unset BUDDYSWITCH_INSTANCE_ID
+      unset BUDDYSWITCH_INSTANCE_JSON
+      BUDDYSWITCH_START_BUDDY="${buddy}" \
+      BUDDYSWITCH_START_INSTANCE_ID="${instance_id}" \
+        buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-start-bootstrap"
+    )
+  fi
+
+  if [[ "${json}" -eq 1 ]]; then
+    python3 - "${instance_id}" "${buddy}" "${BUDDYSWITCH_WORKSPACE_DIR}" "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}" "${instance_json}" <<'PY'
+import json
+import sys
+
+payload = {
+    "instance_id": sys.argv[1],
+    "buddy": sys.argv[2],
+    "workspace_dir": sys.argv[3],
+    "project_workspace_dir": sys.argv[4],
+    "instance_record": sys.argv[5],
+}
+print(json.dumps(payload, ensure_ascii=True))
+PY
+    return 0
+  fi
 
   echo "BuddySwitch instance: ${instance_id} (${buddy})"
   echo "Workspace: ${BUDDYSWITCH_WORKSPACE_DIR}"
@@ -235,7 +283,8 @@ instance_set_inactive_locked() {
 }
 
 instance_input() {
-  local instance_id="${1:-}" text="" thread_id="" arg output action turn_id
+  local instance_id="${1:-}" text="" thread_id="" arg output action turn_id json
+  json=0
   if [[ -z "${instance_id}" ]]; then
     echo "instance id is required" >&2
     return 2
@@ -252,6 +301,10 @@ instance_input() {
         fi
         text="$2"
         shift 2
+        ;;
+      --json)
+        json=1
+        shift
         ;;
       *)
         echo "Unknown instance input option: ${arg}" >&2
@@ -313,8 +366,43 @@ if isinstance(value, str):
 PY
   )"
   if [[ "${action}" == "steer" ]]; then
+    if [[ "${json}" -eq 1 ]]; then
+      python3 - "${output}" "${instance_id}" "${thread_id}" <<'PY'
+import json
+import sys
+
+source = json.loads(sys.argv[1])
+payload = {
+    "instance_id": sys.argv[2],
+    "thread_id": sys.argv[3],
+    "action": source.get("action"),
+    "turn_id": source.get("turn_id"),
+}
+expected_turn_id = source.get("expected_turn_id")
+if isinstance(expected_turn_id, str) and expected_turn_id:
+    payload["expected_turn_id"] = expected_turn_id
+print(json.dumps(payload, ensure_ascii=True))
+PY
+      return 0
+    fi
     echo "Steered turn: ${turn_id}"
   else
+    if [[ "${json}" -eq 1 ]]; then
+      python3 - "${output}" "${instance_id}" "${thread_id}" <<'PY'
+import json
+import sys
+
+source = json.loads(sys.argv[1])
+payload = {
+    "instance_id": sys.argv[2],
+    "thread_id": sys.argv[3],
+    "action": source.get("action"),
+    "turn_id": source.get("turn_id"),
+}
+print(json.dumps(payload, ensure_ascii=True))
+PY
+      return 0
+    fi
     echo "Started turn: ${turn_id}"
   fi
 }
@@ -357,16 +445,24 @@ instance_attach() {
 }
 
 instance_stop() {
-  local instance_id="${1:-}"
+  local instance_id="${1:-}" json=0
   if [[ -z "${instance_id}" ]]; then
     echo "instance id is required" >&2
     return 2
   fi
   shift || true
-  if [[ $# -gt 0 ]]; then
-    echo "Unknown instance stop option: $1" >&2
-    return 2
-  fi
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json)
+        json=1
+        shift
+        ;;
+      *)
+        echo "Unknown instance stop option: $1" >&2
+        return 2
+        ;;
+    esac
+  done
 
   buddyswitch_validate_instance_id "${instance_id}" || return $?
   buddyswitch_instance_validate_record "${instance_id}" >/dev/null || return $?
@@ -375,6 +471,15 @@ instance_stop() {
     "${REPO_ROOT}/buddyswitch-codex" \
     "__locked-instance-set-inactive" \
     "${instance_id}"
+  if [[ "${json}" -eq 1 ]]; then
+    python3 - "${instance_id}" <<'PY'
+import json
+import sys
+
+print(json.dumps({"instance_id": sys.argv[1], "status": "inactive"}, ensure_ascii=True))
+PY
+    return 0
+  fi
   echo "Instance stopped: ${instance_id}"
 }
 
@@ -486,16 +591,24 @@ PY
 }
 
 instance_interrupt() {
-  local instance_id="${1:-}" thread_id output
+  local instance_id="${1:-}" thread_id output json=0
   if [[ -z "${instance_id}" ]]; then
     echo "instance id is required" >&2
     return 2
   fi
   shift || true
-  if [[ $# -gt 0 ]]; then
-    echo "Unknown instance interrupt option: $1" >&2
-    return 2
-  fi
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json)
+        json=1
+        shift
+        ;;
+      *)
+        echo "Unknown instance interrupt option: $1" >&2
+        return 2
+        ;;
+    esac
+  done
 
   buddyswitch_validate_instance_id "${instance_id}" || return $?
   buddyswitch_instance_validate_record "${instance_id}" >/dev/null || return $?
@@ -517,6 +630,22 @@ instance_interrupt() {
     return 1
   }
 
+  if [[ "${json}" -eq 1 ]]; then
+    python3 - "${output}" "${instance_id}" "${thread_id}" <<'PY'
+import json
+import sys
+
+source = json.loads(sys.argv[1])
+payload = {
+    "instance_id": sys.argv[2],
+    "thread_id": sys.argv[3],
+    "turn_id": source.get("turn_id"),
+}
+print(json.dumps(payload, ensure_ascii=True))
+PY
+    return 0
+  fi
+
   python3 - "${output}" <<'PY'
 import json
 import sys
@@ -528,7 +657,7 @@ PY
 }
 
 instance_delete() {
-  local instance_id="${1:-}" confirmed=0 arg
+  local instance_id="${1:-}" confirmed=0 json=0 arg delete_stdout
   if [[ -z "${instance_id}" ]]; then
     echo "instance id is required" >&2
     return 2
@@ -538,6 +667,9 @@ instance_delete() {
     case "${arg}" in
       --yes)
         confirmed=1
+        ;;
+      --json)
+        json=1
         ;;
       *)
         echo "Unknown instance delete option: ${arg}" >&2
@@ -554,6 +686,25 @@ instance_delete() {
     echo "Instance root: $(buddyswitch_instance_root "${instance_id}")"
     echo "Shared state kept: ${BUDDYSWITCH_SHARED_ROOT}/state"
     echo "Run with --yes to delete this instance root."
+    return 0
+  fi
+
+  if [[ "${json}" -eq 1 ]]; then
+    if ! delete_stdout="$(
+      BUDDYSWITCH_DELETE_INSTANCE_ID="${instance_id}" \
+        buddyswitch_with_runtime_lock "${REPO_ROOT}/buddyswitch-codex" "__locked-instance-delete"
+    )"; then
+      if [[ -n "${delete_stdout}" ]]; then
+        printf '%s\n' "${delete_stdout}" >&2
+      fi
+      return 1
+    fi
+    python3 - "${instance_id}" <<'PY'
+import json
+import sys
+
+print(json.dumps({"instance_id": sys.argv[1], "deleted": True}, ensure_ascii=True))
+PY
     return 0
   fi
 

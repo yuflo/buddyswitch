@@ -105,67 +105,14 @@ def validate_instance_id(instance_id: str) -> str:
     return instance_id
 
 
-def parse_buddies_tsv(stdout: str) -> list[dict[str, str]]:
-    buddies: list[dict[str, str]] = []
-    for line in stdout.splitlines():
-        if not line.strip():
-            continue
-        buddy_id, label, scope = _split_tsv_line(line, expected_fields=3)
-        buddies.append({"id": buddy_id, "label": label, "scope": scope})
-    return buddies
-
-
-def parse_instance_list_tsv(stdout: str) -> list[dict[str, Any]]:
-    lines = [line for line in stdout.splitlines() if line.strip()]
-    if not lines or lines[0] == "No BuddySwitch instances found.":
-        return []
-    header = lines[0].split("\t")
-    rows: list[dict[str, Any]] = []
-    for line in lines[1:]:
-        values = line.split("\t")
-        if len(values) < len(header):
-            values.extend([""] * (len(header) - len(values)))
-        row = dict(zip(header, values, strict=False))
-        thread_id = row.get("thread_id") or None
-        browser_port_text = row.get("browser_port") or ""
-        browser_port = int(browser_port_text) if browser_port_text else None
-        rows.append(
-            {
-                "instance_id": row.get("instance_id", ""),
-                "buddy": row.get("buddy", ""),
-                "status": row.get("status", ""),
-                "app_server_health": row.get("app_server_health", ""),
-                "thread_id": thread_id,
-                "browser_port": browser_port,
-                "updated_at": row.get("updated_at", ""),
-                "workspace_dir": row.get("workspace_dir", ""),
-            }
-        )
-    return rows
-
-
-def parse_started_instance_id(stdout: str) -> str | None:
-    match = re.search(r"BuddySwitch instance:\s+(inst-[A-Za-z0-9._-]+)\b", stdout)
-    if match is None:
-        return None
-    return match.group(1)
-
-
-def parse_turn_action_output(stdout: str) -> dict[str, str] | None:
-    match = re.search(r"^(Started|Steered) turn:\s+(\S+)$", stdout, flags=re.MULTILINE)
-    if match is None:
-        return None
-    return {
-        "action": "start" if match.group(1) == "Started" else "steer",
-        "turn_id": match.group(2),
-    }
-
-
-def parse_interrupt_turn_id(stdout: str) -> str | None:
-    match = re.search(r"^Interrupted turn:\s+(\S+)$", stdout, flags=re.MULTILINE)
-    if match is None:
-        return None
-    return match.group(1)
+def load_command_json_object(stdout: str, *, message: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise HttpError(status=502, code="COMMAND_FAILED", message=message) from exc
+    if not isinstance(payload, dict):
+        raise HttpError(status=502, code="COMMAND_FAILED", message=message)
+    return payload
 
 
 def map_command_failure(command_label: str, result: CommandResult) -> HttpError:
@@ -331,10 +278,14 @@ class WebManagementService:
         )
 
     def _create_instance_under_lock(self, buddy: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "start", "--buddy", buddy], timeout_seconds=120)
-        instance_id = parse_started_instance_id(result.stdout)
-        if instance_id is None:
-            raise HttpError(status=502, code="COMMAND_FAILED", message="Could not parse created instance id.")
+        result = self._run_command(["instance", "start", "--buddy", buddy, "--json"], timeout_seconds=120)
+        payload = load_command_json_object(
+            result.stdout,
+            message=f"Invalid JSON from instance start for buddy {buddy}.",
+        )
+        instance_id = payload.get("instance_id")
+        if not isinstance(instance_id, str) or not instance_id:
+            raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid start payload for buddy {buddy}.")
         return {
             "ok": True,
             "instance_id": instance_id,
@@ -353,13 +304,23 @@ class WebManagementService:
 
     def _send_input_under_lock(self, instance_id: str, text: str) -> dict[str, Any]:
         result = self._run_command(
-            ["instance", "input", instance_id, "--text", text],
+            ["instance", "input", instance_id, "--text", text, "--json"],
             timeout_seconds=60,
         )
-        parsed = parse_turn_action_output(result.stdout)
+        parsed = load_command_json_object(
+            result.stdout,
+            message=f"Invalid JSON from instance input for {instance_id}.",
+        )
         payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(instance_id)}
-        if parsed is not None:
-            payload.update(parsed)
+        action = parsed.get("action")
+        turn_id = parsed.get("turn_id")
+        expected_turn_id = parsed.get("expected_turn_id")
+        if isinstance(action, str):
+            payload["action"] = action
+        if isinstance(turn_id, str):
+            payload["turn_id"] = turn_id
+        if isinstance(expected_turn_id, str):
+            payload["expected_turn_id"] = expected_turn_id
         return payload
 
     def _interrupt(self, instance_id: str) -> dict[str, Any]:
@@ -369,10 +330,14 @@ class WebManagementService:
         )
 
     def _interrupt_under_lock(self, instance_id: str) -> dict[str, Any]:
-        result = self._run_command(["instance", "interrupt", instance_id], timeout_seconds=30)
+        result = self._run_command(["instance", "interrupt", instance_id, "--json"], timeout_seconds=30)
+        parsed = load_command_json_object(
+            result.stdout,
+            message=f"Invalid JSON from instance interrupt for {instance_id}.",
+        )
         payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(instance_id)}
-        turn_id = parse_interrupt_turn_id(result.stdout)
-        if turn_id is not None:
+        turn_id = parsed.get("turn_id")
+        if isinstance(turn_id, str):
             payload["turn_id"] = turn_id
         return payload
 
@@ -383,7 +348,11 @@ class WebManagementService:
         )
 
     def _stop_under_lock(self, instance_id: str) -> dict[str, Any]:
-        self._run_command(["instance", "stop", instance_id], timeout_seconds=60)
+        result = self._run_command(["instance", "stop", instance_id, "--json"], timeout_seconds=60)
+        load_command_json_object(
+            result.stdout,
+            message=f"Invalid JSON from instance stop for {instance_id}.",
+        )
         return {"ok": True, "instance": self._get_instance_status(instance_id)}
 
     def _delete(self, instance_id: str) -> dict[str, Any]:
@@ -393,33 +362,79 @@ class WebManagementService:
         )
 
     def _delete_under_lock(self, instance_id: str) -> dict[str, Any]:
-        self._run_command(["instance", "delete", instance_id, "--yes"], timeout_seconds=60)
+        result = self._run_command(["instance", "delete", instance_id, "--yes", "--json"], timeout_seconds=60)
+        load_command_json_object(
+            result.stdout,
+            message=f"Invalid JSON from instance delete for {instance_id}.",
+        )
         return {"ok": True, "instance_id": instance_id}
 
     def _list_buddies(self) -> list[dict[str, str]]:
-        result = self._run_command(["instance", "buddies"], timeout_seconds=10)
-        return parse_buddies_tsv(result.stdout)
+        result = self._run_command(["instance", "buddies", "--json"], timeout_seconds=10)
+        payload = load_command_json_object(result.stdout, message="Invalid JSON from instance buddies.")
+        buddies = payload.get("buddies")
+        if not isinstance(buddies, list):
+            raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid buddies payload from launcher.")
+        rows: list[dict[str, str]] = []
+        for row in buddies:
+            if not isinstance(row, dict):
+                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid buddies payload from launcher.")
+            buddy_id = row.get("id")
+            label = row.get("label")
+            scope = row.get("scope")
+            if not isinstance(buddy_id, str) or not isinstance(label, str) or not isinstance(scope, str):
+                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid buddies payload from launcher.")
+            rows.append({"id": buddy_id, "label": label, "scope": scope})
+        return rows
 
     def _list_instances(self) -> list[dict[str, Any]]:
-        result = self._run_command(["instance", "list"], timeout_seconds=10)
-        return parse_instance_list_tsv(result.stdout)
+        result = self._run_command(["instance", "list", "--json"], timeout_seconds=10)
+        payload = load_command_json_object(result.stdout, message="Invalid JSON from instance list.")
+        instances = payload.get("instances")
+        if not isinstance(instances, list):
+            raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
+        rows: list[dict[str, Any]] = []
+        for row in instances:
+            if not isinstance(row, dict):
+                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
+            instance_id = row.get("instance_id")
+            buddy = row.get("buddy")
+            status = row.get("status")
+            app_server_health = row.get("app_server_health")
+            thread_id = row.get("thread_id")
+            browser_port = row.get("browser_port")
+            updated_at = row.get("updated_at")
+            workspace_dir = row.get("workspace_dir")
+            if not isinstance(instance_id, str) or not isinstance(buddy, str) or not isinstance(status, str):
+                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
+            if not isinstance(app_server_health, str):
+                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
+            if thread_id is not None and not isinstance(thread_id, str):
+                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
+            if browser_port is not None and not isinstance(browser_port, int):
+                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
+            if not isinstance(updated_at, str) or not isinstance(workspace_dir, str):
+                raise HttpError(status=502, code="COMMAND_FAILED", message="Invalid instance list payload from launcher.")
+            rows.append(
+                {
+                    "instance_id": instance_id,
+                    "buddy": buddy,
+                    "status": status,
+                    "app_server_health": app_server_health,
+                    "thread_id": thread_id,
+                    "browser_port": browser_port,
+                    "updated_at": updated_at,
+                    "workspace_dir": workspace_dir,
+                }
+            )
+        return rows
 
     def _get_instance_status(self, instance_id: str) -> dict[str, Any]:
         result = self._run_command(["instance", "status", instance_id, "--json"], timeout_seconds=10)
-        try:
-            payload = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise HttpError(
-                status=502,
-                code="COMMAND_FAILED",
-                message=f"Invalid JSON from instance status for {instance_id}.",
-            ) from exc
-        if not isinstance(payload, dict):
-            raise HttpError(
-                status=502,
-                code="COMMAND_FAILED",
-                message=f"Invalid status payload for {instance_id}.",
-            )
+        payload = load_command_json_object(
+            result.stdout,
+            message=f"Invalid JSON from instance status for {instance_id}.",
+        )
         return payload
 
     def _run_command(self, args: list[str], *, timeout_seconds: float) -> CommandResult:
@@ -463,14 +478,6 @@ def _first_nonempty_line(text: str) -> str | None:
         if cleaned:
             return cleaned
     return None
-
-
-def _split_tsv_line(line: str, *, expected_fields: int) -> list[str]:
-    parts = line.split("\t", expected_fields - 1)
-    if len(parts) != expected_fields:
-        raise ValueError(f"Invalid TSV line: {line!r}")
-    return parts
-
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the BuddySwitch local web management server.")
