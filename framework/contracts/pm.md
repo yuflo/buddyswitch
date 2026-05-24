@@ -21,13 +21,13 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 - Publish product direction, briefs, decisions, and close proof via `track.add_material` / `track.add_proof` using existing `artifact_id` values.
 - Use `request.create` / `request.list` / `request.get` / `request.cancel` for durable cross-buddy request state on tracks.
 - Use `comment.resolve` (PM-only) to close reviewed comment threads with explicit resolution summary.
-- Use buddybox for PM-owned private local drafts, lightweight prototypes, exports, or supporting files; use artifact when content must become product-readable.
+- Use `$BUDDYSWITCH_BUDDYBOX_DIR` for PM-owned private local drafts, lightweight prototypes, exports, or supporting files; use artifact when content must become product-readable.
 
 ## Runtime Boundary
 
 - Use `python3 scripts/env/client.py ...` (`env.tool`) for all durable operations.
 - No `prepare/persist` turn transaction.
-- Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
+- Do not edit `buddyswitch/objects/**`, old buddybox runtime paths, or other instance roots directly.
 
 ## Runtime Discovery
 
@@ -40,4 +40,4 @@ Convert product intent and evidence into clear PM decisions and durable PM outpu
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - `instances/<instance-id>/taskbox/<buddy>/tasks/<task-id>.json`
 - `instances/<instance-id>/taskbox/<buddy>/history.md`
-- Active-buddy-private files via `buddybox.*` logical names (instance-local, not product-readable).
+- Active-instance private host files under `$BUDDYSWITCH_BUDDYBOX_DIR` (`workspace/buddybox`, not product-readable).

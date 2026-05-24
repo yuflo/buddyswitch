@@ -627,6 +627,65 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(rejected.get("permission_boundary"), "source_refs.required_fields")
         self.assertFalse(env_store.artifact_file("art-source-invalid-r1").exists())
 
+    def test_source_ref_rejects_private_buddybox_logical_name_refs_without_mutation(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-pm-art-source-buddybox", buddy="pm")
+        rejected_create = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-art-source-buddybox",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-source-buddybox-r1",
+                "title": "Invalid source ref type",
+                "summary": "",
+                "template": "note",
+                "body": "invalid source refs",
+                "source_refs": [{"type": "buddybox", "logical_name": "prototype/index.html"}],
+            },
+        )
+        self.assertFalse(rejected_create.get("ok"), msg=rejected_create)
+        self.assertEqual((rejected_create.get("error") or {}).get("code"), "E_SOURCE_REFS")
+        self.assertEqual(rejected_create.get("permission_boundary"), "source_refs.required_fields")
+        self.assertFalse(env_store.artifact_file("art-source-buddybox-r1").exists())
+
+        created = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-art-source-buddybox",
+            buddy="pm",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-source-update-target",
+                "title": "Valid source ref target",
+                "summary": "seed",
+                "template": "note",
+                "body": "seed",
+                "source_refs": [{"type": "note", "label": "seed"}],
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        rejected_update = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-art-source-buddybox",
+            buddy="pm",
+            tool="artifact",
+            action="update_metadata",
+            args={
+                "artifact_id": "art-source-update-target",
+                "source_refs": [{"type": "buddybox", "logical_name": "prototype/index.html"}],
+            },
+        )
+        self.assertFalse(rejected_update.get("ok"), msg=rejected_update)
+        self.assertEqual((rejected_update.get("error") or {}).get("code"), "E_SOURCE_REFS")
+        self.assertEqual(rejected_update.get("permission_boundary"), "source_refs.required_fields")
+
+        stored = env_store.get_artifact("art-source-update-target")
+        self.assertIsInstance(stored, dict, msg=rejected_update)
+        assert isinstance(stored, dict)
+        self.assertEqual(stored.get("source_refs"), [{"type": "note", "label": "seed"}])
+
     def test_source_ref_full_read_claim_accepts_readable_published_artifact(self) -> None:
         instance_pm = self._instance_json(instance_id="inst-pm-art-source-read", buddy="pm")
         self.assertTrue(
@@ -1521,23 +1580,9 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_attach_file_creates_artifact_owned_attachment_summary_without_body_blob(self) -> None:
         instance_id = "inst-design-attach"
         instance_json = self._instance_json(instance_id=instance_id, buddy="design")
-        source = self._runtime_path(f"instances/{instance_id}/tmp/chrome-devtools/desktop.png")
+        source = self._runtime_path(f"instances/{instance_id}/workspace/buddybox/screenshots/desktop.png")
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(b"\x89PNG\r\n\x1a\n")
-
-        imported = self._dispatch(
-            instance_json=instance_json,
-            instance_id=instance_id,
-            buddy="design",
-            tool="buddybox",
-            action="import_file",
-            args={
-                "logical_name": "screenshots/desktop.png",
-                "source_path": str(source),
-                "content_type": "image/png",
-            },
-        )
-        self.assertTrue(imported.get("ok"), msg=imported)
 
         created = self._dispatch(
             instance_json=instance_json,
@@ -1565,7 +1610,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "artifact_id": "art-design-attach-r1",
                 "filename": "desktop.png",
                 "content_type": "image/png",
-                "source_buddybox_logical_name": "screenshots/desktop.png",
+                "source_path": str(source),
             },
         )
         self.assertTrue(attached.get("ok"), msg=attached)
@@ -1579,8 +1624,9 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("sha256", attachment)
         self.assertNotIn("content", attachment)
         self.assertNotIn("content_base64", attachment)
-        self.assertNotIn("source_buddybox_logical_name", attachment)
+        self.assertNotIn("source_path", attachment)
         self.assertNotIn("path", attachment)
+        self.assertNotIn(str(source), json.dumps(attached, ensure_ascii=True))
 
         attachment_id = str(attachment.get("attachment_id"))
         self.assertTrue(artifact_repo.attachment_file("art-design-attach-r1", attachment_id).exists())
@@ -1603,7 +1649,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(len(attachments), 1)
         self.assertEqual(attachments[0].get("attachment_id"), attachment_id)
         self.assertNotIn("content_base64", attachments[0])
-        self.assertNotIn("source_buddybox_logical_name", attachments[0])
+        self.assertNotIn("source_path", attachments[0])
         self.assertNotIn("path", attachments[0])
 
     def test_list_attachments_returns_empty_list_for_readable_artifact_without_attachments(self) -> None:
@@ -1655,22 +1701,9 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         self.assertTrue(created.get("ok"), msg=created)
-        source = self._runtime_path(f"instances/{instance_id}/tmp/pm/evidence.txt")
+        source = self._runtime_path(f"instances/{instance_id}/workspace/buddybox/evidence/evidence.txt")
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text("hello from PM", encoding="utf-8")
-        imported = self._dispatch(
-            instance_json=instance_pm,
-            instance_id=instance_id,
-            buddy="pm",
-            tool="buddybox",
-            action="import_file",
-            args={
-                "logical_name": "evidence/evidence.txt",
-                "source_path": str(source),
-                "content_type": "text/plain",
-            },
-        )
-        self.assertTrue(imported.get("ok"), msg=imported)
         attached = self._dispatch(
             instance_json=instance_pm,
             instance_id=instance_id,
@@ -1680,7 +1713,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={
                 "artifact_id": "art-pm-attach-published",
                 "filename": "evidence.txt",
-                "source_buddybox_logical_name": "evidence/evidence.txt",
+                "source_path": str(source),
                 "content_type": "text/plain",
             },
         )
@@ -1729,6 +1762,9 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_attach_file_rejects_inline_blob_payload_without_mutation(self) -> None:
         instance_json = self._instance_json(instance_id="inst-attach-inline-reject", buddy="design")
+        source = self._runtime_path("instances/inst-attach-inline-reject/workspace/buddybox/screenshots/desktop.png")
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"\x89PNG\r\n")
         created = self._dispatch(
             instance_json=instance_json,
             instance_id="inst-attach-inline-reject",
@@ -1754,7 +1790,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={
                 "artifact_id": "art-attach-inline-reject",
                 "filename": "desktop.png",
-                "source_buddybox_logical_name": "screenshots/desktop.png",
+                "source_path": str(source),
                 "content_base64": "aGVsbG8=",
             },
         )
@@ -1763,6 +1799,124 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(rejected.get("durability"), "none")
         stored = env_store.get_artifact("art-attach-inline-reject")
         self.assertIsInstance(stored, dict, msg=rejected)
+        assert isinstance(stored, dict)
+        self.assertEqual(stored.get("attachments"), [])
+
+    def test_attach_file_rejects_retired_buddybox_source_field_without_mutation(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-attach-retired-field", buddy="design")
+        created = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-attach-retired-field",
+            buddy="design",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-attach-retired-field",
+                "title": "Design handoff",
+                "summary": "seed",
+                "template": "design",
+                "body": "# Handoff",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        retired_field = "_".join(["source", "buddybox", "logical", "name"])
+        rejected = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-attach-retired-field",
+            buddy="design",
+            tool="artifact",
+            action="attach_file",
+            args={
+                "artifact_id": "art-attach-retired-field",
+                "filename": "desktop.png",
+                retired_field: "screenshots/desktop.png",
+            },
+        )
+        self.assertFalse(rejected.get("ok"), msg=rejected)
+        self.assertEqual(rejected.get("state_changed"), False, msg=rejected)
+        self.assertEqual(rejected.get("durability"), "none", msg=rejected)
+        self.assertIn(retired_field, json.dumps(rejected, ensure_ascii=True))
+        stored = env_store.get_artifact("art-attach-retired-field")
+        self.assertIsInstance(stored, dict, msg=rejected)
+        assert isinstance(stored, dict)
+        self.assertEqual(stored.get("attachments"), [])
+
+    def test_attach_file_rejects_invalid_source_paths_without_mutation(self) -> None:
+        instance_id = "inst-attach-invalid-source"
+        instance_json = self._instance_json(instance_id=instance_id, buddy="design")
+        created = self._dispatch(
+            instance_json=instance_json,
+            instance_id=instance_id,
+            buddy="design",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-attach-invalid-source",
+                "title": "Design handoff",
+                "summary": "seed",
+                "template": "design",
+                "body": "# Handoff",
+            },
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+
+        buddybox_root = self._runtime_path(f"instances/{instance_id}/workspace/buddybox")
+        buddybox_root.mkdir(parents=True, exist_ok=True)
+        directory_source = buddybox_root / "dir-source"
+        directory_source.mkdir(parents=True, exist_ok=True)
+        empty_source = buddybox_root / "empty.txt"
+        empty_source.write_bytes(b"")
+        missing_source = buddybox_root / "missing.txt"
+        outside_runtime_source = self._runtime_path("external/outside.txt")
+        outside_runtime_source.parent.mkdir(parents=True, exist_ok=True)
+        outside_runtime_source.write_text("outside\n", encoding="utf-8")
+        state_source = self._runtime_path("buddyswitch/objects/artifacts/not-allowed.txt")
+        state_source.parent.mkdir(parents=True, exist_ok=True)
+        state_source.write_text("state\n", encoding="utf-8")
+        global_tmp_source = Path("/tmp") / f"buddyswitch-attach-{instance_id}.txt"
+        global_tmp_source.write_text("tmp\n", encoding="utf-8")
+        source_root = ROOT / "README.md"
+        escape_target = self._runtime_path("escape/secret.txt")
+        escape_target.parent.mkdir(parents=True, exist_ok=True)
+        escape_target.write_text("secret\n", encoding="utf-8")
+        symlink_source = buddybox_root / "links" / "escape.txt"
+        symlink_source.parent.mkdir(parents=True, exist_ok=True)
+        symlink_source.symlink_to(escape_target)
+        self.addCleanup(global_tmp_source.unlink, missing_ok=True)
+
+        cases = {
+            "missing": missing_source,
+            "directory": directory_source,
+            "empty": empty_source,
+            "runtime_state": state_source,
+            "source_checkout": source_root,
+            "global_tmp": global_tmp_source,
+            "outside_instance": outside_runtime_source,
+            "symlink_escape": symlink_source,
+        }
+
+        for name, path in cases.items():
+            rejected = self._dispatch(
+                instance_json=instance_json,
+                instance_id=instance_id,
+                buddy="design",
+                tool="artifact",
+                action="attach_file",
+                args={
+                    "artifact_id": "art-attach-invalid-source",
+                    "filename": "evidence.txt",
+                    "source_path": str(path),
+                },
+            )
+            with self.subTest(case=name):
+                self.assertFalse(rejected.get("ok"), msg=rejected)
+                self.assertEqual(rejected.get("state_changed"), False, msg=rejected)
+                self.assertEqual(rejected.get("durability"), "none", msg=rejected)
+                self.assertIn("source_path", rejected.get("correctable_fields", []), msg=rejected)
+
+        stored = env_store.get_artifact("art-attach-invalid-source")
+        self.assertIsInstance(stored, dict)
         assert isinstance(stored, dict)
         self.assertEqual(stored.get("attachments"), [])
 

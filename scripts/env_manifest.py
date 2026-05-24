@@ -264,7 +264,6 @@ def _validate_permission(permission: str, label: str) -> None:
         "track",
         "task",
         "artifact",
-        "buddybox",
         "context",
         "evidence",
         "message",
@@ -413,7 +412,7 @@ def buddy_authority_profile(manifest: dict[str, Any], buddy_id: str) -> dict[str
         "permission_scope": DEBUG_API_PERMISSION_SCOPE,
         "runtime_note": (
             "buddy->skills controls which runtime packages are materialized under .agents/skills, "
-            "while product writes are explicit env.tool operations over track/task/artifact/buddybox "
+            "while product writes are explicit env.tool operations over track/task/artifact "
             "objects. object permission enforcement remains in manual/debug mutation APIs."
         ),
     }

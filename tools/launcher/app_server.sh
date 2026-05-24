@@ -94,16 +94,23 @@ buddyswitch_app_server_is_active() {
 }
 
 buddyswitch_app_server_ensure() {
-  local output socket_path app_server_pid app_server_log active_buddy
+  local output socket_path app_server_pid app_server_log active_buddy tmp_prefix
   active_buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
+  if [[ -n "${BUDDYSWITCH_INSTANCE_TMP:-}" ]]; then
+    tmp_prefix="${BUDDYSWITCH_INSTANCE_TMP}/zsh"
+  else
+    tmp_prefix="${TMPPREFIX:-}"
+  fi
   output="$(
     TMPDIR="${BUDDYSWITCH_INSTANCE_TMP:-${TMPDIR:-}}" \
     TMP="${BUDDYSWITCH_INSTANCE_TMP:-${TMP:-}}" \
     TEMP="${BUDDYSWITCH_INSTANCE_TMP:-${TEMP:-}}" \
+    TMPPREFIX="${tmp_prefix}" \
     HOME="${BUDDYSWITCH_HOME}" \
     CODEX_HOME="${BUDDYSWITCH_CODEX_HOME}" \
     XDG_CONFIG_HOME="${BUDDYSWITCH_XDG_CONFIG_HOME}" \
     BUDDYSWITCH_ACTIVE_BUDDY="${active_buddy}" \
+    BUDDYSWITCH_BUDDYBOX_DIR="${BUDDYSWITCH_BUDDYBOX_DIR:-${BUDDYSWITCH_WORKSPACE_DIR}/buddybox}" \
     BUDDYSWITCH_INSTANCE_ID="${BUDDYSWITCH_INSTANCE_ID}" \
     BUDDYSWITCH_INSTANCE_JSON="${BUDDYSWITCH_INSTANCE_JSON}" \
     BUDDYSWITCH_INSTANCE_TMP="${BUDDYSWITCH_INSTANCE_TMP:-}" \

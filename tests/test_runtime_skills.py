@@ -37,7 +37,6 @@ class RuntimeSkillsTests(unittest.TestCase):
         "task": ROOT / "buddyswitch/skills/shared/task-tool/SKILL.md",
         "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
         "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
-        "buddybox": ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md",
         "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
         "comment": ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
         "request": ROOT / "buddyswitch/skills/shared/request-tool/SKILL.md",
@@ -107,7 +106,6 @@ class RuntimeSkillsTests(unittest.TestCase):
         "track-tool",
         "artifact-tool",
         "task-tool",
-        "buddybox-tool",
         "message-tool",
         "comment-tool",
         "request-tool",
@@ -182,13 +180,35 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("handoff-tool", all_skill_ids)
 
     def test_each_buddy_keeps_shared_runtime_tools_without_handoff(self) -> None:
-        required = {"track-tool", "artifact-tool", "task-tool", "buddybox-tool", "message-tool", "comment-tool", "request-tool"}
+        required = {"track-tool", "artifact-tool", "task-tool", "message-tool", "comment-tool", "request-tool"}
         for buddy in self.manifest.get("buddies", []):
             assert isinstance(buddy, dict)
             skills = set(buddy.get("skills", []))
             with self.subTest(buddy=buddy.get("id")):
                 self.assertTrue(required.issubset(skills))
                 self.assertNotIn("handoff-tool", skills)
+
+    def test_manifest_and_runtime_skill_materialization_exclude_buddybox_tool(self) -> None:
+        all_skill_ids = {row.get("id") for row in self.manifest.get("skills", []) if isinstance(row, dict)}
+        self.assertNotIn("buddybox-tool", all_skill_ids)
+        self.assertFalse((ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md").exists())
+        for buddy in ("pm", "design", "dev", "market", "test"):
+            buddy_row = next(
+                row
+                for row in self.manifest.get("buddies", [])
+                if isinstance(row, dict) and row.get("id") == buddy
+            )
+            self.assertNotIn("buddybox-tool", set(buddy_row.get("skills", [])), msg=buddy)
+            with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+                workspace = Path(temp_dir) / f"{buddy}-workspace"
+                workspace.mkdir()
+                installed = runtime_skills.install_runtime_skills(
+                    manifest_path=ROOT / "buddyswitch" / "manifest.toml",
+                    buddy_id=buddy,
+                    workspace=workspace,
+                )
+                self.assertNotIn("buddybox-tool", set(installed), msg=buddy)
+                self.assertFalse((workspace / ".agents" / "skills" / "buddybox-tool").exists(), msg=buddy)
 
     def test_shared_tool_skills_do_not_teach_handoff_or_next_buddy(self) -> None:
         shared_skill_files = list(self.SHARED_TOOL_SKILLS.values())
@@ -582,13 +602,17 @@ class RuntimeSkillsTests(unittest.TestCase):
             )
             self.assertTrue(set(self.MARKET_P0_SKILLS).isdisjoint(set(installed)))
 
-    def test_design_shape_prototype_guidance_uses_generic_artifact_attachments(self) -> None:
+    def test_design_shape_prototype_guidance_uses_direct_buddybox_files_and_explicit_attachments(self) -> None:
         skill_text = (ROOT / "buddyswitch/skills/design/shape-prototype/SKILL.md").read_text(encoding="utf-8").lower()
         template_text = (
             ROOT / "buddyswitch/skills/design/shape-prototype/assets/design-handoff-template.md"
         ).read_text(encoding="utf-8").lower()
+        retired_import = ".".join(("buddybox", "import_file"))
 
-        self.assertIn("artifact attachment", template_text)
+        self.assertIn("buddyswitch_buddybox_dir", skill_text)
+        self.assertIn("source_path", skill_text)
+        self.assertNotIn(retired_import, skill_text)
+        self.assertIn("buddyswitch_buddybox_dir", template_text)
         self.assertIn("attachment_id", template_text)
         self.assertIn("chrome-devtools-cockpit", template_text)
         self.assertIn("chrome-devtools-cockpit", skill_text)
@@ -698,7 +722,6 @@ class RuntimeSkillsTests(unittest.TestCase):
         skill_paths = [
             ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
             ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
-            ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md",
         ]
         for path in skill_paths:
             text = path.read_text(encoding="utf-8").lower()
@@ -707,20 +730,14 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertNotIn("**returns:**", text)
                 self.assertNotIn("## payload examples", text)
 
-    def test_shared_message_and_buddybox_skills_prevent_observed_invalid_calls(self) -> None:
+    def test_shared_message_skill_prevents_observed_invalid_calls(self) -> None:
         message_skill = self.SHARED_TOOL_SKILLS["message"].read_text(encoding="utf-8").lower()
-        buddybox_skill = self.SHARED_TOOL_SKILLS["buddybox"].read_text(encoding="utf-8").lower()
 
         self.assertIn("message list --payload '{}'", message_skill)
         self.assertIn("does not accept `box`", message_skill)
         self.assertIn("request.list", message_skill)
         self.assertNotIn('message list --payload \'{"box":"inbox"}\'', message_skill)
         self.assertNotIn('message list --payload "{\\"box\\":\\"inbox\\"}"', message_skill)
-
-        self.assertIn("do not use absolute paths, traversal", buddybox_skill)
-        self.assertIn("buddy id prefix", buddybox_skill)
-        self.assertIn("logical_name", buddybox_skill)
-        self.assertIn("heartbeats/b.md", buddybox_skill)
 
     def test_message_comment_shared_tool_skills_stay_atomic(self) -> None:
         """MCT-SURF-006: Message/comment skills don't teach non-goal features."""
@@ -1271,7 +1288,6 @@ class RuntimeSkillsTests(unittest.TestCase):
             "task": ROOT / "buddyswitch/skills/shared/task-tool/SKILL.md",
             "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
             "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
-            "buddybox": ROOT / "buddyswitch/skills/shared/buddybox-tool/SKILL.md",
             "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
             "comment": ROOT / "buddyswitch/skills/shared/comment-tool/SKILL.md",
             "request": ROOT / "buddyswitch/skills/shared/request-tool/SKILL.md",

@@ -195,7 +195,7 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "track_id": "track-alpha",
                 "refs": [
                     {"type": "track", "id": "track-alpha", "label": "Primary track"},
-                    {"type": "buddybox", "logical_name": "prototype/index.html", "label": "Prototype"},
+                    {"type": "artifact", "id": "art-design-handoff", "label": "Prototype"},
                 ],
             },
         )
@@ -206,7 +206,7 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(task["owner_buddy"], "dev")
         self.assertEqual(task["priority"], "high")
         self.assertEqual(task["track_id"], "track-alpha")
-        self.assertEqual(task["refs"][1]["logical_name"], "prototype/index.html")
+        self.assertEqual(task["refs"][1]["id"], "art-design-handoff")
         self.assertIsNone(task["closed_at"])
 
         task_file = self._task_file(instance["instance_root"], "dev", "task-dev-high")
@@ -539,7 +539,7 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             {"task_id": "task-dev-invalid-status", "title": "Bad status", "status": "waiting"},
             {"task_id": "task-dev-invalid-refs", "title": "Bad refs type", "refs": "track-alpha"},
             {"task_id": "task-dev-missing-ref-id", "title": "Missing ref id", "refs": [{"type": "track"}]},
-            {"task_id": "task-dev-bad-buddybox-ref", "title": "Bad buddybox ref", "refs": [{"type": "buddybox", "id": "file"}]},
+            {"task_id": "task-dev-bad-buddybox-ref", "title": "Bad buddybox ref", "refs": [{"type": "buddybox", "logical_name": "prototype/index.html"}]},
             {"task_id": "task-dev-source-refs", "title": "Reject source_refs", "source_refs": []},
             {"task_id": "task-dev-visibility", "title": "Reject visibility", "visibility": "public"},
             {"task_id": "../escape", "title": "Reject traversal"},
@@ -557,6 +557,8 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertFalse(rejected.get("ok"), msg=rejected)
                 self.assertEqual(rejected.get("permission_boundary"), "request-payload")
                 self.assertIs(rejected.get("state_changed"), False)
+                if args.get("task_id") == "task-dev-bad-buddybox-ref":
+                    self.assertIn("not supported", json.dumps(rejected, ensure_ascii=True).lower())
                 self.assertEqual(self._snapshot_taskbox_task_ids(instance["instance_root"], "dev"), before_task_ids)
 
 

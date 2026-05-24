@@ -24,10 +24,6 @@ _TASK_REF_SCHEMA = {
             "type": "string",
             "description": "Referenced runtime object id when the ref points at track/artifact/message/comment/request.",
         },
-        "logical_name": {
-            "type": "string",
-            "description": "Referenced buddybox logical name when the ref points at a private buddybox file.",
-        },
         "label": {
             "type": "string",
             "description": "Optional short label for the reference.",
@@ -48,7 +44,7 @@ def _build_definition() -> ToolDefinition:
         object_model=(
             "Tasks live in the active instance taskbox under taskbox/<buddy>. "
             "They are private work items, not shared runtime objects. "
-            "Task refs and track_id are private context links to tracks, artifacts, messages, comments, requests, or buddybox files; they do not publish or share those objects."
+            "Task refs and track_id are private context links to tracks, artifacts, messages, comments, and requests; they do not publish or share those objects."
         ),
         use_when=(
             "You need to create, list, inspect, update, archive, or review history for active-buddy private tasks.",

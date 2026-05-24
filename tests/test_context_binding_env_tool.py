@@ -24,7 +24,7 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
-_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment", "request"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment", "request"}
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
@@ -264,7 +264,10 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         affordances = summary.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=summary)
         assert isinstance(affordances, dict)
-        self.assertEqual(affordances, tool_registry.compact_tool_affordances())
+        self.assertEqual(
+            affordances,
+            tool_registry.compact_tool_affordances(exclude_tools={"buddybox"}),
+        )
         self.assertEqual(set(affordances), _EXPECTED_TOOLS)
         self.assertNotIn("handoff", affordances)
         dumped = json.dumps(affordances, ensure_ascii=True)
@@ -272,7 +275,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("payload_fields", dumped)
         self.assertNotIn("action_semantics", dumped)
         self.assertNotIn('"properties"', dumped)
-        for tool_name in ("track", "artifact", "task", "buddybox", "context"):
+        for tool_name in ("track", "artifact", "task", "context"):
             with self.subTest(tool=tool_name):
                 compact = affordances.get(tool_name)
                 self.assertIsInstance(compact, dict, msg=summary)
@@ -340,7 +343,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "request_lifecycle_visibility",
                 "search_boundary",
                 "evidence_boundary",
-                "buddybox_visibility",
+                "writable_file_surface",
             },
         )
         self.assertEqual(snapshot.get("active_buddy"), "dev")
@@ -504,34 +507,52 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("tracks", sources)
         self.assertIn("artifacts", sources)
 
-    def test_context_outputs_describe_instance_private_buddybox_without_legacy_paths(self) -> None:
+    def test_context_outputs_writable_surfaces_without_buddybox_tool_methods(self) -> None:
         instance_json = self._instance_json(buddy="pm")
         listed = self._dispatch(instance_json=instance_json, tool="context", action="list_sources", args={}, buddy="pm")
         self.assertTrue(listed.get("ok"), msg=listed)
         sources = listed.get("sources")
         self.assertIsInstance(sources, dict, msg=listed)
         assert isinstance(sources, dict)
-        buddybox_source = sources.get("buddybox")
-        self.assertIsInstance(buddybox_source, dict, msg=sources)
-        assert isinstance(buddybox_source, dict)
-        self.assertEqual(buddybox_source.get("workspace_relative_root"), "buddybox")
+        writable_surfaces_source = sources.get("writable_surfaces")
+        self.assertIsInstance(writable_surfaces_source, dict, msg=sources)
+        assert isinstance(writable_surfaces_source, dict)
+        self.assertFalse(writable_surfaces_source.get("mutates_product_state"))
+        self.assertFalse(writable_surfaces_source.get("grants_write_authority"))
 
         summarized = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="pm")
         self.assertTrue(summarized.get("ok"), msg=summarized)
-        buddybox_desc = summarized.get("buddybox_desc")
-        self.assertIsInstance(buddybox_desc, dict, msg=summarized)
-        assert isinstance(buddybox_desc, dict)
-        self.assertEqual(buddybox_desc.get("workspace_relative_root"), "buddybox")
-        self.assertNotIn("logical_root", buddybox_desc)
+        surfaces = summarized.get("writable_surfaces")
+        self.assertIsInstance(surfaces, dict, msg=summarized)
+        assert isinstance(surfaces, dict)
+        persistent = surfaces.get("persistent_files")
+        self.assertIsInstance(persistent, dict, msg=surfaces)
+        assert isinstance(persistent, dict)
+        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_BUDDYBOX_DIR")
+        self.assertEqual(persistent.get("workspace_relative_root"), "buddybox")
+        self.assertFalse(persistent.get("mutates_product_state"))
+        temporary = surfaces.get("temporary_files")
+        self.assertIsInstance(temporary, dict, msg=surfaces)
+        assert isinstance(temporary, dict)
+        self.assertEqual(temporary.get("env"), "BUDDYSWITCH_INSTANCE_TMP")
 
+        self.assertIn("buddybox", json.dumps(summarized, ensure_ascii=True))
+        retired_tokens = (
+            "buddybox_desc",
+            "describe_capability",
+            "_".join(("write", "private", "text")),
+            "_".join(("write", "private", "binary")),
+            "_".join(("logical", "name", "policy")),
+        )
         for payload in (listed, summarized):
             packed = json.dumps(payload, ensure_ascii=True)
-            self.assertIn("buddybox", packed)
             self.assertNotIn("buddyswitch/local/buddybox", packed)
             self.assertNotIn("state/buddyswitch/local/buddybox", packed)
             self.assertNotIn("buddyswitch/content/buddybox", packed)
             self.assertNotIn("/private/tmp", packed)
             self.assertNotIn("/tmp/ai-calendar", packed)
+            for retired in retired_tokens:
+                self.assertNotIn(retired, packed)
 
     def test_context_summarize_includes_source_workspace_facts_for_dev(self) -> None:
         instance_json = self._instance_json(buddy="dev")
@@ -698,7 +719,11 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsInstance(operation_semantics, dict, msg=payload)
         assert isinstance(operation_semantics, dict)
         self.assertIn("source_workspace", operation_semantics["context.get"]["returns"])
+        self.assertIn("writable_surfaces", operation_semantics["context.get"]["returns"])
         self.assertIn("source_workspace", operation_semantics["context.summarize"]["returns"])
+        self.assertIn("writable_surfaces", operation_semantics["context.summarize"]["returns"])
+        self.assertNotIn("buddybox.desc", operation_semantics)
+        self.assertNotIn("buddybox.write", operation_semantics)
         for key in ("context.get", "context.summarize"):
             with self.subTest(operation=key):
                 self.assertIn("reads", operation_semantics[key])
@@ -713,6 +738,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         context_catalog = payload.get("tool_catalog", {}).get("context", {})
         self.assertIsInstance(context_catalog, dict, msg=payload)
         assert isinstance(context_catalog, dict)
+        self.assertNotIn("buddybox", payload.get("tool_catalog", {}))
         action_semantics = context_catalog.get("action_semantics", {})
         self.assertIsInstance(action_semantics, dict, msg=context_catalog)
         assert isinstance(action_semantics, dict)

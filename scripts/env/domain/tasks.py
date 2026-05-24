@@ -27,7 +27,7 @@ PUBLICATION_STYLE_FIELDS = {
 }
 VALID_TASK_PRIORITY = task_repo.valid_task_priorities()
 ALLOWED_TASK_REF_ID_TYPES = {"track", "artifact", "message", "comment", "request"}
-ALLOWED_TASK_REF_TYPES = ALLOWED_TASK_REF_ID_TYPES | {"buddybox"}
+ALLOWED_TASK_REF_TYPES = set(ALLOWED_TASK_REF_ID_TYPES)
 _STATUS_VALUES = task_repo.valid_task_statuses()
 
 
@@ -110,19 +110,13 @@ def normalize_refs(value: Any) -> list[dict[str, object]]:
         label = _normalize_ref_label(raw.get("label"))
         if label is not None:
             normalized["label"] = label
-        if ref_type == "buddybox":
-            logical_name = raw.get("logical_name")
-            if not isinstance(logical_name, str) or not logical_name.strip():
-                raise TaskPayloadError("buddybox refs require logical_name")
-            normalized["logical_name"] = logical_name.strip()
-        else:
-            ref_id = raw.get("id")
-            if not isinstance(ref_id, str) or not ref_id.strip():
-                raise TaskPayloadError("refs require id")
-            try:
-                normalized["id"] = runtime_files.require_id(ref_id.strip(), "ref.id")
-            except ValueError as exc:
-                raise TaskPayloadError(str(exc)) from exc
+        ref_id = raw.get("id")
+        if not isinstance(ref_id, str) or not ref_id.strip():
+            raise TaskPayloadError("refs require id")
+        try:
+            normalized["id"] = runtime_files.require_id(ref_id.strip(), "ref.id")
+        except ValueError as exc:
+            raise TaskPayloadError(str(exc)) from exc
         refs.append(normalized)
     return refs
 

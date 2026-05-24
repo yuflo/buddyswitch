@@ -1605,9 +1605,7 @@ exec "$real_git" "$@"
                 self.assertIn("task-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
                 self.assertIn("track-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
                 self.assertIn("artifact-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
-                buddy_permissions = set(row for row in buddy.get("permissions", []) if isinstance(row, str))
-                if {"buddybox.read", "buddybox.write", "buddybox.delete"} & buddy_permissions:
-                    self.assertIn("buddybox-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
+                self.assertNotIn("buddybox-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
                 for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
                     self.assertNotIn(removed, installed_skill_ids, msg=f"buddy={buddy_id}")
 
@@ -1720,6 +1718,10 @@ exec "$real_git" "$@"
             self.assertEqual(payload["tmpdir"], str(instance_root / "tmp"))
             self.assertEqual(payload["tmp"], str(instance_root / "tmp"))
             self.assertEqual(payload["temp"], str(instance_root / "tmp"))
+            self.assertEqual(payload["instance_tmp"], str(instance_root / "tmp"))
+            self.assertEqual(payload["tmpprefix"], str(instance_root / "tmp" / "zsh"))
+            self.assertEqual(payload["buddybox_dir"], str(workspace_dir / "buddybox"))
+            self.assertTrue((workspace_dir / "buddybox").is_dir())
             self.assertTrue(payload["runtime_broker_socket"], "runtime broker socket must be exported to codex")
             buddy_agents = ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md"
             self.assertTrue(buddy_agents.exists(), "pm buddy prompt asset must be checked in")
@@ -1779,8 +1781,6 @@ exec "$real_git" "$@"
                 "scripts/env/tools/artifact/_impl.py",
                 "scripts/env/tools/context/tool.py",
                 "scripts/env/tools/context/_impl.py",
-                "scripts/env/tools/buddybox/tool.py",
-                "scripts/env/tools/buddybox/_impl.py",
                 "scripts/env/tools/evidence/tool.py",
                 "scripts/env/tools/evidence/_impl.py",
                 "scripts/env/tools/message/tool.py",

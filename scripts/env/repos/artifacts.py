@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import mimetypes
 import os
 import shutil
 import uuid
@@ -41,30 +42,10 @@ def _require_non_empty_text(value: Any, field: str) -> str:
     return value.strip()
 
 
-def _validate_buddybox_ref_logical_name(logical_name: Any, *, active_buddy: str | None = None) -> str:
-    if not isinstance(logical_name, str) or not logical_name.strip():
-        raise ValueError("source_refs.buddybox.logical_name must be a non-empty string")
-    normalized = logical_name.replace("\\", "/").strip()
-    if normalized.startswith("/"):
-        raise ValueError("source_refs.buddybox.logical_name must be relative")
-    parts = [part for part in normalized.split("/") if part not in {"", "."}]
-    if not parts:
-        raise ValueError("source_refs.buddybox.logical_name must be non-empty")
-    if any(part == ".." for part in parts):
-        raise ValueError("source_refs.buddybox.logical_name must not include '..' traversal")
-    blocked_prefixes = set(_KNOWN_BUDDY_IDS)
-    if isinstance(active_buddy, str) and active_buddy:
-        blocked_prefixes.add(active_buddy)
-    if parts[0] in blocked_prefixes:
-        raise ValueError("source_refs.buddybox.logical_name must not include a buddy prefix")
-    return "/".join(parts)
-
-
 def _normalize_source_refs(
     raw_refs: Any,
     *,
     active_buddy: str | None = None,
-    allow_buddybox: bool = True,
 ) -> list[dict[str, Any]] | None:
     if raw_refs is None:
         return None
@@ -83,16 +64,6 @@ def _normalize_source_refs(
 
         if ref_type in {"artifact", "track", "task"}:
             row["id"] = runtime_files.require_id(raw.get("id"), f"source_ref.{ref_type}.id")
-        elif ref_type == "buddybox":
-            if not allow_buddybox:
-                raise ValueError("source_ref.buddybox is private provenance and cannot be used in this payload")
-            if "path" in raw:
-                raise ValueError("source_refs.buddybox.logical_name is required; path is retired")
-            normalized_name = _validate_buddybox_ref_logical_name(raw.get("logical_name"), active_buddy=active_buddy)
-            row["logical_name"] = normalized_name
-            if isinstance(active_buddy, str) and active_buddy:
-                row["private_to_buddy"] = active_buddy
-            row["read_grant"] = False
         elif ref_type == "external":
             label = raw.get("label")
             if not isinstance(label, str) or not label.strip():
@@ -209,6 +180,14 @@ def attachment_summaries(artifact_id: str) -> list[dict[str, Any]]:
     return list(attachments) if isinstance(attachments, list) else []
 
 
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
 def create_artifact_revision(
     *,
     artifact_id: str | None,
@@ -238,7 +217,7 @@ def create_artifact_revision(
         raise ValueError(f"template must be one of {', '.join(VALID_ARTIFACT_TEMPLATES)}")
     if not isinstance(summary, str):
         raise ValueError("summary must be a string")
-    normalized_refs = _normalize_source_refs(source_refs, active_buddy=created_by, allow_buddybox=True)
+    normalized_refs = _normalize_source_refs(source_refs, active_buddy=created_by)
 
     revision = 1
     supersedes_id: str | None = None
@@ -334,11 +313,11 @@ def update_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     return save_artifact(artifact)
 
 
-def adopt_buddybox_attachment(
+def adopt_local_attachment(
     artifact_id: str,
     filename: str,
     created_by: str,
-    source_logical_name: str,
+    source_path: Path,
     content_type: str | None,
     context: Any,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -346,30 +325,24 @@ def adopt_buddybox_attachment(
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
 
-    manifest = getattr(context, "manifest", None)
-    if manifest is None and isinstance(context, dict):
-        manifest = context.get("manifest")
-    buddies = manifest.get("buddies", []) if isinstance(manifest, dict) else []
-    buddy_ids = {
-        str(row.get("id")).strip()
-        for row in buddies
-        if isinstance(row, dict) and isinstance(row.get("id"), str) and str(row.get("id")).strip()
-    }
-    buddy_ids.add(created_by)
+    root = context.repos.runtime_files.buddybox_local_dir(context.instance_payload).resolve(strict=False)
+    try:
+        resolved_source = source_path.expanduser().resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(str(source_path)) from exc
+    if not _path_is_within(resolved_source, root):
+        raise ValueError("source_path must resolve inside the active instance buddybox directory")
+    if resolved_source.is_dir():
+        raise IsADirectoryError(str(source_path))
+    if not resolved_source.is_file():
+        raise ValueError("source_path must resolve to a regular file")
 
-    logical_name = context.repos.buddybox.normalize_logical_name(
-        source_logical_name,
-        active_buddy=created_by,
-        buddy_ids=buddy_ids,
-    )
-    root = context.repos.buddybox.ensure_active_buddy_root(
-        active_buddy=created_by,
-        instance_payload=context.instance_payload,
-    )
-    source_path = root / logical_name
-    raw, inferred_content_type = context.repos.buddybox.read_private_file(root=root, logical_name=logical_name)
+    raw = resolved_source.read_bytes()
+    if not raw:
+        raise ValueError("source_path must reference a non-empty file")
 
     attachment_id = f"att-{uuid.uuid4().hex[:10]}"
+    inferred_content_type = mimetypes.guess_type(resolved_source.name)[0] or "application/octet-stream"
     content_type_value = content_type.strip() if isinstance(content_type, str) and content_type.strip() else inferred_content_type
     timestamp = now_iso()
     attachment = {
@@ -386,9 +359,9 @@ def adopt_buddybox_attachment(
     runtime_files.require_runtime_workspace_write_root()
     target_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        os.link(source_path, target_path)
+        os.link(resolved_source, target_path)
     except OSError:
-        shutil.copyfile(source_path, target_path)
+        shutil.copyfile(resolved_source, target_path)
 
     updated_artifact = dict(artifact)
     updated_artifact["attachments"] = attachment_summaries(artifact_id) + [attachment]
@@ -479,7 +452,7 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(summary, str):
         raise ValueError("artifact.summary must be a string")
 
-    source_refs = _normalize_source_refs(artifact.get("source_refs"), active_buddy=created_by, allow_buddybox=True)
+    source_refs = _normalize_source_refs(artifact.get("source_refs"), active_buddy=created_by)
 
     revision = artifact.get("revision")
     if not isinstance(revision, int) or revision <= 0:

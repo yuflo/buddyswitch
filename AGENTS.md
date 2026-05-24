@@ -85,7 +85,7 @@ Runtime state is projected under:
 - `buddyswitch/objects/tasks/*.json`
 - `buddyswitch/objects/artifacts/*.json`
 
-Buddybox private files are active-buddy private and instance-local; address them only through buddybox env tools with `logical_name`.
+Persistent private host files live under `$BUDDYSWITCH_BUDDYBOX_DIR`, which resolves to the active instance `workspace/buddybox`. Product objects still require explicit env tools; do not edit `buddyswitch/objects/**` or old buddybox runtime paths directly.
 
 Use env tools for product-mode runtime state. Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
 Runtime contracts are owned by code, JSON contracts, role contracts, and tests; do not create prose mirrors for runtime behavior.

@@ -137,7 +137,6 @@ def _normalize_source_refs(
     raw_refs: Any,
     *,
     active_buddy: str | None = None,
-    allow_buddybox: bool = True,
 ) -> list[dict[str, Any]] | None:
     if raw_refs is None:
         return None
@@ -156,16 +155,6 @@ def _normalize_source_refs(
 
         if ref_type in {"artifact", "track", "task"}:
             row["id"] = require_id(raw.get("id"), f"source_ref.{ref_type}.id")
-        elif ref_type == "buddybox":
-            if not allow_buddybox:
-                raise ValueError("source_ref.buddybox is private provenance and cannot be used in this payload")
-            if "path" in raw:
-                raise ValueError("source_refs.buddybox.logical_name is required; path is retired")
-            normalized_name = _validate_buddybox_ref_logical_name(raw.get("logical_name"), active_buddy=active_buddy)
-            row["logical_name"] = normalized_name
-            if isinstance(active_buddy, str) and active_buddy:
-                row["private_to_buddy"] = active_buddy
-            row["read_grant"] = False
         elif ref_type == "external":
             label = raw.get("label")
             if not isinstance(label, str) or not label.strip():
@@ -652,7 +641,7 @@ def create_artifact_revision(
         raise ValueError(f"template must be one of {', '.join(VALID_ARTIFACT_TEMPLATES)}")
     if not isinstance(summary, str):
         raise ValueError("summary must be a string")
-    normalized_refs = _normalize_source_refs(source_refs, active_buddy=created_by, allow_buddybox=True)
+    normalized_refs = _normalize_source_refs(source_refs, active_buddy=created_by)
 
     revision = 1
     supersedes_id: str | None = None

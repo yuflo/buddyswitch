@@ -12,13 +12,13 @@ Shape product interaction and UX direction into durable design outputs.
 - Persist deliverables via `artifact.create_revision` using V1 artifact templates and markdown body content.
 - Use `request.list` / `request.get` for incoming and outgoing cross-buddy requests.
 - When a request is assigned to Design, mutate lifecycle with `request.accept`, `request.block`, and `request.complete` plus track-context refs.
-- Use buddybox for private local prototypes or exports; use artifact for design artifact briefs another buddy must read.
+- Use `$BUDDYSWITCH_BUDDYBOX_DIR` for private local prototypes or exports; use artifact for design artifact briefs another buddy must read.
 
 ## Runtime Boundary
 
 - Use `python3 scripts/env/client.py ...` (`env.tool`) for durable operations.
 - No `prepare/persist` turn transaction.
-- Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
+- Do not edit `buddyswitch/objects/**`, old buddybox runtime paths, or other instance roots directly.
 
 ## Runtime Discovery
 
@@ -30,4 +30,4 @@ Shape product interaction and UX direction into durable design outputs.
 - `instances/<instance-id>/taskbox/<buddy>/tasks/<task-id>.json`
 - `instances/<instance-id>/taskbox/<buddy>/history.md`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
-- Active-buddy-private files via `buddybox.*` logical names (instance-local, not product-readable).
+- Active-instance private host files under `$BUDDYSWITCH_BUDDYBOX_DIR` (`workspace/buddybox`, not product-readable).

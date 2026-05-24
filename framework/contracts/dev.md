@@ -12,13 +12,13 @@ Implement approved scope in source code and persist implementation evidence expl
 - Use `track.add_update` and `track.update_now` for progress and blockers.
 - Use `request.list` / `request.get` for durable inbound/outbound request state on tracks.
 - For requests assigned to Dev, use `request.accept`, `request.block`, and `request.complete` with result refs.
-- Use buddybox for private logs, generated files, binary outputs, or local reports; use artifact for implementation reports and technical conclusions the product workflow must read.
+- Use `$BUDDYSWITCH_BUDDYBOX_DIR` for private logs, generated files, binary outputs, or local reports; use artifact for implementation reports and technical conclusions the product workflow must read.
 
 ## Runtime Boundary
 
 - Use `python3 scripts/env/client.py ...` (`env.tool`) for durable runtime objects.
 - No `prepare/persist` turn transaction.
-- Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
+- Do not edit `buddyswitch/objects/**`, old buddybox runtime paths, or other instance roots directly.
 
 ## Runtime Discovery
 
@@ -31,4 +31,4 @@ Implement approved scope in source code and persist implementation evidence expl
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
 - `instances/<instance-id>/taskbox/<buddy>/tasks/<task-id>.json`
 - `instances/<instance-id>/taskbox/<buddy>/history.md`
-- Active-buddy-private files via `buddybox.*` logical names (instance-local, not product-readable).
+- Active-instance private host files under `$BUDDYSWITCH_BUDDYBOX_DIR` (`workspace/buddybox`, not product-readable).

@@ -94,22 +94,20 @@ class EnvClientPayloadCliTests(unittest.TestCase):
             {"tool": "context", "action": "list_sources", "args": {}},
         )
 
-    def test_buddybox_import_file_cli_uses_hyphenated_command_and_canonical_action(self) -> None:
-        payload = {
-            "logical_name": "screenshots/desktop.png",
-            "source_path": "/tmp/desktop.png",
-            "content_type": "image/png",
-        }
-        code, output, broker = self._run_client(["buddybox", "import-file", "--payload", json.dumps(payload)])
-        self.assertEqual(code, 0, msg=output)
-        broker.assert_called_once_with(
-            "env.tool",
-            {"tool": "buddybox", "action": "import_file", "args": payload},
+    def test_buddybox_cli_resource_is_not_registered(self) -> None:
+        completed = subprocess.run(
+            ["python3", str(ROOT / "scripts" / "env" / "client.py"), "buddybox", "write", "--payload", "{}"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
         )
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("invalid choice", completed.stderr)
 
     def test_artifact_attachment_cli_commands_use_hyphenated_spelling_and_canonical_actions(self) -> None:
         cases = (
-            ("attach-file", "attach_file", {"artifact_id": "art-1", "filename": "desktop.png", "source_buddybox_logical_name": "shots/desktop.png"}),
+            ("attach-file", "attach_file", {"artifact_id": "art-1", "filename": "desktop.png", "source_path": "/tmp/shots/desktop.png"}),
             ("list-attachments", "list_attachments", {"artifact_id": "art-1"}),
             ("get-attachment", "get_attachment", {"artifact_id": "art-1", "attachment_id": "att-1"}),
         )

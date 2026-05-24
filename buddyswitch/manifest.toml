@@ -181,10 +181,6 @@ id = "task-tool"
 path = "buddyswitch/skills/shared/task-tool"
 
 [[skills]]
-id = "buddybox-tool"
-path = "buddyswitch/skills/shared/buddybox-tool"
-
-[[skills]]
 id = "message-tool"
 path = "buddyswitch/skills/shared/message-tool"
 
@@ -219,13 +215,12 @@ skills = [
   "track-tool",
   "artifact-tool",
   "task-tool",
-  "buddybox-tool",
   "message-tool",
   "comment-tool",
   "request-tool",
 ]
 artifact_templates = ["brief"]
-permissions = ["track.read", "track.update_now", "track.add_material", "track.add_update", "track.add_proof", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "request.read", "request.create", "request.accept", "request.block", "request.complete", "request.cancel", "search.use"]
+permissions = ["track.read", "track.update_now", "track.add_material", "track.add_update", "track.add_proof", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "request.read", "request.create", "request.accept", "request.block", "request.complete", "request.cancel", "search.use"]
 
 [[buddies]]
 id = "pm"
@@ -245,7 +240,6 @@ skills = [
   "track-tool",
   "artifact-tool",
   "task-tool",
-  "buddybox-tool",
   "message-tool",
   "comment-tool",
   "request-tool",
@@ -267,9 +261,6 @@ permissions = [
   "artifact.create",
   "artifact.update",
   "artifact.delete",
-  "buddybox.read",
-  "buddybox.write",
-  "buddybox.delete",
   "context.read",
   "evidence.issue",
   "message.send",
@@ -290,9 +281,9 @@ permissions = [
 id = "design"
 label = "Design"
 scope = "Shape UI/UX prototype direction and design artifact outcomes."
-skills = ["shape-prototype", "track-tool", "artifact-tool", "task-tool", "buddybox-tool", "message-tool", "comment-tool", "request-tool"]
+skills = ["shape-prototype", "track-tool", "artifact-tool", "task-tool", "message-tool", "comment-tool", "request-tool"]
 artifact_templates = ["design", "brief"]
-permissions = ["track.read", "track.update_now", "track.add_material", "track.add_update", "track.add_proof", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "request.read", "request.create", "request.accept", "request.block", "request.complete", "request.cancel", "search.use"]
+permissions = ["track.read", "track.update_now", "track.add_material", "track.add_update", "track.add_proof", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "request.read", "request.create", "request.accept", "request.block", "request.complete", "request.cancel", "search.use"]
 
 [[buddies]]
 id = "dev"
@@ -316,18 +307,17 @@ skills = [
   "track-tool",
   "artifact-tool",
   "task-tool",
-  "buddybox-tool",
   "message-tool",
   "comment-tool",
   "request-tool",
 ]
 artifact_templates = ["brief", "note"]
-permissions = ["track.read", "track.update_now", "track.add_material", "track.add_update", "track.add_proof", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "request.read", "request.create", "request.accept", "request.block", "request.complete", "request.cancel", "search.use"]
+permissions = ["track.read", "track.update_now", "track.add_material", "track.add_update", "track.add_proof", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "request.read", "request.create", "request.accept", "request.block", "request.complete", "request.cancel", "search.use"]
 
 [[buddies]]
 id = "test"
 label = "Test"
 scope = "Validate behavior and report pass/fail/blocked outcomes."
-skills = ["smoke-test", "track-tool", "artifact-tool", "task-tool", "buddybox-tool", "message-tool", "comment-tool", "request-tool"]
+skills = ["smoke-test", "track-tool", "artifact-tool", "task-tool", "message-tool", "comment-tool", "request-tool"]
 artifact_templates = ["proof"]
-permissions = ["track.read", "track.update_now", "track.add_material", "track.add_update", "track.add_proof", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "buddybox.read", "buddybox.write", "buddybox.delete", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "request.read", "request.create", "request.accept", "request.block", "request.complete", "request.cancel", "search.use"]
+permissions = ["track.read", "track.update_now", "track.add_material", "track.add_update", "track.add_proof", "task.read", "task.create", "task.update", "task.archive", "artifact.read", "artifact.create", "artifact.update", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "request.read", "request.create", "request.accept", "request.block", "request.complete", "request.cancel", "search.use"]

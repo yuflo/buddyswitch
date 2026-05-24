@@ -17,28 +17,10 @@ _ALLOWED_TYPES = {
     "artifact",
     "track",
     "task",
-    "buddybox",
     "external",
     "note",
 }
-_KNOWN_BUDDY_IDS = {"pm", "design", "dev", "market", "test"}
 PROVENANCE_ONLY_NOTE = "source_refs are provenance-only metadata, not a required reading path"
-
-
-def validate_buddybox_ref_logical_name(logical_name: Any, *, active_buddy: str) -> str:
-    if not isinstance(logical_name, str) or not logical_name.strip():
-        raise ValueError("source_refs.buddybox.logical_name must be a non-empty string")
-    normalized = logical_name.replace("\\", "/").strip()
-    if normalized.startswith("/"):
-        raise ValueError("source_refs.buddybox.logical_name must be relative")
-    pieces = [piece for piece in normalized.split("/") if piece not in {"", "."}]
-    if not pieces:
-        raise ValueError("source_refs.buddybox.logical_name must be non-empty")
-    if any(piece == ".." for piece in pieces):
-        raise ValueError("source_refs.buddybox.logical_name must not include '..' traversal")
-    if pieces[0] in (_KNOWN_BUDDY_IDS | {active_buddy}):
-        raise ValueError("source_refs.buddybox.logical_name must not include a buddy prefix")
-    return "/".join(pieces)
 
 
 def normalize_source_refs(
@@ -46,7 +28,6 @@ def normalize_source_refs(
     *,
     active_buddy: str,
     read_claim: str | None = None,
-    allow_buddybox: bool = True,
 ) -> tuple[list[dict[str, Any]] | None, dict[str, Any] | None]:
     if raw_refs is None:
         return None, None
@@ -67,17 +48,6 @@ def normalize_source_refs(
         item: dict[str, Any] = {"type": ref_type}
         if ref_type in {"artifact", "track", "task"}:
             item["id"] = runtime_files.require_id(raw.get("id"), f"source_refs.{ref_type}.id")
-        elif ref_type == "buddybox":
-            if not allow_buddybox:
-                raise ValueError(
-                    "source_refs.buddybox logical names are private provenance and not allowed in this payload"
-                )
-            if "path" in raw:
-                raise ValueError("source_refs.buddybox.logical_name is required; path is retired")
-            normalized_name = validate_buddybox_ref_logical_name(raw.get("logical_name"), active_buddy=active_buddy)
-            item["logical_name"] = normalized_name
-            item["private_to_buddy"] = active_buddy
-            item["read_grant"] = False
         elif ref_type == "external":
             label = raw.get("label")
             if not isinstance(label, str) or not label.strip():
@@ -138,13 +108,6 @@ def source_ref_summary(refs: list[dict[str, Any]] | None) -> list[dict[str, Any]
             continue
         if "id" in row:
             summary.append({"type": ref_type, "id": row.get("id")})
-        elif "logical_name" in row:
-            entry = {"type": ref_type, "logical_name": row.get("logical_name")}
-            if "private_to_buddy" in row:
-                entry["private_to_buddy"] = row.get("private_to_buddy")
-            if "read_grant" in row:
-                entry["read_grant"] = row.get("read_grant")
-            summary.append(entry)
         elif "label" in row:
             entry = {"type": ref_type, "label": row.get("label")}
             if "url" in row:

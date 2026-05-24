@@ -110,7 +110,7 @@ def _hold_product_runtime_lock(
 def _build_env_tools_desc() -> dict[str, Any]:
     """Expose canonical env tool contract and semantics map for runtime consumers."""
 
-    return tool_registry.env_tools_description()
+    return tool_registry.env_tools_description(exclude_tools={"buddybox"})
 
 
 def _runtime_status_payload() -> dict[str, Any]:

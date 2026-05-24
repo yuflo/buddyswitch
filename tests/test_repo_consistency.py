@@ -17,7 +17,7 @@ import env_store  # noqa: E402
 import turn_runtime  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
 
-_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment", "request"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment", "request"}
 _FORBIDDEN_RUNTIME_SURFACES = {
     "artifact_index",
     "artifact_search",
@@ -84,6 +84,17 @@ class RepoConsistencyTests(unittest.TestCase):
             return False
         name = Path(path_text).name
         return any(marker in name for marker in _DOC_SPEC_CONTEXT_MARKERS)
+
+    @staticmethod
+    def _retired_buddybox_host_path_tokens() -> tuple[str, ...]:
+        return (
+            " ".join(("buddybox", "write", "--payload")),
+            ".".join(("buddybox", "import_file")),
+            "_".join(("source", "buddybox", "logical", "name")),
+            "_".join(("write", "private", "text")),
+            "_".join(("write", "private", "binary")),
+            " ".join(("address", "them", "only", "through", "buddybox", "env", "tools")),
+        )
 
     def test_active_runtime_modules_do_not_import_env_store(self) -> None:
         completed = subprocess.run(
@@ -206,6 +217,30 @@ class RepoConsistencyTests(unittest.TestCase):
         )
         request_actions = set(tool_catalog.supported_actions("request"))
         self.assertEqual(request_actions, {"create", "list", "get", "accept", "block", "complete", "cancel"})
+
+    def test_buddybox_env_tool_package_is_removed(self) -> None:
+        self.assertFalse((ROOT / "scripts" / "env" / "tools" / "buddybox").exists())
+        self.assertNotIn("buddybox", tool_catalog.supported_tools())
+
+    def test_live_guidance_uses_direct_buddybox_directory_not_env_tool_payloads(self) -> None:
+        paths = [
+            ROOT / "AGENTS.md",
+            ROOT / "README.md",
+            ROOT / "framework" / "contracts",
+            ROOT / "buddyswitch" / "skills",
+        ]
+        chunks: list[str] = []
+        for root in paths:
+            files = [root] if root.is_file() else sorted(path for path in root.rglob("*") if path.is_file())
+            for path in files:
+                if path.suffix not in {".md", ".toml"}:
+                    continue
+                chunks.append(path.read_text(encoding="utf-8").lower())
+        text = "\n".join(chunks)
+        for forbidden in self._retired_buddybox_host_path_tokens():
+            self.assertNotIn(forbidden, text)
+        self.assertIn("buddyswitch_buddybox_dir", text)
+        self.assertIn("workspace/buddybox", text)
 
     def test_registry_semantic_projections_are_generated_from_definitions(self) -> None:
         desc = tool_catalog.env_tools_description()
@@ -584,7 +619,7 @@ class RepoConsistencyTests(unittest.TestCase):
             [
                 "rg",
                 "-n",
-                "track\\.now|artifact\\.source_refs|comment\\.mentions|buddybox\\.list",
+                "track\\.now|artifact\\.source_refs|comment\\.mentions",
                 "scripts/env/tool_runtime",
             ],
             cwd=ROOT,
@@ -752,7 +787,7 @@ class RepoConsistencyTests(unittest.TestCase):
             "Path(tempfile.gettempdir())",
             "system tempdir",
         )
-        scan_targets = ["tools/launcher/env.sh", "scripts/env/tools/buddybox/_impl.py"]
+        scan_targets = ["tools/launcher/env.sh", "tools/launcher/app_server.sh", "scripts/env/tools/artifact/_impl.py"]
         for token in forbidden:
             completed = subprocess.run(
                 ["rg", "-F", "-n", "--", token, *scan_targets],

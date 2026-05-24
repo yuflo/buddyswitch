@@ -115,9 +115,18 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         affordances = response.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=response)
         assert isinstance(affordances, dict)
-        self.assertTrue({"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment", "request"}.issubset(set(affordances)))
+        self.assertTrue({"task", "track", "artifact", "context", "evidence", "search", "message", "comment", "request"}.issubset(set(affordances)))
+        self.assertNotIn("buddybox", affordances)
         self.assertNotIn("handoff", affordances)
         self.assertNotIn("project_source", affordances)
+        writable_surfaces = response.get("writable_surfaces")
+        self.assertIsInstance(writable_surfaces, dict, msg=response)
+        assert isinstance(writable_surfaces, dict)
+        persistent = writable_surfaces.get("persistent_files")
+        self.assertIsInstance(persistent, dict, msg=writable_surfaces)
+        assert isinstance(persistent, dict)
+        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_BUDDYBOX_DIR")
+        self.assertEqual(persistent.get("workspace_relative_root"), "buddybox")
 
     def test_context_summarize_includes_compact_artifacts_comments_and_updates(self) -> None:
         track = env_store.create_track(
@@ -420,7 +429,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         self.assertEqual((response.get("error") or {}).get("code"), "E_TRACK_AUTHORITY")
         self.assertEqual(response["permission_boundary"], "track.lifecycle_authority")
 
-    def test_pm_page_prototype_decision_surface_prefers_private_buddybox_without_phrase_rule(self) -> None:
+    def test_pm_page_prototype_decision_surface_prefers_direct_private_buddybox_directory_without_phrase_rule(self) -> None:
         pm_agents = (ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md").read_text(
             encoding="utf-8"
         )
@@ -433,83 +442,56 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         affordances = summary.get("tool_affordances")
         self.assertIsInstance(affordances, dict, msg=summary)
         assert isinstance(affordances, dict)
-        buddybox = affordances.get("buddybox")
         artifact = affordances.get("artifact")
         task = affordances.get("task")
         track = affordances.get("track")
         context_tool = affordances.get("context")
         evidence = affordances.get("evidence")
         search = affordances.get("search")
-        self.assertIsInstance(buddybox, dict, msg=summary)
         self.assertIsInstance(artifact, dict, msg=summary)
         self.assertIsInstance(task, dict, msg=summary)
         self.assertIsInstance(track, dict, msg=summary)
         self.assertIsInstance(context_tool, dict, msg=summary)
         self.assertIsInstance(evidence, dict, msg=summary)
         self.assertIsInstance(search, dict, msg=summary)
-        assert isinstance(buddybox, dict)
         assert isinstance(artifact, dict)
         assert isinstance(task, dict)
         assert isinstance(track, dict)
         assert isinstance(context_tool, dict)
         assert isinstance(evidence, dict)
         assert isinstance(search, dict)
-        for compact in (buddybox, artifact, task, track, context_tool, evidence, search):
+        self.assertNotIn("buddybox", affordances)
+        writable_surfaces = summary.get("writable_surfaces")
+        self.assertIsInstance(writable_surfaces, dict, msg=summary)
+        assert isinstance(writable_surfaces, dict)
+        persistent = writable_surfaces.get("persistent_files")
+        self.assertIsInstance(persistent, dict, msg=writable_surfaces)
+        assert isinstance(persistent, dict)
+        self.assertEqual(persistent.get("env"), "BUDDYSWITCH_BUDDYBOX_DIR")
+        self.assertEqual(persistent.get("workspace_relative_root"), "buddybox")
+        for compact in (artifact, task, track, context_tool, evidence, search):
             for key in ("capability", "when_to_use", "when_not_to_use", "returns", "state_effect"):
                 self.assertIn(key, compact, msg=compact)
 
         context_get = self._dispatch(buddy="pm", tool="context", action="get", args={})
         self.assertTrue(context_get["ok"], msg=context_get)
-        buddybox_catalog = context_get["tool_catalog"]["buddybox"]
-        write_semantics = buddybox_catalog["action_semantics"]["write"]
-        self.assertEqual(write_semantics.get("title"), "buddybox.write")
-        self.assertIn("side_effects", write_semantics)
+        self.assertNotIn("buddybox", context_get["tool_catalog"])
+        self.assertNotIn("buddybox.write", context_get["operation_semantics"])
         semantic_payload = json.dumps(
-            {"summary": affordances, "buddybox_write": write_semantics},
+            {"summary": affordances, "writable_surfaces": writable_surfaces},
             ensure_ascii=True,
         ).lower()
         self.assertNotIn("prototype means", semantic_payload)
         self.assertNotIn("quickly build means", semantic_payload)
 
-        written = self._dispatch(
-            buddy="pm",
-            tool="buddybox",
-            action="write",
-            args={
-                "logical_name": "prototypes/simple-page.html",
-                "content": "<!doctype html><html><body><h1>Prototype</h1></body></html>",
-                "content_type": "text/html",
-            },
-        )
-        self.assertTrue(written["ok"], msg=written)
-        self.assertTrue((self.instance_root / "workspace" / "buddybox" / "prototypes" / "simple-page.html").exists())
-        self.assertFalse(written.get("mutates_product_state"), msg=written)
-        self.assertEqual(written.get("mutated_product_objects"), [], msg=written)
-
-        options = written.get("allowed_next_action_options")
-        self.assertIsInstance(options, list, msg=written)
-        assert isinstance(options, list)
-        option_pairs = {
-            (row.get("tool"), row.get("action"))
-            for row in options
-            if isinstance(row, dict)
-        }
-        self.assertIn(("buddybox", "read"), option_pairs)
-        self.assertIn(("buddybox", "list"), option_pairs)
-        self.assertIn(("artifact", "create_revision"), option_pairs)
-        promotion = next(
-            row
-            for row in options
-            if isinstance(row, dict) and row.get("tool") == "artifact" and row.get("action") == "create_revision"
-        )
-        self.assertIn("when", str(promotion.get("reason", "")).lower())
-        self.assertNotIn("must", str(promotion.get("reason", "")).lower())
-        self.assertNotIn("always", str(promotion.get("reason", "")).lower())
-        for row in options:
-            if not isinstance(row, dict):
-                continue
-            for key in ("tool", "action", "mutates", "preconditions", "reason", "source_refs"):
-                self.assertIn(key, row, msg=row)
+        product_objects_root = self._runtime_path("buddyswitch/objects")
+        before = sorted(path.relative_to(product_objects_root).as_posix() for path in product_objects_root.rglob("*.json"))
+        target = self.instance_root / "workspace" / "buddybox" / "prototypes" / "simple-page.html"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("<!doctype html><html><body><h1>Prototype</h1></body></html>", encoding="utf-8")
+        self.assertTrue(target.exists())
+        after = sorted(path.relative_to(product_objects_root).as_posix() for path in product_objects_root.rglob("*.json"))
+        self.assertEqual(after, before)
 
 
 if __name__ == "__main__":

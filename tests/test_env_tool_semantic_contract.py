@@ -14,12 +14,11 @@ if str(SCRIPTS) not in sys.path:
 
 from env.tool_runtime import registry as catalog  # noqa: E402
 
-_EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment", "request"}
+_EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment", "request"}
 _EXPECTED_ACTIONS_BY_TOOL = {
     "task": {"create", "list", "get", "update", "archive", "history"},
     "track": {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
     "artifact": {"list", "get", "create_revision", "update_metadata", "attach_file", "list_attachments", "get_attachment"},
-    "buddybox": {"desc", "list", "read", "write", "delete", "import_file"},
     "context": {"get", "summarize", "list_sources"},
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request", "open_browser"},
@@ -143,11 +142,6 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("context", "get", ("full", "catalog", "summarize")),
             ("context", "summarize", ("compact", "summary", "get")),
             ("context", "list_sources", ("source", "descriptor", "catalog")),
-            ("buddybox", "list", ("summary", "logical", "read")),
-            ("buddybox", "read", ("exact", "logical_name", "list")),
-            ("buddybox", "write", ("replace", "private", "artifact")),
-            ("buddybox", "import_file", ("source_path", "private", "artifact")),
-            ("buddybox", "delete", ("delete", "private", "archive")),
             ("message", "send", ("inbox", "buddy", "comment")),
             ("message", "list", ("inbox", "read", "comment")),
             ("comment", "resolve", ("pm", "thread", "resolved")),
@@ -246,7 +240,6 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         track_model = str(desc["track"].get("object_model", "")).lower()
         task_model = str(desc["task"].get("object_model", "")).lower()
         artifact_model = str(desc["artifact"].get("object_model", "")).lower()
-        buddybox_model = str(desc["buddybox"].get("object_model", "")).lower()
 
         self.assertIn("shared product outcome thread", track_model)
         self.assertIn("feature iteration", track_model)
@@ -255,8 +248,6 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertIn("context link", task_model)
         self.assertIn("draft", artifact_model)
         self.assertIn("track.add_material", artifact_model)
-        self.assertIn("private file", buddybox_model)
-        self.assertIn("not product-readable", buddybox_model)
 
         task_create = desc["task"]["action_semantics"]["create"]
         task_side_effects = task_create["side_effects"]

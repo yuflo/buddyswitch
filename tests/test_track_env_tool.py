@@ -531,22 +531,9 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-open-attachments").get("ok"))
 
-        pm_source = self._instance_root("inst-pm-track") / "tmp" / "pm" / "brief-attachment.txt"
+        pm_source = self._instance_root("inst-pm-track") / "workspace" / "buddybox" / "evidence" / "brief-attachment.txt"
         pm_source.parent.mkdir(parents=True, exist_ok=True)
         pm_source.write_text("pm attachment", encoding="utf-8")
-        imported_pm = self._dispatch(
-            instance_json=pm_instance,
-            instance_id="inst-pm-track",
-            buddy="pm",
-            tool="buddybox",
-            action="import_file",
-            args={
-                "logical_name": "evidence/brief-attachment.txt",
-                "source_path": str(pm_source),
-                "content_type": "text/plain",
-            },
-        )
-        self.assertTrue(imported_pm.get("ok"), msg=imported_pm)
 
         pm_draft = self._create_draft(
             instance_json=pm_instance,
@@ -566,7 +553,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={
                 "artifact_id": "art-track-open-brief-r1",
                 "filename": "brief-attachment.txt",
-                "source_buddybox_logical_name": "evidence/brief-attachment.txt",
+                "source_path": str(pm_source),
                 "content_type": "text/plain",
             },
         )
@@ -589,22 +576,9 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(published_material.get("ok"), msg=published_material)
 
         test_instance = self._instance_json(instance_id="inst-test-track-open", buddy="test")
-        test_source = self._instance_root("inst-test-track-open") / "tmp" / "test" / "proof-attachment.txt"
+        test_source = self._instance_root("inst-test-track-open") / "workspace" / "buddybox" / "evidence" / "proof-attachment.txt"
         test_source.parent.mkdir(parents=True, exist_ok=True)
         test_source.write_text("proof attachment", encoding="utf-8")
-        imported_test = self._dispatch(
-            instance_json=test_instance,
-            instance_id="inst-test-track-open",
-            buddy="test",
-            tool="buddybox",
-            action="import_file",
-            args={
-                "logical_name": "evidence/proof-attachment.txt",
-                "source_path": str(test_source),
-                "content_type": "text/plain",
-            },
-        )
-        self.assertTrue(imported_test.get("ok"), msg=imported_test)
 
         test_draft = self._create_draft(
             instance_json=test_instance,
@@ -624,7 +598,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={
                 "artifact_id": "art-track-open-proof-r1",
                 "filename": "proof-attachment.txt",
-                "source_buddybox_logical_name": "evidence/proof-attachment.txt",
+                "source_path": str(test_source),
                 "content_type": "text/plain",
             },
         )

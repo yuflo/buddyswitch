@@ -52,7 +52,6 @@ def _source_refs_field_error() -> dict[str, Any]:
             {"type": "artifact", "id": "art-..."},
             {"type": "track", "id": "track-..."},
             {"type": "task", "id": "task-..."},
-            {"type": "buddybox", "logical_name": "notes/source.txt"},
             {"type": "external", "label": "Product page", "url": "https://example.com"},
             {"type": "note", "label": "Source note"},
         ],
@@ -68,11 +67,11 @@ def _attachment_filename_field_error() -> dict[str, Any]:
     }
 
 
-def _source_buddybox_logical_name_field_error() -> dict[str, Any]:
+def _source_path_field_error() -> dict[str, Any]:
     return {
-        "path": "source_buddybox_logical_name",
-        "message": "source_buddybox_logical_name must reference one active-buddy private buddybox file",
-        "example": "screenshots/desktop.png",
+        "path": "source_path",
+        "message": "source_path must reference one non-empty file inside the active instance buddybox directory",
+        "example": "/path/to/instance/workspace/buddybox/screenshots/desktop.png",
     }
 
 
@@ -82,17 +81,6 @@ def _attachment_id_field_error() -> dict[str, Any]:
         "message": "attachment_id must reference one attachment owned by the selected artifact",
         "example": "att-example",
     }
-
-
-def _manifest_buddy_ids(context: ArtifactServiceContext) -> set[str]:
-    buddy_ids: set[str] = set()
-    for row in context.get("manifest", {}).get("buddies", []):
-        if isinstance(row, dict):
-            buddy_id = row.get("id")
-            if isinstance(buddy_id, str) and buddy_id.strip():
-                buddy_ids.add(buddy_id.strip())
-    buddy_ids.add(context["active_buddy"])
-    return buddy_ids
 
 
 def _allowed_templates_for_active_buddy(context: ArtifactServiceContext) -> tuple[str, ...]:
@@ -152,29 +140,30 @@ def _reject_payload(
     action: str,
     active_buddy: str,
     message: str,
+    correctable_fields: list[str] | None = None,
     field_errors: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    correctable_fields: list[str] | None = None
-    if "unsupported payload fields:" in message:
-        suffix = message.split("unsupported payload fields:", 1)[1].strip()
-        if suffix:
-            correctable_fields = [row.strip() for row in suffix.split(",") if row.strip()]
-    else:
-        for field in (
-            "artifact_id",
-            "title",
-            "summary",
-            "template",
-            "body",
-            "supersedes_artifact_id",
-            "source_refs",
-            "filename",
-            "source_buddybox_logical_name",
-            "attachment_id",
-        ):
-            if field in message:
-                correctable_fields = [field]
-                break
+    if correctable_fields is None:
+        if "unsupported payload fields:" in message:
+            suffix = message.split("unsupported payload fields:", 1)[1].strip()
+            if suffix:
+                correctable_fields = [row.strip() for row in suffix.split(",") if row.strip()]
+        else:
+            for field in (
+                "artifact_id",
+                "title",
+                "summary",
+                "template",
+                "body",
+                "supersedes_artifact_id",
+                "source_refs",
+                "filename",
+                "source_path",
+                "attachment_id",
+            ):
+                if field in message:
+                    correctable_fields = [field]
+                    break
     return tool_results.rejection(
         tool="artifact",
         action=action,
@@ -572,7 +561,6 @@ def create_artifact_revision(*, args: dict[str, Any], context: ArtifactServiceCo
             args.get("source_refs"),
             active_buddy=active_buddy,
             read_claim=read_claim if isinstance(read_claim, str) else None,
-            allow_buddybox=True,
         )
     except ValueError as exc:
         return _reject_scope(
@@ -711,7 +699,6 @@ def update_artifact_metadata(*, args: dict[str, Any], context: ArtifactServiceCo
                 args.get("source_refs"),
                 active_buddy=active_buddy,
                 read_claim=read_claim if isinstance(read_claim, str) else None,
-                allow_buddybox=True,
             )
         except ValueError as exc:
             return _reject_scope(
@@ -777,13 +764,13 @@ def attach_file_to_artifact(*, args: dict[str, Any], context: ArtifactServiceCon
             field_errors=[_attachment_filename_field_error()],
         )
 
-    source_logical_name = args.get("source_buddybox_logical_name")
-    if not isinstance(source_logical_name, str) or not source_logical_name.strip():
+    source_path = args.get("source_path")
+    if not isinstance(source_path, str) or not source_path.strip():
         return _reject_payload(
             action=action,
             active_buddy=active_buddy,
-            message="source_buddybox_logical_name is required",
-            field_errors=[_source_buddybox_logical_name_field_error()],
+            message="source_path is required",
+            field_errors=[_source_path_field_error()],
         )
 
     artifact = context.repos.artifact.get_artifact(artifact_id)
@@ -806,65 +793,23 @@ def attach_file_to_artifact(*, args: dict[str, Any], context: ArtifactServiceCon
             code="E_ARTIFACT_SCOPE",
         )
 
-    buddy_ids = _manifest_buddy_ids(context)
     try:
-        normalized_logical_name = context.repos.buddybox.normalize_logical_name(
-            source_logical_name,
-            active_buddy=active_buddy,
-            buddy_ids=buddy_ids,
-        )
-        root = context.repos.buddybox.ensure_active_buddy_root(
-            active_buddy=active_buddy,
-            instance_payload=context["instance_payload"],
-        )
-        raw, _content_type = context.repos.buddybox.read_private_file(root=root, logical_name=normalized_logical_name)
-    except context.repos.buddybox.BuddyboxLogicalNameError as exc:
-        return _reject_payload(
-            action=action,
-            active_buddy=active_buddy,
-            message=str(exc),
-            field_errors=[_source_buddybox_logical_name_field_error()],
-        )
-    except FileNotFoundError:
-        return _reject_payload(
-            action=action,
-            active_buddy=active_buddy,
-            message=f"source_buddybox_logical_name not found: {source_logical_name}",
-            field_errors=[_source_buddybox_logical_name_field_error()],
-        )
-    except context.repos.buddybox.BuddyboxBoundaryError as exc:
-        return _reject_scope(
-            action=action,
-            active_buddy=active_buddy,
-            boundary="artifact.buddy_scope",
-            message=str(exc),
-            code="E_ARTIFACT_SCOPE",
-            correctable_fields=["source_buddybox_logical_name"],
-            field_errors=[_source_buddybox_logical_name_field_error()],
-        )
-    if not raw:
-        return _reject_payload(
-            action=action,
-            active_buddy=active_buddy,
-            message="source_buddybox_logical_name must reference a non-empty private file",
-            field_errors=[_source_buddybox_logical_name_field_error()],
-        )
-
-    try:
-        updated_artifact, attachment = context.repos.artifact.adopt_buddybox_attachment(
+        updated_artifact, attachment = context.repos.artifact.adopt_local_attachment(
             artifact_id=artifact_id,
             filename=filename,
             created_by=active_buddy,
-            source_logical_name=normalized_logical_name,
+            source_path=Path(source_path.strip()),
             content_type=args.get("content_type") if isinstance(args.get("content_type"), str) else None,
             context=context,
         )
-    except ValueError as exc:
-        message = str(exc)
-        field_errors = [_attachment_filename_field_error()] if "attachment.filename" in message or "filename" in message else None
-        if field_errors is None and "source_buddybox_logical_name" in message:
-            field_errors = [_source_buddybox_logical_name_field_error()]
-        return _reject_payload(action=action, active_buddy=active_buddy, message=message, field_errors=field_errors)
+    except (FileNotFoundError, IsADirectoryError, ValueError) as exc:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=str(exc),
+            correctable_fields=["source_path"],
+            field_errors=[_source_path_field_error()],
+        )
 
     row = _artifact_response_row(updated_artifact, active_buddy, context)
     return tool_results.success(

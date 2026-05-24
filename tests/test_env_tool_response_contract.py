@@ -396,7 +396,7 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             args={
                 "artifact_id": "art-design-attach-contract",
                 "filename": "desktop.png",
-                "source_buddybox_logical_name": "screenshots/desktop.png",
+                "source_path": str(self._runtime_path(f"instances/{instance_id}/workspace/buddybox/screenshots/desktop.png")),
                 "content_base64": "aGVsbG8=",
             },
         )
@@ -436,17 +436,6 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         )
         self._assert_success_matches_declared_action_semantics("track.create", track)
 
-        private_file = self._dispatch(
-            instance_json=dev_instance,
-            instance_id=f"{instance_id}-dev",
-            buddy="dev",
-            tool="buddybox",
-            action="write",
-            args={"logical_name": "notes/effects.txt", "content": "private"},
-        )
-        self._assert_success_matches_declared_action_semantics("buddybox.write", private_file)
-        self.assertFalse(private_file.get("mutates_product_state"), msg=private_file)
-
         draft = self._dispatch(
             instance_json=dev_instance,
             instance_id=f"{instance_id}-dev",
@@ -462,6 +451,25 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             },
         )
         self.assertTrue(draft.get("ok"), msg=draft)
+        source = self.runtime_root / "buddybox" / "notes" / "effects.txt"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("private", encoding="utf-8")
+        attached = self._dispatch(
+            instance_json=dev_instance,
+            instance_id=f"{instance_id}-dev",
+            buddy="dev",
+            tool="artifact",
+            action="attach_file",
+            args={
+                "artifact_id": "art-declared-effects-r1",
+                "filename": "effects.txt",
+                "source_path": str(source),
+                "content_type": "text/plain",
+            },
+        )
+        self._assert_success_matches_declared_action_semantics("artifact.attach_file", attached)
+        self.assertTrue(attached.get("state_changed"), msg=attached)
+
         token = self._dispatch(
             instance_json=dev_instance,
             instance_id=f"{instance_id}-dev",
@@ -692,6 +700,21 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
             },
         )
         self.assertTrue(created.get("ok"), msg=created)
+        draft = self._dispatch(
+            instance_json=dev_instance_json,
+            instance_id=dev_instance_id,
+            buddy="dev",
+            tool="artifact",
+            action="create_revision",
+            args={
+                "artifact_id": "art-field-errors-r1",
+                "title": "Field Errors Draft",
+                "summary": "seed",
+                "template": "note",
+                "body": "body",
+            },
+        )
+        self.assertTrue(draft.get("ok"), msg=draft)
 
         cases = [
             (
@@ -759,16 +782,19 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
                 "source_refs",
             ),
             (
-                "buddybox.write.content",
+                "artifact.attach_file.source_path",
                 self._dispatch(
                     instance_json=dev_instance_json,
                     instance_id=dev_instance_id,
                     buddy="dev",
-                    tool="buddybox",
-                    action="write",
-                    args={"logical_name": "notes/field-errors.txt"},
+                    tool="artifact",
+                    action="attach_file",
+                    args={
+                        "artifact_id": "art-field-errors-r1",
+                        "filename": "field-errors.txt",
+                    },
                 ),
-                "content",
+                "source_path",
             ),
             (
                 "comment.add.mentions",

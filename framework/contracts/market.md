@@ -13,14 +13,14 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 - Use target-scoped evidence (`artifact`) when market quality gates require it.
 - Use `request.list` / `request.get` to track incoming and outgoing structured requests.
 - For requests assigned to Market, mutate lifecycle with `request.accept`, `request.block`, and `request.complete`.
-- Use buddybox for private research exports, logs, or local reports; use artifact for market deliverables PM, Design, or Dev must read.
+- Use `$BUDDYSWITCH_BUDDYBOX_DIR` for private research exports, logs, or local reports; use artifact for market deliverables PM, Design, or Dev must read.
 
 ## Runtime Boundary
 
 - Use `python3 scripts/env/client.py ...` (`env.tool`) for durable operations.
 - No `prepare/persist` turn transaction.
 - Do not fabricate evidence tokens.
-- Do not edit `buddyswitch/objects/**` or `buddyswitch/local/buddybox/**` directly.
+- Do not edit `buddyswitch/objects/**`, old buddybox runtime paths, or other instance roots directly.
 
 ## Runtime Discovery
 
@@ -32,4 +32,4 @@ Produce evidence-based market outputs that PM/Design/Dev can consume.
 - `instances/<instance-id>/taskbox/<buddy>/tasks/<task-id>.json`
 - `instances/<instance-id>/taskbox/<buddy>/history.md`
 - `buddyswitch/objects/artifacts/<artifact-id>.json`
-- Active-buddy-private files via `buddybox.*` logical names (instance-local, not product-readable).
+- Active-instance private host files under `$BUDDYSWITCH_BUDDYBOX_DIR` (`workspace/buddybox`, not product-readable).

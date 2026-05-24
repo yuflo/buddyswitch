@@ -294,6 +294,8 @@ buddyswitch_workspace_cleanup_stale_state_projections
         sandbox_env["TMPDIR"] = str(instance_root / "tmp")
         sandbox_env["TMP"] = str(instance_root / "tmp")
         sandbox_env["TEMP"] = str(instance_root / "tmp")
+        sandbox_env["TMPPREFIX"] = str(instance_root / "tmp" / "zsh")
+        sandbox_env["BUDDYSWITCH_BUDDYBOX_DIR"] = str(workspace_dir / "buddybox")
         sandbox_env["BUDDYSWITCH_STATE_ROOT"] = str(shared_root / "state")
         sandboxed = subprocess.run(
             [
@@ -311,16 +313,23 @@ buddyswitch_workspace_cleanup_stale_state_projections
                 "mkdir -p \"$CODEX_HOME/sessions\" && echo codex > \"$CODEX_HOME/sessions/probe.jsonl\"; codex=$?\n"
                 "mkdir -p \"$XDG_CONFIG_HOME/test\" && echo xdg > \"$XDG_CONFIG_HOME/test/probe.txt\"; xdg=$?\n"
                 "mkdir -p \"$TMPDIR\" && echo tmp > \"$TMPDIR/probe.txt\"; inst_tmp=$?\n"
-                "mkdir -p buddybox/prototypes && echo buddybox > buddybox/prototypes/probe.txt; buddybox=$?\n"
+                "mkdir -p \"$BUDDYSWITCH_BUDDYBOX_DIR/prototypes\" && echo buddybox > \"$BUDDYSWITCH_BUDDYBOX_DIR/prototypes/probe.txt\"; buddybox=$?\n"
+                "cat > \"$BUDDYSWITCH_BUDDYBOX_DIR/heredoc.txt\" <<'EOF'\n"
+                "ok\n"
+                "EOF\n"
+                "heredoc=$?\n"
+                "test \"$(cat \"$BUDDYSWITCH_BUDDYBOX_DIR/heredoc.txt\")\" = ok; heredoc_read=$?\n"
                 "echo root > workspace-root-probe.txt; workspace_root=$?\n"
                 "echo global > /tmp/buddyswitch-global-probe.txt; global_tmp=$?\n"
                 "mkdir -p \"$BUDDYSWITCH_STATE_ROOT/buddyswitch/objects\" && echo state > \"$BUDDYSWITCH_STATE_ROOT/buddyswitch/objects/probe.txt\"; state=$?\n"
-                "echo \"home=$home codex=$codex xdg=$xdg inst_tmp=$inst_tmp buddybox=$buddybox workspace_root=$workspace_root global_tmp=$global_tmp state=$state\"\n"
+                "echo \"home=$home codex=$codex xdg=$xdg inst_tmp=$inst_tmp buddybox=$buddybox heredoc=$heredoc heredoc_read=$heredoc_read workspace_root=$workspace_root global_tmp=$global_tmp state=$state\"\n"
                 "test \"$home\" = 0\n"
                 "test \"$codex\" = 0\n"
                 "test \"$xdg\" = 0\n"
                 "test \"$inst_tmp\" = 0\n"
                 "test \"$buddybox\" = 0\n"
+                "test \"$heredoc\" = 0\n"
+                "test \"$heredoc_read\" = 0\n"
                 "test \"$workspace_root\" != 0\n"
                 "test \"$global_tmp\" != 0\n"
                 "test \"$state\" != 0\n",
@@ -335,6 +344,8 @@ buddyswitch_workspace_cleanup_stale_state_projections
         self.assertIn("xdg=0", sandboxed.stdout)
         self.assertIn("inst_tmp=0", sandboxed.stdout)
         self.assertIn("buddybox=0", sandboxed.stdout)
+        self.assertIn("heredoc=0", sandboxed.stdout)
+        self.assertIn("heredoc_read=0", sandboxed.stdout)
         self.assertIn("workspace_root=1", sandboxed.stdout)
         self.assertIn("global_tmp=1", sandboxed.stdout)
         self.assertIn("state=1", sandboxed.stdout)

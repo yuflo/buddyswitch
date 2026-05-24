@@ -83,6 +83,11 @@ def supported_tools() -> set[str]:
     return rows
 
 
+def _selected_tools(*, exclude_tools: set[str] | None = None) -> list[str]:
+    excluded = exclude_tools or set()
+    return [tool for tool in sorted(supported_tools()) if tool not in excluded]
+
+
 def supported_actions(tool: str) -> set[str]:
     try:
         definition = load_definition(tool)
@@ -187,9 +192,9 @@ def _action_semantic_row(tool: str, row: ActionDefinition) -> dict[str, Any]:
     }
 
 
-def env_tools_description() -> dict[str, dict[str, Any]]:
+def env_tools_description(*, exclude_tools: set[str] | None = None) -> dict[str, dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
-    for tool in sorted(supported_tools()):
+    for tool in _selected_tools(exclude_tools=exclude_tools):
         definition = load_definition(tool)
         operations: list[str] = []
         payload_fields: dict[str, list[str]] = {}
@@ -231,9 +236,9 @@ def env_tools_description() -> dict[str, dict[str, Any]]:
     return rows
 
 
-def operation_semantics() -> dict[str, dict[str, Any]]:
+def operation_semantics(*, exclude_tools: set[str] | None = None) -> dict[str, dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
-    for tool in sorted(supported_tools()):
+    for tool in _selected_tools(exclude_tools=exclude_tools):
         definition = load_definition(tool)
         for action in definition.actions:
             rows[f"{tool}.{action.name}"] = {
@@ -256,9 +261,9 @@ def operation_semantics() -> dict[str, dict[str, Any]]:
     return rows
 
 
-def compact_tool_affordances() -> dict[str, dict[str, Any]]:
+def compact_tool_affordances(*, exclude_tools: set[str] | None = None) -> dict[str, dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
-    for tool in sorted(supported_tools()):
+    for tool in _selected_tools(exclude_tools=exclude_tools):
         definition = load_definition(tool)
         rows[tool] = {
             "capability": definition.title,

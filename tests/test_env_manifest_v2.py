@@ -34,24 +34,23 @@ class EnvManifestV2Tests(unittest.TestCase):
             permissions = set(buddy.get("permissions", []))
             with self.subTest(buddy=buddy.get("id")):
                 self.assertFalse(any(item.startswith("memory.") for item in permissions))
-                self.assertIn("buddybox.read", permissions)
+                self.assertFalse(any(item.startswith("buddybox.") for item in permissions))
                 self.assertNotIn("run.commit", permissions)
                 self.assertNotIn("binding.get", permissions)
                 self.assertFalse(any(item.startswith("handoff.") for item in permissions))
 
-    def test_buddy_permissions_have_no_buddybox_special_cases(self) -> None:
-        expected = {"buddybox.read", "buddybox.write", "buddybox.delete"}
+    def test_buddy_permissions_do_not_declare_buddybox_special_cases(self) -> None:
         for buddy in self.manifest.get("buddies", []):
             assert isinstance(buddy, dict)
             buddy_id = str(buddy.get("id"))
             permissions = set(buddy.get("permissions", []))
             with self.subTest(buddy=buddy_id):
-                self.assertTrue(expected.issubset(permissions))
                 for permission in permissions:
                     lowered = permission.lower()
                     self.assertFalse(lowered.startswith("buddybox.read_foreign"))
                     self.assertFalse(lowered.startswith("buddybox.pm_override"))
                     self.assertFalse(lowered.startswith("buddybox." + buddy_id + "_"))
+                    self.assertFalse(lowered.startswith("buddybox."))
 
     def test_memory_permissions_are_rejected_by_validator(self) -> None:
         with self.assertRaisesRegex(env_manifest.ManifestError, "unsupported object 'memory'"):
@@ -66,31 +65,24 @@ class EnvManifestV2Tests(unittest.TestCase):
             assert isinstance(row, dict)
             self.assertEqual(set(row.keys()), {"id", "path"})
 
-    def test_buddybox_capable_buddies_include_buddybox_tool(self) -> None:
-        buddybox_capable: set[str] = set()
+    def test_buddies_do_not_receive_buddybox_tool(self) -> None:
         for buddy in self.manifest.get("buddies", []):
             assert isinstance(buddy, dict)
             buddy_id = buddy.get("id")
             permissions = {row for row in buddy.get("permissions", []) if isinstance(row, str)}
-            if {"buddybox.read", "buddybox.write", "buddybox.delete"} & permissions:
-                self.assertIsInstance(buddy_id, str)
-                assert isinstance(buddy_id, str)
-                buddybox_capable.add(buddy_id)
-                skills = {row for row in buddy.get("skills", []) if isinstance(row, str)}
-                self.assertIn("buddybox-tool", skills, msg=buddy_id)
-        self.assertEqual(buddybox_capable, {"market", "pm", "design", "dev", "test"})
+            self.assertIsInstance(buddy_id, str)
+            assert isinstance(buddy_id, str)
+            self.assertFalse(any(permission.startswith("buddybox.") for permission in permissions), msg=buddy_id)
+            skills = {row for row in buddy.get("skills", []) if isinstance(row, str)}
+            self.assertNotIn("buddybox-tool", skills, msg=buddy_id)
 
-    def test_buddybox_tool_skill_row_points_to_shared_package(self) -> None:
+    def test_manifest_has_no_buddybox_tool_skill_row(self) -> None:
         rows = [
             row
             for row in self.manifest.get("skills", [])
             if isinstance(row, dict) and row.get("id") == "buddybox-tool"
         ]
-        self.assertEqual(len(rows), 1, msg=rows)
-        row = rows[0]
-        self.assertEqual(set(row.keys()), {"id", "path"})
-        self.assertEqual(row.get("path"), "buddyswitch/skills/shared/buddybox-tool")
-        self.assertTrue((ROOT / str(row["path"]) / "SKILL.md").exists())
+        self.assertEqual(rows, [])
 
     def test_message_comment_and_request_permissions_are_supported(self) -> None:
         """MCT-MAN-001: Manifest validator accepts message/comment/request permission objects."""

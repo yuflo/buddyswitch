@@ -640,9 +640,12 @@ def main(argv: list[str]) -> int:
         "tmpdir": os.environ.get("TMPDIR"),
         "tmp": os.environ.get("TMP"),
         "temp": os.environ.get("TEMP"),
+        "tmpprefix": os.environ.get("TMPPREFIX"),
         "active_buddy": os.environ.get("BUDDYSWITCH_ACTIVE_BUDDY"),
         "instance_id": os.environ.get("BUDDYSWITCH_INSTANCE_ID"),
         "instance_json": os.environ.get("BUDDYSWITCH_INSTANCE_JSON"),
+        "buddybox_dir": os.environ.get("BUDDYSWITCH_BUDDYBOX_DIR"),
+        "instance_tmp": os.environ.get("BUDDYSWITCH_INSTANCE_TMP"),
         "project_workspace_dir": os.environ.get("BUDDYSWITCH_PROJECT_WORKSPACE_DIR"),
         "runtime_broker_socket": os.environ.get("BUDDYSWITCH_RUNTIME_BROKER_SOCKET"),
     }

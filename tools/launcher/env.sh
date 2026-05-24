@@ -228,6 +228,7 @@ buddyswitch_env_bind_instance() {
   export BUDDYSWITCH_INSTANCE_JSON="$(buddyswitch_instance_json_path "${instance_id}")"
   export BUDDYSWITCH_INSTANCE_ROOT="${instance_root}"
   export BUDDYSWITCH_WORKSPACE_DIR="${instance_root}/workspace"
+  export BUDDYSWITCH_BUDDYBOX_DIR="${BUDDYSWITCH_WORKSPACE_DIR}/buddybox"
   export BUDDYSWITCH_INSTANCE_TMP="${instance_root}/tmp"
   export BUDDYSWITCH_HOME="${instance_root}/home"
   export BUDDYSWITCH_CODEX_HOME="${instance_root}/codex-home"
@@ -255,11 +256,11 @@ buddyswitch_instance_ensure_taskbox() {
 }
 
 buddyswitch_instance_ensure_private_writable_surface() {
-  if [[ -z "${BUDDYSWITCH_WORKSPACE_DIR:-}" || -z "${BUDDYSWITCH_INSTANCE_TMP:-}" ]]; then
-    echo "buddyswitch: instance workspace and tmp must be bound" >&2
+  if [[ -z "${BUDDYSWITCH_BUDDYBOX_DIR:-}" || -z "${BUDDYSWITCH_INSTANCE_TMP:-}" ]]; then
+    echo "buddyswitch: instance buddybox and tmp must be bound" >&2
     return 2
   fi
-  mkdir -p "${BUDDYSWITCH_WORKSPACE_DIR}/buddybox"
+  mkdir -p "${BUDDYSWITCH_BUDDYBOX_DIR}"
   mkdir -p "${BUDDYSWITCH_INSTANCE_TMP}"
 }
 
@@ -588,6 +589,8 @@ buddyswitch_run_codex() {
     TMPDIR="${BUDDYSWITCH_INSTANCE_TMP}" \
     TMP="${BUDDYSWITCH_INSTANCE_TMP}" \
     TEMP="${BUDDYSWITCH_INSTANCE_TMP}" \
+    TMPPREFIX="${BUDDYSWITCH_INSTANCE_TMP}/zsh" \
+    BUDDYSWITCH_BUDDYBOX_DIR="${BUDDYSWITCH_BUDDYBOX_DIR:-}" \
     HOME="${BUDDYSWITCH_HOME}" \
     CODEX_HOME="${BUDDYSWITCH_CODEX_HOME}" \
     XDG_CONFIG_HOME="${BUDDYSWITCH_XDG_CONFIG_HOME}" \

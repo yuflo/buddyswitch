@@ -20,7 +20,6 @@ if str(SCRIPTS) not in sys.path:
 
 SHIPPED_TOOLS: dict[str, set[str]] = {
     "artifact": {"attach_file", "create_revision", "get", "get_attachment", "list", "list_attachments", "update_metadata"},
-    "buddybox": {"delete", "desc", "import_file", "list", "read", "write"},
     "comment": {"add", "list", "resolve"},
     "context": {"get", "list_sources", "summarize"},
     "evidence": {"approve_downgrade", "issue_browser"},

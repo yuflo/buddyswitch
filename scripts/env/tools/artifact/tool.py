@@ -470,11 +470,11 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name='attach_file',
                 title='artifact.attach_file',
-                description='Attach one active-buddy private buddybox file to an active-buddy-owned draft artifact.',
+                description='Attach one existing file from the active instance buddybox directory to an active-buddy-owned draft artifact.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
-                    'required': ['artifact_id', 'filename', 'source_buddybox_logical_name'],
+                    'required': ['artifact_id', 'filename', 'source_path'],
                     'properties': {
                         'artifact_id': {
                             'type': 'string',
@@ -484,9 +484,9 @@ def _build_definition() -> ToolDefinition:
                             'type': 'string',
                             'description': 'Display filename without path separators.',
                         },
-                        'source_buddybox_logical_name': {
+                        'source_path': {
                             'type': 'string',
-                            'description': 'Active-buddy private buddybox logical_name to promote into this artifact attachment.',
+                            'description': 'Existing source file path under the active instance buddybox directory.',
                         },
                         'content_type': {
                             'type': 'string',
@@ -506,7 +506,7 @@ def _build_definition() -> ToolDefinition:
                 failure_state_guarantee='Rejected attachment writes do not mutate artifact metadata, pinned files, buddybox files, or track state.',
                 reads=(
                     'one active-buddy-owned draft artifact',
-                    'one active-buddy private buddybox file',
+                    'one source file under the active instance buddybox directory',
                 ),
                 writes=(
                     'artifact attachment metadata',
@@ -523,15 +523,15 @@ def _build_definition() -> ToolDefinition:
                 ),
                 preconditions=(
                     'artifact_id references an active-buddy-owned draft artifact',
-                    'source_buddybox_logical_name references one active-buddy private buddybox file',
+                    'source_path references one non-empty file inside the active instance buddybox directory',
                 ),
                 returns=('attachment',),
                 use_when=(
-                    'You need to promote one private buddybox file into draft artifact attachment metadata.',
+                    'You need to promote one file from $BUDDYSWITCH_BUDDYBOX_DIR into draft artifact attachment metadata.',
                 ),
                 do_not_use_when=(
                     'You need to create a new draft body first; use artifact.create_revision.',
-                    'You only need private file storage without artifact ownership; use buddybox.import_file or buddybox.write.',
+                    'You only need private file storage without artifact ownership; write the file directly under $BUDDYSWITCH_BUDDYBOX_DIR.',
                 ),
                 risk_hints={
                     'read_only': False,

@@ -305,20 +305,9 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(design_draft.get("ok"), msg=design_draft)
 
-        source = self.instance_root / "tmp" / "chrome-devtools" / "desktop.png"
+        source = self.workspace_dir / "buddybox" / "screenshots" / "desktop.png"
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(b"\x89PNG\r\n")
-        imported = self._dispatch(
-            buddy="design",
-            tool="buddybox",
-            action="import_file",
-            args={
-                "logical_name": "screenshots/desktop.png",
-                "source_path": str(source),
-                "content_type": "image/png",
-            },
-        )
-        self.assertTrue(imported.get("ok"), msg=imported)
 
         attached = self._dispatch(
             buddy="design",
@@ -327,7 +316,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={
                 "artifact_id": "art-design-attach-e2e-r1",
                 "filename": "desktop.png",
-                "source_buddybox_logical_name": "screenshots/desktop.png",
+                "source_path": str(source),
                 "content_type": "image/png",
             },
         )

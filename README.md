@@ -24,10 +24,11 @@ Product mode:
 ## Product Runtime Loop (Runless)
 
 1. Call context discovery (`context.get` or `context.summarize`).
-2. Pick explicit target ids (`track_id`, `task_id`, `artifact_id`) or buddybox `logical_name` values for private files.
-3. Write product objects or active buddy private local files with env tools:
-   - `task.*`, `track.*`, `artifact.*`, `buddybox.*`
-4. Summarize what was written.
+2. Pick explicit target ids (`track_id`, `task_id`, `artifact_id`) and decide whether any host-private file belongs under `$BUDDYSWITCH_BUDDYBOX_DIR`.
+3. Write product objects with env tools:
+   - `task.*`, `track.*`, `artifact.*`
+4. Write active-instance private host files directly under `$BUDDYSWITCH_BUDDYBOX_DIR`, then attach them explicitly with `artifact.attach_file` using `source_path` when they must become product-readable.
+5. Summarize what was written.
 
 No `prepare/persist` lifecycle is required.
 
@@ -54,7 +55,7 @@ Canonical product state and private local paths:
 - `instances/<instance-id>/taskbox/<buddy>/tasks/*.json`
 - `instances/<instance-id>/taskbox/<buddy>/history.md`
 
-Buddybox private files are active-instance-local and tool-managed through `buddybox.*` with `logical_name`; they are not product-readable object state.
+Buddybox private files are active-instance-local under `$BUDDYSWITCH_BUDDYBOX_DIR` (`workspace/buddybox`); they are not product-readable object state until an explicit artifact attachment or other product write publishes them.
 
 ## Manage Instances
 

@@ -26,6 +26,8 @@ _ACTION_DEFINITION_MAP = {
     ]
 }
 
+_DISCOVERY_EXCLUDED_TOOLS = {"buddybox"}
+
 class ContextServiceContext(TypedDict):
     active_buddy: str
     instance_id: str
@@ -315,8 +317,8 @@ def _active_buddy_permissions(*, active_buddy: str, manifest: dict[str, Any]) ->
 
 def _capability_snapshot(*, active_buddy: str, manifest: dict[str, Any]) -> dict[str, str]:
     permissions = _active_buddy_permissions(active_buddy=active_buddy, manifest=manifest)
-    operation_semantics = tool_registry.operation_semantics()
-    affordances = tool_registry.compact_tool_affordances()
+    operation_semantics = tool_registry.operation_semantics(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS)
+    affordances = tool_registry.compact_tool_affordances(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS)
     artifact_create = operation_semantics["artifact.create_revision"]
 
     can_create_track = "track.create" in permissions
@@ -341,7 +343,7 @@ def _capability_snapshot(*, active_buddy: str, manifest: dict[str, Any]) -> dict
         "request_lifecycle_visibility": str(operation_semantics["request.create"]["visibility"]),
         "search_boundary": str(affordances["search"]["object_model"]),
         "evidence_boundary": str(affordances["evidence"]["object_model"]),
-        "buddybox_visibility": str(operation_semantics["buddybox.write"]["visibility"]),
+        "writable_file_surface": "$BUDDYSWITCH_BUDDYBOX_DIR for persistent private files; $BUDDYSWITCH_INSTANCE_TMP for temporary files.",
     }
 
 
@@ -641,20 +643,20 @@ def _current_context_sections(
         include_resolved_path=include_resolved_path,
     )
 
-    buddybox_desc = context.rules.buddybox_workspace.build_buddybox_desc(active_buddy, instance_payload=instance_payload)
+    writable_surfaces = _build_writable_surfaces(instance_payload)
     candidate_tracks = [_candidate_track_row(track=row, active_buddy=active_buddy) for row in visible_tracks]
     candidate_requests = [_candidate_request_row(request=row, active_buddy=active_buddy) for row in visible_requests]
     candidate_tasks = [_candidate_task_row(task=row) for row in visible_tasks]
 
     return {
-        "tool_catalog": tool_registry.env_tools_description(),
-        "operation_semantics": tool_registry.operation_semantics(),
+        "tool_catalog": tool_registry.env_tools_description(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS),
+        "operation_semantics": tool_registry.operation_semantics(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS),
         "tool_catalog_errors": tool_registry.tool_catalog_errors(),
         "tracks": visible_tracks,
         "tasks": visible_tasks,
         "artifact_summaries": visible_artifacts,
         "requests": visible_requests,
-        "buddybox_desc": buddybox_desc,
+        "writable_surfaces": writable_surfaces,
         "candidate_tracks": candidate_tracks,
         "candidate_requests": candidate_requests,
         "candidate_tasks": candidate_tasks,
@@ -677,7 +679,7 @@ def _current_context_sections(
                 "has_requests": bool(visible_requests),
                 "has_open_comment_threads": bool(open_comment_threads),
                 "has_recent_updates": bool(recent_updates),
-                "has_buddybox_workspace": bool(buddybox_desc),
+                "has_writable_surfaces": bool(writable_surfaces),
             },
         },
         "current_context_summary": {
@@ -688,7 +690,26 @@ def _current_context_sections(
             "open_comment_threads": len(open_comment_threads),
             "recent_updates": len(recent_updates),
             "messages": int(message_cues.get("count", 0)),
-            "has_buddybox_workspace": bool(buddybox_desc),
+            "has_writable_surfaces": bool(writable_surfaces),
+        },
+    }
+
+
+def _build_writable_surfaces(instance_payload: dict[str, Any]) -> dict[str, Any]:
+    del instance_payload
+    return {
+        "persistent_files": {
+            "kind": "host_writable_directory",
+            "env": "BUDDYSWITCH_BUDDYBOX_DIR",
+            "workspace_relative_root": "buddybox",
+            "durability": "active_instance_persistent",
+            "mutates_product_state": False,
+        },
+        "temporary_files": {
+            "kind": "host_writable_directory",
+            "env": "BUDDYSWITCH_INSTANCE_TMP",
+            "durability": "active_instance_ephemeral",
+            "mutates_product_state": False,
         },
     }
 
@@ -725,25 +746,12 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "scope": "requester-recipient-pm visible request state",
             "source_of_truth": "request.list / request.get via runtime env tools",
         },
-        "buddybox": {
-            "description": "Active buddy private file capability metadata for the instance-private workspace surface.",
-            "scope": "active-buddy private file capability",
-            "capability": "private_file_workspace",
-            "owner_scope": "active_buddy",
-            "lifetime_scope": "active_instance_workspace",
-            "visibility": "active_buddy_private",
-            "product_readable": False,
-            "cross_buddy_readable": False,
+        "writable_surfaces": {
+            "description": "Runtime writable filesystem surfaces for host-visible files.",
+            "scope": "read-only writable-surface facts",
+            "source_of_truth": "launcher instance environment and permission profile",
             "mutates_product_state": False,
-            "workspace_relative_root": "buddybox",
-            "supports": [
-                "describe_capability",
-                "list_private_file_summaries",
-                "read_private_file",
-                "write_private_text",
-                "write_private_binary",
-                "delete_private_file",
-            ],
+            "grants_write_authority": False,
         },
         "source_workspace": {
             "description": "Runtime product source root facts for the active buddy.",
@@ -781,12 +789,12 @@ def get_context(*, args: dict[str, Any], context: ContextServiceContext) -> dict
         tool="context",
         action=action,
         active_buddy=active_buddy,
-        effect_summary="Returned full runtime context sections plus source_workspace facts, full tool catalog, and full operation semantics.",
+        effect_summary="Returned full runtime context sections plus source_workspace facts, writable_surfaces facts, full tool catalog, and full operation semantics.",
         state_changed=False,
         durability="none",
         read_scope="read-only runtime context sections, source workspace facts, and full catalog metadata",
         allowed_next_actions=[
-            "Use task/track/artifact/buddybox tools with explicit ids.",
+            "Use task/track/artifact tools with explicit ids.",
             "Use context.summarize for compact orientation.",
         ],
         extra=sections,
@@ -824,8 +832,8 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "open_comment_threads": sections["open_comment_threads"],
         "recent_updates": sections["recent_updates"],
         "message_cues": sections["message_cues"],
-        "buddybox_desc": sections["buddybox_desc"],
-        "tool_affordances": tool_registry.compact_tool_affordances(),
+        "writable_surfaces": sections["writable_surfaces"],
+        "tool_affordances": tool_registry.compact_tool_affordances(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS),
         "capability_snapshot": sections["capability_snapshot"],
         "decision_surface": sections["decision_surface"],
     }
@@ -834,7 +842,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         tool="context",
         action=action,
         active_buddy=active_buddy,
-        effect_summary="Returned compact context orientation with source_workspace facts, candidate ids, buddybox descriptor, and first-pass tool affordances.",
+        effect_summary="Returned compact context orientation with source_workspace facts, writable_surfaces facts, candidate ids, and first-pass tool affordances.",
         state_changed=False,
         durability="none",
         read_scope="compact read-only orientation with source_workspace facts; not full catalog",
