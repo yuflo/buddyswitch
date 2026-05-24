@@ -10,8 +10,9 @@ APP_SERVER_HELPER="${REPO_ROOT}/tools/launcher/app_server.sh"
 INSTANCE_HELPER="${REPO_ROOT}/tools/launcher/instance.sh"
 CLEANUP_HELPER="${REPO_ROOT}/tools/launcher/cleanup.sh"
 RUNTIME_BROKER_HELPER="${REPO_ROOT}/tools/launcher/runtime_broker.sh"
+WEB_MANAGEMENT_HELPER="${REPO_ROOT}/tools/launcher/web_management.py"
 
-if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" ]]; then
+if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
   echo "Launcher helpers are missing under tools/launcher." >&2
   exit 1
 fi
@@ -38,6 +39,7 @@ Usage:
   buddyswitch-codex instance interrupt <instance-id>
   buddyswitch-codex instance list [--buddy <buddy>]
   buddyswitch-codex instance delete <instance-id> [--yes]
+  buddyswitch-codex web [--host 127.0.0.1] [--port 8765]
 
   buddyswitch-codex data cleanup --buddy <buddy> [--yes] [--json]
   buddyswitch-codex data cleanup --all-data [--yes] [--json]
@@ -51,6 +53,7 @@ Usage:
 
 Commands:
   instance Manage BuddySwitch product-mode instances.
+  web      Run the local BuddySwitch web management server.
   data     Manage BuddySwitch data cleanup commands.
   env      Manage BuddySwitch environment status and reset commands.
   help     Show this help message.
@@ -962,6 +965,10 @@ fail_unknown_top_level_command() {
   return 2
 }
 
+web_main() {
+  python3 "${WEB_MANAGEMENT_HELPER}" "$@"
+}
+
 main() {
   local command="${1:-}"
   case "${command}" in
@@ -995,6 +1002,10 @@ main() {
     instance)
       shift || true
       buddyswitch_instance_main "$@"
+      ;;
+    web)
+      shift || true
+      web_main "$@"
       ;;
     data)
       shift || true

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BuddySwitch Web Management</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <div class="management-shell">
+      <header class="topbar">
+        <div>
+          <h1>BuddySwitch Web Management</h1>
+          <p class="subtle">Local browser control for BuddySwitch instances.</p>
+        </div>
+        <div class="topbar-actions">
+          <span id="server-status" class="status-pill">Checking</span>
+          <button id="refresh-button" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <main class="layout" data-api-instances="/api/instances">
+        <section class="section create-section" aria-labelledby="create-heading">
+          <div class="section-heading">
+            <h2 id="create-heading">Create Instance</h2>
+          </div>
+          <div class="create-controls">
+            <label class="field">
+              <span>Buddy</span>
+              <select id="buddy-select"></select>
+            </label>
+            <button id="create-button" type="button">Create</button>
+          </div>
+        </section>
+
+        <section class="section table-section" aria-labelledby="instances-heading">
+          <div class="section-heading">
+            <h2 id="instances-heading">Instances</h2>
+          </div>
+          <table class="instances-table">
+            <thead>
+              <tr>
+                <th>Instance</th>
+                <th>Buddy</th>
+                <th>Status</th>
+                <th>App Server</th>
+                <th>Thread</th>
+                <th>Browser</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody id="instances-body"></tbody>
+          </table>
+        </section>
+
+        <section class="section detail-section" aria-labelledby="detail-heading">
+          <div class="section-heading">
+            <h2 id="detail-heading">Selected Instance</h2>
+          </div>
+          <dl id="instance-detail" class="detail-grid"></dl>
+        </section>
+
+        <section class="section action-section" aria-labelledby="action-heading">
+          <div class="section-heading">
+            <h2 id="action-heading">Actions</h2>
+          </div>
+          <label class="field textarea-field">
+            <span>Instruction</span>
+            <textarea id="instruction-input" rows="5" placeholder="Send the next instruction to the selected instance."></textarea>
+          </label>
+          <div class="action-row">
+            <button id="send-button" type="button">Send</button>
+            <button id="interrupt-button" type="button">Interrupt</button>
+            <button id="stop-button" type="button">Stop</button>
+            <button id="delete-button" type="button">Delete</button>
+          </div>
+          <p id="message-banner" class="message-banner" role="status" aria-live="polite"></p>
+        </section>
+      </main>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
