@@ -27,7 +27,7 @@ SHIPPED_TOOLS: dict[str, set[str]] = {
     "message": {"list", "send"},
     "request": {"create", "list", "get", "accept", "block", "complete", "cancel"},
     "search": {"open_browser", "request", "status"},
-    "task": {"archive", "create", "get", "list", "update"},
+    "task": {"archive", "create", "get", "history", "list", "update"},
     "track": {"add_material", "add_proof", "add_update", "archive", "create", "list", "open", "update_now"},
 }
 

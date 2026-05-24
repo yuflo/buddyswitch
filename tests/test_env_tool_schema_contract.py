@@ -124,6 +124,7 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         comment_add = catalog.get_action_definition("comment", "add").input_schema
         task_create = catalog.get_action_definition("task", "create").input_schema
         task_list = catalog.get_action_definition("task", "list").input_schema
+        task_history = catalog.get_action_definition("task", "history").input_schema
         context_get = catalog.get_action_definition("context", "get").input_schema
         context_summarize = catalog.get_action_definition("context", "summarize").input_schema
         evidence_issue = catalog.get_action_definition("evidence", "issue_browser").input_schema
@@ -213,6 +214,10 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(task_create["properties"]["status"].get("enum"), ["active", "blocked", "done", "archived"])
         self.assertEqual(task_list["properties"]["limit"].get("type"), "integer")
         self.assertEqual(task_list["properties"]["limit"].get("minimum"), 1)
+        self.assertEqual(task_list["properties"]["limit"].get("default"), 100)
+        self.assertEqual(task_history["properties"]["limit"].get("type"), "integer")
+        self.assertEqual(task_history["properties"]["limit"].get("minimum"), 1)
+        self.assertEqual(task_history["properties"]["limit"].get("default"), 50)
 
         self.assertEqual(context_get["properties"]["limit"].get("type"), "integer")
         self.assertEqual(context_get["properties"]["limit"].get("minimum"), 1)

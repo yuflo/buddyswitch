@@ -16,7 +16,7 @@ from env.tool_runtime import registry as catalog  # noqa: E402
 
 _EXPECTED_TOOLS = {"task", "track", "artifact", "buddybox", "context", "evidence", "search", "message", "comment", "request"}
 _EXPECTED_ACTIONS_BY_TOOL = {
-    "task": {"create", "list", "get", "update", "archive"},
+    "task": {"create", "list", "get", "update", "archive", "history"},
     "track": {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
     "artifact": {"list", "get", "create_revision", "update_metadata", "attach_file", "list_attachments", "get_attachment"},
     "buddybox": {"desc", "list", "read", "write", "delete", "import_file"},
@@ -134,6 +134,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("task", "get", ("task id", "list", "update")),
             ("task", "update", ("patch", "archive", "task")),
             ("task", "archive", ("archive", "active", "update")),
+            ("task", "history", ("history", "lifecycle", "list")),
             ("comment", "add", ("discussion", "timeline", "message")),
             ("search", "request", ("target_url", "without opening", "open_browser")),
             ("search", "open_browser", ("browser", "open", "payload")),
@@ -223,6 +224,22 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertIsInstance(row["writes"], list)
                 self.assertIsInstance(row["does_not_write"], list)
                 self.assertIn(row["durability"], {"none", "transient", "durable"})
+
+    def test_task_history_operation_semantics_are_read_only(self) -> None:
+        history = catalog.operation_semantics()["task.history"]
+        self.assertEqual(history["kind"], "read")
+        self.assertEqual(history["mutates"], "none")
+        self.assertEqual(history["required_permission"], "task.read")
+        self.assertEqual(history["authority"], "task.buddy_scope")
+        self.assertEqual(history["visibility"], "active-buddy private")
+        self.assertEqual(history["durability"], "none")
+        self.assertEqual(history["result_content_level"], "history rows")
+        self.assertIn("instance-local taskbox history", history["reads"])
+        self.assertEqual(history["writes"], [])
+        self.assertIn("task state", " ".join(history["does_not_write"]).lower())
+        self.assertIs(history["risk_hints"]["read_only"], True)
+        self.assertIs(history["risk_hints"]["destructive"], False)
+        self.assertIs(history["risk_hints"]["idempotent"], True)
 
     def test_high_risk_object_boundaries_are_explicit(self) -> None:
         desc = self._desc()

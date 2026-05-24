@@ -46,7 +46,9 @@ def _build_definition() -> ToolDefinition:
         scope="instance-local active-buddy private taskbox",
         capability_boundary="Only the active buddy's taskbox inside the active instance is readable and writable.",
         object_model=(
-            "Tasks live in the active instance taskbox under taskbox/<buddy>. They are private work items, not shared runtime objects, and may reference tracks, artifacts, messages, comments, requests, or buddybox files without publishing or sharing them."
+            "Tasks live in the active instance taskbox under taskbox/<buddy>. "
+            "They are private work items, not shared runtime objects. "
+            "Task refs and track_id are private context links to tracks, artifacts, messages, comments, requests, or buddybox files; they do not publish or share those objects."
         ),
         use_when=(
             "You need to create, list, inspect, update, archive, or review history for active-buddy private tasks.",
@@ -113,6 +115,7 @@ def _build_definition() -> ToolDefinition:
                     "shared runtime task objects",
                     "track state",
                     "artifact state",
+                    "artifact visibility",
                     "message state",
                     "comment state",
                     "request state",
@@ -160,7 +163,9 @@ def _build_definition() -> ToolDefinition:
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Optional maximum number of rows to return.",
+                            "minimum": 1,
+                            "default": 100,
+                            "description": "Optional maximum number of summary rows to return.",
                         },
                     },
                 },
@@ -187,8 +192,8 @@ def _build_definition() -> ToolDefinition:
                 ),
                 preconditions=("active buddy owns task.read permission",),
                 returns=("tasks",),
-                use_when=("You need queue triage across private taskbox tasks.",),
-                do_not_use_when=("You need one specific task or you need to mutate task state.",),
+                use_when=("You need to list private taskbox summary rows for queue triage before choosing task.get.",),
+                do_not_use_when=("You need one specific task row; use task.get. You need to mutate task state; use task.update or task.archive.",),
                 risk_hints={
                     "read_only": True,
                     "destructive": False,
@@ -236,8 +241,8 @@ def _build_definition() -> ToolDefinition:
                 ),
                 preconditions=("task_id references an active-buddy taskbox task",),
                 returns=("task",),
-                use_when=("You need one specific private task row by id.",),
-                do_not_use_when=("You need multi-row filtering or mutation.",),
+                use_when=("You need one specific private task row by task id after task.list or another response gave you the id.",),
+                do_not_use_when=("You need multi-row filtering; use task.list. You need mutation; use task.update or task.archive.",),
                 risk_hints={
                     "read_only": True,
                     "destructive": False,
@@ -312,8 +317,8 @@ def _build_definition() -> ToolDefinition:
                 ),
                 preconditions=("task_id references an active-buddy taskbox task",),
                 returns=("task",),
-                use_when=("You need to patch task content, priority, refs, or lifecycle state.",),
-                do_not_use_when=("You need to create a new task or inspect history without mutation.",),
+                use_when=("You need to patch a task title, summary, priority, refs, track_id, or lifecycle status without archiving it.",),
+                do_not_use_when=("You need to create a new task, archive a task, or inspect history without mutation.",),
                 risk_hints={
                     "read_only": False,
                     "destructive": False,
@@ -361,8 +366,8 @@ def _build_definition() -> ToolDefinition:
                 ),
                 preconditions=("task_id references an active-buddy taskbox task",),
                 returns=("task",),
-                use_when=("You need to remove a task from default taskbox views while preserving history.",),
-                do_not_use_when=("You only need a non-archival status change; use task.update.",),
+                use_when=("You need to archive a task so it leaves default active taskbox views while preserving lifecycle history.",),
+                do_not_use_when=("You need to keep the task active or only need a non-archival status change; use task.update.",),
                 risk_hints={
                     "read_only": False,
                     "destructive": True,
@@ -383,7 +388,9 @@ def _build_definition() -> ToolDefinition:
                     "properties": {
                         "limit": {
                             "type": "integer",
-                            "description": "Optional maximum number of history entries to return.",
+                            "minimum": 1,
+                            "default": 50,
+                            "description": "Optional maximum number of lifecycle history entries to return.",
                         },
                     },
                 },
@@ -410,8 +417,8 @@ def _build_definition() -> ToolDefinition:
                 ),
                 preconditions=("active buddy owns task.read permission",),
                 returns=("entries",),
-                use_when=("You need recent lifecycle history for the active instance taskbox.",),
-                do_not_use_when=("You need current task rows rather than lifecycle history.",),
+                use_when=("You need recent lifecycle history lines for the active instance taskbox after create, update, close, reopen, or archive events.",),
+                do_not_use_when=("You need current task summary rows; use task.list. You need one task row; use task.get.",),
                 risk_hints={
                     "read_only": True,
                     "destructive": False,
