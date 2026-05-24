@@ -15,7 +15,7 @@ from env_manifest import DEFAULT_MANIFEST, ManifestError, load_manifest, require
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONTRACT = ROOT / "framework" / "contracts" / "buddy-env-profile.json"
 _SAFE_BUDDY_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
-BUDDYBOX_ROOT_TEMPLATE = "buddyswitch/local/buddybox/{buddy_id}"
+BUDDYBOX_ROOT = "buddybox"
 
 
 class EnvProfileError(ValueError):
@@ -155,13 +155,12 @@ def _require_search_capability(
     }
 
 
-def resolve_buddybox_root(root_template: str, *, buddy_id: str) -> str:
-    if root_template != BUDDYBOX_ROOT_TEMPLATE:
+def resolve_buddybox_root(root_value: str, *, buddy_id: str) -> str:
+    if root_value != BUDDYBOX_ROOT:
         raise EnvProfileError(
-            "buddybox.root must be template "
-            f"{BUDDYBOX_ROOT_TEMPLATE!r}; got {root_template!r}"
+            f"buddybox.root must be {BUDDYBOX_ROOT!r}; got {root_value!r}"
         )
-    return root_template.format(buddy_id=buddy_id)
+    return root_value
 
 
 def validate_env_profile(
@@ -250,7 +249,7 @@ def validate_env_profile(
         label="filesystem_capability.raw_state",
     )
 
-    expected_host_writable = ["home", "codex-home", "xdg-config", "scratch", "temp"]
+    expected_host_writable = ["home", "codex-home", "xdg-config", "scratch", "runtime-temp"]
     if buddy_id == "dev":
         expected_host_writable = [*expected_host_writable, "source-root"]
     if host_writable != expected_host_writable:

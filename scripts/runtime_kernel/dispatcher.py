@@ -124,6 +124,13 @@ def _runtime_server_env(
         "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
         "BUDDYSWITCH_STATE_ROOT": str(shared_root / "state"),
     }
+    instance_root = instance_record.get("instance_root")
+    if isinstance(instance_root, str) and instance_root.strip():
+        resolved_instance_root = Path(instance_root.strip()).expanduser().resolve(strict=False)
+    else:
+        resolved_instance_root = instance_json_path.parent.resolve(strict=False)
+    updates["BUDDYSWITCH_INSTANCE_ROOT"] = str(resolved_instance_root)
+    updates["BUDDYSWITCH_INSTANCE_TMP"] = str(resolved_instance_root / "tmp")
     workspace_dir = instance_record.get("workspace_dir")
     if isinstance(workspace_dir, str) and workspace_dir.strip():
         updates["BUDDYSWITCH_WORKSPACE_DIR"] = str(

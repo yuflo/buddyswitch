@@ -203,7 +203,6 @@ tests
 docs
 README.md
 buddyswitch-codex
-buddyswitch/content/buddybox
 runs
 buddyswitch/content/runs
 EOF
@@ -501,7 +500,9 @@ buddyswitch_workspace_runtime_output_paths() {
 }
 
 buddyswitch_workspace_local_runtime_paths() {
-  true
+  cat <<'EOF'
+buddybox
+EOF
 }
 
 buddyswitch_workspace_is_instance_mode() {
@@ -870,13 +871,14 @@ buddyswitch_workspace_cleanup_projection_dir() {
 
 buddyswitch_workspace_cleanup_stale_state_projections() {
   local workspace_dir state_root workspace_objects_root state_objects_root
-  local workspace_buddybox_root buddy_entry buddy_id state_buddy_root
+  local legacy_runtime_local_root workspace_buddybox_root
 
   workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
   state_root="${BUDDYSWITCH_SHARED_ROOT}/state"
   workspace_objects_root="${workspace_dir}/buddyswitch/objects"
   state_objects_root="${state_root}/buddyswitch/objects"
-  workspace_buddybox_root="${workspace_dir}/buddyswitch/local/buddybox"
+  legacy_runtime_local_root="${workspace_dir}/buddyswitch/local"
+  workspace_buddybox_root="${legacy_runtime_local_root}/buddybox"
 
   buddyswitch_workspace_cleanup_projection_dir "${workspace_objects_root}" "${state_objects_root}" "*.json" || return $?
 
@@ -887,15 +889,7 @@ buddyswitch_workspace_cleanup_stale_state_projections() {
   if [[ ! -d "${workspace_buddybox_root}" ]]; then
     return 0
   fi
-
-  for buddy_entry in "${workspace_buddybox_root}"/*; do
-    [[ -e "${buddy_entry}" || -L "${buddy_entry}" ]] || continue
-    buddy_id="$(basename "${buddy_entry}")"
-    state_buddy_root="${state_root}/buddyswitch/local/buddybox/${buddy_id}"
-    buddyswitch_workspace_cleanup_projection_dir "${buddy_entry}" "${state_buddy_root}" "*" || return $?
-  done
-
-  find "${workspace_buddybox_root}" -depth -type d -empty -exec rmdir {} + >/dev/null 2>&1 || true
+  buddyswitch_workspace_force_remove_path "${workspace_buddybox_root}" || return $?
 }
 
 buddyswitch_workspace_active_buddy() {

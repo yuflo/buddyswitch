@@ -27,14 +27,18 @@ ALL_BUDDIES = ("pm", "design", "dev", "market", "test")
 
 class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
-        path = self._runtime_path(f"instance-{instance_id}.json")
+        instance_root = self._instance_root(instance_id)
+        workspace_dir = instance_root / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        path = instance_root / "instance.json"
         path.write_text(
             json.dumps(
                 {
                     "instance_id": instance_id,
                     "buddy": buddy,
                     "status": status,
-                    "workspace_dir": str(self.runtime_root),
+                    "instance_root": str(instance_root),
+                    "workspace_dir": str(workspace_dir),
                     "browser_port": None,
                     "updated_at": "2026-05-18T00:00:00Z",
                 },
@@ -527,7 +531,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-open-attachments").get("ok"))
 
-        pm_source = self._runtime_path("tmp/pm/brief-attachment.txt")
+        pm_source = self._instance_root("inst-pm-track") / "tmp" / "pm" / "brief-attachment.txt"
         pm_source.parent.mkdir(parents=True, exist_ok=True)
         pm_source.write_text("pm attachment", encoding="utf-8")
         imported_pm = self._dispatch(
@@ -585,7 +589,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(published_material.get("ok"), msg=published_material)
 
         test_instance = self._instance_json(instance_id="inst-test-track-open", buddy="test")
-        test_source = self._runtime_path("tmp/test/proof-attachment.txt")
+        test_source = self._instance_root("inst-test-track-open") / "tmp" / "test" / "proof-attachment.txt"
         test_source.parent.mkdir(parents=True, exist_ok=True)
         test_source.write_text("proof attachment", encoding="utf-8")
         imported_test = self._dispatch(

@@ -134,7 +134,6 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         self.assertIn("mcp_elicitations = false", config_text)
         self.assertIn("request_permissions = false", config_text)
         self.assertIn("skill_approval = false", config_text)
-        self.assertIn(json.dumps(str(Path("/tmp").resolve(strict=False))), config_text)
         if profile_mode:
             self.assertNotIn('sandbox_mode = "workspace-write"', config_text)
             self.assertNotIn("[sandbox_workspace_write]", config_text)
@@ -147,6 +146,12 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             workspace_keys = [path for path in filesystem if "/instances/" in path and path.endswith("/workspace")]
             self.assertEqual(len(workspace_keys), 1, msg=workspace_keys)
             self.assertEqual(filesystem[workspace_keys[0]], "read")
+            buddybox_keys = [path for path in filesystem if "/instances/" in path and path.endswith("/workspace/buddybox")]
+            self.assertEqual(len(buddybox_keys), 1, msg=buddybox_keys)
+            self.assertEqual(filesystem[buddybox_keys[0]], "write")
+            instance_tmp_keys = [path for path in filesystem if "/instances/" in path and path.endswith("/tmp")]
+            self.assertEqual(len(instance_tmp_keys), 1, msg=instance_tmp_keys)
+            self.assertEqual(filesystem[instance_tmp_keys[0]], "write")
             project_source_keys = [path for path in filesystem if path.endswith("/project/workspace/projects/app")]
             self.assertEqual(len(project_source_keys), 1, msg=project_source_keys)
             self.assertIn(filesystem[project_source_keys[0]], {"read", "write"})
@@ -156,6 +161,9 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             state_keys = [path for path in filesystem if path.endswith("/state")]
             self.assertEqual(len(state_keys), 1, msg=state_keys)
             self.assertEqual(filesystem[state_keys[0]], "none")
+            self.assertNotIn(str(Path("/tmp").resolve(strict=False)), filesystem)
+            if os.environ.get("TMPDIR"):
+                self.assertNotIn(str(Path(os.environ["TMPDIR"]).resolve(strict=False)), filesystem)
             self.assertNotIn(":project_roots", filesystem)
             for key, value in filesystem.items():
                 self.assertIsInstance(key, str)
@@ -173,6 +181,7 @@ class BuddySwitchLauncherTests(unittest.TestCase):
             self.assertIn('mode = "full"', config_text)
             self.assertNotIn(str(repo_git_common_dir), config_text)
         else:
+            self.assertIn(json.dumps(str(Path("/tmp").resolve(strict=False))), config_text)
             self.assertEqual(config_text.count('sandbox_mode = "workspace-write"'), 1)
             self.assertEqual(config_text.count("[sandbox_workspace_write]"), 1)
             self.assertIn('sandbox_mode = "workspace-write"', top_level_text)
@@ -184,9 +193,14 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         allowed_paths = [
             shared_root_resolved,
             str(repo_git_common_dir),
-            str(Path("/tmp").resolve(strict=False)),
-            str(Path(os.environ["TMPDIR"]).resolve(strict=False)) if os.environ.get("TMPDIR") else "",
         ]
+        if not profile_mode:
+            allowed_paths.extend(
+                [
+                    str(Path("/tmp").resolve(strict=False)),
+                    str(Path(os.environ["TMPDIR"]).resolve(strict=False)) if os.environ.get("TMPDIR") else "",
+                ]
+            )
         if profile_mode:
             allowed_paths.append(repo_root_resolved)
         for allowed_path in allowed_paths:
@@ -627,6 +641,7 @@ exec "$real_git" "$@"
                     "status": status,
                     "current_task_id": "task-existing",
                     "current_track_id": "track-existing",
+                    "instance_root": str(instance_root),
                     "workspace_dir": str(workspace_path),
                     "browser_port": browser_port,
                     "thread_id": thread_id,
@@ -815,6 +830,7 @@ exec "$real_git" "$@"
 
         self.assertFalse((workspace_dir / "buddyswitch" / "objects").exists())
         self.assertFalse((workspace_dir / "buddyswitch" / "objects").is_symlink())
+        self.assertTrue((workspace_dir / "buddybox").is_dir())
         self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").exists())
         self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").is_symlink())
 
@@ -1701,6 +1717,9 @@ exec "$real_git" "$@"
             self.assertEqual(payload["home"], str(instance_root / "home"))
             self.assertEqual(payload["codex_home"], str(instance_root / "codex-home"))
             self.assertEqual(payload["xdg_config_home"], str(instance_root / "xdg-config"))
+            self.assertEqual(payload["tmpdir"], str(instance_root / "tmp"))
+            self.assertEqual(payload["tmp"], str(instance_root / "tmp"))
+            self.assertEqual(payload["temp"], str(instance_root / "tmp"))
             self.assertTrue(payload["runtime_broker_socket"], "runtime broker socket must be exported to codex")
             buddy_agents = ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md"
             self.assertTrue(buddy_agents.exists(), "pm buddy prompt asset must be checked in")
@@ -1803,6 +1822,8 @@ exec "$real_git" "$@"
             self.assertTrue((instance_root / "browser" / "profile").exists())
             self.assertTrue((instance_root / "browser" / "chrome.pid").exists())
             self.assertTrue((instance_root / "browser" / "chrome.log").exists())
+            self.assertTrue((workspace_dir / "buddybox").is_dir())
+            self.assertTrue((instance_root / "tmp").is_dir())
             self.assertFalse((shared_root / "chrome" / "shared-browser").exists())
             self.assertFalse((shared_root / "run" / "browser-cockpit.pid").exists())
             workspace_project_config = workspace_dir / ".codex" / "config.toml"
@@ -1830,6 +1851,7 @@ exec "$real_git" "$@"
             self.assertEqual(instance_snapshot["buddy"], "pm")
             self.assertNotIn("current_task_id", instance_snapshot)
             self.assertNotIn("current_track_id", instance_snapshot)
+            self.assertEqual(instance_snapshot["instance_root"], str(instance_root))
             self.assertEqual(instance_snapshot["workspace_dir"], str(workspace_dir))
             browser_port = instance_snapshot["browser_port"]
             self.assertIsInstance(browser_port, int)
@@ -1839,6 +1861,7 @@ exec "$real_git" "$@"
             self.assertEqual(stored_instance["status"], "active")
             self.assertEqual(stored_instance["instance_id"], payload["instance_id"])
             self.assertEqual(stored_instance["buddy"], "pm")
+            self.assertEqual(stored_instance["instance_root"], str(instance_root))
             self.assertEqual(stored_instance["workspace_dir"], str(workspace_dir))
             self.assertNotIn("current_task_id", stored_instance)
             self.assertNotIn("current_track_id", stored_instance)
@@ -1873,12 +1896,9 @@ exec "$real_git" "$@"
                     f"runtime workspace must not expose projected state path: {projected_path}",
                 )
 
-            buddybox_root = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm"
+            buddybox_root = workspace_dir / "buddybox"
             shared_buddybox_root = shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm"
-            self.assertFalse(
-                buddybox_root.exists() or buddybox_root.is_symlink(),
-                "active buddybox root must not be an ordinary workspace path",
-            )
+            self.assertTrue(buddybox_root.is_dir(), "active buddybox root must exist in the instance workspace")
             self.assertFalse(shared_buddybox_root.exists(), "shared state buddybox remains tool-backed until written")
 
             self.assertFalse((workspace_dir / "buddyswitch/local/buddybox/dev").exists())

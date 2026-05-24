@@ -482,7 +482,7 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             },
         )
         self.assertTrue(written["ok"], msg=written)
-        self.assertTrue(self._runtime_path("buddyswitch/local/buddybox/pm/prototypes/simple-page.html").exists())
+        self.assertTrue((self.instance_root / "workspace" / "buddybox" / "prototypes" / "simple-page.html").exists())
         self.assertFalse(written.get("mutates_product_state"), msg=written)
         self.assertEqual(written.get("mutated_product_objects"), [], msg=written)
 

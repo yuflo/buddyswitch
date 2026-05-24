@@ -414,6 +414,8 @@ def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, str]:
     home = canonical(str(args.home))
     codex_home = canonical(str(args.codex_home))
     xdg_config_home = canonical(str(args.xdg_config_home))
+    buddybox_root = workspace_dir / "buddybox"
+    instance_tmp = instance_root / "tmp"
     filesystem_entries: dict[str, str] = {}
     filesystem_entries["/"] = "read"
     filesystem_entries[str(workspace_dir)] = "read"
@@ -421,24 +423,12 @@ def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, str]:
     filesystem_entries[str(state_root)] = "none"
     filesystem_entries[str(project_source_root)] = "write" if source_root_access == "write" else "read"
 
-    writable_roots: list[Path] = [home, codex_home, xdg_config_home]
-    forbidden_temp = [
-        canonical_shared_root,
-        project_root,
-        project_workspace_dir,
-        project_source_root,
-        state_root,
-        instance_root,
-        workspace_dir,
-    ]
-    writable_roots.extend(
-        _safe_temp_roots(
-            temp_roots=args.temp_root,
-            repo_root=canonical_repo_root,
-            source_codex_home=canonical_source_codex_home,
-            forbidden=forbidden_temp,
-        )
-    )
+    for raw in args.temp_root:
+        candidate = canonical(raw)
+        if candidate != instance_tmp:
+            raise ValueError(f"product-mode temp root must be the active instance tmp: {candidate}")
+
+    writable_roots: list[Path] = [home, codex_home, xdg_config_home, buddybox_root, instance_tmp]
 
     blocked_roots = [
         canonical_shared_root,

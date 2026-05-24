@@ -49,6 +49,7 @@ def build_buddybox_desc(active_buddy: str, *, instance_payload: dict[str, Any] |
             "write_private_binary",
             "delete_private_file",
         ],
+        "workspace_relative_root": "buddybox",
         "logical_name_policy": _logical_name_policy(),
         "state_summary": buddybox_repo.state_summary(root=root),
     }

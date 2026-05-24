@@ -27,12 +27,16 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         super().setUp()
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
-        self.instance_json = self._runtime_path("instance.json")
+        self.instance_root = self._instance_root("inst-e2e-runless")
+        self.instance_json = self.instance_root / "instance.json"
+        self.workspace_dir = self.instance_root / "workspace"
+        self.workspace_dir.mkdir(parents=True, exist_ok=True)
         self.instance_payload = {
             "instance_id": "inst-e2e-runless",
             "buddy": "pm",
             "status": "active",
-            "workspace_dir": str(self.runtime_root),
+            "instance_root": str(self.instance_root),
+            "workspace_dir": str(self.workspace_dir),
             "browser_port": 9333,
         }
         self.instance_json.write_text(json.dumps(self.instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
@@ -301,7 +305,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(design_draft.get("ok"), msg=design_draft)
 
-        source = self._runtime_path("tmp/chrome-devtools/desktop.png")
+        source = self.instance_root / "tmp" / "chrome-devtools" / "desktop.png"
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(b"\x89PNG\r\n")
         imported = self._dispatch(

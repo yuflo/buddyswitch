@@ -726,6 +726,44 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertIn("context summarize", text)
                 self.assertIn("context get", text)
 
+    def test_instance_private_writable_surface_has_no_legacy_buddybox_roots(self) -> None:
+        forbidden = (
+            'BUDDYBOX_ROOT_TEMPLATE = "buddyswitch/local/buddybox/{buddy_id}"',
+            'BUDDYBOX_LOCAL_DIR = LOCAL_ROOT / "buddybox"',
+            'workspace_buddybox_root="${workspace_dir}/buddyswitch/local/buddybox"',
+            "state/buddyswitch/local/buddybox",
+            "buddyswitch/content/buddybox",
+        )
+        scan_targets = ["scripts", "tools", "buddyswitch/env-profiles", "framework/contracts"]
+        for token in forbidden:
+            completed = subprocess.run(
+                ["rg", "-F", "-n", "-g", "!**/__pycache__/**", "--", token, *scan_targets],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+            self.assertEqual(completed.stdout.strip(), "", msg=f"{token}\n{completed.stdout}")
+
+    def test_product_mode_does_not_grant_global_tmp_as_writable_root(self) -> None:
+        forbidden = (
+            '--temp-root "/tmp"',
+            "Path(tempfile.gettempdir())",
+            "system tempdir",
+        )
+        scan_targets = ["tools/launcher/env.sh", "scripts/env/tools/buddybox/_impl.py"]
+        for token in forbidden:
+            completed = subprocess.run(
+                ["rg", "-F", "-n", "--", token, *scan_targets],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+            self.assertEqual(completed.stdout.strip(), "", msg=f"{token}\n{completed.stdout}")
+
 
 if __name__ == "__main__":
     unittest.main()

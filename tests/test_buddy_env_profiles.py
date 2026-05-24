@@ -46,21 +46,25 @@ class BuddyEnvProfilesTests(unittest.TestCase):
             )
             self.assertEqual(list(profile.keys()), env_profiles.profile_contract(ROOT)["top_level_key_order"])
             self.assertEqual(profile["buddy_id"], buddy_id)
-            self.assertEqual(profile["buddybox"]["root"], env_profiles.BUDDYBOX_ROOT_TEMPLATE)
+            self.assertEqual(profile["buddybox"]["root"], env_profiles.BUDDYBOX_ROOT)
             self.assertEqual(
                 env_profiles.resolve_buddybox_root(profile["buddybox"]["root"], buddy_id=buddy_id),
-                f"buddyswitch/local/buddybox/{buddy_id}",
+                "buddybox",
             )
             self.assertEqual(profile["filesystem_capability"]["raw_state"], "broker-only")
             if buddy_id == "dev":
                 self.assertEqual(profile["project"]["access"], "write")
                 self.assertEqual(profile["filesystem_capability"]["source_root"], "write")
                 self.assertIn("source-root", profile["filesystem_capability"]["host_writable"])
+                self.assertIn("runtime-temp", profile["filesystem_capability"]["host_writable"])
+                self.assertNotIn("temp", profile["filesystem_capability"]["host_writable"])
                 self.assertNotIn("project-workspace", profile["filesystem_capability"]["host_writable"])
             else:
                 self.assertEqual(profile["project"]["access"], "read-only")
                 self.assertEqual(profile["filesystem_capability"]["source_root"], "read-only")
                 self.assertNotIn("source-root", profile["filesystem_capability"]["host_writable"])
+                self.assertIn("runtime-temp", profile["filesystem_capability"]["host_writable"])
+                self.assertNotIn("temp", profile["filesystem_capability"]["host_writable"])
                 self.assertNotIn("project-workspace", profile["filesystem_capability"]["host_writable"])
             if buddy_id == "market":
                 self.assertEqual(profile["tool_capability"]["browser_cockpit"], "required")

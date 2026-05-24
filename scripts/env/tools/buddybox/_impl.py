@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import base64
-import tempfile
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -286,8 +285,8 @@ def _source_path_field_error() -> dict[str, Any]:
     return {
         "path": "source_path",
         "message": "source_path must resolve to one allowed local regular file",
-        "expected": "existing local file path under runtime workspace root or system tempdir",
-        "example": "/tmp/chrome-devtools/desktop.png",
+        "expected": "existing local file path under the runtime workspace or active instance tmp",
+        "example": "tmp/chrome-devtools/desktop.png",
     }
 
 
@@ -755,16 +754,21 @@ def import_buddybox_file_for_active_buddy(*, args: dict[str, Any], context: Budd
             field_errors=[_source_path_field_error()],
         )
 
+    workspace_root = context.repos.runtime_files.runtime_workspace_root(context["instance_payload"])
+    buddybox_root = context.repos.buddybox.active_buddy_root(
+        active_buddy=active_buddy,
+        instance_payload=context["instance_payload"],
+    )
+    instance_tmp = context.repos.runtime_files.instance_tmp_dir(context["instance_payload"])
+
     try:
         existed, inferred_content_type, size_bytes = context.repos.buddybox.import_private_file(
             root=root,
             logical_name=logical_name,
             source_path=Path(source_path.strip()),
-            allowed_roots=(
-                context.repos.runtime_files.runtime_workspace_root(context["instance_payload"]),
-                Path(tempfile.gettempdir()),
-            ),
+            allowed_roots=(workspace_root, instance_tmp),
             blocked_roots=(
+                buddybox_root,
                 context.repos.runtime_files.OBJECTS_ROOT,
                 context.repos.runtime_files.LOCAL_ROOT,
             ),

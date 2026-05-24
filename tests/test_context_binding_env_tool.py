@@ -504,6 +504,35 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("tracks", sources)
         self.assertIn("artifacts", sources)
 
+    def test_context_outputs_describe_instance_private_buddybox_without_legacy_paths(self) -> None:
+        instance_json = self._instance_json(buddy="pm")
+        listed = self._dispatch(instance_json=instance_json, tool="context", action="list_sources", args={}, buddy="pm")
+        self.assertTrue(listed.get("ok"), msg=listed)
+        sources = listed.get("sources")
+        self.assertIsInstance(sources, dict, msg=listed)
+        assert isinstance(sources, dict)
+        buddybox_source = sources.get("buddybox")
+        self.assertIsInstance(buddybox_source, dict, msg=sources)
+        assert isinstance(buddybox_source, dict)
+        self.assertEqual(buddybox_source.get("workspace_relative_root"), "buddybox")
+
+        summarized = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="pm")
+        self.assertTrue(summarized.get("ok"), msg=summarized)
+        buddybox_desc = summarized.get("buddybox_desc")
+        self.assertIsInstance(buddybox_desc, dict, msg=summarized)
+        assert isinstance(buddybox_desc, dict)
+        self.assertEqual(buddybox_desc.get("workspace_relative_root"), "buddybox")
+        self.assertNotIn("logical_root", buddybox_desc)
+
+        for payload in (listed, summarized):
+            packed = json.dumps(payload, ensure_ascii=True)
+            self.assertIn("buddybox", packed)
+            self.assertNotIn("buddyswitch/local/buddybox", packed)
+            self.assertNotIn("state/buddyswitch/local/buddybox", packed)
+            self.assertNotIn("buddyswitch/content/buddybox", packed)
+            self.assertNotIn("/private/tmp", packed)
+            self.assertNotIn("/tmp/ai-calendar", packed)
+
     def test_context_summarize_includes_source_workspace_facts_for_dev(self) -> None:
         instance_json = self._instance_json(buddy="dev")
         source_root = self._runtime_path("projects/app")

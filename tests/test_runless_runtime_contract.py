@@ -38,14 +38,18 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         buddy: str = "pm",
         status: str = "active",
     ) -> Path:
-        path = self._runtime_path("instance.json")
+        instance_root = self._instance_root(instance_id)
+        workspace_dir = instance_root / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        path = instance_root / "instance.json"
         path.write_text(
             json.dumps(
                 {
                     "instance_id": instance_id,
                     "buddy": buddy,
                     "status": status,
-                    "workspace_dir": str(self.runtime_root),
+                    "instance_root": str(instance_root),
+                    "workspace_dir": str(workspace_dir),
                     "browser_port": None,
                     "updated_at": "2026-05-14T00:00:00Z",
                 },
@@ -146,6 +150,7 @@ class RunlessRuntimeContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "instance_id",
                 "buddy",
                 "status",
+                "instance_root",
                 "workspace_dir",
                 "browser_port",
                 "updated_at",

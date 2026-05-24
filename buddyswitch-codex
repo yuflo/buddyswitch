@@ -165,6 +165,7 @@ start_locked_bootstrap() {
 
   buddyswitch_workspace_ensure_project_worktree
   buddyswitch_workspace_repair_runtime_projects_app_projection
+  buddyswitch_instance_ensure_private_writable_surface
   buddyswitch_instance_ensure_taskbox "${requested_buddy}"
   buddyswitch_instance_activate "${requested_instance_id}" "${requested_buddy}" "inactive" >/dev/null
   buddyswitch_runtime_broker_ensure

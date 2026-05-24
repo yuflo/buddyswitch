@@ -59,16 +59,20 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         buddy: str = "pm",
         status: str = "active",
     ) -> Path:
-        instance_json = self._runtime_path("instance.json")
+        instance_root = self._instance_root(instance_id)
+        workspace_dir = instance_root / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        instance_json = instance_root / "instance.json"
         instance_json.write_text(
             json.dumps(
                 {
                     "instance_id": instance_id,
                     "buddy": buddy,
                     "status": status,
+                    "instance_root": str(instance_root),
                     "current_task_id": None,
                     "current_track_id": None,
-                    "workspace_dir": str(self.runtime_root),
+                    "workspace_dir": str(workspace_dir),
                     "browser_port": None,
                     "created_at": "2026-05-06T00:00:00Z",
                     "updated_at": "2026-05-06T00:00:00Z",
@@ -179,16 +183,18 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("permission_boundary"), "env.tool", msg=response)
 
     def test_env_tool_buddybox_write_uses_shared_state_root(self) -> None:
-        workspace_dir = self._runtime_path("alt-workspace")
+        instance_root = self._instance_root("inst-pm-alt-workspace")
+        workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         (workspace_dir / "AGENTS.md").write_text("# BuddySwitch Runtime Workspace\n", encoding="utf-8")
-        instance_json = self._runtime_path("instance-alt-workspace.json")
+        instance_json = instance_root / "instance.json"
         instance_json.write_text(
             json.dumps(
                 {
                     "instance_id": "inst-pm-alt-workspace",
                     "buddy": "pm",
                     "status": "active",
+                    "instance_root": str(instance_root),
                     "current_task_id": None,
                     "current_track_id": None,
                     "workspace_dir": str(workspace_dir),
@@ -215,24 +221,25 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=instance_json,
         )
         self.assertTrue(written.get("ok"), msg=written)
-        state_target = self._runtime_path("buddyswitch/local/buddybox/pm/broker/out.txt")
-        workspace_target = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm" / "broker" / "out.txt"
-        self.assertTrue(state_target.exists(), msg=state_target)
-        self.assertEqual(state_target.read_text(encoding="utf-8"), "broker\n")
-        self.assertFalse(workspace_target.exists())
+        target = workspace_dir / "buddybox" / "broker" / "out.txt"
+        self.assertTrue(target.exists(), msg=target)
+        self.assertEqual(target.read_text(encoding="utf-8"), "broker\n")
+        self.assertFalse(self._runtime_path("buddyswitch/local/buddybox/pm/broker/out.txt").exists())
         self.assertFalse(self._runtime_path("state/buddyswitch/local/buddybox/pm/broker/out.txt").exists())
 
     def test_env_tool_buddybox_lifecycle_uses_shared_state_root(self) -> None:
-        workspace_dir = self._runtime_path("alt-workspace-lifecycle")
+        instance_root = self._instance_root("inst-pm-alt-workspace-lifecycle")
+        workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         (workspace_dir / "AGENTS.md").write_text("# BuddySwitch Runtime Workspace\n", encoding="utf-8")
-        instance_json = self._runtime_path("instance-alt-workspace-lifecycle.json")
+        instance_json = instance_root / "instance.json"
         instance_json.write_text(
             json.dumps(
                 {
                     "instance_id": "inst-pm-alt-workspace-lifecycle",
                     "buddy": "pm",
                     "status": "active",
+                    "instance_root": str(instance_root),
                     "current_task_id": None,
                     "current_track_id": None,
                     "workspace_dir": str(workspace_dir),
@@ -260,11 +267,9 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(write_payload.get("ok"), msg=write_payload)
 
-        target = self._runtime_path("buddyswitch/local/buddybox/pm/broker/lifecycle.txt")
-        workspace_target = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm" / "broker" / "lifecycle.txt"
+        target = workspace_dir / "buddybox" / "broker" / "lifecycle.txt"
         wrong_runtime_root = self._runtime_path("state/buddyswitch/local/buddybox/pm/broker/lifecycle.txt")
         self.assertTrue(target.exists(), msg=target)
-        self.assertFalse(workspace_target.exists(), msg=workspace_target)
         self.assertFalse(wrong_runtime_root.exists(), msg=wrong_runtime_root)
 
         read_payload = self._dispatch(

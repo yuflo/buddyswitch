@@ -156,7 +156,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "--xdg-config-home",
                 str(instance_root / "xdg-config"),
                 "--temp-root",
-                "/tmp",
+                str(instance_root / "tmp"),
             ],
             cwd=ROOT,
             text=True,
@@ -242,6 +242,8 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
+            dev_instance_root = shared_root / "instances" / "inst-dev-boundary"
+            pm_instance_root = shared_root / "instances" / "inst-pm-boundary"
             project_workspace_dir = shared_root / "project" / "workspace"
             project_source_root = project_workspace_dir / "projects" / "app"
 
@@ -254,6 +256,10 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
             self.assertIn(str(project_source_root.resolve(strict=False)), dev_writable)
             self.assertNotIn(str(project_source_root.resolve(strict=False)), pm_writable)
+            self.assertIn(str((dev_instance_root / "workspace" / "buddybox").resolve(strict=False)), dev_writable)
+            self.assertIn(str((dev_instance_root / "tmp").resolve(strict=False)), dev_writable)
+            self.assertIn(str((pm_instance_root / "workspace" / "buddybox").resolve(strict=False)), pm_writable)
+            self.assertIn(str((pm_instance_root / "tmp").resolve(strict=False)), pm_writable)
             self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), dev_writable)
             self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), pm_writable)
             self.assertNotIn(str((shared_root / "state").resolve(strict=False)), dev_writable)
@@ -270,12 +276,17 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             config_text = self._patch_config(temp_root=temp_root, buddy="pm", shared_root=shared_root)
             writable_paths = self._writable_paths(config_text)
             project_source_root = project_workspace_dir / "projects" / "app"
+            self.assertIn(str((workspace_dir / "buddybox").resolve(strict=False)), writable_paths)
+            self.assertIn(str((instance_root / "tmp").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
             self.assertNotIn(str(project_source_root.resolve(strict=False)), writable_paths)
             self.assertNotIn(str(workspace_dir.resolve(strict=False)), writable_paths)
             self.assertNotIn(str((workspace_dir / ".sandbox").resolve(strict=False)), writable_paths)
             self.assertNotIn(str((workspace_dir / ".sandbox" / "design").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(shared_root.resolve(strict=False)), writable_paths)
+            self.assertNotIn(str((shared_root / "state").resolve(strict=False)), writable_paths)
+            self.assertNotIn("/tmp", writable_paths)
+            self.assertNotIn(str(Path(tempfile.gettempdir()).resolve(strict=False)), writable_paths)
 
     def test_permission_profile_keeps_dev_source_root_write_and_runtime_reads(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -288,6 +299,8 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             writable_paths = self._writable_paths(config_text)
             filesystem = self._filesystem_entries(config_text)
             self.assertIn(str(project_source_root.resolve(strict=False)), writable_paths)
+            self.assertIn(str((runtime_workspace_dir / "buddybox").resolve(strict=False)), writable_paths)
+            self.assertIn(str((shared_root / "instances" / "inst-dev-boundary" / "tmp").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
             self.assertNotIn(":project_roots", filesystem)
             for key, value in filesystem.items():
@@ -302,6 +315,8 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 str((runtime_workspace_dir / "buddyswitch" / "objects").resolve(strict=False)),
                 filesystem,
             )
+            self.assertNotIn("/tmp", writable_paths)
+            self.assertNotIn(str(Path(tempfile.gettempdir()).resolve(strict=False)), writable_paths)
 
     def test_env_tool_rejects_payload_paths_instead_of_bypassing_project_or_raw_state_boundaries(self) -> None:
         project_probe = self._runtime_path("projects/app/env-tool-bypass.txt")

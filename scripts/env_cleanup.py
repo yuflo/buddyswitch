@@ -40,7 +40,7 @@ TRACK_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.TRACKS_DIR)
 ARTIFACT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.ARTIFACT_OBJECTS_DIR)
 MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.MESSAGES_DIR)
 COMMENT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.COMMENTS_DIR)
-BUDDYBOX_RELATIVE_DIR = _runtime_relative_path(runtime_files.BUDDYBOX_LOCAL_DIR)
+BUDDYBOX_RELATIVE_DIR = "buddybox"
 
 
 def _strip_toml_comment(line: str) -> str:
@@ -563,16 +563,16 @@ def _parse_buddybox_owner_path(path: Path) -> tuple[Path, str] | None:
     if not marker:
         return None
     window = len(marker)
-    for index in range(0, len(parts) - window):
+    for index in range(0, len(parts) - window + 1):
         if tuple(parts[index : index + window]) != marker:
             continue
-        buddy_index = index + window
-        if buddy_index >= len(parts):
+        marker_end = index + window
+        if marker_end >= len(parts):
             return None
-        logical_parts = parts[buddy_index + 1 :]
+        logical_parts = parts[marker_end:]
         if not logical_parts:
             return None
-        buddy_root = Path(*parts[: buddy_index + 1])
+        buddy_root = Path(*parts[:marker_end])
         logical_name = "/".join(logical_parts)
         return buddy_root, logical_name
     return None
@@ -718,7 +718,7 @@ def build_cleanup_plan(
         for record in comment_objects:
             if record.get("author_buddy") == buddy:
                 add_indexed_comment(plan, record)
-        buddybox_relative_dir = f"{BUDDYBOX_RELATIVE_DIR}/{buddy}" if isinstance(buddy, str) and buddy else BUDDYBOX_RELATIVE_DIR
+        buddybox_relative_dir = BUDDYBOX_RELATIVE_DIR
         if shared_root is not None:
             resolved_shared_root = shared_root.resolve(strict=False)
             for workspace_dir in discover_instance_workspaces(

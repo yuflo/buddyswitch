@@ -55,14 +55,12 @@ buddyswitch_require_runtime_lock() {
 buddyswitch_patch_codex_config() {
   local config_path
   local active_buddy
+  local local_default_tmp_root
   local -a patch_args=()
   local -a temp_root_args=()
   config_path="${BUDDYSWITCH_CODEX_HOME}/config.toml"
   active_buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
-
-  if [[ -n "${TMPDIR:-}" ]]; then
-    temp_root_args+=(--temp-root "${TMPDIR}")
-  fi
+  local_default_tmp_root="/tmp"
 
   patch_args=(
     --config "${config_path}"
@@ -72,6 +70,7 @@ buddyswitch_patch_codex_config() {
   )
 
   if [[ -n "${active_buddy}" ]]; then
+    temp_root_args=(--temp-root "${BUDDYSWITCH_INSTANCE_TMP}")
     patch_args+=(
       --manifest "${BUDDYSWITCH_REPO_ROOT}/buddyswitch/manifest.toml"
       --buddy "${active_buddy}"
@@ -85,11 +84,15 @@ buddyswitch_patch_codex_config() {
     if [[ -n "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET:-}" ]]; then
       patch_args+=(--broker-socket "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}")
     fi
+  else
+    temp_root_args=(--temp-root "${local_default_tmp_root}")
+    if [[ -n "${TMPDIR:-}" ]]; then
+      temp_root_args+=(--temp-root "${TMPDIR}")
+    fi
   fi
 
   python3 "${BUDDYSWITCH_CODEX_CONFIG_HELPER}" \
     "${patch_args[@]}" \
-    --temp-root "/tmp" \
     "${temp_root_args[@]}"
 }
 
@@ -225,6 +228,7 @@ buddyswitch_env_bind_instance() {
   export BUDDYSWITCH_INSTANCE_JSON="$(buddyswitch_instance_json_path "${instance_id}")"
   export BUDDYSWITCH_INSTANCE_ROOT="${instance_root}"
   export BUDDYSWITCH_WORKSPACE_DIR="${instance_root}/workspace"
+  export BUDDYSWITCH_INSTANCE_TMP="${instance_root}/tmp"
   export BUDDYSWITCH_HOME="${instance_root}/home"
   export BUDDYSWITCH_CODEX_HOME="${instance_root}/codex-home"
   export BUDDYSWITCH_XDG_CONFIG_HOME="${instance_root}/xdg-config"
@@ -250,6 +254,15 @@ buddyswitch_instance_ensure_taskbox() {
   fi
 }
 
+buddyswitch_instance_ensure_private_writable_surface() {
+  if [[ -z "${BUDDYSWITCH_WORKSPACE_DIR:-}" || -z "${BUDDYSWITCH_INSTANCE_TMP:-}" ]]; then
+    echo "buddyswitch: instance workspace and tmp must be bound" >&2
+    return 2
+  fi
+  mkdir -p "${BUDDYSWITCH_WORKSPACE_DIR}/buddybox"
+  mkdir -p "${BUDDYSWITCH_INSTANCE_TMP}"
+}
+
 buddyswitch_generate_instance_id() {
   local buddy="$1"
   python3 -c 'import sys, uuid; print(f"inst-{sys.argv[1]}-{uuid.uuid4().hex[:12]}")' "${buddy}"
@@ -265,7 +278,7 @@ buddyswitch_instance_activate() {
   instance_dir="$(dirname "${instance_json}")"
   mkdir -p "${instance_dir}"
 
-  python3 - "${instance_json}" "${instance_id}" "${buddy}" "${status}" "${BUDDYSWITCH_WORKSPACE_DIR}" <<'PY'
+  python3 - "${instance_json}" "${instance_id}" "${buddy}" "${status}" "${BUDDYSWITCH_WORKSPACE_DIR}" "${BUDDYSWITCH_INSTANCE_ROOT}" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -276,11 +289,13 @@ instance_id = sys.argv[2]
 buddy = sys.argv[3]
 status = sys.argv[4]
 workspace_dir = sys.argv[5]
+instance_root = sys.argv[6]
 now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 payload = {
     "instance_id": instance_id,
     "buddy": buddy,
     "status": status,
+    "instance_root": instance_root,
     "workspace_dir": workspace_dir,
     "browser_port": None,
     "updated_at": now,
@@ -567,6 +582,17 @@ buddyswitch_reject_native_search_args() {
 buddyswitch_run_codex() {
   if [[ -n "${BUDDYSWITCH_ACTIVE_BUDDY:-}" || -n "${BUDDYSWITCH_INSTANCE_ID:-}" ]]; then
     buddyswitch_reject_native_search_args "$@" || return $?
+  fi
+  if [[ -n "${BUDDYSWITCH_INSTANCE_TMP:-}" ]]; then
+    mkdir -p "${BUDDYSWITCH_INSTANCE_TMP}"
+    TMPDIR="${BUDDYSWITCH_INSTANCE_TMP}" \
+    TMP="${BUDDYSWITCH_INSTANCE_TMP}" \
+    TEMP="${BUDDYSWITCH_INSTANCE_TMP}" \
+    HOME="${BUDDYSWITCH_HOME}" \
+    CODEX_HOME="${BUDDYSWITCH_CODEX_HOME}" \
+    XDG_CONFIG_HOME="${BUDDYSWITCH_XDG_CONFIG_HOME}" \
+    codex "$@"
+    return $?
   fi
   HOME="${BUDDYSWITCH_HOME}" \
   CODEX_HOME="${BUDDYSWITCH_CODEX_HOME}" \

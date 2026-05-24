@@ -726,7 +726,7 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "request.list / request.get via runtime env tools",
         },
         "buddybox": {
-            "description": "Active buddy private file capability metadata and tool-backed private data plane.",
+            "description": "Active buddy private file capability metadata for the instance-private workspace surface.",
             "scope": "active-buddy private file capability",
             "capability": "private_file_workspace",
             "owner_scope": "active_buddy",
@@ -735,6 +735,7 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "product_readable": False,
             "cross_buddy_readable": False,
             "mutates_product_state": False,
+            "workspace_relative_root": "buddybox",
             "supports": [
                 "describe_capability",
                 "list_private_file_summaries",

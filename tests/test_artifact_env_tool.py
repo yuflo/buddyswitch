@@ -25,14 +25,18 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
-        path = self._runtime_path("instance.json")
+        instance_root = self._runtime_path(f"instances/{instance_id}")
+        workspace_dir = instance_root / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        path = instance_root / "instance.json"
         path.write_text(
             json.dumps(
                 {
                     "instance_id": instance_id,
                     "buddy": buddy,
                     "status": status,
-                    "workspace_dir": str(self.runtime_root),
+                    "instance_root": str(instance_root),
+                    "workspace_dir": str(workspace_dir),
                     "browser_port": None,
                     "updated_at": "2026-05-18T00:00:00Z",
                 },
@@ -1517,7 +1521,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_attach_file_creates_artifact_owned_attachment_summary_without_body_blob(self) -> None:
         instance_id = "inst-design-attach"
         instance_json = self._instance_json(instance_id=instance_id, buddy="design")
-        source = self._runtime_path("tmp/chrome-devtools/desktop.png")
+        source = self._runtime_path(f"instances/{instance_id}/tmp/chrome-devtools/desktop.png")
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(b"\x89PNG\r\n\x1a\n")
 
@@ -1651,7 +1655,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         self.assertTrue(created.get("ok"), msg=created)
-        source = self._runtime_path("tmp/pm/evidence.txt")
+        source = self._runtime_path(f"instances/{instance_id}/tmp/pm/evidence.txt")
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text("hello from PM", encoding="utf-8")
         imported = self._dispatch(

@@ -121,7 +121,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             "--xdg-config-home",
             str(xdg_config_home),
             "--temp-root",
-            "/tmp",
+            str(instance_root / "tmp"),
         ]
         if extra_args:
             args.extend(extra_args)
@@ -178,7 +178,9 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "codex-home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "xdg-config").resolve(strict=False)), writable_paths)
-            self.assertIn(str(Path("/tmp").resolve(strict=False)), writable_paths)
+            self.assertIn(str((workspace_dir / "buddybox").resolve(strict=False)), writable_paths)
+            self.assertIn(str((instance_root / "tmp").resolve(strict=False)), writable_paths)
+            self.assertNotIn(str(Path("/tmp").resolve(strict=False)), writable_paths)
 
             forbidden_writes = [
                 shared_root,
@@ -239,16 +241,8 @@ class BuddyEnvSandboxTests(unittest.TestCase):
                     str(runtime_workspace_temp),
                 ],
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-            filesystem = _parse_profile_filesystem(config_path.read_text(encoding="utf-8"))
-            writable_paths = {key for key, value in filesystem.items() if value == "write"}
-
-            self.assertNotIn(str(state_temp.resolve(strict=False)), writable_paths)
-            self.assertNotIn(str(project_source_temp.resolve(strict=False)), writable_paths)
-            self.assertNotIn(str(project_workspace_temp.resolve(strict=False)), writable_paths)
-            self.assertNotIn(str(instance_temp.resolve(strict=False)), writable_paths)
-            self.assertNotIn(str(runtime_workspace_temp.resolve(strict=False)), writable_paths)
-            self.assertIn(str(Path("/tmp").resolve(strict=False)), writable_paths)
+            self.assertNotEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertIn("product-mode temp root must be the active instance tmp", completed.stderr)
 
     def test_dev_permission_profile_writes_source_root_only_and_keeps_state_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -287,6 +281,8 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             )
             _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
             self.assertIn(str(product_source_root.resolve(strict=False)), writable_paths)
+            self.assertIn(str((workspace_dir / "buddybox").resolve(strict=False)), writable_paths)
+            self.assertIn(str((instance_root / "tmp").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
             self.assertNotIn(str((shared_root / "state").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(shared_root.resolve(strict=False)), writable_paths)
@@ -331,11 +327,13 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             )
 
             self.assertIn(str(product_source_root.resolve(strict=False)), writable_paths)
+            self.assertIn(str((workspace_dir / "buddybox").resolve(strict=False)), writable_paths)
             self.assertNotIn(str(project_workspace_dir.resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "codex-home").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "xdg-config").resolve(strict=False)), writable_paths)
-            self.assertIn(str(Path("/tmp").resolve(strict=False)), writable_paths)
+            self.assertIn(str((instance_root / "tmp").resolve(strict=False)), writable_paths)
+            self.assertNotIn(str(Path("/tmp").resolve(strict=False)), writable_paths)
 
     def test_permission_profile_denies_stale_runtime_source_surfaces(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -359,6 +357,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
             filesystem = _profile_filesystem_entries(config_path.read_text(encoding="utf-8"))
+            writable_paths = {key for key, value in filesystem.items() if value == "write"}
             _assert_codex_filesystem_profile_is_flat(self, filesystem)
             self.assertEqual(filesystem[str(workspace_dir.resolve(strict=False))], "read")
             self.assertEqual(filesystem[str((shared_root / "state").resolve(strict=False))], "none")
@@ -369,6 +368,8 @@ class BuddyEnvSandboxTests(unittest.TestCase):
                 filesystem,
             )
             _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
+            self.assertIn(str((workspace_dir / "buddybox").resolve(strict=False)), writable_paths)
+            self.assertIn(str((instance_root / "tmp").resolve(strict=False)), writable_paths)
 
     def test_patch_keeps_mcp_sections_and_forces_approve(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

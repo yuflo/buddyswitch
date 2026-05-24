@@ -7,7 +7,7 @@
     "path": "projects/app"
   },
   "buddybox": {
-    "root": "buddyswitch/local/buddybox/{buddy_id}"
+    "root": "buddybox"
   },
   "filesystem_capability": {
     "host_writable": [
@@ -15,7 +15,7 @@
       "codex-home",
       "xdg-config",
       "scratch",
-      "temp"
+      "runtime-temp"
     ],
     "source_root": "read-only",
     "raw_state": "broker-only"

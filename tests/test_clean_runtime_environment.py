@@ -116,6 +116,7 @@ buddyswitch_workspace_cleanup_stale_state_projections
 
         self.assertFalse((workspace_dir / "buddyswitch" / "objects").exists())
         self.assertFalse((workspace_dir / "buddyswitch" / "objects").is_symlink())
+        self.assertTrue((workspace_dir / "buddybox").is_dir())
         self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").exists())
         self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").is_symlink())
 
@@ -181,12 +182,29 @@ buddyswitch_workspace_cleanup_stale_state_projections
         self.assertTrue(state_track.exists())
         self.assertEqual(state_track.read_text(encoding="utf-8"), '{"id":"track-old","ok":true}\n')
 
-    def test_stale_local_runtime_data_is_migrated_to_state_root(self) -> None:
+    def test_stale_object_projection_is_migrated_to_state_root(self) -> None:
         shared_root, workspace_dir, project_workspace_dir = self._prepare_runtime_workspace(buddy="pm")
 
         local_track = workspace_dir / "buddyswitch" / "objects" / "tracks" / "track-local.json"
         local_track.parent.mkdir(parents=True, exist_ok=True)
         local_track.write_text('{"id":"track-local","from":"workspace"}\n', encoding="utf-8")
+
+        cleanup = self._run_cleanup(
+            shared_root=shared_root,
+            workspace_dir=workspace_dir,
+            project_workspace_dir=project_workspace_dir,
+            buddy="pm",
+        )
+        self.assertEqual(cleanup.returncode, 0, msg=cleanup.stderr)
+
+        migrated_track = shared_root / "state" / "buddyswitch" / "objects" / "tracks" / "track-local.json"
+        self.assertTrue(migrated_track.exists())
+        self.assertEqual(migrated_track.read_text(encoding="utf-8"), '{"id":"track-local","from":"workspace"}\n')
+
+        self.assertFalse((workspace_dir / "buddyswitch" / "objects").exists())
+
+    def test_stale_buddybox_projection_is_removed_without_migration(self) -> None:
+        shared_root, workspace_dir, project_workspace_dir = self._prepare_runtime_workspace(buddy="pm")
 
         local_box = workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm" / "coordination" / "a-log.md"
         local_box.parent.mkdir(parents=True, exist_ok=True)
@@ -199,16 +217,9 @@ buddyswitch_workspace_cleanup_stale_state_projections
             buddy="pm",
         )
         self.assertEqual(cleanup.returncode, 0, msg=cleanup.stderr)
-
-        migrated_track = shared_root / "state" / "buddyswitch" / "objects" / "tracks" / "track-local.json"
-        migrated_box = shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm" / "coordination" / "a-log.md"
-        self.assertTrue(migrated_track.exists())
-        self.assertEqual(migrated_track.read_text(encoding="utf-8"), '{"id":"track-local","from":"workspace"}\n')
-        self.assertTrue(migrated_box.exists())
-        self.assertEqual(migrated_box.read_text(encoding="utf-8"), "hello\n")
-
-        self.assertFalse((workspace_dir / "buddyswitch" / "objects").exists())
-        self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox" / "pm").exists())
+        self.assertFalse((workspace_dir / "buddyswitch" / "local" / "buddybox").exists())
+        self.assertFalse((shared_root / "state" / "buddyswitch" / "local" / "buddybox" / "pm" / "coordination" / "a-log.md").exists())
+        self.assertFalse((workspace_dir / "buddybox" / "coordination" / "a-log.md").exists())
 
     def test_no_prompt_side_command_blacklist_workaround_text(self) -> None:
         completed = subprocess.run(
@@ -267,7 +278,7 @@ buddyswitch_workspace_cleanup_stale_state_projections
                 "--xdg-config-home",
                 str(instance_root / "xdg-config"),
                 "--temp-root",
-                "/tmp",
+                str(instance_root / "tmp"),
             ],
             cwd=ROOT,
             text=True,
@@ -277,7 +288,13 @@ buddyswitch_workspace_cleanup_stale_state_projections
         self.assertEqual(patch.returncode, 0, msg=patch.stderr)
 
         sandbox_env = dict(os.environ)
+        sandbox_env["HOME"] = str(instance_root / "home")
         sandbox_env["CODEX_HOME"] = str(codex_home)
+        sandbox_env["XDG_CONFIG_HOME"] = str(instance_root / "xdg-config")
+        sandbox_env["TMPDIR"] = str(instance_root / "tmp")
+        sandbox_env["TMP"] = str(instance_root / "tmp")
+        sandbox_env["TEMP"] = str(instance_root / "tmp")
+        sandbox_env["BUDDYSWITCH_STATE_ROOT"] = str(shared_root / "state")
         sandboxed = subprocess.run(
             [
                 "codex",
@@ -289,7 +306,24 @@ buddyswitch_workspace_cleanup_stale_state_projections
                 str(workspace_dir),
                 "/bin/zsh",
                 "-lc",
-                "rg --files >/tmp/buddyswitch-rg-files.txt && git status --short --untracked-files=all -- . >/tmp/buddyswitch-git-status.txt",
+                "set +e\n"
+                "mkdir -p \"$HOME/.cache\" && echo home > \"$HOME/.cache/probe.txt\"; home=$?\n"
+                "mkdir -p \"$CODEX_HOME/sessions\" && echo codex > \"$CODEX_HOME/sessions/probe.jsonl\"; codex=$?\n"
+                "mkdir -p \"$XDG_CONFIG_HOME/test\" && echo xdg > \"$XDG_CONFIG_HOME/test/probe.txt\"; xdg=$?\n"
+                "mkdir -p \"$TMPDIR\" && echo tmp > \"$TMPDIR/probe.txt\"; inst_tmp=$?\n"
+                "mkdir -p buddybox/prototypes && echo buddybox > buddybox/prototypes/probe.txt; buddybox=$?\n"
+                "echo root > workspace-root-probe.txt; workspace_root=$?\n"
+                "echo global > /tmp/buddyswitch-global-probe.txt; global_tmp=$?\n"
+                "mkdir -p \"$BUDDYSWITCH_STATE_ROOT/buddyswitch/objects\" && echo state > \"$BUDDYSWITCH_STATE_ROOT/buddyswitch/objects/probe.txt\"; state=$?\n"
+                "echo \"home=$home codex=$codex xdg=$xdg inst_tmp=$inst_tmp buddybox=$buddybox workspace_root=$workspace_root global_tmp=$global_tmp state=$state\"\n"
+                "test \"$home\" = 0\n"
+                "test \"$codex\" = 0\n"
+                "test \"$xdg\" = 0\n"
+                "test \"$inst_tmp\" = 0\n"
+                "test \"$buddybox\" = 0\n"
+                "test \"$workspace_root\" != 0\n"
+                "test \"$global_tmp\" != 0\n"
+                "test \"$state\" != 0\n",
             ],
             text=True,
             capture_output=True,
@@ -297,8 +331,14 @@ buddyswitch_workspace_cleanup_stale_state_projections
             env=sandbox_env,
         )
         self.assertEqual(sandboxed.returncode, 0, msg=sandboxed.stderr)
+        self.assertIn("home=0", sandboxed.stdout)
+        self.assertIn("xdg=0", sandboxed.stdout)
+        self.assertIn("inst_tmp=0", sandboxed.stdout)
+        self.assertIn("buddybox=0", sandboxed.stdout)
+        self.assertIn("workspace_root=1", sandboxed.stdout)
+        self.assertIn("global_tmp=1", sandboxed.stdout)
+        self.assertIn("state=1", sandboxed.stdout)
         stderr_lower = sandboxed.stderr.lower()
-        self.assertNotIn("operation not permitted", stderr_lower)
         self.assertNotIn("retry without sandbox", stderr_lower)
 
 

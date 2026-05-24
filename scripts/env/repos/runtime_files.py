@@ -44,6 +44,7 @@ def _recompute_runtime_roots() -> None:
     global CONTENT_ROOT
     global LOCAL_ROOT
     global BUDDYBOX_LOCAL_DIR
+    legacy_buddybox_local_dir: Path
 
     if _RUNTIME_ROOT_OVERRIDE is None:
         ROOT = _default_repo_root()
@@ -62,7 +63,8 @@ def _recompute_runtime_roots() -> None:
     REQUESTS_DIR = OBJECTS_ROOT / "requests"
     CONTENT_ROOT = STATE_ROOT / "buddyswitch" / "content"
     LOCAL_ROOT = STATE_ROOT / "buddyswitch" / "local"
-    BUDDYBOX_LOCAL_DIR = LOCAL_ROOT / "buddybox"
+    legacy_buddybox_local_dir = LOCAL_ROOT / "buddybox"
+    BUDDYBOX_LOCAL_DIR = legacy_buddybox_local_dir
     for listener in _RUNTIME_ROOT_LISTENERS:
         listener()
 
@@ -111,7 +113,19 @@ def runtime_workspace_root(instance_payload: dict[str, Any] | None = None) -> Pa
 
 
 def buddybox_local_dir(instance_payload: dict[str, Any] | None = None) -> Path:
-    return BUDDYBOX_LOCAL_DIR
+    return runtime_workspace_root(instance_payload) / "buddybox"
+
+
+def instance_tmp_dir(instance_payload: dict[str, Any] | None = None) -> Path:
+    if isinstance(instance_payload, Mapping):
+        return instance_root_from_context(
+            instance_json=None,
+            instance_payload=instance_payload,
+        ) / "tmp"
+    raw_root = os.environ.get("BUDDYSWITCH_INSTANCE_ROOT")
+    if isinstance(raw_root, str) and raw_root.strip():
+        return Path(raw_root.strip()).expanduser().resolve(strict=False) / "tmp"
+    raise ValueError("instance context is required for instance tmp access")
 
 
 def instance_root_from_context(

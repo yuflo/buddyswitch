@@ -50,7 +50,8 @@ def normalize_logical_prefix(value: Any, *, active_buddy: str, buddy_ids: set[st
 
 
 def active_buddy_root(*, active_buddy: str, instance_payload: dict[str, Any] | None = None) -> Path:
-    return runtime_files.buddybox_local_dir(instance_payload) / active_buddy
+    runtime_files.require_id(active_buddy, "buddy")
+    return runtime_files.buddybox_local_dir(instance_payload)
 
 
 def ensure_active_buddy_root(*, active_buddy: str, instance_payload: dict[str, Any] | None = None) -> Path:

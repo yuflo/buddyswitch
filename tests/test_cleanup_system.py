@@ -118,6 +118,7 @@ class CleanupSystemTests(unittest.TestCase):
                     "instance_id": instance_id,
                     "buddy": buddy,
                     "status": "active",
+                    "instance_root": str(instance_root),
                     "workspace_dir": str(workspace),
                     "browser_port": None,
                     "updated_at": "2026-05-19T00:00:00Z",
@@ -291,17 +292,13 @@ class CleanupSystemTests(unittest.TestCase):
         pm_workspace = self._instance_workspace(instance_id="inst-pm-cleanup", buddy="pm")
         dev_workspace = self._instance_workspace(instance_id="inst-dev-cleanup", buddy="dev")
 
-        pm_owned = pm_workspace / "buddyswitch" / "local" / "buddybox" / "pm" / "notes" / "draft.md"
+        pm_owned = pm_workspace / "buddybox" / "notes" / "draft.md"
         pm_owned.parent.mkdir(parents=True, exist_ok=True)
         pm_owned.write_text("pm-owned", encoding="utf-8")
 
-        pm_workspace_dev_file = pm_workspace / "buddyswitch" / "local" / "buddybox" / "dev" / "notes" / "keep.md"
-        pm_workspace_dev_file.parent.mkdir(parents=True, exist_ok=True)
-        pm_workspace_dev_file.write_text("dev-owned", encoding="utf-8")
-
-        dev_workspace_pm_file = dev_workspace / "buddyswitch" / "local" / "buddybox" / "pm" / "notes" / "keep.md"
-        dev_workspace_pm_file.parent.mkdir(parents=True, exist_ok=True)
-        dev_workspace_pm_file.write_text("pm-in-dev-workspace", encoding="utf-8")
+        dev_owned = dev_workspace / "buddybox" / "notes" / "keep.md"
+        dev_owned.parent.mkdir(parents=True, exist_ok=True)
+        dev_owned.write_text("dev-owned", encoding="utf-8")
 
         plan = env_cleanup.build_cleanup_plan(
             scope="buddy",
@@ -321,8 +318,18 @@ class CleanupSystemTests(unittest.TestCase):
         result = env_cleanup.execute_cleanup_plan(plan)
         self.assertTrue(result["ok"], msg=result)
         self.assertFalse(pm_owned.exists())
-        self.assertTrue(pm_workspace_dev_file.exists())
-        self.assertTrue(dev_workspace_pm_file.exists())
+        self.assertTrue(dev_owned.exists())
+
+        all_data_plan = env_cleanup.build_cleanup_plan(
+            scope="all-data",
+            buddy=None,
+            repo_root=self.repo_root,
+            manifest_path=self.manifest_path,
+            shared_root=self.shared_root,
+        )
+        all_data_result = env_cleanup.execute_cleanup_plan(all_data_plan)
+        self.assertTrue(all_data_result["ok"], msg=all_data_result)
+        self.assertFalse(dev_owned.exists())
 
 
 if __name__ == "__main__":
