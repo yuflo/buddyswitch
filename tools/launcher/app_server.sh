@@ -165,6 +165,15 @@ buddyswitch_app_server_thread_start() {
     --permissions "buddyswitch-runtime"
 }
 
+buddyswitch_app_server_thread_clear() {
+  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-start \
+    --socket "$(buddyswitch_app_server_socket)" \
+    --workspace-dir "${BUDDYSWITCH_WORKSPACE_DIR}" \
+    --shared-project-workspace-dir "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}" \
+    --permissions "buddyswitch-runtime" \
+    --session-start-source "clear"
+}
+
 buddyswitch_app_server_thread_read() {
   local thread_id="$1"
   python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-read \
@@ -185,6 +194,49 @@ buddyswitch_app_server_input() {
 buddyswitch_app_server_interrupt() {
   local thread_id="$1"
   python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" interrupt \
+    --socket "$(buddyswitch_app_server_socket)" \
+    --thread-id "${thread_id}"
+}
+
+buddyswitch_app_server_goal_get() {
+  local thread_id="$1"
+  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" goal-get \
+    --socket "$(buddyswitch_app_server_socket)" \
+    --thread-id "${thread_id}"
+}
+
+buddyswitch_app_server_goal_set() {
+  local thread_id="$1"
+  local objective="${2:-}"
+  local status="${3:-}"
+  local token_budget="${4:-}"
+  local -a command=(
+    python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" goal-set
+    --socket "$(buddyswitch_app_server_socket)"
+    --thread-id "${thread_id}"
+  )
+  if [[ -n "${objective}" ]]; then
+    command+=(--objective "${objective}")
+  fi
+  if [[ -n "${status}" ]]; then
+    command+=(--status "${status}")
+  fi
+  if [[ -n "${token_budget}" ]]; then
+    command+=(--token-budget "${token_budget}")
+  fi
+  "${command[@]}"
+}
+
+buddyswitch_app_server_goal_clear() {
+  local thread_id="$1"
+  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" goal-clear \
+    --socket "$(buddyswitch_app_server_socket)" \
+    --thread-id "${thread_id}"
+}
+
+buddyswitch_app_server_compact() {
+  local thread_id="$1"
+  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" compact \
     --socket "$(buddyswitch_app_server_socket)" \
     --thread-id "${thread_id}"
 }

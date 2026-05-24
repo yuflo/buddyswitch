@@ -543,19 +543,21 @@ def thread_start(
     workspace_dir: Path,
     shared_project_workspace_dir: Path,
     permissions: str,
+    *,
+    session_start_source: str | None = None,
 ) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "cwd": str(workspace_dir),
+        "permissions": permissions,
+        "runtimeWorkspaceRoots": [
+            str(workspace_dir),
+            str(shared_project_workspace_dir),
+        ],
+    }
+    if session_start_source is not None:
+        params["sessionStartSource"] = session_start_source
     with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
-        result = client.request(
-            "thread/start",
-            {
-                "cwd": str(workspace_dir),
-                "permissions": permissions,
-                "runtimeWorkspaceRoots": [
-                    str(workspace_dir),
-                    str(shared_project_workspace_dir),
-                ],
-            },
-        )
+        result = client.request("thread/start", params)
     return result
 
 
@@ -655,6 +657,40 @@ def interrupt_turn(socket_path: Path, thread_id: str) -> dict[str, Any]:
     return {"ok": True, "turn_id": active_turn_id}
 
 
+def goal_get(socket_path: Path, thread_id: str) -> dict[str, Any]:
+    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
+        return client.request("thread/goal/get", {"threadId": thread_id})
+
+
+def goal_set(
+    socket_path: Path,
+    thread_id: str,
+    *,
+    objective: str | None = None,
+    status: str | None = None,
+    token_budget: int | None = None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {"threadId": thread_id}
+    if objective is not None:
+        params["objective"] = objective
+    if status is not None:
+        params["status"] = status
+    if token_budget is not None:
+        params["tokenBudget"] = token_budget
+    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
+        return client.request("thread/goal/set", params)
+
+
+def goal_clear(socket_path: Path, thread_id: str) -> dict[str, Any]:
+    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
+        return client.request("thread/goal/clear", {"threadId": thread_id})
+
+
+def compact_start(socket_path: Path, thread_id: str) -> dict[str, Any]:
+    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
+        return client.request("thread/compact/start", {"threadId": thread_id})
+
+
 def _command_status(args: argparse.Namespace) -> int:
     payload = app_server_status(Path(args.socket), Path(args.pid_file), Path(args.marker_file), Path(args.log_file))
     print(json.dumps(payload, ensure_ascii=True))
@@ -684,6 +720,7 @@ def _command_thread_start(args: argparse.Namespace) -> int:
         Path(args.workspace_dir),
         Path(args.shared_project_workspace_dir),
         args.permissions,
+        session_start_source=args.session_start_source,
     )
     print(json.dumps(payload, ensure_ascii=True))
     return 0
@@ -703,6 +740,36 @@ def _command_input(args: argparse.Namespace) -> int:
 
 def _command_interrupt(args: argparse.Namespace) -> int:
     payload = interrupt_turn(Path(args.socket), args.thread_id)
+    print(json.dumps(payload, ensure_ascii=True))
+    return 0
+
+
+def _command_goal_get(args: argparse.Namespace) -> int:
+    payload = goal_get(Path(args.socket), args.thread_id)
+    print(json.dumps(payload, ensure_ascii=True))
+    return 0
+
+
+def _command_goal_set(args: argparse.Namespace) -> int:
+    payload = goal_set(
+        Path(args.socket),
+        args.thread_id,
+        objective=args.objective,
+        status=args.status,
+        token_budget=args.token_budget,
+    )
+    print(json.dumps(payload, ensure_ascii=True))
+    return 0
+
+
+def _command_goal_clear(args: argparse.Namespace) -> int:
+    payload = goal_clear(Path(args.socket), args.thread_id)
+    print(json.dumps(payload, ensure_ascii=True))
+    return 0
+
+
+def _command_compact(args: argparse.Namespace) -> int:
+    payload = compact_start(Path(args.socket), args.thread_id)
     print(json.dumps(payload, ensure_ascii=True))
     return 0
 
@@ -737,6 +804,7 @@ def build_parser() -> argparse.ArgumentParser:
     thread_start_parser.add_argument("--workspace-dir", required=True)
     thread_start_parser.add_argument("--shared-project-workspace-dir", required=True)
     thread_start_parser.add_argument("--permissions", required=True)
+    thread_start_parser.add_argument("--session-start-source", choices=["startup", "clear"], default=None)
     thread_start_parser.set_defaults(func=_command_thread_start)
 
     thread_read_parser = subparsers.add_parser("thread-read")
@@ -756,6 +824,29 @@ def build_parser() -> argparse.ArgumentParser:
     interrupt.add_argument("--socket", required=True)
     interrupt.add_argument("--thread-id", required=True)
     interrupt.set_defaults(func=_command_interrupt)
+
+    goal_get_parser = subparsers.add_parser("goal-get")
+    goal_get_parser.add_argument("--socket", required=True)
+    goal_get_parser.add_argument("--thread-id", required=True)
+    goal_get_parser.set_defaults(func=_command_goal_get)
+
+    goal_set_parser = subparsers.add_parser("goal-set")
+    goal_set_parser.add_argument("--socket", required=True)
+    goal_set_parser.add_argument("--thread-id", required=True)
+    goal_set_parser.add_argument("--objective")
+    goal_set_parser.add_argument("--status")
+    goal_set_parser.add_argument("--token-budget", type=int)
+    goal_set_parser.set_defaults(func=_command_goal_set)
+
+    goal_clear_parser = subparsers.add_parser("goal-clear")
+    goal_clear_parser.add_argument("--socket", required=True)
+    goal_clear_parser.add_argument("--thread-id", required=True)
+    goal_clear_parser.set_defaults(func=_command_goal_clear)
+
+    compact = subparsers.add_parser("compact")
+    compact.add_argument("--socket", required=True)
+    compact.add_argument("--thread-id", required=True)
+    compact.set_defaults(func=_command_compact)
 
     return parser
 

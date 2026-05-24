@@ -422,6 +422,41 @@ temp_path.replace(instance_json)
 PY
 }
 
+buddyswitch_instance_set_thread_id() {
+  local instance_id="$1"
+  local thread_id="$2"
+  local instance_json
+
+  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+
+  python3 - "${instance_json}" "${instance_id}" "${thread_id}" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+instance_json = Path(sys.argv[1])
+instance_id = sys.argv[2]
+thread_id = sys.argv[3]
+
+if not instance_json.exists():
+    raise SystemExit(f"Instance record missing: {instance_json}")
+if not thread_id:
+    raise SystemExit("Thread id is required")
+
+payload = json.loads(instance_json.read_text(encoding="utf-8"))
+if payload.get("instance_id") != instance_id:
+    raise SystemExit(f"Instance id mismatch in {instance_json}")
+
+payload["thread_id"] = thread_id
+payload["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+temp_path = instance_json.with_suffix(".tmp")
+temp_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+temp_path.replace(instance_json)
+PY
+}
+
 buddyswitch_instance_clear_app_server() {
   local instance_id="$1"
   local status="${2:-inactive}"

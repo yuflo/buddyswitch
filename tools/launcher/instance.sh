@@ -7,6 +7,9 @@ Usage:
   buddyswitch-codex instance buddies [--json]
   buddyswitch-codex instance start --buddy <buddy> [--json]
   buddyswitch-codex instance input <instance-id> --text <text> [--json]
+  buddyswitch-codex instance goal <instance-id> get|set|clear [--json]
+  buddyswitch-codex instance compact <instance-id> [--json]
+  buddyswitch-codex instance clear <instance-id> [--json]
   buddyswitch-codex instance attach <instance-id>
   buddyswitch-codex instance stop <instance-id> [--json]
   buddyswitch-codex instance status <instance-id> [--json]
@@ -19,6 +22,9 @@ Commands:
   buddies Print valid buddies from buddyswitch/manifest.toml.
   start   Start a fresh product-mode app-server service.
   input   Send text to a running product-mode instance.
+  goal    Get, set, or clear the running instance goal.
+  compact Start app-server thread compaction for a running instance.
+  clear   Clear the running instance conversation with a fresh thread.
   attach  Attach a TUI to a running product-mode instance.
   stop    Stop a running product-mode instance service.
   status  Show product-mode instance service state.
@@ -371,6 +377,33 @@ buddyswitch_instance_main() {
         return 2
       fi
       instance_input "$@"
+      ;;
+    goal)
+      shift || true
+      if [[ $# -lt 2 ]]; then
+        echo "instance id and goal action are required" >&2
+        buddyswitch_instance_usage >&2
+        return 2
+      fi
+      instance_goal "$@"
+      ;;
+    compact)
+      shift || true
+      if [[ $# -lt 1 ]]; then
+        echo "instance id is required" >&2
+        buddyswitch_instance_usage >&2
+        return 2
+      fi
+      instance_compact "$@"
+      ;;
+    clear)
+      shift || true
+      if [[ $# -lt 1 ]]; then
+        echo "instance id is required" >&2
+        buddyswitch_instance_usage >&2
+        return 2
+      fi
+      instance_clear "$@"
       ;;
     attach)
       shift || true

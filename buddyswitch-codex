@@ -33,6 +33,9 @@ Usage:
   buddyswitch-codex instance buddies [--json]
   buddyswitch-codex instance start --buddy <buddy> [--json]
   buddyswitch-codex instance input <instance-id> --text <text> [--json]
+  buddyswitch-codex instance goal <instance-id> get|set|clear [--json]
+  buddyswitch-codex instance compact <instance-id> [--json]
+  buddyswitch-codex instance clear <instance-id> [--json]
   buddyswitch-codex instance attach <instance-id>
   buddyswitch-codex instance stop <instance-id> [--json]
   buddyswitch-codex instance status <instance-id> [--json]
@@ -407,6 +410,272 @@ PY
   fi
 }
 
+instance_require_active_service_thread() {
+  local instance_id="$1"
+  local action_label="$2"
+  local thread_id
+
+  buddyswitch_validate_instance_id "${instance_id}" || return $?
+  buddyswitch_instance_validate_record "${instance_id}" >/dev/null || return $?
+  buddyswitch_env_bind_instance "${instance_id}" || return $?
+  thread_id="$(buddyswitch_instance_record_field "${instance_id}" "thread_id" || true)"
+  if [[ -z "${thread_id}" ]]; then
+    echo "Instance ${action_label} blocked: ${instance_id} has no thread id; stop/delete it and start a new instance." >&2
+    return 3
+  fi
+  if ! buddyswitch_app_server_is_active; then
+    echo "Instance ${action_label} blocked: ${instance_id} is unhealthy or inactive." >&2
+    return 3
+  fi
+  INSTANCE_ACTIVE_THREAD_ID="${thread_id}"
+}
+
+instance_goal_print_json() {
+  local output="$1"
+  local instance_id="$2"
+  local thread_id="$3"
+  local action="$4"
+
+  python3 - "${output}" "${instance_id}" "${thread_id}" "${action}" <<'PY'
+import json
+import sys
+
+source = json.loads(sys.argv[1])
+payload = {
+    "instance_id": sys.argv[2],
+    "thread_id": sys.argv[3],
+}
+action = sys.argv[4]
+if action in {"get", "set"}:
+    payload["goal"] = source.get("goal")
+elif action == "clear":
+    payload["cleared"] = bool(source.get("cleared"))
+print(json.dumps(payload, ensure_ascii=True))
+PY
+}
+
+instance_goal() {
+  local instance_id="${1:-}" action="${2:-}" json=0 objective="" status="" token_budget="" arg thread_id output
+  if [[ -z "${instance_id}" || -z "${action}" ]]; then
+    echo "instance goal requires <instance-id> get|set|clear" >&2
+    return 2
+  fi
+  shift 2 || true
+
+  case "${action}" in
+    get|clear)
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --json)
+            json=1
+            shift
+            ;;
+          *)
+            echo "Unknown instance goal ${action} option: $1" >&2
+            return 2
+            ;;
+        esac
+      done
+      ;;
+    set)
+      while [[ $# -gt 0 ]]; do
+        arg="$1"
+        case "${arg}" in
+          --objective)
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+              echo "instance goal set requires --objective <text>" >&2
+              return 2
+            fi
+            objective="$2"
+            shift 2
+            ;;
+          --status)
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+              echo "instance goal set requires --status <status>" >&2
+              return 2
+            fi
+            status="$2"
+            shift 2
+            ;;
+          --token-budget)
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+              echo "instance goal set requires --token-budget <tokens>" >&2
+              return 2
+            fi
+            token_budget="$2"
+            if ! [[ "${token_budget}" =~ ^[0-9]+$ ]]; then
+              echo "instance goal set requires a numeric --token-budget value" >&2
+              return 2
+            fi
+            shift 2
+            ;;
+          --json)
+            json=1
+            shift
+            ;;
+          *)
+            echo "Unknown instance goal set option: ${arg}" >&2
+            return 2
+            ;;
+        esac
+      done
+      if [[ -z "${objective}" && -z "${status}" && -z "${token_budget}" ]]; then
+        echo "instance goal set requires --objective, --status, or --token-budget" >&2
+        return 2
+      fi
+      ;;
+    *)
+      echo "Unknown instance goal action: ${action}" >&2
+      return 2
+      ;;
+  esac
+
+  instance_require_active_service_thread "${instance_id}" "goal" || return $?
+  thread_id="${INSTANCE_ACTIVE_THREAD_ID}"
+  case "${action}" in
+    get)
+      output="$(buddyswitch_app_server_goal_get "${thread_id}" 2>&1)" || {
+        [[ -n "${output}" ]] && echo "${output}" >&2
+        return 1
+      }
+      ;;
+    set)
+      output="$(buddyswitch_app_server_goal_set "${thread_id}" "${objective}" "${status}" "${token_budget}" 2>&1)" || {
+        [[ -n "${output}" ]] && echo "${output}" >&2
+        return 1
+      }
+      ;;
+    clear)
+      output="$(buddyswitch_app_server_goal_clear "${thread_id}" 2>&1)" || {
+        [[ -n "${output}" ]] && echo "${output}" >&2
+        return 1
+      }
+      ;;
+  esac
+
+  if [[ "${json}" -eq 1 ]]; then
+    instance_goal_print_json "${output}" "${instance_id}" "${thread_id}" "${action}"
+    return 0
+  fi
+
+  python3 - "${output}" "${action}" <<'PY'
+import json
+import sys
+
+source = json.loads(sys.argv[1])
+action = sys.argv[2]
+if action == "clear":
+    print(f"Goal cleared: {'yes' if source.get('cleared') else 'no'}")
+else:
+    goal = source.get("goal")
+    if isinstance(goal, dict):
+        print(f"Goal: {goal.get('objective') or ''}")
+    else:
+        print("No active goal.")
+PY
+}
+
+instance_compact() {
+  local instance_id="${1:-}" json=0 thread_id output
+  if [[ -z "${instance_id}" ]]; then
+    echo "instance id is required" >&2
+    return 2
+  fi
+  shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json)
+        json=1
+        shift
+        ;;
+      *)
+        echo "Unknown instance compact option: $1" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  instance_require_active_service_thread "${instance_id}" "compact" || return $?
+  thread_id="${INSTANCE_ACTIVE_THREAD_ID}"
+  output="$(buddyswitch_app_server_compact "${thread_id}" 2>&1)" || {
+    [[ -n "${output}" ]] && echo "${output}" >&2
+    return 1
+  }
+  if [[ "${json}" -eq 1 ]]; then
+    python3 - "${output}" "${instance_id}" "${thread_id}" <<'PY'
+import json
+import sys
+
+json.loads(sys.argv[1])
+print(json.dumps({"instance_id": sys.argv[2], "thread_id": sys.argv[3], "started": True}, ensure_ascii=True))
+PY
+    return 0
+  fi
+  echo "Compaction started: ${thread_id}"
+}
+
+instance_clear() {
+  local instance_id="${1:-}" json=0 previous_thread_id output new_thread_id
+  if [[ -z "${instance_id}" ]]; then
+    echo "instance id is required" >&2
+    return 2
+  fi
+  shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json)
+        json=1
+        shift
+        ;;
+      *)
+        echo "Unknown instance clear option: $1" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  instance_require_active_service_thread "${instance_id}" "clear" || return $?
+  previous_thread_id="${INSTANCE_ACTIVE_THREAD_ID}"
+  output="$(buddyswitch_app_server_thread_clear 2>&1)" || {
+    [[ -n "${output}" ]] && echo "${output}" >&2
+    return 1
+  }
+  new_thread_id="$(
+    python3 - "${output}" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+thread = payload.get("thread")
+if isinstance(thread, dict):
+    thread_id = thread.get("id")
+    if isinstance(thread_id, str):
+        print(thread_id)
+PY
+  )"
+  if [[ -z "${new_thread_id}" ]]; then
+    echo "App-server clear did not return thread.id." >&2
+    echo "${output}" >&2
+    return 1
+  fi
+  buddyswitch_instance_set_thread_id "${instance_id}" "${new_thread_id}" || return $?
+  if [[ "${json}" -eq 1 ]]; then
+    python3 - "${instance_id}" "${previous_thread_id}" "${new_thread_id}" <<'PY'
+import json
+import sys
+
+payload = {
+    "instance_id": sys.argv[1],
+    "previous_thread_id": sys.argv[2],
+    "thread_id": sys.argv[3],
+}
+print(json.dumps(payload, ensure_ascii=True))
+PY
+    return 0
+  fi
+  echo "Thread cleared: ${previous_thread_id} -> ${new_thread_id}"
+}
+
 instance_attach() {
   local instance_id="${1:-}" buddy thread_id socket_path
   if [[ -z "${instance_id}" ]]; then
@@ -441,7 +710,7 @@ instance_attach() {
   BUDDYSWITCH_ACTIVE_BUDDY="${buddy}" \
   BUDDYSWITCH_INSTANCE_ID="${instance_id}" \
   BUDDYSWITCH_INSTANCE_JSON="${BUDDYSWITCH_INSTANCE_JSON}" \
-    buddyswitch_run_codex resume --remote "unix://${socket_path}" "${thread_id}"
+    buddyswitch_run_codex --remote "unix://${socket_path}"
 }
 
 instance_stop() {

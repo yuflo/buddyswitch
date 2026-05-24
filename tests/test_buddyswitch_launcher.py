@@ -2372,6 +2372,197 @@ exec "$real_git" "$@"
             self.assertEqual(payload["expected_turn_id"], "turn-123")
             self.assertNotIn("Steered turn:", input_result.stdout)
 
+    def test_goal_set_json_calls_thread_goal_set(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            goal_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "goal",
+                    ctx["instance_id"],
+                    "set",
+                    "--objective",
+                    "Ship launcher goal API",
+                    "--token-budget",
+                    "1234",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(goal_result.returncode, 0, msg=goal_result.stderr)
+            payload = json.loads(goal_result.stdout)
+            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(payload["goal"]["objective"], "Ship launcher goal API")
+            self.assertEqual(payload["goal"]["tokenBudget"], 1234)
+            calls = [
+                json.loads(line)
+                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            rpc_rows = [row for row in calls if row["argv"][:1] == ["json-rpc"]]
+            goal_set = next(row for row in rpc_rows if row["rpc_method"] == "thread/goal/set")
+            self.assertEqual(goal_set["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(goal_set["params"]["objective"], "Ship launcher goal API")
+            self.assertEqual(goal_set["params"]["tokenBudget"], 1234)
+
+    def test_goal_get_and_clear_json_use_thread_goal_rpc(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={
+                    "goal": {
+                        "threadId": "thread-inst-pm-test",
+                        "objective": "Existing objective",
+                        "status": "active",
+                        "tokenBudget": None,
+                        "tokensUsed": 0,
+                        "timeUsedSeconds": 0,
+                        "createdAt": 0,
+                        "updatedAt": 0,
+                    }
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            get_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "goal",
+                    ctx["instance_id"],
+                    "get",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(get_result.returncode, 0, msg=get_result.stderr)
+            get_payload = json.loads(get_result.stdout)
+            self.assertEqual(get_payload["goal"]["objective"], "Existing objective")
+
+            clear_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "goal",
+                    ctx["instance_id"],
+                    "clear",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(clear_result.returncode, 0, msg=clear_result.stderr)
+            clear_payload = json.loads(clear_result.stdout)
+            self.assertEqual(clear_payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(clear_payload["thread_id"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(clear_payload["cleared"], True)
+            calls = [
+                json.loads(line)
+                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            methods = [row["rpc_method"] for row in calls if row["argv"][:1] == ["json-rpc"]]
+            self.assertIn("thread/goal/get", methods)
+            self.assertIn("thread/goal/clear", methods)
+
+    def test_compact_json_calls_thread_compact_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            compact_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "compact",
+                    ctx["instance_id"],
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(compact_result.returncode, 0, msg=compact_result.stderr)
+            payload = json.loads(compact_result.stdout)
+            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
+            calls = [
+                json.loads(line)
+                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            compact = next(row for row in calls if row.get("rpc_method") == "thread/compact/start")
+            self.assertEqual(compact["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+
+    def test_clear_json_starts_clear_thread_and_updates_instance_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={"clear_thread_id": "thread-cleared"},
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            clear_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "clear",
+                    ctx["instance_id"],
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(clear_result.returncode, 0, msg=clear_result.stderr)
+            payload = json.loads(clear_result.stdout)
+            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["previous_thread_id"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(payload["thread_id"], "thread-cleared")
+            instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
+            self.assertEqual(instance_payload["thread_id"], "thread-cleared")
+            calls = [
+                json.loads(line)
+                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            thread_start = next(row for row in calls if row.get("rpc_method") == "thread/start")
+            self.assertEqual(thread_start["params"]["sessionStartSource"], "clear")
+            self.assertEqual(thread_start["params"]["permissions"], "buddyswitch-runtime")
+
     def test_input_reports_non_steerable_active_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
@@ -2496,7 +2687,7 @@ exec "$real_git" "$@"
             self.assertIn("--text", input_result.stderr)
             self.assertEqual(Path(str(ctx["calls_path"])).read_text(encoding="utf-8"), "")
 
-    def test_attach_invokes_remote_resume_without_stopping_service(self) -> None:
+    def test_attach_invokes_remote_tui_without_local_resume_replay(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
@@ -2522,10 +2713,8 @@ exec "$real_git" "$@"
             self.assertEqual(
                 payload["argv"],
                 [
-                    "resume",
                     "--remote",
                     f"unix://{instance_payload['app_server_socket']}",
-                    instance_payload["thread_id"],
                 ],
             )
             self.assertEqual(instance_payload["status"], "active")

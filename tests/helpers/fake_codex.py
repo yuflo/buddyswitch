@@ -386,6 +386,8 @@ def build_default_result(method: str, params: dict[str, object] | None, state: d
     if method == "thread/loaded/list":
         return {"data": [state.get("thread_id")], "nextCursor": None}
     if method == "thread/start":
+        if isinstance(params, dict) and params.get("sessionStartSource") == "clear":
+            return {"thread": default_thread({**state, "thread_id": state.get("clear_thread_id", "thread-cleared")})}
         return {"thread": default_thread(state)}
     if method == "thread/read":
         return {"thread": default_thread(state)}
@@ -405,11 +407,32 @@ def build_default_result(method: str, params: dict[str, object] | None, state: d
         return {"turnId": expected_turn_id or state.get("next_turn_id", "turn-test")}
     if method == "turn/interrupt":
         return {}
+    if method == "thread/goal/get":
+        return {"goal": state.get("goal")}
+    if method == "thread/goal/set":
+        thread_id = str(params.get("threadId") if isinstance(params, dict) else state.get("thread_id"))
+        goal = {
+            "threadId": thread_id,
+            "objective": params.get("objective") if isinstance(params, dict) and isinstance(params.get("objective"), str) else "",
+            "status": params.get("status") if isinstance(params, dict) and isinstance(params.get("status"), str) else "active",
+            "tokenBudget": params.get("tokenBudget") if isinstance(params, dict) and isinstance(params.get("tokenBudget"), int) else None,
+            "tokensUsed": 0,
+            "timeUsedSeconds": 0,
+            "createdAt": 0,
+            "updatedAt": 0,
+        }
+        return {"goal": goal}
+    if method == "thread/goal/clear":
+        return {"cleared": state.get("goal") is not None}
+    if method == "thread/compact/start":
+        return {}
     return {}
 
 
 def maybe_mutate_state(method: str, params: dict[str, object] | None, state: dict[str, object]) -> None:
     if method == "thread/start":
+        if isinstance(params, dict) and params.get("sessionStartSource") == "clear":
+            state["thread_id"] = str(state.get("clear_thread_id", "thread-cleared"))
         state.setdefault("thread_status", {"type": "idle"})
         state.setdefault("turns", [])
         return
@@ -433,6 +456,30 @@ def maybe_mutate_state(method: str, params: dict[str, object] | None, state: dic
             if isinstance(turn, dict):
                 turn["status"] = "interrupted"
         state["thread_status"] = {"type": "idle"}
+        return
+    if method == "thread/goal/set":
+        if not isinstance(params, dict):
+            return
+        thread_id = str(params.get("threadId") or state.get("thread_id") or "thread-test")
+        previous = state.get("goal") if isinstance(state.get("goal"), dict) else {}
+        goal = dict(previous)
+        goal.update(
+            {
+                "threadId": thread_id,
+                "objective": params.get("objective", goal.get("objective", "")),
+                "status": params.get("status", goal.get("status", "active")),
+                "tokenBudget": params.get("tokenBudget", goal.get("tokenBudget")),
+                "tokensUsed": goal.get("tokensUsed", 0),
+                "timeUsedSeconds": goal.get("timeUsedSeconds", 0),
+                "createdAt": goal.get("createdAt", 0),
+                "updatedAt": 0,
+            }
+        )
+        state["goal"] = goal
+        return
+    if method == "thread/goal/clear":
+        state.pop("goal", None)
+        return
 
 
 def rpc_error_response(request_id: object, code: int, message: str) -> dict[str, object]:

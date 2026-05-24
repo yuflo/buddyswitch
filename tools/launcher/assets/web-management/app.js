@@ -34,7 +34,7 @@
 
     return {
       canSend: isActive && appServerHealthy && draftText.length > 0,
-      canInterrupt: isActive && appServerHealthy && threadStatus === 'in_progress',
+      canInterrupt: isActive && appServerHealthy && (threadStatus === 'active' || threadStatus === 'in_progress'),
       canStop: isActive,
       canDelete: isInactive,
     };

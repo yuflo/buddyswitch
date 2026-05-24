@@ -72,6 +72,25 @@ test('active in-progress instance enables interrupt and still allows steering in
   );
 });
 
+test('active app-server thread enables interrupt and still allows steering input', () => {
+  assert.deepEqual(
+    app.computeInstanceActionState(
+      {
+        status: 'active',
+        app_server_health: 'healthy',
+        thread: { status: 'active' },
+      },
+      { draftText: 'Refine the plan', isMutating: false }
+    ),
+    {
+      canSend: true,
+      canInterrupt: true,
+      canStop: true,
+      canDelete: false,
+    }
+  );
+});
+
 test('inactive instance only allows delete', () => {
   assert.deepEqual(
     app.computeInstanceActionState(
