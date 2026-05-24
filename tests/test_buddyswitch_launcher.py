@@ -1912,6 +1912,7 @@ exec "$real_git" "$@"
             self._write_fake_chrome(fake_bin / "fake-chrome")
 
             capture_path = temp_root_path / "capture.json"
+            calls_path = temp_root_path / "calls.jsonl"
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
@@ -1919,6 +1920,7 @@ exec "$real_git" "$@"
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
             env["BUDDYSWITCH_TEST_BROWSER_READY_FILE"] = str(temp_root_path / "browser-ready.flag")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
 
             completed = subprocess.run(
                 [str(LAUNCHER), "instance", "start", "--buddy", "pm"],
@@ -1957,6 +1959,16 @@ exec "$real_git" "$@"
             self.assertIn("app_server_log", instance_payload)
             self.assertTrue(payload["runtime_broker_socket"])
             self.assertIn(json.dumps(str(Path(payload["runtime_broker_socket"]).resolve(strict=False))), payload["config_toml"])
+            call_entries = [
+                json.loads(line)
+                for line in calls_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            rpc_rows = [row for row in call_entries if row["argv"][:1] == ["json-rpc"]]
+            thread_start = next(row for row in rpc_rows if row["rpc_method"] == "thread/start")
+            self.assertEqual(thread_start["params"]["permissions"], "buddyswitch-runtime")
+            self.assertIn("runtimeWorkspaceRoots", thread_start["params"])
+            self.assertNotIn("sandboxPolicy", thread_start["params"])
 
     def test_start_rejects_codex_args_passthrough(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -2124,10 +2136,13 @@ exec "$real_git" "$@"
             self.assertIn("turn/start", methods)
             self.assertNotIn("turn/steer", methods)
             turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
+            self.assertEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(
                 turn_start["params"]["input"],
                 [{"type": "text", "text": "Draft brief", "text_elements": []}],
             )
+            self.assertEqual(turn_start["params"]["permissions"], "buddyswitch-runtime")
+            self.assertNotIn("sandboxPolicy", turn_start["params"])
             self.assertIn("turn-test", input_result.stdout)
 
     def test_input_steers_in_progress_turn(self) -> None:

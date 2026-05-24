@@ -167,7 +167,8 @@ buddyswitch_app_server_input() {
   python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" input \
     --socket "$(buddyswitch_app_server_socket)" \
     --thread-id "${thread_id}" \
-    --text "${text}"
+    --text "${text}" \
+    --permissions "buddyswitch-runtime"
 }
 
 buddyswitch_app_server_interrupt() {

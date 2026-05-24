@@ -583,7 +583,9 @@ def thread_turns_list(socket_path: Path, thread_id: str, *, limit: int = 5) -> d
         )
 
 
-def input_turn(socket_path: Path, thread_id: str, text: str) -> dict[str, Any]:
+def input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, Any]:
+    if not permissions:
+        raise AppServerProtocolError("input turn requires an explicit permissions profile")
     thread_payload = thread_read(socket_path, thread_id, include_turns=False)
     thread = thread_payload.get("thread")
     if not isinstance(thread, dict):
@@ -596,6 +598,7 @@ def input_turn(socket_path: Path, thread_id: str, text: str) -> dict[str, Any]:
                 {
                     "threadId": thread_id,
                     "input": text_input_payload(text),
+                    "permissions": permissions,
                 },
             )
         turn = result.get("turn")
@@ -693,7 +696,7 @@ def _command_thread_read(args: argparse.Namespace) -> int:
 
 
 def _command_input(args: argparse.Namespace) -> int:
-    payload = input_turn(Path(args.socket), args.thread_id, args.text)
+    payload = input_turn(Path(args.socket), args.thread_id, args.text, args.permissions)
     print(json.dumps(payload, ensure_ascii=True))
     return 0
 
@@ -746,6 +749,7 @@ def build_parser() -> argparse.ArgumentParser:
     input_parser.add_argument("--socket", required=True)
     input_parser.add_argument("--thread-id", required=True)
     input_parser.add_argument("--text", required=True)
+    input_parser.add_argument("--permissions", required=True)
     input_parser.set_defaults(func=_command_input)
 
     interrupt = subparsers.add_parser("interrupt")

@@ -301,6 +301,36 @@ class AppServerClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             APP_SERVER.build_turn_steer_params("thread-1", "", "hello")
 
+    def test_input_command_requires_explicit_permissions_profile(self) -> None:
+        parser = APP_SERVER.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(
+                [
+                    "input",
+                    "--socket",
+                    "/tmp/app-server.sock",
+                    "--thread-id",
+                    "thread-1",
+                    "--text",
+                    "Draft brief",
+                ]
+            )
+
+        args = parser.parse_args(
+            [
+                "input",
+                "--socket",
+                "/tmp/app-server.sock",
+                "--thread-id",
+                "thread-1",
+                "--text",
+                "Draft brief",
+                "--permissions",
+                "buddyswitch-runtime",
+            ]
+        )
+        self.assertEqual(args.permissions, "buddyswitch-runtime")
+
     def test_server_error_is_reported_without_retrying_mutating_call(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = self._socket_path(Path(temp_root))
