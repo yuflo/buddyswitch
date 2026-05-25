@@ -174,6 +174,16 @@ buddyswitch_app_server_thread_clear() {
     --session-start-source "clear"
 }
 
+buddyswitch_app_server_thread_resume() {
+  local thread_id="$1"
+  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-resume \
+    --socket "$(buddyswitch_app_server_socket)" \
+    --thread-id "${thread_id}" \
+    --workspace-dir "${BUDDYSWITCH_WORKSPACE_DIR}" \
+    --shared-project-workspace-dir "${BUDDYSWITCH_PROJECT_WORKSPACE_DIR}" \
+    --permissions "buddyswitch-runtime"
+}
+
 buddyswitch_app_server_thread_read() {
   local thread_id="$1"
   python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-read \

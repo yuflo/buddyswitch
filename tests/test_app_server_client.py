@@ -256,6 +256,76 @@ class AppServerClientTests(unittest.TestCase):
             self.assertEqual(errors, [])
             self.assertEqual(results, [{"thread": {"id": "thread-1", "status": "idle"}}])
 
+    def test_thread_resume_sends_thread_id_and_runtime_context(self) -> None:
+        self.assertTrue(
+            hasattr(APP_SERVER, "thread_resume"),
+            "APP_SERVER.thread_resume is required for launcher attach preflight",
+        )
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+
+            results: list[dict[str, object]] = []
+            errors: list[BaseException] = []
+
+            def run_resume() -> None:
+                try:
+                    results.append(
+                        APP_SERVER.thread_resume(
+                            socket_path,
+                            "thread-1",
+                            workspace_dir=Path("/tmp/bs-workspace"),
+                            shared_project_workspace_dir=Path("/tmp/bs-project"),
+                            permissions="buddyswitch-runtime",
+                        )
+                    )
+                except BaseException as exc:
+                    errors.append(exc)
+
+            resume_thread = threading.Thread(target=run_resume, daemon=True)
+            resume_thread.start()
+
+            init = server.next_message()
+            self.assertEqual(init["method"], "initialize")
+            server.send_response(init["id"], {"userAgent": "codex/1.0.0"})
+            self.assertEqual(server.next_message()["method"], "initialized")
+
+            request = server.next_message()
+            self.assertEqual(request["method"], "thread/resume")
+            params = request["params"]
+            assert isinstance(params, dict)
+            self.assertEqual(params["threadId"], "thread-1")
+            self.assertEqual(params["cwd"], "/tmp/bs-workspace")
+            self.assertEqual(params["runtimeWorkspaceRoots"], ["/tmp/bs-workspace", "/tmp/bs-project"])
+            self.assertEqual(params["permissions"], "buddyswitch-runtime")
+            self.assertEqual(params["excludeTurns"], True)
+            self.assertNotIn("path", params)
+
+            server.send_response(
+                request["id"],
+                {
+                    "thread": {"id": "thread-1", "status": {"type": "idle"}},
+                    "model": "gpt-5",
+                    "modelProvider": "openai",
+                    "serviceTier": None,
+                    "cwd": "/tmp/bs-workspace",
+                    "runtimeWorkspaceRoots": ["/tmp/bs-workspace", "/tmp/bs-project"],
+                    "instructionSources": [],
+                    "approvalPolicy": "never",
+                    "approvalsReviewer": "user",
+                    "sandbox": {"mode": "workspace-write"},
+                    "activePermissionProfile": {"id": "buddyswitch-runtime"},
+                    "reasoningEffort": None,
+                },
+            )
+            resume_thread.join(timeout=2)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(results[0]["thread"]["id"], "thread-1")
+
     def test_request_ignores_notifications_until_matching_response(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = self._socket_path(Path(temp_root))

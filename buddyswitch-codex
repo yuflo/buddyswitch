@@ -677,7 +677,7 @@ PY
 }
 
 instance_attach() {
-  local instance_id="${1:-}" buddy thread_id socket_path
+  local instance_id="${1:-}" buddy thread_id socket_path output resumed_thread_id
   if [[ -z "${instance_id}" ]]; then
     echo "instance id is required" >&2
     return 2
@@ -706,11 +706,27 @@ instance_attach() {
     socket_path="$(buddyswitch_app_server_socket)"
   fi
 
+  output="$(buddyswitch_app_server_thread_resume "${thread_id}" 2>&1)" || {
+    echo "thread/resume failed for ${thread_id}" >&2
+    [[ -n "${output}" ]] && echo "${output}" >&2
+    return 1
+  }
+  resumed_thread_id="$(
+    python3 -c 'import json, sys; print(json.load(sys.stdin).get("thread", {}).get("id", ""))' <<<"${output}"
+  )" || {
+    echo "thread/resume returned invalid JSON for ${thread_id}" >&2
+    return 1
+  }
+  if [[ "${resumed_thread_id}" != "${thread_id}" ]]; then
+    echo "thread/resume returned unexpected thread id: ${resumed_thread_id}" >&2
+    return 1
+  fi
+
   cd "${BUDDYSWITCH_WORKSPACE_DIR}"
   BUDDYSWITCH_ACTIVE_BUDDY="${buddy}" \
   BUDDYSWITCH_INSTANCE_ID="${instance_id}" \
   BUDDYSWITCH_INSTANCE_JSON="${BUDDYSWITCH_INSTANCE_JSON}" \
-    buddyswitch_run_codex --remote "unix://${socket_path}"
+    buddyswitch_run_codex resume --remote "unix://${socket_path}" "${thread_id}"
 }
 
 instance_stop() {

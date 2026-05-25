@@ -561,6 +561,28 @@ def thread_start(
     return result
 
 
+def thread_resume(
+    socket_path: Path,
+    thread_id: str,
+    *,
+    workspace_dir: Path,
+    shared_project_workspace_dir: Path,
+    permissions: str,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "threadId": thread_id,
+        "cwd": str(workspace_dir),
+        "runtimeWorkspaceRoots": [
+            str(workspace_dir),
+            str(shared_project_workspace_dir),
+        ],
+        "permissions": permissions,
+        "excludeTurns": True,
+    }
+    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
+        return client.request("thread/resume", params)
+
+
 def thread_read(socket_path: Path, thread_id: str, *, include_turns: bool = False) -> dict[str, Any]:
     with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
         return client.request(
@@ -726,6 +748,18 @@ def _command_thread_start(args: argparse.Namespace) -> int:
     return 0
 
 
+def _command_thread_resume(args: argparse.Namespace) -> int:
+    payload = thread_resume(
+        Path(args.socket),
+        args.thread_id,
+        workspace_dir=Path(args.workspace_dir),
+        shared_project_workspace_dir=Path(args.shared_project_workspace_dir),
+        permissions=args.permissions,
+    )
+    print(json.dumps(payload, ensure_ascii=True))
+    return 0
+
+
 def _command_thread_read(args: argparse.Namespace) -> int:
     payload = thread_read(Path(args.socket), args.thread_id, include_turns=args.include_turns)
     print(json.dumps(payload, ensure_ascii=True))
@@ -806,6 +840,14 @@ def build_parser() -> argparse.ArgumentParser:
     thread_start_parser.add_argument("--permissions", required=True)
     thread_start_parser.add_argument("--session-start-source", choices=["startup", "clear"], default=None)
     thread_start_parser.set_defaults(func=_command_thread_start)
+
+    thread_resume_parser = subparsers.add_parser("thread-resume")
+    thread_resume_parser.add_argument("--socket", required=True)
+    thread_resume_parser.add_argument("--thread-id", required=True)
+    thread_resume_parser.add_argument("--workspace-dir", required=True)
+    thread_resume_parser.add_argument("--shared-project-workspace-dir", required=True)
+    thread_resume_parser.add_argument("--permissions", required=True)
+    thread_resume_parser.set_defaults(func=_command_thread_resume)
 
     thread_read_parser = subparsers.add_parser("thread-read")
     thread_read_parser.add_argument("--socket", required=True)

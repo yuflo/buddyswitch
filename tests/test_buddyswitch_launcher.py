@@ -2563,6 +2563,49 @@ exec "$real_git" "$@"
             self.assertEqual(thread_start["params"]["sessionStartSource"], "clear")
             self.assertEqual(thread_start["params"]["permissions"], "buddyswitch-runtime")
 
+    def test_attach_after_clear_uses_new_thread_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={"clear_thread_id": "thread-cleared"},
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            clear_result = subprocess.run(
+                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(clear_result.returncode, 0, msg=clear_result.stderr)
+            self.assertEqual(json.loads(clear_result.stdout)["thread_id"], "thread-cleared")
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            attach_result = subprocess.run(
+                [str(LAUNCHER), "instance", "attach", ctx["instance_id"]],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(attach_result.returncode, 0, msg=attach_result.stderr)
+
+            payload = json.loads(Path(str(ctx["capture_path"])).read_text(encoding="utf-8"))
+            self.assertEqual(payload["argv"][-1], "thread-cleared")
+            calls = [
+                json.loads(line)
+                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            resume_rpc = next(row for row in calls if row.get("rpc_method") == "thread/resume")
+            self.assertEqual(resume_rpc["params"]["threadId"], "thread-cleared")
+
     def test_input_reports_non_steerable_active_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
@@ -2687,7 +2730,7 @@ exec "$real_git" "$@"
             self.assertIn("--text", input_result.stderr)
             self.assertEqual(Path(str(ctx["calls_path"])).read_text(encoding="utf-8"), "")
 
-    def test_attach_invokes_remote_tui_without_local_resume_replay(self) -> None:
+    def test_attach_preflights_thread_resume_then_invokes_remote_resume_tui(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
@@ -2710,15 +2753,83 @@ exec "$real_git" "$@"
             self.assertEqual(attach_result.returncode, 0, msg=attach_result.stderr)
             payload = json.loads(Path(str(ctx["capture_path"])).read_text(encoding="utf-8"))
             instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
+            calls = [
+                json.loads(line)
+                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            resume_rpc = next(row for row in calls if row.get("rpc_method") == "thread/resume")
+            self.assertEqual(resume_rpc["params"]["threadId"], instance_payload["thread_id"])
+            self.assertEqual(resume_rpc["params"]["cwd"], instance_payload["workspace_dir"])
+            self.assertEqual(resume_rpc["params"]["permissions"], "buddyswitch-runtime")
+            self.assertEqual(resume_rpc["params"]["excludeTurns"], True)
+            self.assertNotIn("path", resume_rpc["params"])
+
             self.assertEqual(
                 payload["argv"],
                 [
+                    "resume",
                     "--remote",
                     f"unix://{instance_payload['app_server_socket']}",
+                    instance_payload["thread_id"],
                 ],
             )
+            instance_root = Path(str(ctx["instance_root"]))
+            self.assertEqual(payload["cwd"], str((instance_root / "workspace").resolve()))
+            self.assertEqual(payload["home"], str(instance_root / "home"))
+            self.assertEqual(payload["codex_home"], str(instance_root / "codex-home"))
+            self.assertEqual(payload["xdg_config_home"], str(instance_root / "xdg-config"))
+            self.assertEqual(payload["instance_json"], str(instance_root / "instance.json"))
             self.assertEqual(instance_payload["status"], "active")
             self.assertTrue(Path(instance_payload["app_server_socket"]).exists())
+
+    def test_attach_to_active_turn_preflights_same_running_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={
+                    "thread_status": {"type": "active", "activeFlags": []},
+                    "turns": [
+                        {
+                            "id": "turn-active",
+                            "items": [],
+                            "itemsView": "summary",
+                            "status": "inProgress",
+                            "error": None,
+                            "startedAt": 0,
+                            "completedAt": None,
+                            "durationMs": None,
+                        }
+                    ],
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            attach_result = subprocess.run(
+                [str(LAUNCHER), "instance", "attach", ctx["instance_id"]],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(attach_result.returncode, 0, msg=attach_result.stderr)
+
+            instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
+            payload = json.loads(Path(str(ctx["capture_path"])).read_text(encoding="utf-8"))
+            self.assertEqual(payload["argv"][-1], instance_payload["thread_id"])
+
+            calls = [
+                json.loads(line)
+                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            resume_rpc = next(row for row in calls if row.get("rpc_method") == "thread/resume")
+            self.assertEqual(resume_rpc["params"]["threadId"], instance_payload["thread_id"])
 
     def test_attach_rejects_missing_thread_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -2782,6 +2893,62 @@ exec "$real_git" "$@"
             )
             self.assertNotEqual(attach_result.returncode, 0)
             self.assertIn("unhealthy", attach_result.stderr.lower())
+
+    def test_attach_blocks_when_thread_resume_returns_different_thread_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={"thread_resume_response_thread_id": "thread-other"},
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["capture_path"])).unlink(missing_ok=True)
+            attach_result = subprocess.run(
+                [str(LAUNCHER), "instance", "attach", ctx["instance_id"]],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(attach_result.returncode, 0)
+            self.assertIn("thread/resume returned unexpected thread id", attach_result.stderr)
+            self.assertFalse(Path(str(ctx["capture_path"])).exists(), "TUI must not launch after mismatched preflight")
+
+    def test_attach_blocks_when_thread_resume_preflight_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={
+                    "errors": {
+                        "thread/resume": {
+                            "code": -32004,
+                            "message": "thread not loaded: thread-test",
+                        }
+                    }
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["capture_path"])).unlink(missing_ok=True)
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            attach_result = subprocess.run(
+                [str(LAUNCHER), "instance", "attach", ctx["instance_id"]],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(attach_result.returncode, 0)
+            self.assertIn("thread/resume failed", attach_result.stderr)
+            self.assertFalse(Path(str(ctx["capture_path"])).exists(), "TUI must not launch after failed preflight")
 
     def test_stop_active_instance_stops_service_broker_browser_and_marks_inactive(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

@@ -389,6 +389,25 @@ def build_default_result(method: str, params: dict[str, object] | None, state: d
         if isinstance(params, dict) and params.get("sessionStartSource") == "clear":
             return {"thread": default_thread({**state, "thread_id": state.get("clear_thread_id", "thread-cleared")})}
         return {"thread": default_thread(state)}
+    if method == "thread/resume":
+        thread = default_thread(state)
+        response_thread_id = state.get("thread_resume_response_thread_id")
+        if isinstance(response_thread_id, str):
+            thread["id"] = response_thread_id
+        return {
+            "thread": thread,
+            "model": "gpt-5",
+            "modelProvider": "openai",
+            "serviceTier": None,
+            "cwd": os.getcwd(),
+            "runtimeWorkspaceRoots": [],
+            "instructionSources": [],
+            "approvalPolicy": "never",
+            "approvalsReviewer": "user",
+            "sandbox": {"mode": "workspace-write"},
+            "activePermissionProfile": {"id": "buddyswitch-runtime"},
+            "reasoningEffort": None,
+        }
     if method == "thread/read":
         return {"thread": default_thread(state)}
     if method == "thread/turns/list":
@@ -435,6 +454,12 @@ def maybe_mutate_state(method: str, params: dict[str, object] | None, state: dic
             state["thread_id"] = str(state.get("clear_thread_id", "thread-cleared"))
         state.setdefault("thread_status", {"type": "idle"})
         state.setdefault("turns", [])
+        return
+    if method == "thread/resume":
+        count = state.get("thread_resume_count")
+        state["thread_resume_count"] = (count if isinstance(count, int) else 0) + 1
+        if isinstance(params, dict):
+            state["last_thread_resume_params"] = dict(params)
         return
     if method == "turn/start":
         next_turn_id = str(state.get("next_turn_id", "turn-test"))
