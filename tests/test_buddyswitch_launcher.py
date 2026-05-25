@@ -2730,6 +2730,278 @@ exec "$real_git" "$@"
             self.assertIn("--text", input_result.stderr)
             self.assertEqual(Path(str(ctx["calls_path"])).read_text(encoding="utf-8"), "")
 
+    def test_instance_resume_json_restarts_stopped_instance_with_original_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            instance_id = str(ctx["instance_id"])
+            instance_payload = ctx["instance_payload"]
+            assert isinstance(instance_payload, dict)
+            thread_id = str(instance_payload["thread_id"])
+
+            input_result = subprocess.run(
+                [str(LAUNCHER), "instance", "input", instance_id, "--text", "materialize", "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
+
+            stop_result = subprocess.run(
+                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+
+            resume_result = subprocess.run(
+                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
+            payload = json.loads(resume_result.stdout)
+            self.assertEqual(payload["instance_id"], instance_id)
+            self.assertEqual(payload["thread_id"], thread_id)
+            self.assertEqual(payload["status"], "active")
+            record = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
+            config_text = (Path(str(ctx["instance_root"])) / "codex-home" / "config.toml").read_text(encoding="utf-8")
+            self.assertEqual(record["thread_id"], thread_id)
+            self.assertEqual(record["status"], "active")
+            self.assertIsInstance(record["app_server_pid"], int)
+            self.assertTrue(record["app_server_socket"])
+            self.assertIn('default_permissions = "buddyswitch-runtime"', config_text)
+            self.assertIn("[permissions.buddyswitch-runtime.filesystem]", config_text)
+            self._assert_codex_automation_config(config_text, shared_root=Path(str(ctx["shared_root"])))
+
+    def test_instance_resume_uses_thread_resume_for_original_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            instance_id = str(ctx["instance_id"])
+            instance_payload = ctx["instance_payload"]
+            assert isinstance(instance_payload, dict)
+            thread_id = str(instance_payload["thread_id"])
+
+            input_result = subprocess.run(
+                [str(LAUNCHER), "instance", "input", instance_id, "--text", "materialize", "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
+
+            stop_result = subprocess.run(
+                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            resume_result = subprocess.run(
+                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
+            calls = [
+                json.loads(line)
+                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            resume_calls = [row for row in calls if row.get("rpc_method") == "thread/resume"]
+            self.assertTrue(resume_calls, "resume must use Codex app-server thread/resume")
+            self.assertEqual(resume_calls[-1]["params"]["threadId"], thread_id)
+            self.assertEqual(resume_calls[-1]["params"]["excludeTurns"], True)
+
+    def test_instance_resume_human_output_reports_instance_and_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            instance_id = str(ctx["instance_id"])
+            instance_payload = ctx["instance_payload"]
+            assert isinstance(instance_payload, dict)
+            thread_id = str(instance_payload["thread_id"])
+
+            input_result = subprocess.run(
+                [str(LAUNCHER), "instance", "input", instance_id, "--text", "materialize", "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
+
+            stop_result = subprocess.run(
+                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+
+            resume_result = subprocess.run(
+                [str(LAUNCHER), "instance", "resume", instance_id],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
+            self.assertIn(f"Instance resumed: {instance_id}", resume_result.stdout)
+            self.assertIn(f"Thread: {thread_id}", resume_result.stdout)
+
+    def test_instance_resume_active_instance_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            instance_id = str(ctx["instance_id"])
+            record_path = Path(str(ctx["instance_root"])) / "instance.json"
+            before = json.loads(record_path.read_text(encoding="utf-8"))
+            thread_id = str(before["thread_id"])
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            resume_result = subprocess.run(
+                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
+            payload = json.loads(resume_result.stdout)
+            self.assertEqual(payload["instance_id"], instance_id)
+            self.assertEqual(payload["thread_id"], thread_id)
+            self.assertEqual(payload["status"], "active")
+            after = json.loads(record_path.read_text(encoding="utf-8"))
+            self.assertEqual(after["thread_id"], before["thread_id"])
+            self.assertEqual(after["app_server_socket"], before["app_server_socket"])
+            rpc_calls = [
+                json.loads(line)
+                for line in Path(str(ctx["calls_path"])).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertFalse(
+                [row for row in rpc_calls if row.get("rpc_method") == "thread/resume"],
+                "active resume must not restart lifecycle through thread/resume",
+            )
+
+    def test_instance_resume_blocks_when_thread_id_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_id = "inst-pm-no-thread"
+            self._write_instance_record(
+                shared_root,
+                instance_id,
+                status="inactive",
+                thread_id=None,
+            )
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+
+            resume_result = subprocess.run(
+                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(resume_result.returncode, 3)
+            self.assertIn("has no thread id", resume_result.stderr)
+
+    def test_instance_resume_keeps_inactive_when_thread_resume_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            instance_id = str(ctx["instance_id"])
+            instance_payload = ctx["instance_payload"]
+            assert isinstance(instance_payload, dict)
+            thread_id = str(instance_payload["thread_id"])
+
+            stop_result = subprocess.run(
+                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+
+            Path(str(ctx["state_file"])).write_text(
+                json.dumps(
+                    {
+                        "thread_id": thread_id,
+                        "errors": {
+                            "thread/resume": {
+                                "code": -32600,
+                                "message": f"no rollout found for thread id {thread_id}",
+                            }
+                        },
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            resume_result = subprocess.run(
+                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(resume_result.returncode, 0)
+            self.assertIn("thread/resume failed", resume_result.stderr)
+            record = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
+            self.assertEqual(record["status"], "inactive")
+            self.assertIsNone(record.get("app_server_pid"))
+            self.assertIsNone(record.get("app_server_socket"))
+
     def test_attach_preflights_thread_resume_then_invokes_remote_resume_tui(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home))

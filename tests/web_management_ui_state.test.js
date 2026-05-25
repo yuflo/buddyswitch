@@ -30,11 +30,14 @@ test('no selection disables all instance actions', () => {
       canInterrupt: false,
       canStop: false,
       canDelete: false,
+      canClear: false,
+      canInitialize: false,
+      canResume: false,
     }
   );
 });
 
-test('active healthy instance allows send and stop, but not delete', () => {
+test('active healthy instance allows send, stop, clear, and initialize retry, but not delete', () => {
   assert.deepEqual(
     app.computeInstanceActionState(
       {
@@ -49,6 +52,9 @@ test('active healthy instance allows send and stop, but not delete', () => {
       canInterrupt: false,
       canStop: true,
       canDelete: false,
+      canClear: true,
+      canInitialize: true,
+      canResume: false,
     }
   );
 });
@@ -68,6 +74,9 @@ test('active in-progress instance enables interrupt and still allows steering in
       canInterrupt: true,
       canStop: true,
       canDelete: false,
+      canClear: false,
+      canInitialize: false,
+      canResume: false,
     }
   );
 });
@@ -87,11 +96,14 @@ test('active app-server thread enables interrupt and still allows steering input
       canInterrupt: true,
       canStop: true,
       canDelete: false,
+      canClear: false,
+      canInitialize: false,
+      canResume: false,
     }
   );
 });
 
-test('inactive instance only allows delete', () => {
+test('inactive instance allows resume and delete only', () => {
   assert.deepEqual(
     app.computeInstanceActionState(
       {
@@ -106,6 +118,9 @@ test('inactive instance only allows delete', () => {
       canInterrupt: false,
       canStop: false,
       canDelete: true,
+      canClear: false,
+      canInitialize: false,
+      canResume: true,
     }
   );
 });
@@ -125,6 +140,53 @@ test('mutation busy state disables all instance controls', () => {
       canInterrupt: false,
       canStop: false,
       canDelete: false,
+      canClear: false,
+      canInitialize: false,
+      canResume: false,
+    }
+  );
+});
+
+test('active idle instance allows clear and initialize retry even without draft text', () => {
+  assert.deepEqual(
+    app.computeInstanceActionState(
+      {
+        status: 'active',
+        app_server_health: 'healthy',
+        thread: { status: 'idle' },
+      },
+      { draftText: '', isMutating: false }
+    ),
+    {
+      canSend: false,
+      canInterrupt: false,
+      canStop: true,
+      canDelete: false,
+      canClear: true,
+      canInitialize: true,
+      canResume: false,
+    }
+  );
+});
+
+test('active in-progress instance disables clear and initialize while allowing interrupt', () => {
+  assert.deepEqual(
+    app.computeInstanceActionState(
+      {
+        status: 'active',
+        app_server_health: 'healthy',
+        thread: { status: 'in_progress' },
+      },
+      { draftText: 'Steer', isMutating: false }
+    ),
+    {
+      canSend: true,
+      canInterrupt: true,
+      canStop: true,
+      canDelete: false,
+      canClear: false,
+      canInitialize: false,
+      canResume: false,
     }
   );
 });

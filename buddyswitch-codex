@@ -37,6 +37,7 @@ Usage:
   buddyswitch-codex instance compact <instance-id> [--json]
   buddyswitch-codex instance clear <instance-id> [--json]
   buddyswitch-codex instance attach <instance-id>
+  buddyswitch-codex instance resume <instance-id> [--json]
   buddyswitch-codex instance stop <instance-id> [--json]
   buddyswitch-codex instance status <instance-id> [--json]
   buddyswitch-codex instance interrupt <instance-id> [--json]
@@ -727,6 +728,170 @@ instance_attach() {
   BUDDYSWITCH_INSTANCE_ID="${instance_id}" \
   BUDDYSWITCH_INSTANCE_JSON="${BUDDYSWITCH_INSTANCE_JSON}" \
     buddyswitch_run_codex resume --remote "unix://${socket_path}" "${thread_id}"
+}
+
+instance_resume() {
+  local instance_id="${1:-}" json=0 arg payload resume_status
+  if [[ -z "${instance_id}" ]]; then
+    echo "instance id is required" >&2
+    return 2
+  fi
+  shift || true
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    case "${arg}" in
+      --json)
+        json=1
+        shift
+        ;;
+      *)
+        echo "Unknown instance resume option: ${arg}" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  payload="$(
+    buddyswitch_with_runtime_lock \
+      "${REPO_ROOT}/buddyswitch-codex" \
+      "__locked-instance-resume" \
+      "${instance_id}"
+  )"
+  resume_status=$?
+  if [[ "${resume_status}" -ne 0 ]]; then
+    if [[ -n "${payload}" ]]; then
+      printf '%s\n' "${payload}" >&2
+    fi
+    return "${resume_status}"
+  fi
+
+  if [[ "${json}" -eq 1 ]]; then
+    printf '%s\n' "${payload}"
+    return 0
+  fi
+
+  python3 - "${payload}" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+print(f"Instance resumed: {payload.get('instance_id', '')}")
+print(f"Thread: {payload.get('thread_id', '')}")
+PY
+}
+
+instance_resume_locked() {
+  local instance_id="${1:-}" buddy thread_id browser_port app_server_json
+  local browser_output="" resume_json="" resumed_thread_id
+
+  buddyswitch_require_runtime_lock
+  if [[ -z "${instance_id}" ]]; then
+    echo "instance id is required" >&2
+    return 2
+  fi
+
+  buddyswitch_validate_instance_id "${instance_id}" || return $?
+  buddy="$(buddyswitch_instance_validate_record "${instance_id}")" || return $?
+  buddyswitch_env_bind_instance "${instance_id}" || return $?
+  thread_id="$(buddyswitch_instance_record_field "${instance_id}" "thread_id" || true)"
+  if [[ -z "${thread_id}" ]]; then
+    echo "Instance resume blocked: ${instance_id} has no thread id; delete it and start a new instance." >&2
+    return 3
+  fi
+
+  if buddyswitch_app_server_is_active; then
+    python3 - "${instance_id}" "${thread_id}" <<'PY'
+import json
+import sys
+
+print(json.dumps({
+    "instance_id": sys.argv[1],
+    "thread_id": sys.argv[2],
+    "status": "active",
+}, ensure_ascii=True))
+PY
+    return 0
+  fi
+
+  buddyswitch_require_env_profile "${buddy}" || return $?
+  buddyswitch_require_buddy_agents_template "${buddy}" || return $?
+  buddyswitch_ensure_shared_env
+  buddyswitch_workspace_ensure_project_worktree
+  buddyswitch_workspace_repair_runtime_projects_app_projection
+  buddyswitch_instance_ensure_private_writable_surface
+  buddyswitch_instance_ensure_taskbox "${buddy}"
+  buddyswitch_runtime_broker_ensure
+  export BUDDYSWITCH_ACTIVE_BUDDY="${buddy}"
+  buddyswitch_patch_codex_config
+
+  browser_port="$(buddyswitch_instance_record_field "${instance_id}" "browser_port" || true)"
+  if [[ -n "${browser_port}" ]]; then
+    export BUDDYSWITCH_BROWSER_PORT="${browser_port}"
+  else
+    buddyswitch_browser_allocate_instance_port || return $?
+  fi
+
+  browser_output="$(buddyswitch_browser_bootstrap 2>&1)" || {
+    [[ -n "${browser_output}" ]] && echo "${browser_output}" >&2
+    buddyswitch_runtime_broker_stop
+    return 1
+  }
+  buddyswitch_instance_set_browser_port "${instance_id}" "${BUDDYSWITCH_BROWSER_PORT}"
+
+  app_server_json="$(buddyswitch_app_server_ensure)" || {
+    buddyswitch_runtime_broker_stop
+    buddyswitch_browser_instance_stop "${instance_id}" || true
+    return 1
+  }
+
+  resume_json="$(buddyswitch_app_server_thread_resume "${thread_id}" 2>&1)" || {
+    echo "thread/resume failed for ${thread_id}" >&2
+    [[ -n "${resume_json}" ]] && echo "${resume_json}" >&2
+    buddyswitch_app_server_stop || true
+    buddyswitch_runtime_broker_stop
+    buddyswitch_browser_instance_stop "${instance_id}" || true
+    buddyswitch_instance_clear_app_server "${instance_id}" "inactive"
+    return 1
+  }
+
+  resumed_thread_id="$(
+    python3 -c 'import json, sys; print(json.load(sys.stdin).get("thread", {}).get("id", ""))' <<<"${resume_json}"
+  )" || {
+    echo "thread/resume returned invalid JSON for ${thread_id}" >&2
+    buddyswitch_app_server_stop || true
+    buddyswitch_runtime_broker_stop
+    buddyswitch_browser_instance_stop "${instance_id}" || true
+    buddyswitch_instance_clear_app_server "${instance_id}" "inactive"
+    return 1
+  }
+
+  if [[ "${resumed_thread_id}" != "${thread_id}" ]]; then
+    echo "thread/resume returned unexpected thread id: ${resumed_thread_id}" >&2
+    buddyswitch_app_server_stop || true
+    buddyswitch_runtime_broker_stop
+    buddyswitch_browser_instance_stop "${instance_id}" || true
+    buddyswitch_instance_clear_app_server "${instance_id}" "inactive"
+    return 1
+  fi
+
+  buddyswitch_instance_set_app_server \
+    "${instance_id}" \
+    "${thread_id}" \
+    "$(_buddyswitch_app_server_json_field "${app_server_json}" "pid")" \
+    "$(_buddyswitch_app_server_json_field "${app_server_json}" "socket_path")" \
+    "$(_buddyswitch_app_server_json_field "${app_server_json}" "log_file")" \
+    "active"
+
+  python3 - "${instance_id}" "${thread_id}" <<'PY'
+import json
+import sys
+
+print(json.dumps({
+    "instance_id": sys.argv[1],
+    "thread_id": sys.argv[2],
+    "status": "active",
+}, ensure_ascii=True))
+PY
 }
 
 instance_stop() {
@@ -1423,6 +1588,10 @@ main() {
     __locked-instance-set-inactive)
       shift || true
       instance_set_inactive_locked "$@"
+      ;;
+    __locked-instance-resume)
+      shift || true
+      instance_resume_locked "$@"
       ;;
     __locked-instance-delete)
       shift || true

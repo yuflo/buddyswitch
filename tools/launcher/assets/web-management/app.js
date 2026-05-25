@@ -20,6 +20,9 @@
         canInterrupt: false,
         canStop: false,
         canDelete: false,
+        canClear: false,
+        canInitialize: false,
+        canResume: false,
       };
     }
 
@@ -31,12 +34,16 @@
       || Boolean(instance.app_server && instance.app_server.healthy);
     const isActive = status === 'active';
     const isInactive = status === 'inactive';
+    const threadBusy = threadStatus === 'active' || threadStatus === 'in_progress';
 
     return {
       canSend: isActive && appServerHealthy && draftText.length > 0,
-      canInterrupt: isActive && appServerHealthy && (threadStatus === 'active' || threadStatus === 'in_progress'),
+      canInterrupt: isActive && appServerHealthy && threadBusy,
       canStop: isActive,
       canDelete: isInactive,
+      canClear: isActive && appServerHealthy && !threadBusy,
+      canInitialize: isActive && appServerHealthy && !threadBusy,
+      canResume: isInactive,
     };
   }
 
@@ -173,6 +180,9 @@
     elements.interruptButton.disabled = !actionState.canInterrupt;
     elements.stopButton.disabled = !actionState.canStop;
     elements.deleteButton.disabled = !actionState.canDelete;
+    elements.clearButton.disabled = !actionState.canClear;
+    elements.initializeButton.disabled = !actionState.canInitialize;
+    elements.resumeButton.disabled = !actionState.canResume;
   }
 
   async function refreshAll(state, elements) {
@@ -272,6 +282,9 @@
       interruptButton: document.getElementById('interrupt-button'),
       stopButton: document.getElementById('stop-button'),
       deleteButton: document.getElementById('delete-button'),
+      clearButton: document.getElementById('clear-button'),
+      initializeButton: document.getElementById('initialize-button'),
+      resumeButton: document.getElementById('resume-button'),
       messageBanner: document.getElementById('message-banner'),
     };
 
@@ -318,6 +331,27 @@
     elements.stopButton.addEventListener('click', function () {
       runMutation(state, elements, 'stop', function () {
         return fetchJson('/api/instances/' + encodeURIComponent(state.selectedInstanceId) + '/stop', {
+          method: 'POST',
+        });
+      });
+    });
+    elements.clearButton.addEventListener('click', function () {
+      runMutation(state, elements, 'clear', function () {
+        return fetchJson('/api/instances/' + encodeURIComponent(state.selectedInstanceId) + '/clear', {
+          method: 'POST',
+        });
+      });
+    });
+    elements.initializeButton.addEventListener('click', function () {
+      runMutation(state, elements, 'initialize', function () {
+        return fetchJson('/api/instances/' + encodeURIComponent(state.selectedInstanceId) + '/initialize', {
+          method: 'POST',
+        });
+      });
+    });
+    elements.resumeButton.addEventListener('click', function () {
+      runMutation(state, elements, 'resume', function () {
+        return fetchJson('/api/instances/' + encodeURIComponent(state.selectedInstanceId) + '/resume', {
           method: 'POST',
         });
       });

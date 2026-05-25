@@ -11,6 +11,7 @@ Usage:
   buddyswitch-codex instance compact <instance-id> [--json]
   buddyswitch-codex instance clear <instance-id> [--json]
   buddyswitch-codex instance attach <instance-id>
+  buddyswitch-codex instance resume <instance-id> [--json]
   buddyswitch-codex instance stop <instance-id> [--json]
   buddyswitch-codex instance status <instance-id> [--json]
   buddyswitch-codex instance interrupt <instance-id> [--json]
@@ -26,6 +27,7 @@ Commands:
   compact Start app-server thread compaction for a running instance.
   clear   Clear the running instance conversation with a fresh thread.
   attach  Attach a TUI to a running product-mode instance.
+  resume  Resume a stopped product-mode instance service.
   stop    Stop a running product-mode instance service.
   status  Show product-mode instance service state.
   interrupt Interrupt the active turn on a running product-mode instance.
@@ -413,6 +415,15 @@ buddyswitch_instance_main() {
         return 2
       fi
       instance_attach "$@"
+      ;;
+    resume)
+      shift || true
+      if [[ $# -lt 1 ]]; then
+        echo "instance id is required" >&2
+        buddyswitch_instance_usage >&2
+        return 2
+      fi
+      instance_resume "$@"
       ;;
     stop)
       shift || true

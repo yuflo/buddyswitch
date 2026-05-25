@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import quote
@@ -50,6 +51,54 @@ class FakeRunner:
         if key not in self.responses:
             raise AssertionError(f"unexpected command: {args!r}")
         return self.responses[key]
+
+
+@dataclass(frozen=True)
+class CommandStep:
+    args: list[str]
+    result: WEB_MANAGEMENT.CommandResult
+
+
+def command_json(payload: dict[str, object]) -> WEB_MANAGEMENT.CommandResult:
+    return WEB_MANAGEMENT.CommandResult(
+        returncode=0,
+        stdout=json.dumps(payload, ensure_ascii=True),
+        stderr="",
+        timed_out=False,
+    )
+
+
+def command_error(*, returncode: int, stderr: str, timed_out: bool = False) -> WEB_MANAGEMENT.CommandResult:
+    return WEB_MANAGEMENT.CommandResult(returncode=returncode, stdout="", stderr=stderr, timed_out=timed_out)
+
+
+def active_status(instance_id: str, thread_id: str, thread_status: str) -> dict[str, object]:
+    return {
+        "instance_id": instance_id,
+        "buddy": "pm",
+        "status": "active",
+        "workspace_dir": f"/tmp/shared/instances/{instance_id}/workspace",
+        "browser_port": 9222,
+        "updated_at": "2026-05-25T10:00:00Z",
+        "thread_id": thread_id,
+        "app_server": {"healthy": True},
+        "thread": {"status": thread_status, "raw": {}},
+    }
+
+
+class OrderedRunner:
+    def __init__(self, steps: list[CommandStep]) -> None:
+        self.steps = list(steps)
+        self.calls: list[tuple[list[str], float]] = []
+
+    def run(self, args: list[str], *, timeout_seconds: float) -> WEB_MANAGEMENT.CommandResult:
+        self.calls.append((list(args), timeout_seconds))
+        if not self.steps:
+            raise AssertionError(f"unexpected command with no steps left: {args!r}")
+        step = self.steps.pop(0)
+        if step.args != args:
+            raise AssertionError(f"expected command {step.args!r}, got {args!r}")
+        return step.result
 
 
 class WebManagementServerTestCase(unittest.TestCase):
@@ -378,86 +427,215 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
         self.assertEqual(runner.calls, [["instance", "buddies", "--json"]])
 
-    def test_create_route_starts_instance_and_refreshes_status(self) -> None:
-        runner = FakeRunner()
-        runner.add(
-            ["instance", "buddies", "--json"],
-            WEB_MANAGEMENT.CommandResult(
-                returncode=0,
-                stdout=json.dumps(
-                    {
-                        "buddies": [
-                            {
-                                "id": "pm",
-                                "label": "PM",
-                                "scope": "Own product iteration and track progression.",
-                            }
-                        ]
-                    },
-                    ensure_ascii=True,
-                ),
-                stderr="",
-                timed_out=False,
-            ),
-        )
-        runner.add(
-            ["instance", "start", "--buddy", "pm", "--json"],
-            WEB_MANAGEMENT.CommandResult(
-                returncode=0,
-                stdout=json.dumps(
-                    {
-                        "instance_id": "inst-pm-demo",
-                        "buddy": "pm",
-                        "workspace_dir": "/tmp/shared/instances/inst-pm-demo/workspace",
-                        "project_workspace_dir": "/tmp/shared/project/workspace",
-                        "instance_record": "/tmp/shared/instances/inst-pm-demo/instance.json",
-                    },
-                    ensure_ascii=True,
-                ),
-                stderr="",
-                timed_out=False,
-            ),
-        )
-        runner.add(
-            ["instance", "status", "inst-pm-demo", "--json"],
-            WEB_MANAGEMENT.CommandResult(
-                returncode=0,
-                stdout=json.dumps(
-                    {
-                        "instance_id": "inst-pm-demo",
-                        "buddy": "pm",
-                        "status": "active",
-                        "workspace_dir": "/tmp/shared/instances/inst-pm-demo/workspace",
-                        "browser_port": 9222,
-                        "updated_at": "2026-05-24T10:00:00Z",
-                        "thread_id": "thread-demo",
-                        "app_server": {"healthy": True},
-                        "thread": {"status": "idle", "raw": {}},
-                    },
-                    ensure_ascii=True,
-                ),
-                stderr="",
-                timed_out=False,
-            ),
-        )
-        _, base_url = self._start_server(runner)
-        status, payload = self._request_json(
-            base_url,
-            method="POST",
-            path="/api/instances",
-            payload={"buddy": "pm"},
-        )
-        self.assertEqual(status, 200)
-        self.assertEqual(payload["instance_id"], "inst-pm-demo")
-        self.assertEqual(payload["instance"]["thread_id"], "thread-demo")
-        self.assertEqual(
-            runner.calls,
+    def test_create_instance_initializes_thread_before_returning(self) -> None:
+        runner = OrderedRunner(
             [
-                ["instance", "buddies", "--json"],
-                ["instance", "start", "--buddy", "pm", "--json"],
-                ["instance", "status", "inst-pm-demo", "--json"],
-            ],
+                CommandStep(
+                    ["instance", "buddies", "--json"],
+                    command_json({"buddies": [{"id": "pm", "label": "PM", "scope": "product"}]}),
+                ),
+                CommandStep(
+                    ["instance", "start", "--buddy", "pm", "--json"],
+                    command_json({"instance_id": "inst-pm-demo"}),
+                ),
+                CommandStep(
+                    ["instance", "input", "inst-pm-demo", "--text", WEB_MANAGEMENT.INITIALIZE_THREAD_PROMPT, "--json"],
+                    command_json(
+                        {
+                            "instance_id": "inst-pm-demo",
+                            "thread_id": "thread-1",
+                            "action": "start",
+                            "turn_id": "turn-init",
+                        }
+                    ),
+                ),
+                CommandStep(
+                    ["instance", "status", "inst-pm-demo", "--json"],
+                    command_json(active_status("inst-pm-demo", "thread-1", "active")),
+                ),
+                CommandStep(
+                    ["instance", "status", "inst-pm-demo", "--json"],
+                    command_json(active_status("inst-pm-demo", "thread-1", "idle")),
+                ),
+            ]
         )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        status, payload = service.handle_api("POST", "/api/instances", b'{"buddy":"pm"}')
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["instance_id"], "inst-pm-demo")
+        self.assertEqual(payload["turn_id"], "turn-init")
+        self.assertEqual(payload["instance"]["thread"]["status"], "idle")
+        self.assertEqual(
+            runner.calls[2][0],
+            ["instance", "input", "inst-pm-demo", "--text", WEB_MANAGEMENT.INITIALIZE_THREAD_PROMPT, "--json"],
+        )
+        self.assertEqual(runner.steps, [])
+
+    def test_create_instance_returns_error_when_initialization_fails(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    ["instance", "buddies", "--json"],
+                    command_json({"buddies": [{"id": "pm", "label": "PM", "scope": "product"}]}),
+                ),
+                CommandStep(
+                    ["instance", "start", "--buddy", "pm", "--json"],
+                    command_json({"instance_id": "inst-pm-demo"}),
+                ),
+                CommandStep(
+                    ["instance", "input", "inst-pm-demo", "--text", WEB_MANAGEMENT.INITIALIZE_THREAD_PROMPT, "--json"],
+                    command_error(returncode=1, stderr="model failed"),
+                ),
+            ]
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("POST", "/api/instances", b'{"buddy":"pm"}')
+
+        self.assertEqual(raised.exception.status, 502)
+        self.assertEqual(raised.exception.code, "COMMAND_FAILED")
+        self.assertIn("model failed", raised.exception.message)
+
+    def test_create_instance_returns_error_when_initialization_times_out(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    ["instance", "buddies", "--json"],
+                    command_json({"buddies": [{"id": "pm", "label": "PM", "scope": "product"}]}),
+                ),
+                CommandStep(
+                    ["instance", "start", "--buddy", "pm", "--json"],
+                    command_json({"instance_id": "inst-pm-demo"}),
+                ),
+                CommandStep(
+                    ["instance", "input", "inst-pm-demo", "--text", WEB_MANAGEMENT.INITIALIZE_THREAD_PROMPT, "--json"],
+                    command_json(
+                        {
+                            "instance_id": "inst-pm-demo",
+                            "thread_id": "thread-1",
+                            "action": "start",
+                            "turn_id": "turn-init",
+                        }
+                    ),
+                ),
+                *[
+                    CommandStep(
+                        ["instance", "status", "inst-pm-demo", "--json"],
+                        command_json(active_status("inst-pm-demo", "thread-1", "active")),
+                    )
+                    for _ in range(20)
+                ],
+            ]
+        )
+        service = WEB_MANAGEMENT.WebManagementService(
+            repo_root=ROOT,
+            command_runner=runner.run,
+            init_wait_timeout_seconds=0.01,
+            init_wait_poll_seconds=0.001,
+        )
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("POST", "/api/instances", b'{"buddy":"pm"}')
+
+        self.assertEqual(raised.exception.status, 504)
+        self.assertEqual(raised.exception.code, "COMMAND_TIMEOUT")
+        self.assertIn("Initialization did not finish", raised.exception.message)
+
+    def test_clear_route_initializes_new_thread_before_returning(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    ["instance", "clear", "inst-pm-demo", "--json"],
+                    command_json(
+                        {
+                            "instance_id": "inst-pm-demo",
+                            "previous_thread_id": "thread-old",
+                            "thread_id": "thread-new",
+                        }
+                    ),
+                ),
+                CommandStep(
+                    ["instance", "input", "inst-pm-demo", "--text", WEB_MANAGEMENT.INITIALIZE_THREAD_PROMPT, "--json"],
+                    command_json(
+                        {
+                            "instance_id": "inst-pm-demo",
+                            "thread_id": "thread-new",
+                            "action": "start",
+                            "turn_id": "turn-init",
+                        }
+                    ),
+                ),
+                CommandStep(
+                    ["instance", "status", "inst-pm-demo", "--json"],
+                    command_json(active_status("inst-pm-demo", "thread-new", "idle")),
+                ),
+            ]
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        status, payload = service.handle_api("POST", "/api/instances/inst-pm-demo/clear", b"")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["previous_thread_id"], "thread-old")
+        self.assertEqual(payload["thread_id"], "thread-new")
+        self.assertEqual(payload["turn_id"], "turn-init")
+        self.assertEqual(payload["instance"]["thread_id"], "thread-new")
+
+    def test_initialize_route_sends_fixed_prompt_and_waits(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    ["instance", "input", "inst-pm-demo", "--text", WEB_MANAGEMENT.INITIALIZE_THREAD_PROMPT, "--json"],
+                    command_json(
+                        {
+                            "instance_id": "inst-pm-demo",
+                            "thread_id": "thread-1",
+                            "action": "start",
+                            "turn_id": "turn-init",
+                        }
+                    ),
+                ),
+                CommandStep(
+                    ["instance", "status", "inst-pm-demo", "--json"],
+                    command_json(active_status("inst-pm-demo", "thread-1", "idle")),
+                ),
+            ]
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        status, payload = service.handle_api("POST", "/api/instances/inst-pm-demo/initialize", b"")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["turn_id"], "turn-init")
+        self.assertEqual(payload["instance"]["thread"]["status"], "idle")
+
+    def test_resume_route_delegates_to_launcher_resume(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    ["instance", "resume", "inst-pm-demo", "--json"],
+                    command_json({"instance_id": "inst-pm-demo", "thread_id": "thread-1", "status": "active"}),
+                ),
+                CommandStep(
+                    ["instance", "status", "inst-pm-demo", "--json"],
+                    command_json(active_status("inst-pm-demo", "thread-1", "idle")),
+                ),
+            ]
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        status, payload = service.handle_api("POST", "/api/instances/inst-pm-demo/resume", b"")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["instance"]["status"], "active")
+        self.assertEqual(runner.calls[0][0], ["instance", "resume", "inst-pm-demo", "--json"])
 
     def test_create_route_returns_structured_error_for_malformed_launcher_json(self) -> None:
         runner = FakeRunner()
@@ -589,6 +767,34 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                         ["instance", "status", "inst-pm-demo", "--json"],
                     ],
                 )
+
+    def test_user_input_does_not_use_fixed_init_prompt(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    ["instance", "input", "inst-pm-demo", "--text", "User task", "--json"],
+                    command_json(
+                        {
+                            "instance_id": "inst-pm-demo",
+                            "thread_id": "thread-1",
+                            "action": "start",
+                            "turn_id": "turn-user",
+                        }
+                    ),
+                ),
+                CommandStep(
+                    ["instance", "status", "inst-pm-demo", "--json"],
+                    command_json(active_status("inst-pm-demo", "thread-1", "active")),
+                ),
+            ]
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        status, payload = service.handle_api("POST", "/api/instances/inst-pm-demo/input", b'{"text":"User task"}')
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["turn_id"], "turn-user")
+        self.assertNotIn(WEB_MANAGEMENT.INITIALIZE_THREAD_PROMPT, json.dumps(runner.calls))
 
     def test_input_route_returns_structured_error_for_malformed_launcher_json(self) -> None:
         runner = FakeRunner()
