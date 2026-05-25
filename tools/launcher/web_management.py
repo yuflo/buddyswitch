@@ -255,6 +255,10 @@ class WebManagementService:
             return 200, self._initialize(instance_id)
         if method == "POST" and action == "input":
             return 200, self._send_input(instance_id, body)
+        if method == "POST" and action == "side":
+            return 200, self._side(instance_id, body)
+        if method == "POST" and action == "side-close":
+            return 200, self._side_close(instance_id, body)
         if method == "POST" and action == "interrupt":
             return 200, self._interrupt(instance_id)
         if method == "POST" and action == "resume":
@@ -275,6 +279,10 @@ class WebManagementService:
             return path[len(status_prefix) : -len("/initialize")], "initialize"
         if path.startswith(status_prefix) and path.endswith("/input"):
             return path[len(status_prefix) : -len("/input")], "input"
+        if path.startswith(status_prefix) and path.endswith("/side/close"):
+            return path[len(status_prefix) : -len("/side/close")], "side-close"
+        if path.startswith(status_prefix) and path.endswith("/side"):
+            return path[len(status_prefix) : -len("/side")], "side"
         if path.startswith(status_prefix) and path.endswith("/interrupt"):
             return path[len(status_prefix) : -len("/interrupt")], "interrupt"
         if path.startswith(status_prefix) and path.endswith("/resume"):
@@ -386,6 +394,83 @@ class WebManagementService:
             result.stdout,
             message=f"Invalid JSON from instance input for {instance_id}.",
         )
+
+    def _run_side_command(
+        self,
+        instance_id: str,
+        *,
+        text: str,
+        side_thread_id: str | None,
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        args = ["instance", "side", instance_id]
+        if side_thread_id is not None:
+            args.extend(["--side-thread-id", side_thread_id])
+        args.extend(["--text", text, "--json"])
+        result = self._run_command(args, timeout_seconds=timeout_seconds)
+        return load_command_json_object(
+            result.stdout,
+            message=f"Invalid JSON from instance side for {instance_id}.",
+        )
+
+    def _run_side_close_command(self, instance_id: str, side_thread_id: str, *, timeout_seconds: float) -> dict[str, Any]:
+        result = self._run_command(
+            ["instance", "side", "close", instance_id, "--side-thread-id", side_thread_id, "--json"],
+            timeout_seconds=timeout_seconds,
+        )
+        return load_command_json_object(
+            result.stdout,
+            message=f"Invalid JSON from instance side close for {instance_id}.",
+        )
+
+    def _side(self, instance_id: str, body: bytes) -> dict[str, Any]:
+        payload = self._parse_json_body(body)
+        text = payload.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise HttpError(status=400, code="INVALID_REQUEST", message="text must not be empty.")
+        side_thread_id = payload.get("side_thread_id")
+        if side_thread_id is not None and (not isinstance(side_thread_id, str) or not side_thread_id.strip()):
+            raise HttpError(status=400, code="INVALID_REQUEST", message="side_thread_id must not be empty.")
+        return self._run_busy(
+            f"instance:{instance_id}",
+            lambda: self._side_under_lock(instance_id, text, side_thread_id if isinstance(side_thread_id, str) else None),
+        )
+
+    def _side_under_lock(self, instance_id: str, text: str, side_thread_id: str | None) -> dict[str, Any]:
+        parsed = self._run_side_command(
+            instance_id,
+            text=text,
+            side_thread_id=side_thread_id,
+            timeout_seconds=60,
+        )
+        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(instance_id)}
+        for key in ("action", "thread_action", "parent_thread_id", "side_thread_id", "turn_id", "expected_turn_id"):
+            value = parsed.get(key)
+            if isinstance(value, str):
+                payload[key] = value
+        return payload
+
+    def _side_close(self, instance_id: str, body: bytes) -> dict[str, Any]:
+        payload = self._parse_json_body(body)
+        side_thread_id = payload.get("side_thread_id")
+        if not isinstance(side_thread_id, str) or not side_thread_id.strip():
+            raise HttpError(status=400, code="INVALID_REQUEST", message="side_thread_id must not be empty.")
+        return self._run_busy(
+            f"instance:{instance_id}",
+            lambda: self._side_close_under_lock(instance_id, side_thread_id),
+        )
+
+    def _side_close_under_lock(self, instance_id: str, side_thread_id: str) -> dict[str, Any]:
+        parsed = self._run_side_close_command(instance_id, side_thread_id, timeout_seconds=30)
+        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(instance_id)}
+        for key in ("action", "parent_thread_id", "side_thread_id", "turn_id"):
+            value = parsed.get(key)
+            if isinstance(value, str):
+                payload[key] = value
+        startup_interrupt = parsed.get("startup_interrupt")
+        if isinstance(startup_interrupt, bool):
+            payload["startup_interrupt"] = startup_interrupt
+        return payload
 
     def _interrupt(self, instance_id: str) -> dict[str, Any]:
         return self._run_busy(

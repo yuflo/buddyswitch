@@ -33,6 +33,9 @@ Usage:
   buddyswitch-codex instance buddies [--json]
   buddyswitch-codex instance start --buddy <buddy> [--json]
   buddyswitch-codex instance input <instance-id> --text <text> [--json]
+  buddyswitch-codex instance side <instance-id> --text <text> [--json]
+  buddyswitch-codex instance side <instance-id> --side-thread-id <side-thread-id> --text <text> [--json]
+  buddyswitch-codex instance side close <instance-id> --side-thread-id <side-thread-id> [--json]
   buddyswitch-codex instance goal <instance-id> get|set|clear [--json]
   buddyswitch-codex instance compact <instance-id> [--json]
   buddyswitch-codex instance clear <instance-id> [--json]
@@ -411,6 +414,142 @@ PY
   fi
 }
 
+instance_side_print_start_result() {
+  local output="$1" instance_id="$2" parent_thread_id="$3" side_thread_id="$4" json="$5"
+  if [[ "${json}" -eq 1 ]]; then
+    python3 - "${output}" "${instance_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
+import json
+import sys
+
+source = json.loads(sys.argv[1])
+payload = {
+    "instance_id": sys.argv[2],
+    "parent_thread_id": sys.argv[3],
+    "side_thread_id": sys.argv[4],
+    "action": "start",
+    "thread_action": source.get("thread_action"),
+}
+for key in ("turn_id", "expected_turn_id"):
+    value = source.get(key)
+    if isinstance(value, str) and value:
+        payload[key] = value
+print(json.dumps(payload, ensure_ascii=True))
+PY
+    return 0
+  fi
+  echo "Side conversation started: ${side_thread_id}"
+}
+
+instance_side_print_send_result() {
+  local output="$1" instance_id="$2" parent_thread_id="$3" side_thread_id="$4" json="$5"
+  if [[ "${json}" -eq 1 ]]; then
+    python3 - "${output}" "${instance_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
+import json
+import sys
+
+source = json.loads(sys.argv[1])
+payload = {
+    "instance_id": sys.argv[2],
+    "parent_thread_id": sys.argv[3],
+    "side_thread_id": sys.argv[4],
+    "action": "send",
+    "thread_action": source.get("action"),
+}
+for key in ("turn_id", "expected_turn_id"):
+    value = source.get(key)
+    if isinstance(value, str) and value:
+        payload[key] = value
+print(json.dumps(payload, ensure_ascii=True))
+PY
+    return 0
+  fi
+  echo "Side conversation sent: ${side_thread_id}"
+}
+
+instance_side() {
+  local instance_id="${1:-}" text="" side_thread_id="" parent_thread_id="" arg output json=0
+  if [[ -z "${instance_id}" ]]; then
+    echo "instance id is required" >&2
+    return 2
+  fi
+  shift || true
+
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    case "${arg}" in
+      --text)
+        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+          echo "instance side requires --text <text>" >&2
+          return 2
+        fi
+        text="$2"
+        shift 2
+        ;;
+      --side-thread-id)
+        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+          echo "instance side requires --side-thread-id <side-thread-id>" >&2
+          return 2
+        fi
+        side_thread_id="$2"
+        shift 2
+        ;;
+      --json)
+        json=1
+        shift
+        ;;
+      *)
+        echo "Unknown instance side option: ${arg}" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  if [[ -z "${text}" ]]; then
+    echo "instance side requires --text <text>" >&2
+    return 2
+  fi
+
+  instance_require_active_service_thread "${instance_id}" "side" || return $?
+  parent_thread_id="${INSTANCE_ACTIVE_THREAD_ID}"
+
+  if [[ -n "${side_thread_id}" ]]; then
+    buddyswitch_instance_require_side_thread "${instance_id}" "${parent_thread_id}" "${side_thread_id}" >/dev/null || return $?
+    output="$(buddyswitch_app_server_input "${side_thread_id}" "${text}" 2>&1)" || {
+      if [[ "${output}" == *"turn/steer failed"* ]]; then
+        echo "Instance side blocked: active turn is not steerable; retry later or close it." >&2
+        echo "${output}" >&2
+        return 1
+      fi
+      [[ -n "${output}" ]] && echo "${output}" >&2
+      return 1
+    }
+    instance_side_print_send_result "${output}" "${instance_id}" "${parent_thread_id}" "${side_thread_id}" "${json}"
+    return $?
+  fi
+
+  output="$(buddyswitch_app_server_side_start "${parent_thread_id}" "${text}" 2>&1)" || {
+    [[ -n "${output}" ]] && echo "${output}" >&2
+    return 1
+  }
+  side_thread_id="$(
+    python3 - "${output}" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+value = payload.get("side_thread_id")
+if isinstance(value, str):
+    print(value)
+PY
+  )"
+  if [[ -z "${side_thread_id}" ]]; then
+    echo "Side start returned no side_thread_id." >&2
+    return 1
+  fi
+  buddyswitch_instance_register_side_thread "${instance_id}" "${parent_thread_id}" "${side_thread_id}" || return $?
+  instance_side_print_start_result "${output}" "${instance_id}" "${parent_thread_id}" "${side_thread_id}" "${json}"
+}
+
 instance_require_active_service_thread() {
   local instance_id="$1"
   local action_label="$2"
@@ -429,6 +568,74 @@ instance_require_active_service_thread() {
     return 3
   fi
   INSTANCE_ACTIVE_THREAD_ID="${thread_id}"
+}
+
+instance_side_close() {
+  local instance_id="${1:-}" side_thread_id="" parent_thread_id="" arg output json=0
+  if [[ -z "${instance_id}" ]]; then
+    echo "instance id is required" >&2
+    return 2
+  fi
+  shift || true
+
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    case "${arg}" in
+      --side-thread-id)
+        if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+          echo "instance side close requires --side-thread-id <side-thread-id>" >&2
+          return 2
+        fi
+        side_thread_id="$2"
+        shift 2
+        ;;
+      --json)
+        json=1
+        shift
+        ;;
+      *)
+        echo "Unknown instance side close option: ${arg}" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  if [[ -z "${side_thread_id}" ]]; then
+    echo "instance side close requires --side-thread-id <side-thread-id>" >&2
+    return 2
+  fi
+
+  instance_require_active_service_thread "${instance_id}" "side close" || return $?
+  parent_thread_id="${INSTANCE_ACTIVE_THREAD_ID}"
+  buddyswitch_instance_require_side_thread "${instance_id}" "${parent_thread_id}" "${side_thread_id}" >/dev/null || return $?
+
+  output="$(buddyswitch_app_server_side_close "${side_thread_id}" 2>&1)" || {
+    [[ -n "${output}" ]] && echo "${output}" >&2
+    return 1
+  }
+  buddyswitch_instance_unregister_side_thread "${instance_id}" "${parent_thread_id}" "${side_thread_id}" || return $?
+
+  if [[ "${json}" -eq 1 ]]; then
+    python3 - "${output}" "${instance_id}" "${parent_thread_id}" "${side_thread_id}" <<'PY'
+import json
+import sys
+
+source = json.loads(sys.argv[1])
+payload = {
+    "instance_id": sys.argv[2],
+    "parent_thread_id": sys.argv[3],
+    "side_thread_id": sys.argv[4],
+    "action": "close",
+    "startup_interrupt": bool(source.get("startup_interrupt")),
+}
+turn_id = source.get("turn_id")
+if isinstance(turn_id, str) and turn_id:
+    payload["turn_id"] = turn_id
+print(json.dumps(payload, ensure_ascii=True))
+PY
+    return 0
+  fi
+  echo "Side conversation closed: ${side_thread_id}"
 }
 
 instance_goal_print_json() {

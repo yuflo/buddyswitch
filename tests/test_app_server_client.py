@@ -367,6 +367,17 @@ class AppServerClientTests(unittest.TestCase):
             [{"type": "text", "text": "hello", "text_elements": []}],
         )
 
+    def test_side_boundary_prompt_item_shape_is_codex_compatible(self) -> None:
+        item = APP_SERVER.side_boundary_prompt_item()
+        self.assertEqual(item["type"], "message")
+        self.assertEqual(item["role"], "user")
+        content = item["content"]
+        self.assertEqual(len(content), 1)
+        self.assertEqual(content[0]["type"], "input_text")
+        self.assertIn("Side conversation boundary.", content[0]["text"])
+        self.assertIn("inherited history", content[0]["text"])
+        self.assertIn("separate from the main thread", content[0]["text"])
+
     def test_turn_steer_requires_expected_turn_id(self) -> None:
         with self.assertRaises(ValueError):
             APP_SERVER.build_turn_steer_params("thread-1", "", "hello")
@@ -400,6 +411,50 @@ class AppServerClientTests(unittest.TestCase):
             ]
         )
         self.assertEqual(args.permissions, "buddyswitch-runtime")
+
+    def test_side_commands_require_expected_arguments(self) -> None:
+        parser = APP_SERVER.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(
+                [
+                    "side-start",
+                    "--socket",
+                    "/tmp/app.sock",
+                    "--parent-thread-id",
+                    "thread-main",
+                ]
+            )
+
+        args = parser.parse_args(
+            [
+                "side-start",
+                "--socket",
+                "/tmp/app.sock",
+                "--parent-thread-id",
+                "thread-main",
+                "--text",
+                "Check this",
+                "--workspace-dir",
+                "/tmp/workspace",
+                "--shared-project-workspace-dir",
+                "/tmp/project",
+                "--permissions",
+                "buddyswitch-runtime",
+            ]
+        )
+        self.assertEqual(args.parent_thread_id, "thread-main")
+        self.assertEqual(args.permissions, "buddyswitch-runtime")
+
+        close_args = parser.parse_args(
+            [
+                "side-close",
+                "--socket",
+                "/tmp/app.sock",
+                "--side-thread-id",
+                "thread-side-1",
+            ]
+        )
+        self.assertEqual(close_args.side_thread_id, "thread-side-1")
 
     def test_server_error_is_reported_without_retrying_mutating_call(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

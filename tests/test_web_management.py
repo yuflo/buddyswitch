@@ -768,6 +768,161 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                     ],
                 )
 
+    def test_side_create_route_delegates_and_reports_side_thread_id(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    ["instance", "side", "inst-pm-demo", "--text", "Explore", "--json"],
+                    command_json(
+                        {
+                            "instance_id": "inst-pm-demo",
+                            "action": "start",
+                            "thread_action": "start",
+                            "parent_thread_id": "thread-main",
+                            "side_thread_id": "thread-side-1",
+                            "turn_id": "turn-side-1",
+                        }
+                    ),
+                ),
+                CommandStep(
+                    ["instance", "status", "inst-pm-demo", "--json"],
+                    command_json(active_status("inst-pm-demo", "thread-main", "idle")),
+                ),
+            ]
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        status, payload = service.handle_api("POST", "/api/instances/inst-pm-demo/side", b'{"text":"Explore"}')
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["action"], "start")
+        self.assertEqual(payload["thread_action"], "start")
+        self.assertEqual(payload["side_thread_id"], "thread-side-1")
+        self.assertEqual(payload["parent_thread_id"], "thread-main")
+        self.assertEqual(payload["turn_id"], "turn-side-1")
+        self.assertEqual(payload["instance"]["thread_id"], "thread-main")
+
+    def test_side_send_route_delegates_existing_side(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    [
+                        "instance",
+                        "side",
+                        "inst-pm-demo",
+                        "--side-thread-id",
+                        "thread-side-1",
+                        "--text",
+                        "Follow up",
+                        "--json",
+                    ],
+                    command_json(
+                        {
+                            "instance_id": "inst-pm-demo",
+                            "action": "send",
+                            "thread_action": "steer",
+                            "parent_thread_id": "thread-main",
+                            "side_thread_id": "thread-side-1",
+                            "turn_id": "turn-side-1",
+                            "expected_turn_id": "turn-side-1",
+                        }
+                    ),
+                ),
+                CommandStep(
+                    ["instance", "status", "inst-pm-demo", "--json"],
+                    command_json(active_status("inst-pm-demo", "thread-main", "idle")),
+                ),
+            ]
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        status, payload = service.handle_api(
+            "POST",
+            "/api/instances/inst-pm-demo/side",
+            b'{"side_thread_id":"thread-side-1","text":"Follow up"}',
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["action"], "send")
+        self.assertEqual(payload["thread_action"], "steer")
+        self.assertEqual(payload["side_thread_id"], "thread-side-1")
+        self.assertEqual(payload["parent_thread_id"], "thread-main")
+        self.assertEqual(payload["expected_turn_id"], "turn-side-1")
+        self.assertEqual(payload["instance"]["thread_id"], "thread-main")
+
+    def test_side_close_route_delegates_and_reports_side_thread_id(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    [
+                        "instance",
+                        "side",
+                        "close",
+                        "inst-pm-demo",
+                        "--side-thread-id",
+                        "thread-side-1",
+                        "--json",
+                    ],
+                    command_json(
+                        {
+                            "instance_id": "inst-pm-demo",
+                            "action": "close",
+                            "parent_thread_id": "thread-main",
+                            "side_thread_id": "thread-side-1",
+                            "turn_id": "turn-side-1",
+                            "startup_interrupt": False,
+                        }
+                    ),
+                ),
+                CommandStep(
+                    ["instance", "status", "inst-pm-demo", "--json"],
+                    command_json(active_status("inst-pm-demo", "thread-main", "idle")),
+                ),
+            ]
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        status, payload = service.handle_api(
+            "POST",
+            "/api/instances/inst-pm-demo/side/close",
+            b'{"side_thread_id":"thread-side-1"}',
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["action"], "close")
+        self.assertEqual(payload["side_thread_id"], "thread-side-1")
+        self.assertEqual(payload["parent_thread_id"], "thread-main")
+        self.assertEqual(payload["turn_id"], "turn-side-1")
+        self.assertFalse(payload["startup_interrupt"])
+        self.assertEqual(payload["instance"]["thread_id"], "thread-main")
+
+    def test_side_route_rejects_empty_text(self) -> None:
+        runner, base_url = self._start_server()
+        status, payload = self._request_json(
+            base_url,
+            method="POST",
+            path="/api/instances/inst-pm-demo/side",
+            payload={"text": "   "},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
+        self.assertEqual(runner.calls, [])
+
+    def test_side_close_route_rejects_missing_side_thread_id(self) -> None:
+        runner, base_url = self._start_server()
+        status, payload = self._request_json(
+            base_url,
+            method="POST",
+            path="/api/instances/inst-pm-demo/side/close",
+            payload={},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
+        self.assertEqual(runner.calls, [])
+
     def test_user_input_does_not_use_fixed_init_prompt(self) -> None:
         runner = OrderedRunner(
             [

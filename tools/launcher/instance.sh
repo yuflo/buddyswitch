@@ -7,6 +7,9 @@ Usage:
   buddyswitch-codex instance buddies [--json]
   buddyswitch-codex instance start --buddy <buddy> [--json]
   buddyswitch-codex instance input <instance-id> --text <text> [--json]
+  buddyswitch-codex instance side <instance-id> --text <text> [--json]
+  buddyswitch-codex instance side <instance-id> --side-thread-id <side-thread-id> --text <text> [--json]
+  buddyswitch-codex instance side close <instance-id> --side-thread-id <side-thread-id> [--json]
   buddyswitch-codex instance goal <instance-id> get|set|clear [--json]
   buddyswitch-codex instance compact <instance-id> [--json]
   buddyswitch-codex instance clear <instance-id> [--json]
@@ -23,6 +26,7 @@ Commands:
   buddies Print valid buddies from buddyswitch/manifest.toml.
   start   Start a fresh product-mode app-server service.
   input   Send text to a running product-mode instance.
+  side    Create, continue, or close a side conversation child thread.
   goal    Get, set, or clear the running instance goal.
   compact Start app-server thread compaction for a running instance.
   clear   Clear the running instance conversation with a fresh thread.
@@ -379,6 +383,25 @@ buddyswitch_instance_main() {
         return 2
       fi
       instance_input "$@"
+      ;;
+    side)
+      shift || true
+      if [[ "${1:-}" == "close" ]]; then
+        shift || true
+        if [[ $# -lt 1 ]]; then
+          echo "instance id is required" >&2
+          buddyswitch_instance_usage >&2
+          return 2
+        fi
+        instance_side_close "$@"
+        return $?
+      fi
+      if [[ $# -lt 1 ]]; then
+        echo "instance id is required" >&2
+        buddyswitch_instance_usage >&2
+        return 2
+      fi
+      instance_side "$@"
       ;;
     goal)
       shift || true

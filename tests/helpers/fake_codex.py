@@ -39,6 +39,58 @@ def append_calls(payload: dict[str, object]) -> None:
         handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
 
 
+def _read_pid(path: Path) -> int | None:
+    try:
+        value = int(path.read_text(encoding="utf-8").strip())
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _pid_group(pid: int) -> int | None:
+    try:
+        return os.getpgid(pid)
+    except OSError:
+        return None
+
+
+def append_process_registry(payload: dict[str, object]) -> None:
+    registry_path = os.environ.get("BUDDYSWITCH_TEST_PROCESS_REGISTRY")
+    if not registry_path:
+        return
+    argv = payload.get("argv")
+    if not isinstance(argv, list) or argv[:2] != ["app-server", "--listen"]:
+        return
+    record: dict[str, object] = {
+        "kind": "fake-codex",
+        "pid": os.getpid(),
+        "pgid": os.getpgrp(),
+        "argv": argv,
+        "cwd": payload.get("cwd"),
+        "instance_id": payload.get("instance_id"),
+        "instance_json": payload.get("instance_json"),
+    }
+    instance_json = payload.get("instance_json")
+    if isinstance(instance_json, str) and instance_json:
+        instance_root = Path(instance_json).parent
+        record["instance_root"] = str(instance_root)
+        for prefix, pid_path in (
+            ("runtime_broker", instance_root / "runtime" / "runtime-broker.pid"),
+            ("browser", instance_root / "browser" / "chrome.pid"),
+        ):
+            pid = _read_pid(pid_path)
+            if pid is None:
+                continue
+            record[f"{prefix}_pid"] = pid
+            pgid = _pid_group(pid)
+            if pgid is not None:
+                record[f"{prefix}_pgid"] = pgid
+    path = Path(registry_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=True) + "\n")
+
+
 def read_json(path: Path) -> dict[str, object]:
     if not path.exists():
         return {}
@@ -343,21 +395,87 @@ def save_server_state(state: dict[str, object]) -> None:
     MEMORY_STATE = dict(state)
 
 
-def default_thread(state: dict[str, object], *, status: object | None = None) -> dict[str, object]:
-    thread_id = state.get("thread_id") or "thread-test"
-    thread_status = status if status is not None else state.get("thread_status", {"type": "idle"})
+def _main_thread_id(state: dict[str, object]) -> str:
+    return str(state.get("thread_id") or "thread-test")
+
+
+def _sync_main_thread_legacy(state: dict[str, object]) -> None:
+    threads = state.get("threads")
+    if not isinstance(threads, dict):
+        return
+    main_thread = threads.get(_main_thread_id(state))
+    if not isinstance(main_thread, dict):
+        return
+    state["thread_status"] = main_thread.get("status", {"type": "idle"})
+    state["turns"] = main_thread.get("turns", [])
+
+
+def _ensure_threads_state(state: dict[str, object]) -> dict[str, dict[str, object]]:
+    main_thread_id = _main_thread_id(state)
+    threads = state.get("threads")
+    if not isinstance(threads, dict):
+        threads = {}
+    main_thread = threads.get(main_thread_id)
+    if not isinstance(main_thread, dict):
+        main_thread = {}
+        threads[main_thread_id] = main_thread
+    if "status" not in main_thread:
+        main_thread["status"] = state.get("thread_status", {"type": "idle"})
+    if not isinstance(main_thread.get("turns"), list):
+        main_thread["turns"] = state.get("turns", [])
+    if not isinstance(main_thread.get("injected_items"), list):
+        main_thread["injected_items"] = []
+    state["threads"] = threads
+    _sync_main_thread_legacy(state)
+    return threads
+
+
+def _thread_state(state: dict[str, object], thread_id: str) -> dict[str, object]:
+    threads = _ensure_threads_state(state)
+    thread = threads.get(thread_id)
+    if not isinstance(thread, dict):
+        thread = {
+            "status": {"type": "idle"},
+            "turns": [],
+            "injected_items": [],
+        }
+        threads[thread_id] = thread
+    if not isinstance(thread.get("turns"), list):
+        thread["turns"] = []
+    if not isinstance(thread.get("injected_items"), list):
+        thread["injected_items"] = []
+    return thread
+
+
+def _allocate_side_thread_id(state: dict[str, object]) -> str:
+    side_thread_id = str(state.get("next_side_thread_id", "thread-side-1"))
+    prefix, separator, suffix = side_thread_id.rpartition("-")
+    if separator and suffix.isdigit():
+        state["next_side_thread_id"] = f"{prefix}-{int(suffix) + 1}"
+    return side_thread_id
+
+
+def default_thread(
+    state: dict[str, object],
+    *,
+    thread_id: str | None = None,
+    status: object | None = None,
+) -> dict[str, object]:
+    actual_thread_id = thread_id or _main_thread_id(state)
+    thread_state = _thread_state(state, actual_thread_id)
+    thread_status = status if status is not None else thread_state.get("status", {"type": "idle"})
     return {
-        "id": thread_id,
-        "sessionId": state.get("session_id", thread_id),
-        "forkedFromId": None,
+        "id": actual_thread_id,
+        "sessionId": thread_state.get("session_id", state.get("session_id", actual_thread_id)),
+        "forkedFromId": thread_state.get("forked_from_id"),
         "preview": "",
-        "ephemeral": False,
+        "ephemeral": bool(thread_state.get("ephemeral", False)),
         "modelProvider": "openai",
         "createdAt": 0,
         "updatedAt": 0,
         "status": thread_status,
         "path": None,
-        "cwd": os.getcwd(),
+        "cwd": thread_state.get("cwd", os.getcwd()),
         "cliVersion": "test",
         "source": "appServer",
         "threadSource": None,
@@ -365,7 +483,7 @@ def default_thread(state: dict[str, object], *, status: object | None = None) ->
         "agentRole": None,
         "gitInfo": None,
         "name": None,
-        "turns": [],
+        "turns": thread_state.get("turns", []),
     }
 
 
@@ -384,13 +502,25 @@ def default_turn(turn_id: str, status: str = "inProgress") -> dict[str, object]:
 
 def build_default_result(method: str, params: dict[str, object] | None, state: dict[str, object]) -> dict[str, object]:
     if method == "thread/loaded/list":
-        return {"data": [state.get("thread_id")], "nextCursor": None}
+        return {"data": list(_ensure_threads_state(state).keys()), "nextCursor": None}
     if method == "thread/start":
         if isinstance(params, dict) and params.get("sessionStartSource") == "clear":
-            return {"thread": default_thread({**state, "thread_id": state.get("clear_thread_id", "thread-cleared")})}
+            clear_thread_id = str(state.get("clear_thread_id", "thread-cleared"))
+            temp_state = dict(state)
+            temp_state["thread_id"] = clear_thread_id
+            temp_state["threads"] = {
+                **_ensure_threads_state(state),
+                clear_thread_id: {
+                    "status": {"type": "idle"},
+                    "turns": [],
+                    "injected_items": [],
+                },
+            }
+            return {"thread": default_thread(temp_state, thread_id=clear_thread_id)}
         return {"thread": default_thread(state)}
     if method == "thread/resume":
-        thread = default_thread(state)
+        thread_id = str(params.get("threadId")) if isinstance(params, dict) and params.get("threadId") else _main_thread_id(state)
+        thread = default_thread(state, thread_id=thread_id)
         response_thread_id = state.get("thread_resume_response_thread_id")
         if isinstance(response_thread_id, str):
             thread["id"] = response_thread_id
@@ -408,11 +538,22 @@ def build_default_result(method: str, params: dict[str, object] | None, state: d
             "activePermissionProfile": {"id": "buddyswitch-runtime"},
             "reasoningEffort": None,
         }
+    if method == "thread/fork":
+        parent_thread_id = str(params.get("threadId")) if isinstance(params, dict) and params.get("threadId") else _main_thread_id(state)
+        side_thread_id = str(state.get("next_side_thread_id", "thread-side-1"))
+        thread = default_thread(state, thread_id=side_thread_id, status={"type": "idle"})
+        thread["forkedFromId"] = parent_thread_id
+        thread["ephemeral"] = True
+        return {"thread": thread}
+    if method == "thread/inject_items":
+        return {}
     if method == "thread/read":
-        return {"thread": default_thread(state)}
+        thread_id = str(params.get("threadId")) if isinstance(params, dict) and params.get("threadId") else _main_thread_id(state)
+        return {"thread": default_thread(state, thread_id=thread_id)}
     if method == "thread/turns/list":
+        thread_id = str(params.get("threadId")) if isinstance(params, dict) and params.get("threadId") else _main_thread_id(state)
         return {
-            "data": state.get("turns", []),
+            "data": _thread_state(state, thread_id).get("turns", []),
             "nextCursor": None,
             "backwardsCursor": None,
         }
@@ -449,11 +590,17 @@ def build_default_result(method: str, params: dict[str, object] | None, state: d
 
 
 def maybe_mutate_state(method: str, params: dict[str, object] | None, state: dict[str, object]) -> None:
+    main_thread_id = _main_thread_id(state)
     if method == "thread/start":
         if isinstance(params, dict) and params.get("sessionStartSource") == "clear":
             state["thread_id"] = str(state.get("clear_thread_id", "thread-cleared"))
-        state.setdefault("thread_status", {"type": "idle"})
-        state.setdefault("turns", [])
+            main_thread_id = _main_thread_id(state)
+            main_thread = _thread_state(state, main_thread_id)
+            main_thread["status"] = {"type": "idle"}
+            main_thread["turns"] = []
+            _sync_main_thread_legacy(state)
+            return
+        _ensure_threads_state(state)
         return
     if method == "thread/resume":
         count = state.get("thread_resume_count")
@@ -461,26 +608,62 @@ def maybe_mutate_state(method: str, params: dict[str, object] | None, state: dic
         if isinstance(params, dict):
             state["last_thread_resume_params"] = dict(params)
         return
+    if method == "thread/fork":
+        parent_thread_id = str(params.get("threadId")) if isinstance(params, dict) and params.get("threadId") else main_thread_id
+        side_thread_id = _allocate_side_thread_id(state)
+        side_thread = _thread_state(state, side_thread_id)
+        side_thread["status"] = {"type": "idle"}
+        side_thread["turns"] = []
+        side_thread["injected_items"] = []
+        side_thread["ephemeral"] = True
+        side_thread["forked_from_id"] = parent_thread_id
+        return
+    if method == "thread/inject_items":
+        if not isinstance(params, dict):
+            return
+        thread_id = str(params.get("threadId") or main_thread_id)
+        thread = _thread_state(state, thread_id)
+        items = params.get("items")
+        if isinstance(items, list):
+            thread["injected_items"] = [*thread.get("injected_items", []), *items]
+        return
     if method == "turn/start":
+        thread_id = str(params.get("threadId")) if isinstance(params, dict) and params.get("threadId") else main_thread_id
         next_turn_id = str(state.get("next_turn_id", "turn-test"))
-        state["thread_status"] = {"type": "active", "activeFlags": []}
-        state["turns"] = [default_turn(next_turn_id)]
+        thread = _thread_state(state, thread_id)
+        thread["status"] = {"type": "active", "activeFlags": []}
+        thread["turns"] = [default_turn(next_turn_id)]
+        if thread_id == main_thread_id:
+            _sync_main_thread_legacy(state)
         return
     if method == "turn/steer":
-        if not isinstance(state.get("turns"), list) or not state["turns"]:
+        thread_id = str(params.get("threadId")) if isinstance(params, dict) and params.get("threadId") else main_thread_id
+        thread = _thread_state(state, thread_id)
+        turns = thread.get("turns")
+        if not isinstance(turns, list) or not turns:
             expected_turn_id = None
             if isinstance(params, dict):
                 expected_turn_id = params.get("expectedTurnId")
-            state["turns"] = [default_turn(str(expected_turn_id or state.get("next_turn_id", "turn-test")))]
-        state["thread_status"] = {"type": "active", "activeFlags": []}
+            thread["turns"] = [default_turn(str(expected_turn_id or state.get("next_turn_id", "turn-test")))]
+        thread["status"] = {"type": "active", "activeFlags": []}
+        if thread_id == main_thread_id:
+            _sync_main_thread_legacy(state)
         return
     if method == "turn/interrupt":
-        turns = state.get("turns")
+        thread_id = str(params.get("threadId")) if isinstance(params, dict) and params.get("threadId") else main_thread_id
+        thread = _thread_state(state, thread_id)
+        turns = thread.get("turns")
+        turn_id = params.get("turnId") if isinstance(params, dict) else None
         if isinstance(turns, list) and turns:
-            turn = turns[0]
-            if isinstance(turn, dict):
-                turn["status"] = "interrupted"
-        state["thread_status"] = {"type": "idle"}
+            for turn in turns:
+                if not isinstance(turn, dict):
+                    continue
+                if turn_id in {None, "", turn.get("id")}:
+                    turn["status"] = "interrupted"
+                    break
+        thread["status"] = {"type": "idle"}
+        if thread_id == main_thread_id:
+            _sync_main_thread_legacy(state)
         return
     if method == "thread/goal/set":
         if not isinstance(params, dict):
@@ -722,6 +905,7 @@ def main(argv: list[str]) -> int:
         "runtime_broker_socket": os.environ.get("BUDDYSWITCH_RUNTIME_BROKER_SOCKET"),
     }
     append_calls(entry)
+    append_process_registry(entry)
 
     if argv[:2] == ["mcp", "remove"] and len(argv) >= 3:
         config_path = codex_home / "config.toml"

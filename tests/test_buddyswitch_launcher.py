@@ -7,6 +7,7 @@ import json
 import os
 import errno
 import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -89,6 +90,13 @@ class BuddySwitchLauncherTests(unittest.TestCase):
 
     def setUp(self) -> None:
         super().setUp()
+        self._process_registry_tmp = tempfile.TemporaryDirectory(prefix="buddyswitch-launcher-procs-")
+        self._process_registry_path = Path(self._process_registry_tmp.name) / "processes.jsonl"
+        previous_process_registry = os.environ.get("BUDDYSWITCH_TEST_PROCESS_REGISTRY")
+        os.environ["BUDDYSWITCH_TEST_PROCESS_REGISTRY"] = str(self._process_registry_path)
+        self.addCleanup(self._process_registry_tmp.cleanup)
+        self.addCleanup(self._restore_process_registry_env, previous_process_registry)
+        self.addCleanup(self._cleanup_registered_test_processes)
         self._cleanup_repo_relative_sentinels()
         self.addCleanup(self._cleanup_repo_relative_sentinels)
 
@@ -762,12 +770,14 @@ exec "$real_git" "$@"
         instance_payload = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
         app_server_pid = instance_payload.get("app_server_pid")
         if isinstance(app_server_pid, int):
-            def _cleanup_app_server() -> None:
-                try:
-                    os.kill(app_server_pid, 15)
-                except OSError:
-                    return
-            self.addCleanup(_cleanup_app_server)
+            self.addCleanup(self._cleanup_app_server_process, instance_root, app_server_pid)
+        runtime_broker_pid_file = instance_root / "runtime" / "runtime-broker.pid"
+        try:
+            runtime_broker_pid = int(runtime_broker_pid_file.read_text(encoding="utf-8").strip())
+        except (FileNotFoundError, OSError, ValueError):
+            runtime_broker_pid = 0
+        if runtime_broker_pid:
+            self.addCleanup(self._cleanup_runtime_broker_process, instance_root, runtime_broker_pid)
 
         return {
             "completed": completed,
@@ -781,6 +791,60 @@ exec "$real_git" "$@"
             "instance_root": instance_root,
             "instance_payload": instance_payload,
         }
+
+    @staticmethod
+    def _read_json_lines(path: Path) -> list[dict[str, object]]:
+        return [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    def _read_rpc_rows(self, path: Path) -> list[dict[str, object]]:
+        return [row for row in self._read_json_lines(path) if row["argv"][:1] == ["json-rpc"]]
+
+    def _set_instance_side_threads(
+        self,
+        instance_root: Path,
+        side_threads: list[dict[str, object]],
+    ) -> dict[str, object]:
+        instance_json = instance_root / "instance.json"
+        payload = json.loads(instance_json.read_text(encoding="utf-8"))
+        payload["side_threads"] = side_threads
+        instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        return payload
+
+    def _set_fake_side_thread_state(
+        self,
+        state_file: Path,
+        *,
+        main_thread_id: str,
+        side_thread_id: str,
+        main_status: dict[str, object] | None = None,
+        main_turns: list[dict[str, object]] | None = None,
+        side_status: dict[str, object],
+        side_turns: list[dict[str, object]],
+    ) -> dict[str, object]:
+        payload = json.loads(state_file.read_text(encoding="utf-8"))
+        effective_main_status = main_status if main_status is not None else payload.get("thread_status", {"type": "idle"})
+        effective_main_turns = main_turns if main_turns is not None else payload.get("turns", [])
+        payload["thread_status"] = effective_main_status
+        payload["turns"] = effective_main_turns
+        threads = payload.get("threads")
+        if not isinstance(threads, dict):
+            threads = {}
+        threads[main_thread_id] = {
+            "status": effective_main_status,
+            "turns": effective_main_turns,
+        }
+        threads[side_thread_id] = {
+            "status": side_status,
+            "turns": side_turns,
+            "injected_items": [],
+        }
+        payload["threads"] = threads
+        state_file.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        return payload
 
     def _runtime_sparse_list(self, workspace_dir: Path) -> list[str]:
         return subprocess.check_output(
@@ -843,6 +907,105 @@ exec "$real_git" "$@"
         self.assertFalse((runtime_skills / "write-prd").exists())
         self.assertFalse((runtime_skills / "write-prd" / "assets" / "prd-template.md").exists())
 
+    @staticmethod
+    def _restore_process_registry_env(previous_value: str | None) -> None:
+        if previous_value is None:
+            os.environ.pop("BUDDYSWITCH_TEST_PROCESS_REGISTRY", None)
+        else:
+            os.environ["BUDDYSWITCH_TEST_PROCESS_REGISTRY"] = previous_value
+
+    @staticmethod
+    def _coerce_pid(value: object) -> int | None:
+        if isinstance(value, int):
+            return value if value > 0 else None
+        if isinstance(value, str) and value.isdigit():
+            pid = int(value)
+            return pid if pid > 0 else None
+        return None
+
+    @staticmethod
+    def _pid_is_live(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except OSError as exc:
+            return exc.errno == errno.EPERM
+        return True
+
+    def _terminate_registered_process(self, pid_value: object, pgid_value: object | None = None) -> None:
+        pid = self._coerce_pid(pid_value)
+        if pid is None:
+            return
+        pgid = self._coerce_pid(pgid_value)
+        if pgid is None:
+            try:
+                pgid = os.getpgid(pid)
+            except OSError:
+                pgid = None
+        current_pgid = os.getpgrp()
+        use_group = pgid is not None and pgid != current_pgid
+
+        for signum in (signal.SIGTERM, signal.SIGKILL):
+            if not self._pid_is_live(pid):
+                return
+            try:
+                if use_group and pgid is not None:
+                    os.killpg(pgid, signum)
+                else:
+                    os.kill(pid, signum)
+            except OSError:
+                pass
+            deadline = time.monotonic() + (1.0 if signum == signal.SIGTERM else 0.2)
+            while time.monotonic() < deadline:
+                if not self._pid_is_live(pid):
+                    return
+                time.sleep(0.05)
+
+    def _cleanup_registered_test_processes(self) -> None:
+        registry_path = getattr(self, "_process_registry_path", None)
+        if not isinstance(registry_path, Path) or not registry_path.exists():
+            return
+        records: list[dict[str, object]] = []
+        for line in registry_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                records.append(payload)
+
+        seen: set[int] = set()
+        for payload in reversed(records):
+            for prefix in ("browser", "app_server", "runtime_broker"):
+                pid = self._coerce_pid(payload.get(f"{prefix}_pid"))
+                if pid is None or pid in seen:
+                    continue
+                seen.add(pid)
+                self._terminate_registered_process(pid, payload.get(f"{prefix}_pgid"))
+            pid = self._coerce_pid(payload.get("pid"))
+            if pid is not None and pid not in seen:
+                seen.add(pid)
+                self._terminate_registered_process(pid, payload.get("pgid"))
+
+    def _cleanup_app_server_process(self, instance_root: Path, app_server_pid: int) -> None:
+        self._terminate_registered_process(app_server_pid)
+        for path in (
+            instance_root / "runtime" / "app-server.pid",
+            instance_root / "runtime" / "app-server.sock",
+            instance_root / "runtime" / "app-server.socket",
+        ):
+            path.unlink(missing_ok=True)
+
+    def _cleanup_runtime_broker_process(self, instance_root: Path, runtime_broker_pid: int) -> None:
+        self._terminate_registered_process(runtime_broker_pid)
+        for path in (
+            instance_root / "runtime" / "runtime-broker.pid",
+            instance_root / "runtime" / "runtime-broker.sock",
+            instance_root / "runtime" / "runtime-broker.socket",
+        ):
+            path.unlink(missing_ok=True)
+
     def _cleanup_runtime_broker(self, instance_root: Path) -> None:
         pid_file = instance_root / "runtime" / "runtime-broker.pid"
         try:
@@ -851,26 +1014,78 @@ exec "$real_git" "$@"
         except (FileNotFoundError, OSError, ValueError):
             pid = 0
         if pid:
-            try:
-                os.kill(pid, 15)
-            except OSError:
-                pass
-            for _ in range(20):
-                try:
-                    os.kill(pid, 0)
-                except OSError:
-                    break
-                time.sleep(0.05)
-            try:
-                os.kill(pid, 9)
-            except OSError:
-                pass
+            self._terminate_registered_process(pid)
         for path in (
             pid_file,
             instance_root / "runtime" / "runtime-broker.sock",
             instance_root / "runtime" / "runtime-broker.socket",
         ):
             path.unlink(missing_ok=True)
+
+    def test_cleanup_registered_test_processes_terminates_recorded_process_group(self) -> None:
+        script = (
+            "import subprocess, sys, time\n"
+            "from pathlib import Path\n"
+            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            "Path(sys.argv[1]).write_text(str(child.pid), encoding='utf-8')\n"
+            "time.sleep(60)\n"
+        )
+
+        def pid_live(pid: int) -> bool:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return False
+            return True
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            child_pid_file = temp_root_path / "child.pid"
+            registry_path = temp_root_path / "processes.jsonl"
+            leader = subprocess.Popen(
+                [sys.executable, "-c", script, str(child_pid_file)],
+                start_new_session=True,
+            )
+            child_pid = 0
+            try:
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if child_pid_file.exists():
+                        child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+                        break
+                    time.sleep(0.05)
+                self.assertNotEqual(child_pid, 0)
+                registry_path.write_text(
+                    json.dumps(
+                        {
+                            "pid": leader.pid,
+                            "pgid": os.getpgid(leader.pid),
+                            "kind": "test-process-group",
+                        },
+                        ensure_ascii=True,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                previous_registry = getattr(self, "_process_registry_path", None)
+                self._process_registry_path = registry_path
+                try:
+                    self._cleanup_registered_test_processes()
+                finally:
+                    self._process_registry_path = previous_registry
+
+                leader.wait(timeout=2)
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline and pid_live(child_pid):
+                    time.sleep(0.05)
+                self.assertFalse(pid_live(child_pid))
+            finally:
+                for pid in (child_pid, leader.pid):
+                    if pid:
+                        try:
+                            os.kill(pid, 9)
+                        except OSError:
+                            pass
 
     def _snapshot_tree(self, root: Path) -> list[str]:
         entries: list[str] = []
@@ -2371,6 +2586,575 @@ exec "$real_git" "$@"
             self.assertEqual(payload["turn_id"], "turn-123")
             self.assertEqual(payload["expected_turn_id"], "turn-123")
             self.assertNotIn("Steered turn:", input_result.stdout)
+
+    def test_side_creates_child_injects_boundary_and_sends_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={"next_side_thread_id": "thread-side-1"},
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            side_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    ctx["instance_id"],
+                    "--text",
+                    "Explore the API shape",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
+            payload = json.loads(side_result.stdout)
+            self.assertEqual(payload["instance_id"], ctx["instance_id"])
+            self.assertEqual(payload["parent_thread_id"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(payload["side_thread_id"], "thread-side-1")
+            self.assertEqual(payload["action"], "start")
+            self.assertTrue(payload.get("turn_id"))
+
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            methods = [row["rpc_method"] for row in rpc_rows]
+            self.assertIn("thread/fork", methods)
+            self.assertIn("thread/inject_items", methods)
+            self.assertIn("turn/start", methods)
+
+            fork = next(row for row in rpc_rows if row["rpc_method"] == "thread/fork")
+            self.assertEqual(fork["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+            self.assertTrue(fork["params"]["ephemeral"])
+            self.assertEqual(fork["params"]["permissions"], "buddyswitch-runtime")
+            self.assertIn("runtimeWorkspaceRoots", fork["params"])
+            self.assertIn("developerInstructions", fork["params"])
+            self.assertIn("side conversation", fork["params"]["developerInstructions"])
+
+            inject = next(row for row in rpc_rows if row["rpc_method"] == "thread/inject_items")
+            self.assertEqual(inject["params"]["threadId"], "thread-side-1")
+            item = inject["params"]["items"][0]
+            self.assertEqual(item["type"], "message")
+            self.assertEqual(item["role"], "user")
+            self.assertIn("Side conversation boundary.", item["content"][0]["text"])
+
+            turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
+            self.assertEqual(turn_start["params"]["threadId"], "thread-side-1")
+            self.assertEqual(
+                turn_start["params"]["input"],
+                [{"type": "text", "text": "Explore the API shape", "text_elements": []}],
+            )
+            self.assertEqual(turn_start["params"]["permissions"], "buddyswitch-runtime")
+            self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+
+            instance_payload = json.loads((ctx["instance_root"] / "instance.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(instance_payload["side_threads"]), 1)
+            side_thread = instance_payload["side_threads"][0]
+            self.assertEqual(side_thread["thread_id"], "thread-side-1")
+            self.assertEqual(side_thread["parent_thread_id"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(side_thread["status"], "open")
+
+    def test_side_create_human_output_prints_side_thread_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={"next_side_thread_id": "thread-side-1"},
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            side_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    ctx["instance_id"],
+                    "--text",
+                    "Explore the API shape",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
+            self.assertIn("Side conversation started:", side_result.stdout)
+            self.assertIn("thread-side-1", side_result.stdout)
+            self.assertNotIn("{", side_result.stdout)
+
+    def test_side_send_existing_active_child_steers_side_not_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            main_thread_id = str(ctx["instance_payload"]["thread_id"])
+            self._set_instance_side_threads(
+                ctx["instance_root"],
+                [{"thread_id": "thread-side-1", "parent_thread_id": main_thread_id, "status": "open"}],
+            )
+            self._set_fake_side_thread_state(
+                Path(str(ctx["state_file"])),
+                main_thread_id=main_thread_id,
+                side_thread_id="thread-side-1",
+                side_status={"type": "active", "activeFlags": []},
+                side_turns=[
+                    {
+                        "id": "turn-side-1",
+                        "items": [],
+                        "itemsView": "summary",
+                        "status": "inProgress",
+                        "error": None,
+                        "startedAt": 0,
+                        "completedAt": None,
+                        "durationMs": None,
+                    }
+                ],
+            )
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+
+            side_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    ctx["instance_id"],
+                    "--side-thread-id",
+                    "thread-side-1",
+                    "--text",
+                    "Narrow that answer",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
+            payload = json.loads(side_result.stdout)
+            self.assertEqual(payload["action"], "send")
+            self.assertEqual(payload["side_thread_id"], "thread-side-1")
+            self.assertEqual(payload["parent_thread_id"], main_thread_id)
+            self.assertEqual(payload["thread_action"], "steer")
+            self.assertEqual(payload["expected_turn_id"], "turn-side-1")
+
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            methods = [row["rpc_method"] for row in rpc_rows]
+            self.assertNotIn("thread/fork", methods)
+            self.assertIn("turn/steer", methods)
+            steer = next(row for row in rpc_rows if row["rpc_method"] == "turn/steer")
+            self.assertEqual(steer["params"]["threadId"], "thread-side-1")
+            self.assertEqual(steer["params"]["expectedTurnId"], "turn-side-1")
+            self.assertNotEqual(steer["params"]["threadId"], main_thread_id)
+
+    def test_side_send_existing_idle_child_starts_side_turn(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            main_thread_id = str(ctx["instance_payload"]["thread_id"])
+            self._set_instance_side_threads(
+                ctx["instance_root"],
+                [{"thread_id": "thread-side-1", "parent_thread_id": main_thread_id, "status": "open"}],
+            )
+            self._set_fake_side_thread_state(
+                Path(str(ctx["state_file"])),
+                main_thread_id=main_thread_id,
+                side_thread_id="thread-side-1",
+                side_status={"type": "idle"},
+                side_turns=[],
+            )
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+
+            side_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    ctx["instance_id"],
+                    "--side-thread-id",
+                    "thread-side-1",
+                    "--text",
+                    "Follow up",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(side_result.returncode, 0, msg=side_result.stderr)
+            payload = json.loads(side_result.stdout)
+            self.assertEqual(payload["action"], "send")
+            self.assertEqual(payload["thread_action"], "start")
+
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
+            self.assertEqual(turn_start["params"]["threadId"], "thread-side-1")
+            self.assertEqual(turn_start["params"]["permissions"], "buddyswitch-runtime")
+
+    def test_side_send_rejects_unknown_side_thread_without_rpc_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            side_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    ctx["instance_id"],
+                    "--side-thread-id",
+                    "thread-unknown",
+                    "--text",
+                    "Do not send",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(side_result.returncode, 0)
+            self.assertIn("not registered", side_result.stderr.lower())
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            methods = [row["rpc_method"] for row in rpc_rows]
+            self.assertNotIn("thread/fork", methods)
+            self.assertNotIn("turn/start", methods)
+            self.assertNotIn("turn/steer", methods)
+            self.assertNotIn("turn/interrupt", methods)
+
+    def test_side_send_rejects_main_thread_id_as_side_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            main_thread_id = str(ctx["instance_payload"]["thread_id"])
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    ctx["instance_id"],
+                    "--side-thread-id",
+                    main_thread_id,
+                    "--text",
+                    "Bad",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("main thread", result.stderr.lower())
+            methods = [row["rpc_method"] for row in self._read_rpc_rows(Path(str(ctx["calls_path"])))]
+            self.assertNotIn("turn/start", methods)
+            self.assertNotIn("turn/steer", methods)
+            self.assertNotIn("turn/interrupt", methods)
+
+    def test_side_close_rejects_main_thread_id_as_side_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            main_thread_id = str(ctx["instance_payload"]["thread_id"])
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    "close",
+                    ctx["instance_id"],
+                    "--side-thread-id",
+                    main_thread_id,
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("main thread", result.stderr.lower())
+            methods = [row["rpc_method"] for row in self._read_rpc_rows(Path(str(ctx["calls_path"])))]
+            self.assertNotIn("turn/interrupt", methods)
+            self.assertNotIn("turn/start", methods)
+            self.assertNotIn("turn/steer", methods)
+
+    def test_side_close_interrupts_registered_child_and_removes_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            main_thread_id = str(ctx["instance_payload"]["thread_id"])
+            main_turn = {
+                "id": "turn-main-1",
+                "items": [],
+                "itemsView": "summary",
+                "status": "inProgress",
+                "error": None,
+                "startedAt": 0,
+                "completedAt": None,
+                "durationMs": None,
+            }
+            self._set_instance_side_threads(
+                ctx["instance_root"],
+                [{"thread_id": "thread-side-1", "parent_thread_id": main_thread_id, "status": "open"}],
+            )
+            self._set_fake_side_thread_state(
+                Path(str(ctx["state_file"])),
+                main_thread_id=main_thread_id,
+                main_status={"type": "active", "activeFlags": []},
+                main_turns=[main_turn],
+                side_thread_id="thread-side-1",
+                side_status={"type": "active", "activeFlags": []},
+                side_turns=[
+                    {
+                        "id": "turn-side-1",
+                        "items": [],
+                        "itemsView": "summary",
+                        "status": "inProgress",
+                        "error": None,
+                        "startedAt": 0,
+                        "completedAt": None,
+                        "durationMs": None,
+                    }
+                ],
+            )
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+
+            close_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    "close",
+                    ctx["instance_id"],
+                    "--side-thread-id",
+                    "thread-side-1",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(close_result.returncode, 0, msg=close_result.stderr)
+            payload = json.loads(close_result.stdout)
+            self.assertEqual(payload["action"], "close")
+            self.assertEqual(payload["side_thread_id"], "thread-side-1")
+            self.assertEqual(payload["parent_thread_id"], main_thread_id)
+            self.assertEqual(payload["turn_id"], "turn-side-1")
+
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            interrupt = next(row for row in rpc_rows if row["rpc_method"] == "turn/interrupt")
+            self.assertEqual(interrupt["params"]["threadId"], "thread-side-1")
+            self.assertEqual(interrupt["params"]["turnId"], "turn-side-1")
+
+            instance_payload = json.loads((ctx["instance_root"] / "instance.json").read_text(encoding="utf-8"))
+            self.assertEqual(instance_payload.get("side_threads", []), [])
+
+            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
+            main_state = state_payload["threads"][main_thread_id]
+            self.assertEqual(main_state["turns"][0]["status"], "inProgress")
+
+    def test_side_close_idle_registered_child_uses_startup_interrupt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            main_thread_id = str(ctx["instance_payload"]["thread_id"])
+            self._set_instance_side_threads(
+                ctx["instance_root"],
+                [{"thread_id": "thread-side-1", "parent_thread_id": main_thread_id, "status": "open"}],
+            )
+            self._set_fake_side_thread_state(
+                Path(str(ctx["state_file"])),
+                main_thread_id=main_thread_id,
+                side_thread_id="thread-side-1",
+                side_status={"type": "idle"},
+                side_turns=[],
+            )
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+
+            close_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    "close",
+                    ctx["instance_id"],
+                    "--side-thread-id",
+                    "thread-side-1",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(close_result.returncode, 0, msg=close_result.stderr)
+            payload = json.loads(close_result.stdout)
+            interrupt = next(
+                row
+                for row in self._read_rpc_rows(Path(str(ctx["calls_path"])))
+                if row["rpc_method"] == "turn/interrupt"
+            )
+            self.assertEqual(interrupt["params"]["threadId"], "thread-side-1")
+            self.assertEqual(interrupt["params"]["turnId"], "")
+            self.assertTrue(payload["startup_interrupt"])
+
+    def test_side_create_requires_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            result = subprocess.run(
+                [str(LAUNCHER), "instance", "side", ctx["instance_id"]],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("requires --text", result.stderr)
+            self.assertEqual(self._read_json_lines(Path(str(ctx["calls_path"]))), [])
+
+    def test_side_send_requires_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    ctx["instance_id"],
+                    "--side-thread-id",
+                    "thread-side-1",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("requires --text", result.stderr)
+            self.assertEqual(self._read_json_lines(Path(str(ctx["calls_path"]))), [])
+
+    def test_side_close_requires_side_thread_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            result = subprocess.run(
+                [str(LAUNCHER), "instance", "side", "close", ctx["instance_id"]],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("requires --side-thread-id", result.stderr)
+            self.assertEqual(self._read_json_lines(Path(str(ctx["calls_path"]))), [])
+
+    def test_side_rejects_inactive_or_unhealthy_instance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
+            state_payload["errors"] = {
+                "thread/loaded/list": {"code": -32001, "message": "probe failed"}
+            }
+            Path(str(ctx["state_file"])).write_text(
+                json.dumps(state_payload, ensure_ascii=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "side",
+                    ctx["instance_id"],
+                    "--text",
+                    "Explore",
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 3)
+            self.assertIn("unhealthy or inactive", result.stderr.lower())
+            methods = [row["rpc_method"] for row in self._read_rpc_rows(Path(str(ctx["calls_path"])))]
+            self.assertNotIn("thread/fork", methods)
+            self.assertNotIn("turn/start", methods)
+            self.assertNotIn("turn/steer", methods)
+            self.assertNotIn("turn/interrupt", methods)
 
     def test_goal_set_json_calls_thread_goal_set(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
