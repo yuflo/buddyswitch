@@ -34,7 +34,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         "--target-id",
     )
     SHARED_TOOL_SKILLS = {
-        "task": ROOT / "buddyswitch/skills/shared/task-tool/SKILL.md",
+        "task": ROOT / "buddyswitch/skills/shared/task-management/SKILL.md",
         "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
         "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
         "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",
@@ -105,7 +105,7 @@ class RuntimeSkillsTests(unittest.TestCase):
     SHARED_RUNTIME_TOOL_SKILLS = {
         "track-tool",
         "artifact-tool",
-        "task-tool",
+        "task-management",
         "message-tool",
         "comment-tool",
         "request-tool",
@@ -180,7 +180,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("handoff-tool", all_skill_ids)
 
     def test_each_buddy_keeps_shared_runtime_tools_without_handoff(self) -> None:
-        required = {"track-tool", "artifact-tool", "task-tool", "message-tool", "comment-tool", "request-tool"}
+        required = {"track-tool", "artifact-tool", "task-management", "message-tool", "comment-tool", "request-tool"}
         for buddy in self.manifest.get("buddies", []):
             assert isinstance(buddy, dict)
             skills = set(buddy.get("skills", []))
@@ -1285,7 +1285,7 @@ class RuntimeSkillsTests(unittest.TestCase):
 
     def test_shared_tool_skills_do_not_duplicate_runtime_action_catalogs(self) -> None:
         skill_paths = {
-            "task": ROOT / "buddyswitch/skills/shared/task-tool/SKILL.md",
+            "task": ROOT / "buddyswitch/skills/shared/task-management/SKILL.md",
             "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
             "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
             "message": ROOT / "buddyswitch/skills/shared/message-tool/SKILL.md",

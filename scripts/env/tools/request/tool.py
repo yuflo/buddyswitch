@@ -115,7 +115,7 @@ def _build_definition() -> ToolDefinition:
                     "You need to ask a specific recipient buddy for track-scoped request work, review, or response with durable lifecycle state.",
                 ),
                 do_not_use_when=(
-                    "You need private task planning only; use task.create/task.update.",
+                    "You need private task planning only; use task.current, task.propose, or task.confirm.",
                 ),
                 risk_hints={
                     "read_only": False,

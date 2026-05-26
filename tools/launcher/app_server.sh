@@ -198,6 +198,7 @@ buddyswitch_app_server_input() {
     --socket "$(buddyswitch_app_server_socket)" \
     --thread-id "${thread_id}" \
     --text "${text}" \
+    --instance-json "${BUDDYSWITCH_INSTANCE_JSON}" \
     --permissions "buddyswitch-runtime"
 }
 

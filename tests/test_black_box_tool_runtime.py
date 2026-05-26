@@ -26,7 +26,7 @@ SHIPPED_TOOLS: dict[str, set[str]] = {
     "message": {"list", "send"},
     "request": {"create", "list", "get", "accept", "block", "complete", "cancel"},
     "search": {"open_browser", "request", "status"},
-    "task": {"archive", "create", "get", "history", "list", "update"},
+    "task": {"current", "propose", "confirm"},
     "track": {"add_material", "add_proof", "add_update", "archive", "create", "list", "open", "update_now"},
 }
 
@@ -515,7 +515,7 @@ base = {
     "manifest": manifest,
     "manifest_path": root / "buddyswitch" / "manifest.toml",
 }
-task = dispatch_env_tool_request(payload={"tool": "task", "action": "list", "args": {}}, **base)
+task = dispatch_env_tool_request(payload={"tool": "task", "action": "current", "args": {}}, **base)
 message = dispatch_env_tool_request(payload={"tool": "message", "action": "list", "args": {}}, **base)
 print(json.dumps({"task": task, "message": message}, sort_keys=True))
 """

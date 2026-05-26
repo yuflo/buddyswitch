@@ -846,6 +846,56 @@ exec "$real_git" "$@"
         state_file.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
         return payload
 
+    def _seed_instance_taskbox_current(
+        self,
+        *,
+        instance_root: Path,
+        buddy: str,
+        task_id: str = "task-0001-launcher-context",
+        title: str = "Launcher context task",
+        summary: str = "Render task context before user input.",
+    ) -> None:
+        taskbox_root = instance_root / "taskbox" / buddy
+        tasks_dir = taskbox_root / "tasks"
+        tasks_dir.mkdir(parents=True, exist_ok=True)
+        task_payload = {
+            "id": task_id,
+            "owner_buddy": buddy,
+            "title": title,
+            "summary": summary,
+            "body": "Detailed launcher task body.",
+            "status": "active",
+            "priority": "normal",
+            "track_id": None,
+            "refs": [],
+            "created_at": "2026-05-27T10:00:00+08:00",
+            "updated_at": "2026-05-27T10:00:00+08:00",
+            "closed_at": None,
+        }
+        (tasks_dir / f"{task_id}.json").write_text(json.dumps(task_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        (taskbox_root / "history.md").write_text(
+            f"- 2026-05-27T10:00:00+08:00 task.create {task_id} title={json.dumps(title, ensure_ascii=True, separators=(',', ':'))} status=\"active\"\n",
+            encoding="utf-8",
+        )
+
+    def _assert_composed_task_input(
+        self,
+        text: str,
+        *,
+        raw_text: str,
+        task_id: str = "task-0001-launcher-context",
+        title: str = "Launcher context task",
+    ) -> None:
+        self.assertTrue(text.startswith("[TASK CONTEXT]"), msg=text)
+        self.assertIn(f"Current Task: {task_id}", text)
+        self.assertIn(f"Title: {title}", text)
+        self.assertIn("State: active", text)
+        self.assertIn("Task Handling Cue:", text)
+        self.assertIn("[USER INPUT]", text)
+        self.assertIn(raw_text, text)
+        self.assertLess(text.index(f"Current Task: {task_id}"), text.index("[USER INPUT]"))
+        self.assertLess(text.index("[USER INPUT]"), text.index(raw_text))
+
     def _runtime_sparse_list(self, workspace_dir: Path) -> list[str]:
         return subprocess.check_output(
             ["git", "-C", str(workspace_dir), "sparse-checkout", "list"],
@@ -902,6 +952,7 @@ exec "$real_git" "$@"
         runtime_skills = workspace_dir / ".agents" / "skills"
         for skill_id in self._PM_PRODUCT_SKILLS:
             self.assertTrue((runtime_skills / skill_id / "SKILL.md").exists(), msg=skill_id)
+        self.assertTrue((runtime_skills / "task-management" / "SKILL.md").exists())
         self.assertTrue((runtime_skills / "track-tool" / "SKILL.md").exists())
         self.assertTrue((runtime_skills / "artifact-tool" / "SKILL.md").exists())
         self.assertFalse((runtime_skills / "write-prd").exists())
@@ -1817,7 +1868,7 @@ exec "$real_git" "$@"
                 installed_skill_ids = sorted(path.name for path in runtime_skills.iterdir() if path.is_dir())
                 expected_skill_ids = sorted(skill_id for skill_id in buddy_skills if isinstance(skill_id, str))
                 self.assertEqual(installed_skill_ids, expected_skill_ids, msg=f"buddy={buddy_id}")
-                self.assertIn("task-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
+                self.assertIn("task-management", installed_skill_ids, msg=f"buddy={buddy_id}")
                 self.assertIn("track-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
                 self.assertIn("artifact-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
                 self.assertNotIn("buddybox-tool", installed_skill_ids, msg=f"buddy={buddy_id}")
@@ -1962,7 +2013,7 @@ exec "$real_git" "$@"
             self.assertNotIn("read and execute the selected buddyswitch skill.md", copied_agents)
             self.assertNotIn("instruction_path", copied_agents)
             runtime_skills = workspace_dir / ".agents" / "skills"
-            self.assertTrue((runtime_skills / "task-tool" / "SKILL.md").exists())
+            self.assertTrue((runtime_skills / "task-management" / "SKILL.md").exists())
             self._assert_pm_runtime_skills(workspace_dir)
             for removed in ("task" + "-manager", "track" + "-manager", "artifact" + "-manager"):
                 self.assertFalse((runtime_skills / removed).exists())
@@ -2412,6 +2463,10 @@ exec "$real_git" "$@"
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self._seed_instance_taskbox_current(
+                instance_root=Path(str(ctx["instance_root"])),
+                buddy=str(ctx["instance_payload"]["buddy"]),
+            )
 
             input_result = subprocess.run(
                 [
@@ -2441,10 +2496,9 @@ exec "$real_git" "$@"
             self.assertNotIn("turn/steer", methods)
             turn_start = next(row for row in rpc_rows if row["rpc_method"] == "turn/start")
             self.assertEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
-            self.assertEqual(
-                turn_start["params"]["input"],
-                [{"type": "text", "text": "Draft brief", "text_elements": []}],
-            )
+            input_item = turn_start["params"]["input"][0]
+            self.assertEqual(input_item["type"], "text")
+            self._assert_composed_task_input(input_item["text"], raw_text="Draft brief")
             self.assertEqual(turn_start["params"]["permissions"], "buddyswitch-runtime")
             self.assertNotIn("sandboxPolicy", turn_start["params"])
             self.assertIn("turn-test", input_result.stdout)
@@ -2504,6 +2558,10 @@ exec "$real_git" "$@"
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self._seed_instance_taskbox_current(
+                instance_root=Path(str(ctx["instance_root"])),
+                buddy=str(ctx["instance_payload"]["buddy"]),
+            )
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             input_result = subprocess.run(
@@ -2535,6 +2593,9 @@ exec "$real_git" "$@"
             self.assertNotIn("turn/start", methods)
             steer = next(row for row in rpc_rows if row["rpc_method"] == "turn/steer")
             self.assertEqual(steer["params"]["expectedTurnId"], "turn-123")
+            input_item = steer["params"]["input"][0]
+            self.assertEqual(input_item["type"], "text")
+            self._assert_composed_task_input(input_item["text"], raw_text="Steer current turn")
 
     def test_input_json_includes_expected_turn_id_when_steering(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -2560,6 +2621,10 @@ exec "$real_git" "$@"
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self._seed_instance_taskbox_current(
+                instance_root=Path(str(ctx["instance_root"])),
+                buddy=str(ctx["instance_payload"]["buddy"]),
+            )
 
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             input_result = subprocess.run(
@@ -2651,6 +2716,7 @@ exec "$real_git" "$@"
                 turn_start["params"]["input"],
                 [{"type": "text", "text": "Explore the API shape", "text_elements": []}],
             )
+            self.assertNotIn("[TASK CONTEXT]", turn_start["params"]["input"][0]["text"])
             self.assertEqual(turn_start["params"]["permissions"], "buddyswitch-runtime")
             self.assertNotEqual(turn_start["params"]["threadId"], ctx["instance_payload"]["thread_id"])
 

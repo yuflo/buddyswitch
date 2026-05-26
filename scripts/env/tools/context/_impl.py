@@ -331,7 +331,7 @@ def _capability_snapshot(*, active_buddy: str, manifest: dict[str, Any]) -> dict
     return {
         "active_buddy": active_buddy,
         "track_lifecycle_authority": track_lifecycle_authority,
-        "task_visibility": str(operation_semantics["task.create"]["visibility"]),
+        "task_visibility": str(operation_semantics["task.current"]["visibility"]),
         "artifact_publication_path": " ".join(
             [
                 str(artifact_create["success_effect"]),
@@ -724,7 +724,7 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
         "tasks": {
             "description": "Active-buddy private task hints and checklists.",
             "scope": "active-buddy private task state",
-            "source_of_truth": "task.get / task.list via runtime env tools",
+            "source_of_truth": "task.current / task.propose / task.confirm via runtime env tools",
         },
         "artifacts": {
             "description": "Readable artifact summaries for private drafts and shared track materials/proofs.",

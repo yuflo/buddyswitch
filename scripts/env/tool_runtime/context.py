@@ -185,7 +185,7 @@ class RuntimeObjectAccess:
     def runtime_sources(self) -> dict[str, Any]:
         return {
             "tracks": "track.list / track.open",
-            "tasks": "task.list / task.get",
+            "tasks": "task.current / task.propose / task.confirm",
             "artifacts": "artifact.list / artifact.get",
             "messages": "message.list",
             "comments": "comment.list",

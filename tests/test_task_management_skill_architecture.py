@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runless task-management architecture contract replacements."""
+"""Task-management architecture contract tests."""
 
 from __future__ import annotations
 
@@ -54,72 +54,54 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
     def _history_file(self, *, buddy: str = "pm") -> Path:
         return self.instance_root / "taskbox" / buddy / "history.md"
 
-    def _seed_taskbox_task(self, *, task_id: str, track_id: str | None, buddy: str = "pm") -> None:
-        self._task_file(task_id, buddy=buddy).write_text(
-            json.dumps(
-                {
-                    "id": task_id,
-                    "owner_buddy": buddy,
-                    "title": "Seed task",
-                    "summary": "before update",
-                    "status": "active",
-                    "priority": "normal",
-                    "track_id": track_id,
-                    "refs": [],
-                    "created_at": "2026-05-23T12:00:00+08:00",
-                    "updated_at": "2026-05-23T12:00:00+08:00",
-                    "closed_at": None,
-                },
-                ensure_ascii=True,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-
-    def _assert_publication_rejection_without_state_mutation(
-        self,
-        *,
-        action: str,
-        args: dict[str, object],
-        field: str,
-        before_tracks: dict[str, str],
-        before_artifacts: dict[str, str],
-    ) -> None:
-        rejected = self._dispatch(buddy="pm", tool="task", action=action, args=args)
-        self.assertFalse(rejected["ok"], msg=rejected)
-        self.assertEqual(rejected.get("permission_boundary"), "request-payload")
-        blocked = str(rejected.get("why_blocked"))
-        self.assertIn("publication-style payload fields:", blocked)
-        self.assertIn(field, blocked)
-        self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/tracks"), before_tracks)
-        self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/artifacts"), before_artifacts)
-
     def _snapshot_json_dir(self, relative_dir: str) -> dict[str, str]:
         root = self._runtime_path(relative_dir)
         if not root.exists():
             return {}
         return {path.name: path.read_text(encoding="utf-8") for path in sorted(root.glob("*.json"))}
 
-    def test_task_tool_and_skill_describe_instance_local_taskbox_contract(self) -> None:
-        skill_text = (ROOT / "buddyswitch" / "skills" / "shared" / "task-tool" / "SKILL.md").read_text(encoding="utf-8").lower()
-        self.assertIn("instance-local", skill_text)
-        self.assertIn("taskbox", skill_text)
-        self.assertIn("priority", skill_text)
-        self.assertIn("history", skill_text)
-        self.assertIn("do not edit taskbox files or runtime state files directly", skill_text)
-        self.assertIn("env.tool", skill_text)
+    def test_task_management_skill_and_catalog_are_new_surface_only(self) -> None:
+        skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "task-management" / "SKILL.md"
+        self.assertTrue(skill_path.exists(), msg=skill_path)
+        self.assertFalse((ROOT / "buddyswitch" / "skills" / "shared" / "task-tool" / "SKILL.md").exists())
+        skill_text = skill_path.read_text(encoding="utf-8")
+        lowered = skill_text.lower()
+        self.assertIn("instance-local", lowered)
+        self.assertIn("taskbox", lowered)
+        self.assertIn("env.tool", lowered)
+        for heading in (
+            "## Continue Current Task",
+            "## Create New Task",
+            "## Switch Task",
+            "## Confirm Pending Switch",
+            "## Mark Done / Blocked",
+            "## Tool Reference",
+        ):
+            self.assertIn(heading, skill_text)
+        for old_action in ("task.list", "task.get", "task.update", "task.archive", "task.history"):
+            self.assertNotIn(old_action, skill_text)
+        self.assertNotIn("additionalProperties", skill_text)
+        self.assertNotIn('"required"', skill_text)
+
+        skill_ids = {row.get("id") for row in self.manifest.get("skills", []) if isinstance(row, dict)}
+        self.assertIn("task-management", skill_ids)
+        self.assertNotIn("task-tool", skill_ids)
+        for buddy in self.manifest.get("buddies", []):
+            assert isinstance(buddy, dict)
+            skills = set(buddy.get("skills", []))
+            with self.subTest(buddy=buddy.get("id")):
+                self.assertIn("task-management", skills)
+                self.assertNotIn("task-tool", skills)
 
         catalog = tool_router.env_tools_description()["task"]
+        self.assertEqual(set(catalog["operations"]), {"current", "propose", "confirm"})
         self.assertIn("taskbox", str(catalog["object_model"]).lower())
-        self.assertIn("history", catalog["operations"])
-        self.assertIn("priority", catalog["payload_fields"]["create"])
-        self.assertIn("refs", catalog["payload_fields"]["create"])
-        self.assertIn("priority", catalog["payload_fields"]["update"])
-        self.assertIn("refs", catalog["payload_fields"]["update"])
+        propose_schema = tool_router.get_action_definition("task", "propose").input_schema
+        self.assertIn("body", propose_schema["properties"]["task"]["properties"])
+        self.assertIn("target", catalog["payload_fields"]["propose"])
 
-    def test_explicit_task_creates_only_taskbox_state_without_binding_fields(self) -> None:
-        track = env_store.create_track(
+    def test_task_propose_start_creates_only_taskbox_state_without_binding_fields(self) -> None:
+        env_store.create_track(
             "track-task-arch",
             "Task Arch",
             owner_buddy="pm",
@@ -133,85 +115,55 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
             created_by="pm",
             body="draft body",
             template="note",
-            summary="artifact should not be touched by task.create",
+            summary="artifact should not be touched by task.propose",
         )
         before_track = json.loads(env_store.track_file("track-task-arch").read_text(encoding="utf-8"))
         before_artifact = json.loads(env_store.artifact_file("art-pm-task-arch").read_text(encoding="utf-8"))
 
-        for idx in range(1, 4):
-            payload = self._dispatch(
-                buddy="pm",
-                tool="task",
-                action="create",
-                args={
-                    "task_id": f"task-pm-task-arch-{idx}",
-                    "title": f"Task {idx}",
+        payload = self._dispatch(
+            buddy="pm",
+            tool="task",
+            action="propose",
+            args={
+                "type": "start",
+                "task": {
+                    "title": "Task Arch",
                     "summary": "runless",
-                    "track_id": str(track["id"]),
-                    "priority": "high" if idx == 1 else "normal",
+                    "body": "Detailed private task body.",
+                    "priority": "high",
+                    "track_id": "track-task-arch",
+                    "refs": [],
                 },
-            )
-            self.assertTrue(payload["ok"], msg=payload)
+                "reason": "User introduced private task work.",
+                "evidence": "User request.",
+            },
+        )
+        self.assertTrue(payload["ok"], msg=payload)
 
         after_track = json.loads(env_store.track_file("track-task-arch").read_text(encoding="utf-8"))
         after_artifact = json.loads(env_store.artifact_file("art-pm-task-arch").read_text(encoding="utf-8"))
         self.assertEqual(after_track, before_track)
         self.assertEqual(after_artifact, before_artifact)
-        self.assertEqual(
-            sorted(path.stem for path in (self.instance_root / "taskbox" / "pm" / "tasks").glob("task-pm-task-arch-*.json")),
-            ["task-pm-task-arch-1", "task-pm-task-arch-2", "task-pm-task-arch-3"],
-        )
-        history_text = self._history_file().read_text(encoding="utf-8")
-        self.assertIn("task.create task-pm-task-arch-1", history_text)
+        stored_task = json.loads(self._task_file("task-0001-task-arch").read_text(encoding="utf-8"))
+        self.assertEqual(stored_task.get("body"), "Detailed private task body.")
+        self.assertEqual(stored_task.get("track_id"), "track-task-arch")
+        self.assertIn("task.create task-0001-task-arch", self._history_file().read_text(encoding="utf-8"))
         stored_instance = json.loads(self.instance_json.read_text(encoding="utf-8"))
         self.assertNotIn("current_task_id", stored_instance)
         self.assertNotIn("current_track_id", stored_instance)
 
-    def test_context_decision_surface_reports_runless_mode(self) -> None:
-        payload = self._dispatch(buddy="pm", tool="context", action="summarize", args={})
+    def test_context_decision_surface_names_new_task_actions(self) -> None:
+        payload = self._dispatch(buddy="pm", tool="context", action="get", args={})
         self.assertTrue(payload["ok"], msg=payload)
+        operation_semantics = payload["operation_semantics"]
+        self.assertIn("task.current", operation_semantics)
+        self.assertIn("task.propose", operation_semantics)
+        self.assertIn("task.confirm", operation_semantics)
+        self.assertNotIn("task.list", operation_semantics)
+        self.assertNotIn("task.update", operation_semantics)
         self.assertEqual(payload["decision_surface"]["binding_state"]["state"], "runless")
-        self.assertFalse(self._runtime_path("runs/raw").exists())
-        self.assertFalse(self._runtime_path("buddyswitch/content/runs").exists())
 
-    def test_task_update_track_id_context_changes_only_taskbox_task_state(self) -> None:
-        env_store.create_track("track-task-arch-update-a", "Task arch update A", owner_buddy="pm")
-        env_store.create_track("track-task-arch-update-b", "Task arch update B", owner_buddy="pm")
-        env_store.create_artifact_revision(
-            artifact_id="art-pm-task-arch-update",
-            title="Task arch update artifact",
-            created_by="pm",
-            body="draft body",
-            template="note",
-            summary="artifact baseline",
-        )
-        self._seed_taskbox_task(task_id="task-pm-task-arch-update", track_id="track-task-arch-update-a")
-        before_track_a = json.loads(env_store.track_file("track-task-arch-update-a").read_text(encoding="utf-8"))
-        before_track_b = json.loads(env_store.track_file("track-task-arch-update-b").read_text(encoding="utf-8"))
-        before_artifact = json.loads(env_store.artifact_file("art-pm-task-arch-update").read_text(encoding="utf-8"))
-
-        updated = self._dispatch(
-            buddy="pm",
-            tool="task",
-            action="update",
-            args={
-                "task_id": "task-pm-task-arch-update",
-                "track_id": "track-task-arch-update-b",
-            },
-        )
-        self.assertTrue(updated["ok"], msg=updated)
-
-        after_track_a = json.loads(env_store.track_file("track-task-arch-update-a").read_text(encoding="utf-8"))
-        after_track_b = json.loads(env_store.track_file("track-task-arch-update-b").read_text(encoding="utf-8"))
-        after_artifact = json.loads(env_store.artifact_file("art-pm-task-arch-update").read_text(encoding="utf-8"))
-        self.assertEqual(after_track_a, before_track_a)
-        self.assertEqual(after_track_b, before_track_b)
-        self.assertEqual(after_artifact, before_artifact)
-
-        stored_task = json.loads(self._task_file("task-pm-task-arch-update").read_text(encoding="utf-8"))
-        self.assertEqual(stored_task.get("track_id"), "track-task-arch-update-b")
-
-    def test_task_update_and_archive_reject_publication_payload_fields(self) -> None:
+    def test_task_propose_rejects_publication_payload_fields_without_shared_mutation(self) -> None:
         env_store.create_track("track-task-arch-action-reject", "Task arch action reject", owner_buddy="pm")
         env_store.create_artifact_revision(
             artifact_id="art-pm-task-arch-action-reject",
@@ -221,33 +173,34 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestMixin, unittest.T
             template="note",
             summary="artifact baseline",
         )
-        self._seed_taskbox_task(task_id="task-pm-task-arch-action-reject", track_id="track-task-arch-action-reject")
         before_tracks = self._snapshot_json_dir("buddyswitch/objects/tracks")
         before_artifacts = self._snapshot_json_dir("buddyswitch/objects/artifacts")
+        before_history = self._history_file().read_text(encoding="utf-8")
 
-        field_values: dict[str, object] = {
-            "current_artifacts": [],
-            "updates": [],
-            "source_refs": [],
-            "body": "draft body",
-            "template": "note",
-            "supersedes_artifact_id": "art-pm-task-arch-action-reject",
-        }
-        for field, value in field_values.items():
-            with self.subTest(action="update", field=field):
-                self._assert_publication_rejection_without_state_mutation(
-                    action="update",
-                    args={"task_id": "task-pm-task-arch-action-reject", field: value},
-                    field=field,
-                    before_tracks=before_tracks,
-                    before_artifacts=before_artifacts,
+        for field, value in {"visibility": "public", "template": "note", "source_refs": []}.items():
+            with self.subTest(field=field):
+                rejected = self._dispatch(
+                    buddy="pm",
+                    tool="task",
+                    action="propose",
+                    args={
+                        "type": "start",
+                        "task": {
+                            "title": "Reject publication field",
+                            "body": "Body.",
+                            field: value,
+                        },
+                        "reason": "Bad payload.",
+                        "evidence": "Bad payload.",
+                    },
                 )
+                self.assertFalse(rejected["ok"], msg=rejected)
+                self.assertIs(rejected.get("state_changed"), False)
+                self.assertIn("publication-style payload fields", str(rejected.get("why_blocked")))
+                self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/tracks"), before_tracks)
+                self.assertEqual(self._snapshot_json_dir("buddyswitch/objects/artifacts"), before_artifacts)
+                self.assertEqual(self._history_file().read_text(encoding="utf-8"), before_history)
 
-        with self.subTest(action="archive", field="template"):
-            self._assert_publication_rejection_without_state_mutation(
-                action="archive",
-                args={"task_id": "task-pm-task-arch-action-reject", "template": "note"},
-                field="template",
-                before_tracks=before_tracks,
-                before_artifacts=before_artifacts,
-            )
+
+if __name__ == "__main__":
+    unittest.main()

@@ -16,7 +16,7 @@ from env.tool_runtime import registry as catalog  # noqa: E402
 
 _EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment", "request"}
 _EXPECTED_ACTIONS_BY_TOOL = {
-    "task": {"create", "list", "get", "update", "archive", "history"},
+    "task": {"current", "propose", "confirm"},
     "track": {"create", "list", "open", "update_now", "add_material", "add_update", "add_proof", "archive"},
     "artifact": {"list", "get", "create_revision", "update_metadata", "attach_file", "list_attachments", "get_attachment"},
     "context": {"get", "summarize", "list_sources"},
@@ -129,11 +129,9 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("artifact", "attach_file", ("draft", "buddybox", "attachment")),
             ("artifact", "list_attachments", ("attachment", "summary", "get_attachment")),
             ("artifact", "get_attachment", ("attachment_id", "content_base64", "artifact_id")),
-            ("task", "list", ("list", "summary", "get")),
-            ("task", "get", ("task id", "list", "update")),
-            ("task", "update", ("patch", "archive", "task")),
-            ("task", "archive", ("archive", "active", "update")),
-            ("task", "history", ("history", "lifecycle", "list")),
+            ("task", "current", ("current", "snapshot", "history")),
+            ("task", "propose", ("start", "switch", "finish")),
+            ("task", "confirm", ("pending", "switch", "confirmation")),
             ("comment", "add", ("discussion", "timeline", "message")),
             ("search", "request", ("target_url", "without opening", "open_browser")),
             ("search", "open_browser", ("browser", "open", "payload")),
@@ -219,21 +217,34 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertIsInstance(row["does_not_write"], list)
                 self.assertIn(row["durability"], {"none", "transient", "durable"})
 
-    def test_task_history_operation_semantics_are_read_only(self) -> None:
-        history = catalog.operation_semantics()["task.history"]
-        self.assertEqual(history["kind"], "read")
-        self.assertEqual(history["mutates"], "none")
-        self.assertEqual(history["required_permission"], "task.read")
-        self.assertEqual(history["authority"], "task.buddy_scope")
-        self.assertEqual(history["visibility"], "active-buddy private")
-        self.assertEqual(history["durability"], "none")
-        self.assertEqual(history["result_content_level"], "history rows")
-        self.assertIn("instance-local taskbox history", history["reads"])
-        self.assertEqual(history["writes"], [])
-        self.assertIn("task state", " ".join(history["does_not_write"]).lower())
-        self.assertIs(history["risk_hints"]["read_only"], True)
-        self.assertIs(history["risk_hints"]["destructive"], False)
-        self.assertIs(history["risk_hints"]["idempotent"], True)
+    def test_task_current_operation_semantics_are_read_only(self) -> None:
+        current = catalog.operation_semantics()["task.current"]
+        self.assertEqual(current["kind"], "read")
+        self.assertEqual(current["mutates"], "none")
+        self.assertEqual(current["required_permission"], "task.read")
+        self.assertEqual(current["authority"], "task.buddy_scope")
+        self.assertEqual(current["visibility"], "active-buddy private")
+        self.assertEqual(current["durability"], "none")
+        self.assertEqual(current["result_content_level"], "TaskSnapshot")
+        self.assertIn("instance-local taskbox history", current["reads"])
+        self.assertEqual(current["writes"], [])
+        self.assertIn("taskbox history", " ".join(current["does_not_write"]).lower())
+        self.assertIs(current["risk_hints"]["read_only"], True)
+        self.assertIs(current["risk_hints"]["destructive"], False)
+        self.assertIs(current["risk_hints"]["idempotent"], True)
+
+    def test_task_mutation_operation_semantics_are_taskbox_only(self) -> None:
+        op = catalog.operation_semantics()
+        for action in ("task.propose", "task.confirm"):
+            row = op[action]
+            with self.subTest(action=action):
+                self.assertEqual(row["kind"], "write")
+                self.assertEqual(row["mutates"], "runtime_files")
+                self.assertIn(row["required_permission"], {"task.propose", "task.confirm"})
+                self.assertIn("instance-local active-buddy taskbox task", row["writes"])
+                self.assertIn("instance-local taskbox history", row["writes"])
+                self.assertIn("track state", " ".join(row["does_not_write"]).lower())
+                self.assertIn("artifact visibility", " ".join(row["does_not_write"]).lower())
 
     def test_high_risk_object_boundaries_are_explicit(self) -> None:
         desc = self._desc()
@@ -249,8 +260,8 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertIn("draft", artifact_model)
         self.assertIn("track.add_material", artifact_model)
 
-        task_create = desc["task"]["action_semantics"]["create"]
-        task_side_effects = task_create["side_effects"]
+        task_propose = desc["task"]["action_semantics"]["propose"]
+        task_side_effects = task_propose["side_effects"]
         self.assertIn("track state", " ".join(task_side_effects["does_not_write"]).lower())
         self.assertIn("artifact visibility", " ".join(task_side_effects["does_not_write"]).lower())
 

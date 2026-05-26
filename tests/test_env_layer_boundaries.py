@@ -197,7 +197,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return path
 
-    def _dispatch_dev_task_create(self, args: dict[str, object]) -> dict[str, object]:
+    def _dispatch_dev_task_propose(self, args: dict[str, object]) -> dict[str, object]:
         envelope = runtime_broker.dispatch_runtime_request(
             request={
                 "protocol": PROTOCOL,
@@ -207,7 +207,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     "instance_id": "inst-dev-boundary",
                     "active_buddy": "dev",
                     "tool": "task",
-                    "action": "create",
+                    "action": "propose",
                     "args": args,
                 },
                 "deadline_ms": 35000,
@@ -322,12 +322,17 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         project_probe = self._runtime_path("projects/app/env-tool-bypass.txt")
         raw_probe = self._runtime_path("instances/inst-dev-boundary/taskbox/dev/tasks/env-tool-bypass.json")
 
-        response = self._dispatch_dev_task_create(
+        response = self._dispatch_dev_task_propose(
             {
-                "title": "Boundary bypass attempt",
-                "summary": "should reject before write",
-                "project_path": "projects/app/env-tool-bypass.txt",
-                "raw_state_path": "instances/inst-dev-boundary/taskbox/dev/tasks/env-tool-bypass.json",
+                "type": "start",
+                "reason": "Boundary test.",
+                "evidence": "Payload includes forbidden path fields.",
+                "task": {
+                    "title": "Boundary bypass attempt",
+                    "body": "should reject before write",
+                    "project_path": "projects/app/env-tool-bypass.txt",
+                    "raw_state_path": "instances/inst-dev-boundary/taskbox/dev/tasks/env-tool-bypass.json",
+                },
             }
         )
 
@@ -425,6 +430,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             "scripts/env/repos/artifacts.py",
             "scripts/env/repos/tracks.py",
             "scripts/env/domain/artifact_visibility.py",
+            "scripts/env/domain/task_management.py",
             "scripts/env/domain/tasks.py",
         }
         scanned_roots = [ROOT / "scripts/env/domain"]

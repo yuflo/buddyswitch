@@ -18,6 +18,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+HELPER_DIR = Path(__file__).resolve().parent
+if str(HELPER_DIR) not in sys.path:
+    sys.path.insert(0, str(HELPER_DIR))
+
+from task_input_context import TaskInputContextError, compose_task_context_input
+
 
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WEBSOCKET_VERSION = "13"
@@ -882,7 +888,13 @@ def _command_thread_read(args: argparse.Namespace) -> int:
 
 
 def _command_input(args: argparse.Namespace) -> int:
-    payload = input_turn(Path(args.socket), args.thread_id, args.text, args.permissions)
+    text = args.text
+    if args.instance_json:
+        try:
+            text = compose_task_context_input(raw_text=args.text, instance_json=Path(args.instance_json))
+        except TaskInputContextError as exc:
+            raise AppServerProtocolError(str(exc)) from exc
+    payload = input_turn(Path(args.socket), args.thread_id, text, args.permissions)
     print(json.dumps(payload, ensure_ascii=True))
     return 0
 
@@ -994,6 +1006,7 @@ def build_parser() -> argparse.ArgumentParser:
     input_parser.add_argument("--thread-id", required=True)
     input_parser.add_argument("--text", required=True)
     input_parser.add_argument("--permissions", required=True)
+    input_parser.add_argument("--instance-json")
     input_parser.set_defaults(func=_command_input)
 
     side_start_parser = subparsers.add_parser("side-start")

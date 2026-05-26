@@ -158,13 +158,18 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             method="env.tool",
             params={
                 "tool": "task",
-                "action": "create",
-                "args": {"task_id": "task-pm-broker", "title": "Broker Task", "summary": "seed"},
+                "action": "propose",
+                "args": {
+                    "type": "start",
+                    "reason": "Broker test.",
+                    "evidence": "Broker test starts a task.",
+                    "task": {"title": "Broker Task", "summary": "seed", "body": "Broker Task"},
+                },
             },
             instance_json=instance_json,
         )
         self.assertTrue(created["ok"], msg=created)
-        self.assertEqual((created.get("task") or {}).get("id"), "task-pm-broker")
+        self.assertEqual((created.get("task") or {}).get("title"), "Broker Task")
 
         after_instance = json.loads(instance_json.read_text(encoding="utf-8"))
         self.assertEqual(after_instance, before_instance)
@@ -296,8 +301,13 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 method="env.tool",
                 params={
                     "tool": "task",
-                    "action": "create",
-                    "args": {"task_id": "task-pm-broker-lock", "title": "Broker Lock Task"},
+                    "action": "propose",
+                    "args": {
+                        "type": "start",
+                        "reason": "Broker lock test.",
+                        "evidence": "Broker lock test starts a task.",
+                        "task": {"title": "Broker Lock Task", "body": "Broker Lock Task"},
+                    },
                 },
                 instance_json=instance_json,
             )
@@ -346,7 +356,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         supported = self._dispatch(
             method="env.tool",
-            params={"tool": "task", "action": "list", "args": {}},
+            params={"tool": "task", "action": "current", "args": {}},
             instance_json=instance_json,
             instance_id="inst-dev-example",
             buddy="dev",
@@ -355,7 +365,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         wrong_instance = self._dispatch(
             method="env.tool",
-            params={"tool": "task", "action": "list", "args": {}},
+            params={"tool": "task", "action": "current", "args": {}},
             instance_json=instance_json,
             instance_id="inst-other",
             buddy="dev",
@@ -365,7 +375,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         wrong_buddy = self._dispatch(
             method="env.tool",
-            params={"tool": "task", "action": "list", "args": {}},
+            params={"tool": "task", "action": "current", "args": {}},
             instance_json=instance_json,
             instance_id="inst-dev-example",
             buddy="pm",
@@ -376,7 +386,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         inactive_instance_json = self._instance_json(instance_id="inst-dev-inactive", buddy="dev", status="inactive")
         inactive = self._dispatch(
             method="env.tool",
-            params={"tool": "task", "action": "list", "args": {}},
+            params={"tool": "task", "action": "current", "args": {}},
             instance_json=inactive_instance_json,
             instance_id="inst-dev-inactive",
             buddy="dev",
@@ -661,7 +671,7 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
 
     def test_lock_mode_for_read_only_env_tool_is_read(self) -> None:
         for params in (
-            {"tool": "task", "action": "list", "args": {}},
+            {"tool": "task", "action": "current", "args": {}},
             {"tool": "context", "action": "summarize", "args": {}},
             {"tool": "track", "action": "open", "args": {}},
             {"tool": "artifact", "action": "get", "args": {}},
@@ -671,7 +681,7 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
 
     def test_lock_mode_for_mutating_env_tool_is_write(self) -> None:
         for params in (
-            {"tool": "task", "action": "create", "args": {}},
+            {"tool": "task", "action": "propose", "args": {}},
             {"tool": "track", "action": "update_now", "args": {}},
             {"tool": "track", "action": "add_material", "args": {}},
             {"tool": "track", "action": "add_update", "args": {}},
@@ -819,7 +829,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
             clear=False,
         ):
             with self.assertRaises(client.RuntimeBrokerError) as raised:
-                client.request_runtime_broker("env.tool", {"tool": "task", "action": "list", "args": {}})
+                client.request_runtime_broker("env.tool", {"tool": "task", "action": "current", "args": {}})
         thread.join(timeout=2.0)
         self.assertEqual(raised.exception.code, "E_RUNTIME_BROKER_PERMISSION")
         self.assertEqual(raised.exception.details.get("permission_boundary"), "active-buddy")
@@ -864,7 +874,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         ):
             result = client.request_runtime_broker(
                 "env.tool",
-                {"tool": "task", "action": "list", "args": {}},
+                {"tool": "task", "action": "current", "args": {}},
             )
         thread.join(timeout=2.0)
         self.assertEqual(result, {"ok": True})
@@ -943,7 +953,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         ) as request_once, ensure_patch:
             result = client.request_runtime_broker(
                 "env.tool",
-                {"tool": "task", "action": "list", "args": {}},
+                {"tool": "task", "action": "current", "args": {}},
             )
         self.assertEqual(result, {"ok": True, "items": []})
         self.assertEqual(request_once.call_count, 2)
@@ -1003,7 +1013,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
             with self.assertRaises(client.RuntimeBrokerError):
                 client.request_runtime_broker(
                     "env.tool",
-                    {"tool": "task", "action": "create", "args": {"title": "x"}},
+                    {"tool": "task", "action": "propose", "args": {"type": "start"}},
                 )
         self.assertEqual(request_once.call_count, 1)
 

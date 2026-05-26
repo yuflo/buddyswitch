@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -79,6 +80,9 @@ def _validate_task(task: Mapping[str, Any]) -> dict[str, Any]:
     summary = task.get("summary", "")
     if not isinstance(summary, str):
         raise ValueError("task.summary must be a string")
+    body = task.get("body", "")
+    if not isinstance(body, str):
+        raise ValueError("task.body must be a string")
     status = task.get("status")
     if status not in VALID_TASK_STATUS:
         raise ValueError(f"task.status must be one of {', '.join(VALID_TASK_STATUS)}")
@@ -101,6 +105,7 @@ def _validate_task(task: Mapping[str, Any]) -> dict[str, Any]:
         "owner_buddy": owner_buddy,
         "title": title,
         "summary": summary,
+        "body": body,
         "status": status,
         "priority": priority,
         "track_id": track_id,
@@ -109,27 +114,6 @@ def _validate_task(task: Mapping[str, Any]) -> dict[str, Any]:
         "updated_at": updated_at,
         "closed_at": closed_at,
     }
-
-
-def _history_event_for_change(
-    *,
-    previous: Mapping[str, Any],
-    current: Mapping[str, Any],
-    changed_fields: set[str],
-) -> str:
-    if "status" not in changed_fields:
-        return "task.update"
-    old_status = str(previous.get("status"))
-    new_status = str(current.get("status"))
-    if new_status == "archived":
-        return "task.archive"
-    if old_status in {"done", "archived"} and new_status in {"active", "blocked"}:
-        return "task.reopen"
-    if new_status == "blocked" and old_status != "blocked":
-        return "task.block"
-    if new_status == "done" and old_status != "done":
-        return "task.close"
-    return "task.update"
 
 
 def valid_task_statuses() -> tuple[str, ...]:
@@ -142,6 +126,19 @@ def valid_task_priorities() -> tuple[str, ...]:
 
 def slugify(value: str) -> str:
     return runtime_files.slugify(value)
+
+
+def _history_file(
+    *,
+    active_buddy: str,
+    instance_json: Path | str | None,
+    instance_payload: Mapping[str, object] | None,
+) -> Path:
+    return runtime_files.taskbox_history_file(
+        active_buddy=active_buddy,
+        instance_json=instance_json,
+        instance_payload=instance_payload,
+    )
 
 
 def list_tasks(
@@ -217,13 +214,13 @@ def append_history(
     task_id: str,
     fields: Mapping[str, object],
 ) -> None:
-    history_file = runtime_files.taskbox_history_file(
+    history_file = _history_file(
         active_buddy=active_buddy,
         instance_json=instance_json,
         instance_payload=instance_payload,
     )
     history_file.parent.mkdir(parents=True, exist_ok=True)
-    parts = [f"{key}={json.dumps(value, ensure_ascii=True)}" for key, value in sorted(fields.items())]
+    parts = [f"{key}={json.dumps(value, ensure_ascii=True, separators=(',', ':'))}" for key, value in sorted(fields.items())]
     line = f"- {runtime_files.now_iso()} {event} {task_id}"
     if parts:
         line = f"{line} {' '.join(parts)}"
@@ -238,7 +235,7 @@ def read_history(
     instance_payload: Mapping[str, object] | None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    history_file = runtime_files.taskbox_history_file(
+    history_file = _history_file(
         active_buddy=active_buddy,
         instance_json=instance_json,
         instance_payload=instance_payload,
@@ -248,6 +245,121 @@ def read_history(
     lines = history_file.read_text(encoding="utf-8").splitlines()
     tail = lines[-limit:] if limit > 0 else []
     return [{"line": line} for line in tail]
+
+
+def parse_history_line(line: str) -> dict[str, Any] | None:
+    raw = line.strip()
+    if not raw.startswith("- "):
+        return None
+    parts = raw[2:].split(maxsplit=3)
+    if len(parts) < 3:
+        return None
+    timestamp, event, task_id = parts[:3]
+    try:
+        normalized_task_id = runtime_files.require_id(task_id, "task id")
+    except ValueError:
+        return None
+    fields: dict[str, Any] = {}
+    remainder = parts[3] if len(parts) == 4 else ""
+    decoder = json.JSONDecoder()
+    index = 0
+    while index < len(remainder):
+        while index < len(remainder) and remainder[index].isspace():
+            index += 1
+        if index >= len(remainder):
+            break
+        key_start = index
+        while index < len(remainder) and remainder[index] != "=":
+            index += 1
+        if index >= len(remainder):
+            return None
+        key = remainder[key_start:index]
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
+            return None
+        index += 1
+        try:
+            value, index = decoder.raw_decode(remainder, index)
+        except json.JSONDecodeError:
+            return None
+        fields[key] = value
+    return {
+        "line": line,
+        "timestamp": timestamp,
+        "event": event,
+        "task_id": normalized_task_id,
+        "fields": fields,
+    }
+
+
+def read_history_events(
+    *,
+    active_buddy: str,
+    instance_json: Path | str | None,
+    instance_payload: Mapping[str, object] | None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    history_file = _history_file(
+        active_buddy=active_buddy,
+        instance_json=instance_json,
+        instance_payload=instance_payload,
+    )
+    if not history_file.exists():
+        return []
+    lines = history_file.read_text(encoding="utf-8").splitlines()
+    selected = lines[-limit:] if limit > 0 else lines
+    events: list[dict[str, Any]] = []
+    for line in selected:
+        event = parse_history_line(line)
+        if event is not None:
+            events.append(event)
+    return events
+
+
+def next_task_id(
+    title: str,
+    *,
+    active_buddy: str,
+    instance_json: Path | str | None,
+    instance_payload: Mapping[str, object] | None,
+) -> str:
+    slug = slugify(title)[:48].strip("-") or "task"
+    tasks_dir = _tasks_dir(
+        active_buddy=active_buddy,
+        instance_json=instance_json,
+        instance_payload=instance_payload,
+    )
+    highest = 0
+    if tasks_dir.exists():
+        for path in tasks_dir.glob("task-*.json"):
+            match = re.match(r"task-(\d+)-", path.stem)
+            if match:
+                highest = max(highest, int(match.group(1)))
+    return f"task-{highest + 1:04d}-{slug}"
+
+
+def next_confirmation_id(
+    *,
+    active_buddy: str,
+    instance_json: Path | str | None,
+    instance_payload: Mapping[str, object] | None,
+) -> str:
+    highest = 0
+    for event in read_history_events(
+        active_buddy=active_buddy,
+        instance_json=instance_json,
+        instance_payload=instance_payload,
+        limit=0,
+    ):
+        fields = event.get("fields")
+        if not isinstance(fields, dict):
+            continue
+        value = fields.get("confirmation_id")
+        if not isinstance(value, str):
+            continue
+        match = re.match(r"confirm-(\d+)$", value)
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return f"confirm-{highest + 1:04d}"
 
 
 def create_task(
@@ -262,6 +374,7 @@ def create_task(
     priority: str,
     summary: str,
     refs: list[dict[str, Any]],
+    body: str = "",
 ) -> dict[str, Any]:
     runtime_files.require_id(task_id, "task id")
     if get_task(
@@ -277,6 +390,7 @@ def create_task(
         "owner_buddy": active_buddy,
         "title": title,
         "summary": summary,
+        "body": body,
         "status": status,
         "priority": priority,
         "track_id": track_id,
@@ -300,64 +414,3 @@ def create_task(
         fields={"priority": priority, "status": status},
     )
     return saved
-
-
-def update_task(
-    task_id: str,
-    patch: Mapping[str, Any],
-    *,
-    active_buddy: str,
-    instance_json: Path | str | None,
-    instance_payload: Mapping[str, object] | None,
-) -> tuple[dict[str, Any], bool, str | None]:
-    task = get_task(
-        task_id,
-        active_buddy=active_buddy,
-        instance_json=instance_json,
-        instance_payload=instance_payload,
-    )
-    if task is None:
-        raise ValueError(f"task not found: {task_id}")
-
-    updated = dict(task)
-    changed_fields: set[str] = set()
-    for key, value in patch.items():
-        if key not in {"title", "summary", "status", "priority", "track_id", "refs"}:
-            raise ValueError(f"unsupported task field: {key}")
-        if updated.get(key) != value:
-            updated[key] = value
-            changed_fields.add(key)
-    if not changed_fields:
-        return task, False, None
-
-    now = runtime_files.now_iso()
-    if "status" in changed_fields:
-        new_status = str(updated.get("status"))
-        old_status = str(task.get("status"))
-        if new_status in {"done", "archived"} and old_status not in {"done", "archived"}:
-            updated["closed_at"] = now
-        elif new_status in {"active", "blocked"}:
-            updated["closed_at"] = None
-    updated["updated_at"] = now
-
-    saved = save_task(
-        updated,
-        active_buddy=active_buddy,
-        instance_json=instance_json,
-        instance_payload=instance_payload,
-    )
-    event = _history_event_for_change(
-        previous=task,
-        current=saved,
-        changed_fields=changed_fields,
-    )
-    history_fields = {field: saved.get(field) for field in sorted(changed_fields)}
-    append_history(
-        active_buddy=active_buddy,
-        instance_json=instance_json,
-        instance_payload=instance_payload,
-        event=event,
-        task_id=task_id,
-        fields=history_fields,
-    )
-    return saved, True, event

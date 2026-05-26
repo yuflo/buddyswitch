@@ -25,7 +25,7 @@ EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", 
 
 class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     _CHEAP_ACTION_CASES = (
-        ("task", "list", {}, "dev"),
+        ("task", "current", {}, "dev"),
         ("track", "list", {}, "dev"),
         ("artifact", "get", {"artifact_id": "missing-artifact"}, "dev"),
         ("context", "list_sources", {}, "dev"),
@@ -154,14 +154,14 @@ print(json.dumps(response, sort_keys=True))
         instance_json = self._instance_json(instance_id="inst-dev-isolation", buddy="dev")
         completed = self._run_router_subprocess_with_blocked_message_impl(
             instance_json=instance_json,
-            payload={"tool": "task", "action": "list", "args": {}},
+            payload={"tool": "task", "action": "current", "args": {}},
             buddy="dev",
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         response = json.loads(completed.stdout)
         self.assertTrue(response.get("ok"), msg=response)
         self.assertEqual(response.get("tool"), "task")
-        self.assertEqual(response.get("action"), "task.list")
+        self.assertEqual(response.get("action"), "task.current")
         self.assertIs(response.get("state_changed"), False)
 
     def test_selected_private_impl_import_failure_returns_structured_feedback(self) -> None:

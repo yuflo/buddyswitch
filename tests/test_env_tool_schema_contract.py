@@ -120,9 +120,9 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         track_add_update = catalog.get_action_definition("track", "add_update").input_schema
         artifact_create = catalog.get_action_definition("artifact", "create_revision").input_schema
         comment_add = catalog.get_action_definition("comment", "add").input_schema
-        task_create = catalog.get_action_definition("task", "create").input_schema
-        task_list = catalog.get_action_definition("task", "list").input_schema
-        task_history = catalog.get_action_definition("task", "history").input_schema
+        task_current = catalog.get_action_definition("task", "current").input_schema
+        task_propose = catalog.get_action_definition("task", "propose").input_schema
+        task_confirm = catalog.get_action_definition("task", "confirm").input_schema
         context_get = catalog.get_action_definition("context", "get").input_schema
         context_summarize = catalog.get_action_definition("context", "summarize").input_schema
         evidence_issue = catalog.get_action_definition("evidence", "issue_browser").input_schema
@@ -202,13 +202,14 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         comment_list = catalog.get_action_definition("comment", "list").input_schema
         self.assertEqual(comment_list["properties"]["status"].get("enum"), ["open", "resolved", "all"])
 
-        self.assertEqual(task_create["properties"]["status"].get("enum"), ["active", "blocked", "done", "archived"])
-        self.assertEqual(task_list["properties"]["limit"].get("type"), "integer")
-        self.assertEqual(task_list["properties"]["limit"].get("minimum"), 1)
-        self.assertEqual(task_list["properties"]["limit"].get("default"), 100)
-        self.assertEqual(task_history["properties"]["limit"].get("type"), "integer")
-        self.assertEqual(task_history["properties"]["limit"].get("minimum"), 1)
-        self.assertEqual(task_history["properties"]["limit"].get("default"), 50)
+        self.assertEqual(task_current["properties"]["history_limit"].get("type"), "integer")
+        self.assertEqual(task_current["properties"]["history_limit"].get("minimum"), 1)
+        self.assertEqual(task_current["properties"]["history_limit"].get("default"), 8)
+        self.assertEqual(task_propose["properties"]["type"].get("enum"), ["start", "switch", "finish", "block"])
+        self.assertEqual(task_propose["properties"]["task"]["required"], ["title", "body"])
+        self.assertEqual(task_propose["properties"]["task"]["properties"]["priority"].get("enum"), ["high", "normal", "low"])
+        self.assertEqual(task_propose["properties"]["target"]["properties"]["mode"].get("enum"), ["existing", "new"])
+        self.assertEqual(task_confirm["properties"]["decision"].get("enum"), ["accept", "reject"])
 
         self.assertEqual(context_get["properties"]["limit"].get("type"), "integer")
         self.assertEqual(context_get["properties"]["limit"].get("minimum"), 1)

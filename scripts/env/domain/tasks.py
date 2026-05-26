@@ -12,7 +12,6 @@ from env.repos import tracks as track_repo
 PUBLICATION_STYLE_FIELDS = {
     "artifact_id",
     "artifact_ids",
-    "body",
     "close_proof",
     "current_artifacts",
     "publish",
