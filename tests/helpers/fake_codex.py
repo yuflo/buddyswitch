@@ -11,6 +11,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -812,10 +813,59 @@ def send_json(sock: socket.socket, payload: dict[str, object]) -> None:
     send_frame(sock, 0x1, json.dumps(payload, ensure_ascii=True).encode("utf-8"))
 
 
+def _daemon_notifications(entry: dict[str, object]) -> list[dict[str, object]]:
+    default_thread_id = str(entry.get("instance_id") or "thread-test")
+    state = load_server_state(f"thread-{default_thread_id}")
+    notifications = state.get("daemon_notifications")
+    if not isinstance(notifications, list):
+        return []
+    return [notification for notification in notifications if isinstance(notification, dict)]
+
+
+def send_daemon_initial_notifications(sock: socket.socket, entry: dict[str, object]) -> None:
+    for notification in _daemon_notifications(entry):
+        send_json(sock, notification)
+
+
+def send_daemon_started_turn_completion(
+    sock: socket.socket,
+    entry: dict[str, object],
+    request: dict[str, object],
+    response: dict[str, object] | None,
+) -> None:
+    if request.get("method") != "turn/start" or response is None:
+        return
+    default_thread_id = str(entry.get("instance_id") or "thread-test")
+    state = load_server_state(f"thread-{default_thread_id}")
+    if not state.get("daemon_emit_completion_for_started_turn"):
+        return
+    result = response.get("result")
+    turn = result.get("turn") if isinstance(result, dict) else None
+    turn_id = turn.get("id") if isinstance(turn, dict) else None
+    params = request.get("params")
+    thread_id = params.get("threadId") if isinstance(params, dict) else None
+    if not isinstance(turn_id, str) or not turn_id:
+        return
+    if not isinstance(thread_id, str) or not thread_id:
+        thread_id = _main_thread_id(state)
+    send_json(
+        sock,
+        {
+            "method": "turn/completed",
+            "params": {
+                "thread_id": thread_id,
+                "turn_id": turn_id,
+                "status": "completed",
+            },
+        },
+    )
+
+
 def handle_websocket_connection(sock: socket.socket, entry: dict[str, object]) -> None:
     sock.settimeout(0.5)
     headers = read_http_request(sock)
     websocket_key = extract_websocket_key(headers)
+    client_name = ""
     sock.sendall(
         (
             "HTTP/1.1 101 Switching Protocols\r\n"
@@ -828,15 +878,28 @@ def handle_websocket_connection(sock: socket.socket, entry: dict[str, object]) -
     while RUNNING:
         try:
             opcode, payload = read_frame(sock)
-        except (EOFError, OSError, TimeoutError):
+        except TimeoutError:
+            continue
+        except (EOFError, OSError):
             return
         if opcode == 0x1:
             message = json.loads(payload.decode("utf-8"))
             if not isinstance(message, dict):
                 continue
+            method = message.get("method")
+            if method == "initialize":
+                params = message.get("params")
+                client_info = params.get("clientInfo") if isinstance(params, dict) else None
+                name = client_info.get("name") if isinstance(client_info, dict) else None
+                if isinstance(name, str):
+                    client_name = name
             response = handle_rpc_message(message, entry)
             if response is not None:
                 send_json(sock, response)
+            if client_name == "buddyswitch_daemon" and method == "initialized":
+                send_daemon_initial_notifications(sock, entry)
+            if client_name == "buddyswitch_daemon":
+                send_daemon_started_turn_completion(sock, entry, message, response)
         elif opcode == 0x8:
             try:
                 send_frame(sock, 0x8, payload)
@@ -863,6 +926,14 @@ def run_fake_app_server(socket_url: str, entry: dict[str, object]) -> int:
         return 1
 
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    threads: list[threading.Thread] = []
+
+    def serve_client(client: socket.socket) -> None:
+        try:
+            handle_websocket_connection(client, entry)
+        finally:
+            client.close()
+
     try:
         server.bind(str(path))
         server.listen(5)
@@ -874,13 +945,14 @@ def run_fake_app_server(socket_url: str, entry: dict[str, object]) -> int:
                 continue
             except OSError:
                 break
-            try:
-                handle_websocket_connection(client, entry)
-            finally:
-                client.close()
+            thread = threading.Thread(target=serve_client, args=(client,), daemon=True)
+            thread.start()
+            threads.append(thread)
         return 0
     finally:
         server.close()
+        for thread in threads:
+            thread.join(timeout=0.2)
         path.unlink(missing_ok=True)
 
 

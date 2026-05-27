@@ -771,6 +771,13 @@ exec "$real_git" "$@"
         app_server_pid = instance_payload.get("app_server_pid")
         if isinstance(app_server_pid, int):
             self.addCleanup(self._cleanup_app_server_process, instance_root, app_server_pid)
+        daemon_pid_file = instance_root / "runtime" / "daemon" / "daemon.pid"
+        try:
+            daemon_pid = int(daemon_pid_file.read_text(encoding="utf-8").strip())
+        except (FileNotFoundError, OSError, ValueError):
+            daemon_pid = 0
+        if daemon_pid:
+            self.addCleanup(self._cleanup_daemon_process, instance_root, daemon_pid)
         runtime_broker_pid_file = instance_root / "runtime" / "runtime-broker.pid"
         try:
             runtime_broker_pid = int(runtime_broker_pid_file.read_text(encoding="utf-8").strip())
@@ -802,6 +809,16 @@ exec "$real_git" "$@"
 
     def _read_rpc_rows(self, path: Path) -> list[dict[str, object]]:
         return [row for row in self._read_json_lines(path) if row["argv"][:1] == ["json-rpc"]]
+
+    def _wait_for_rpc_rows(self, path: Path, method: str, *, count: int = 1, timeout: float = 5.0) -> list[dict[str, object]]:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if path.exists():
+                rows = [row for row in self._read_rpc_rows(path) if row.get("rpc_method") == method]
+                if len(rows) >= count:
+                    return rows
+            time.sleep(0.05)
+        return [row for row in self._read_rpc_rows(path) if row.get("rpc_method") == method] if path.exists() else []
 
     def _set_instance_side_threads(
         self,
@@ -1056,6 +1073,10 @@ exec "$real_git" "$@"
             instance_root / "runtime" / "runtime-broker.socket",
         ):
             path.unlink(missing_ok=True)
+
+    def _cleanup_daemon_process(self, instance_root: Path, daemon_pid: int) -> None:
+        self._terminate_registered_process(daemon_pid)
+        (instance_root / "runtime" / "daemon" / "daemon.pid").unlink(missing_ok=True)
 
     def _cleanup_runtime_broker(self, instance_root: Path) -> None:
         pid_file = instance_root / "runtime" / "runtime-broker.pid"
@@ -2325,6 +2346,24 @@ exec "$real_git" "$@"
             self.assertIn("runtimeWorkspaceRoots", thread_start["params"])
             self.assertNotIn("sandboxPolicy", thread_start["params"])
 
+    def test_start_with_buddy_starts_daemon_for_main_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            instance_payload = ctx["instance_payload"]
+            assert isinstance(instance_payload, dict)
+            daemon_dir = Path(str(ctx["instance_root"])) / "runtime" / "daemon"
+            daemon_state = json.loads((daemon_dir / "state.json").read_text(encoding="utf-8"))
+
+            self.assertTrue((daemon_dir / "daemon.pid").exists())
+            self.assertTrue((daemon_dir / "daemon.log").exists())
+            self.assertEqual(daemon_state["instance_id"], ctx["instance_id"])
+            self.assertEqual(daemon_state["main_thread_id"], instance_payload["thread_id"])
+            self.assertEqual(daemon_state["daemon_origin_turn_ids"], [])
+
     def test_start_rejects_codex_args_passthrough(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -3413,6 +3452,31 @@ exec "$real_git" "$@"
             self.assertEqual(thread_start["params"]["sessionStartSource"], "clear")
             self.assertEqual(thread_start["params"]["permissions"], "buddyswitch-runtime")
 
+    def test_clear_restarts_daemon_for_new_main_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={"clear_thread_id": "thread-cleared"},
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            clear_result = subprocess.run(
+                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(clear_result.returncode, 0, msg=clear_result.stderr)
+            daemon_state = json.loads((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(daemon_state["main_thread_id"], "thread-cleared")
+            self.assertTrue((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "daemon.pid").exists())
+
     def test_attach_after_clear_uses_new_thread_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
@@ -3634,6 +3698,42 @@ exec "$real_git" "$@"
             self.assertIn('default_permissions = "buddyswitch-runtime"', config_text)
             self.assertIn("[permissions.buddyswitch-runtime.filesystem]", config_text)
             self._assert_codex_automation_config(config_text, shared_root=Path(str(ctx["shared_root"])))
+
+    def test_instance_resume_starts_daemon_for_original_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            instance_id = str(ctx["instance_id"])
+            instance_payload = ctx["instance_payload"]
+            assert isinstance(instance_payload, dict)
+            thread_id = str(instance_payload["thread_id"])
+
+            stop_result = subprocess.run(
+                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+
+            resume_result = subprocess.run(
+                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
+            daemon_dir = Path(str(ctx["instance_root"])) / "runtime" / "daemon"
+            daemon_state = json.loads((daemon_dir / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(daemon_state["main_thread_id"], thread_id)
+            self.assertTrue((daemon_dir / "daemon.pid").exists())
 
     def test_instance_resume_uses_thread_resume_for_original_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -4116,6 +4216,7 @@ exec "$real_git" "$@"
             self.assertFalse(broker_marker.exists())
             self.assertFalse(broker_socket.exists())
             self.assertFalse(browser_pid.exists())
+            self.assertFalse((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "daemon.pid").exists())
 
     def test_stop_json_marks_instance_inactive_after_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -4166,6 +4267,7 @@ exec "$real_git" "$@"
             self.assertFalse(broker_marker.exists())
             self.assertFalse(broker_socket.exists())
             self.assertFalse(browser_pid.exists())
+            self.assertFalse((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "daemon.pid").exists())
 
     def test_stop_is_idempotent_for_stale_service(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -4252,7 +4354,74 @@ exec "$real_git" "$@"
             self.assertEqual(payload["status"], "active")
             self.assertEqual(payload["thread_id"], ctx["instance_payload"]["thread_id"])
             self.assertEqual(payload["app_server"]["healthy"], True)
+            self.assertIn("daemon", payload)
+            self.assertTrue(payload["daemon"]["pid_file"].endswith("runtime/daemon/daemon.pid"))
+            self.assertTrue(payload["daemon"]["state_path"].endswith("runtime/daemon/state.json"))
             self.assertEqual(payload["thread"]["status"], "idle")
+
+    def test_human_status_reports_daemon_health_line(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            status_result = subprocess.run(
+                [
+                    str(LAUNCHER),
+                    "instance",
+                    "status",
+                    ctx["instance_id"],
+                ],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
+            self.assertIn("Daemon health:", status_result.stdout)
+
+    def test_fake_codex_completed_event_triggers_one_stop_task_tui_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={
+                    "thread_id": "thr-main",
+                    "next_turn_id": "turn-daemon-1",
+                    "daemon_notifications": [
+                        {
+                            "method": "turn/completed",
+                            "params": {
+                                "thread_id": "thr-main",
+                                "turn_id": "turn-user-1",
+                                "status": "completed",
+                            },
+                        }
+                    ],
+                    "daemon_emit_completion_for_started_turn": True,
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            turn_start_rows = self._wait_for_rpc_rows(Path(str(ctx["calls_path"])), "turn/start")
+            time.sleep(0.5)
+            turn_start_rows = [row for row in self._read_rpc_rows(Path(str(ctx["calls_path"]))) if row.get("rpc_method") == "turn/start"]
+
+            self.assertEqual(len(turn_start_rows), 1)
+            params = turn_start_rows[0]["params"]
+            self.assertEqual(params["threadId"], "thr-main")
+            prompt = params["input"][0]["text"]
+            self.assertTrue(prompt.startswith("[TASK CHECKOUT]"), msg=prompt)
+            self.assertNotIn("[USER INPUT]", prompt)
+            daemon_state = json.loads((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(daemon_state["daemon_origin_turn_ids"], ["turn-daemon-1"])
+            self.assertEqual(daemon_state["last_origin_turn_id"], "turn-user-1")
+            self.assertEqual(daemon_state["last_stop_tui_turn_id"], "turn-daemon-1")
 
     def test_list_includes_app_server_health_and_thread_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

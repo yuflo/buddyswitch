@@ -7,12 +7,13 @@ ENV_HELPER="${REPO_ROOT}/tools/launcher/env.sh"
 WORKSPACE_HELPER="${REPO_ROOT}/tools/launcher/workspace.sh"
 BROWSER_HELPER="${REPO_ROOT}/tools/launcher/browser_cockpit.sh"
 APP_SERVER_HELPER="${REPO_ROOT}/tools/launcher/app_server.sh"
+DAEMON_HELPER="${REPO_ROOT}/tools/launcher/daemon.sh"
 INSTANCE_HELPER="${REPO_ROOT}/tools/launcher/instance.sh"
 CLEANUP_HELPER="${REPO_ROOT}/tools/launcher/cleanup.sh"
 RUNTIME_BROKER_HELPER="${REPO_ROOT}/tools/launcher/runtime_broker.sh"
 WEB_MANAGEMENT_HELPER="${REPO_ROOT}/tools/launcher/web_management.py"
 
-if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
+if [[ ! -f "${ENV_HELPER}" || ! -f "${WORKSPACE_HELPER}" || ! -f "${BROWSER_HELPER}" || ! -f "${APP_SERVER_HELPER}" || ! -f "${DAEMON_HELPER}" || ! -f "${INSTANCE_HELPER}" || ! -f "${CLEANUP_HELPER}" || ! -f "${RUNTIME_BROKER_HELPER}" || ! -f "${WEB_MANAGEMENT_HELPER}" ]]; then
   echo "Launcher helpers are missing under tools/launcher." >&2
   exit 1
 fi
@@ -21,6 +22,7 @@ source "${ENV_HELPER}"
 source "${WORKSPACE_HELPER}"
 source "${BROWSER_HELPER}"
 source "${APP_SERVER_HELPER}"
+source "${DAEMON_HELPER}"
 source "${INSTANCE_HELPER}"
 source "${CLEANUP_HELPER}"
 source "${RUNTIME_BROKER_HELPER}"
@@ -272,10 +274,18 @@ PY
     "$(_buddyswitch_app_server_json_field "${app_server_json}" "socket_path")" \
     "$(_buddyswitch_app_server_json_field "${app_server_json}" "log_file")" \
     "active"
+  if ! buddyswitch_daemon_start >/dev/null; then
+    echo "Daemon start failed for ${requested_instance_id}." >&2
+    buddyswitch_app_server_stop || true
+    buddyswitch_runtime_broker_stop
+    buddyswitch_browser_instance_stop "${requested_instance_id}" || true
+    buddyswitch_instance_clear_app_server "${requested_instance_id}" "inactive"
+    return 1
+  fi
 }
 
 instance_set_inactive_locked() {
-  local instance_id="${1:-}"
+  local instance_id="${1:-}" daemon_output=""
   buddyswitch_require_runtime_lock
   if [[ -z "${instance_id}" ]]; then
     echo "instance id is required" >&2
@@ -283,6 +293,10 @@ instance_set_inactive_locked() {
   fi
   buddyswitch_validate_instance_id "${instance_id}" || return $?
   buddyswitch_env_bind_instance "${instance_id}" || return $?
+  daemon_output="$(buddyswitch_daemon_stop 2>&1)" || {
+    echo "Warning: daemon stop failed for ${instance_id}." >&2
+    [[ -n "${daemon_output}" ]] && echo "${daemon_output}" >&2
+  }
   buddyswitch_app_server_stop || true
   buddyswitch_runtime_broker_stop
   buddyswitch_browser_instance_stop "${instance_id}" || true
@@ -823,7 +837,7 @@ PY
 }
 
 instance_clear() {
-  local instance_id="${1:-}" json=0 previous_thread_id output new_thread_id
+  local instance_id="${1:-}" json=0 previous_thread_id output new_thread_id daemon_output=""
   if [[ -z "${instance_id}" ]]; then
     echo "instance id is required" >&2
     return 2
@@ -844,6 +858,10 @@ instance_clear() {
 
   instance_require_active_service_thread "${instance_id}" "clear" || return $?
   previous_thread_id="${INSTANCE_ACTIVE_THREAD_ID}"
+  daemon_output="$(buddyswitch_daemon_stop 2>&1)" || {
+    echo "Warning: daemon stop failed for ${instance_id}." >&2
+    [[ -n "${daemon_output}" ]] && echo "${daemon_output}" >&2
+  }
   output="$(buddyswitch_app_server_thread_clear 2>&1)" || {
     [[ -n "${output}" ]] && echo "${output}" >&2
     return 1
@@ -867,6 +885,10 @@ PY
     return 1
   fi
   buddyswitch_instance_set_thread_id "${instance_id}" "${new_thread_id}" || return $?
+  if ! buddyswitch_daemon_start >/dev/null; then
+    echo "Daemon start failed for ${instance_id}." >&2
+    return 1
+  fi
   if [[ "${json}" -eq 1 ]]; then
     python3 - "${instance_id}" "${previous_thread_id}" "${new_thread_id}" <<'PY'
 import json
@@ -1007,6 +1029,10 @@ instance_resume_locked() {
   fi
 
   if buddyswitch_app_server_is_active; then
+    if ! buddyswitch_daemon_start >/dev/null; then
+      echo "Daemon start failed for ${instance_id}." >&2
+      return 1
+    fi
     python3 - "${instance_id}" "${thread_id}" <<'PY'
 import json
 import sys
@@ -1088,6 +1114,14 @@ PY
     "$(_buddyswitch_app_server_json_field "${app_server_json}" "socket_path")" \
     "$(_buddyswitch_app_server_json_field "${app_server_json}" "log_file")" \
     "active"
+  if ! buddyswitch_daemon_start >/dev/null; then
+    echo "Daemon start failed for ${instance_id}." >&2
+    buddyswitch_app_server_stop || true
+    buddyswitch_runtime_broker_stop
+    buddyswitch_browser_instance_stop "${instance_id}" || true
+    buddyswitch_instance_clear_app_server "${instance_id}" "inactive"
+    return 1
+  fi
 
   python3 - "${instance_id}" "${thread_id}" <<'PY'
 import json
@@ -1141,7 +1175,7 @@ PY
 }
 
 instance_status_json() {
-  local instance_id="$1" app_status_json thread_id thread_json=""
+  local instance_id="$1" app_status_json daemon_status_json thread_id thread_json=""
   buddyswitch_validate_instance_id "${instance_id}" || return $?
   buddyswitch_instance_validate_record "${instance_id}" >/dev/null || return $?
   buddyswitch_env_bind_instance "${instance_id}" || return $?
@@ -1149,6 +1183,10 @@ instance_status_json() {
   app_status_json="$(buddyswitch_app_server_status_json 2>/dev/null || true)"
   if [[ -z "${app_status_json}" ]]; then
     app_status_json='{"healthy": false, "pid": null, "pid_live": false, "socket_path": "", "socket_exists": false, "probe": null}'
+  fi
+  daemon_status_json="$(buddyswitch_daemon_status_json 2>/dev/null || true)"
+  if [[ -z "${daemon_status_json}" ]]; then
+    daemon_status_json='{"live": false, "pid": null, "pid_live": false, "last_error": null}'
   fi
   if [[ -n "${thread_id}" ]]; then
     if python3 - "${app_status_json}" <<'PY'
@@ -1162,14 +1200,15 @@ PY
       thread_json="$(buddyswitch_app_server_thread_read "${thread_id}" 2>/dev/null || true)"
     fi
   fi
-  python3 - "${BUDDYSWITCH_INSTANCE_JSON}" "${app_status_json}" "${thread_json}" <<'PY'
+  python3 - "${BUDDYSWITCH_INSTANCE_JSON}" "${app_status_json}" "${daemon_status_json}" "${thread_json}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 instance_payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 app_server = json.loads(sys.argv[2]) if sys.argv[2] else {}
-thread_payload = json.loads(sys.argv[3]) if sys.argv[3] else {}
+daemon = json.loads(sys.argv[3]) if sys.argv[3] else {}
+thread_payload = json.loads(sys.argv[4]) if sys.argv[4] else {}
 
 thread = thread_payload.get("thread") if isinstance(thread_payload, dict) else None
 thread_status = None
@@ -1191,6 +1230,7 @@ payload = {
     "updated_at": instance_payload.get("updated_at"),
     "thread_id": instance_payload.get("thread_id"),
     "app_server": app_server,
+    "daemon": daemon,
     "thread": {
         "status": thread_status,
         "raw": thread,
@@ -1233,12 +1273,14 @@ import sys
 
 payload = json.loads(sys.argv[1])
 app_server = payload.get("app_server") if isinstance(payload.get("app_server"), dict) else {}
+daemon = payload.get("daemon") if isinstance(payload.get("daemon"), dict) else {}
 thread = payload.get("thread") if isinstance(payload.get("thread"), dict) else {}
 
 print(f"Instance: {payload.get('instance_id')}")
 print(f"Buddy: {payload.get('buddy')}")
 print(f"Status: {payload.get('status')}")
 print(f"App-server health: {'healthy' if app_server.get('healthy') else 'unhealthy'}")
+print(f"Daemon health: {'healthy' if daemon.get('live') else 'unhealthy'}")
 print(f"Thread id: {payload.get('thread_id') or ''}")
 print(f"Thread status: {thread.get('status') or ''}")
 print(f"Browser port: {payload.get('browser_port') or ''}")

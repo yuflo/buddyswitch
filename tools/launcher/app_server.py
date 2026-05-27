@@ -253,9 +253,20 @@ def _turn_status_kind(value: object) -> str | None:
 
 
 class AppServerClient:
-    def __init__(self, socket_path: Path, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self,
+        socket_path: Path,
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        *,
+        client_name: str = CLIENT_NAME,
+        client_title: str = CLIENT_TITLE,
+        client_version: str = CLIENT_VERSION,
+    ) -> None:
         self.socket_path = socket_path
         self.timeout_seconds = timeout_seconds
+        self.client_name = client_name
+        self.client_title = client_title
+        self.client_version = client_version
         self._sock: socket.socket | None = None
         self._recv_buffer = b""
         self._next_request_id = 1
@@ -322,9 +333,9 @@ class AppServerClient:
             "initialize",
             {
                 "clientInfo": {
-                    "name": CLIENT_NAME,
-                    "title": CLIENT_TITLE,
-                    "version": CLIENT_VERSION,
+                    "name": self.client_name,
+                    "title": self.client_title,
+                    "version": self.client_version,
                 },
                 "capabilities": {
                     "experimentalApi": True,
@@ -373,6 +384,15 @@ class AppServerClient:
             if not isinstance(result, dict):
                 raise AppServerProtocolError(f"invalid JSON-RPC result shape for {method}")
             return result
+
+    def read_notification(self) -> dict[str, object]:
+        while True:
+            message = self._read_json_message(method="notification")
+            if "id" in message:
+                continue
+            method = message.get("method")
+            if isinstance(method, str) and method:
+                return message
 
     def _recv_until_http_headers(self, sock: socket.socket, *, method: str) -> bytes:
         deadline = time.monotonic() + self.timeout_seconds

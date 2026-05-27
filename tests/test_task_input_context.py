@@ -268,6 +268,65 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for forbidden_heading in ("Create New Task", "Switch Task", "Tool Reference"):
             self.assertNotIn(forbidden_heading, tui)
 
+    def test_stop_task_tui_current_task_rendering(self) -> None:
+        snapshot = {
+            "owner_buddy": "dev",
+            "task_state": "active",
+            "current_task": {
+                "id": "task-0003-clean-runtime-env",
+                "title": "Clean runtime env",
+                "status": "active",
+                "summary": "task input TUI and task tools are being implemented",
+                "body_excerpt": "Detailed body for the task.",
+            },
+            "pending_confirmation": None,
+            "recent_events": [],
+            "last_event": {
+                "event": "task.update",
+                "task_id": "task-0003-clean-runtime-env",
+                "line": "- 2026-05-27T10:01:00+08:00 task.update task-0003-clean-runtime-env",
+            },
+            "progress_summary": "task input TUI and task tools are being implemented",
+        }
+
+        tui = task_tui.render_stop_task_tui(snapshot, {"turn_id": "turn_123"})
+
+        self.assertIn("[TASK CHECKOUT]", tui)
+        self.assertIn("Previous turn completed: turn_123", tui)
+        self.assertIn("Active task", tui)
+        self.assertIn("task-0003-clean-runtime-env", tui)
+        self.assertIn("Status: active", tui)
+        self.assertIn("Progress: task input TUI and task tools are being implemented", tui)
+        self.assertIn("Last event: task.update task-0003-clean-runtime-env", tui)
+        self.assertIn("Done -> $task-management + task.propose(finish)", tui)
+        self.assertIn("Blocked -> $task-management + task.propose(block)", tui)
+        self.assertIn("Continue -> no task update", tui)
+        self.assertIn("No start / switch / confirm in checkout.", tui)
+        self.assertNotIn("[TASK CONTEXT]", tui)
+        self.assertNotIn("[USER INPUT]", tui)
+
+    def test_stop_task_tui_empty_state_rendering(self) -> None:
+        snapshot = {
+            "owner_buddy": "dev",
+            "task_state": "none",
+            "current_task": None,
+            "pending_confirmation": None,
+            "recent_events": [],
+            "last_event": None,
+            "progress_summary": "",
+        }
+
+        tui = task_tui.render_stop_task_tui(snapshot, {"id": "turn_empty"})
+
+        self.assertIn("[TASK CHECKOUT]", tui)
+        self.assertIn("Previous turn completed: turn_empty", tui)
+        self.assertIn("Active task", tui)
+        self.assertIn("none", tui)
+        self.assertIn("no active task is present", tui)
+        self.assertIn("Continue -> no task update", tui)
+        self.assertIn("No start / switch / confirm in checkout.", tui)
+        self.assertNotIn("[USER INPUT]", tui)
+
 
 if __name__ == "__main__":
     unittest.main()

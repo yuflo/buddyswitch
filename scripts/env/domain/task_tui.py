@@ -45,6 +45,14 @@ def _pending_line(pending: Mapping[str, Any] | None) -> str:
     return f"Pending Confirmation: {confirmation_id} -> {target_label}"
 
 
+def _turn_id(previous_turn: Mapping[str, Any]) -> str:
+    for key in ("turn_id", "id"):
+        value = previous_turn.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return "unknown"
+
+
 def render_task_tui(snapshot: Mapping[str, object]) -> str:
     current_task = _as_mapping(snapshot.get("current_task"))
     pending_confirmation = _as_mapping(snapshot.get("pending_confirmation"))
@@ -91,6 +99,52 @@ def render_task_tui(snapshot: Mapping[str, object]) -> str:
             "- Clear switch away from current task: use $task-management and task.propose(switch).",
             "- Pending switch answer: use task.confirm.",
             "- Unclear: no task mutation.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_stop_task_tui(snapshot: Mapping[str, Any], previous_turn: Mapping[str, Any]) -> str:
+    current_task = _as_mapping(snapshot.get("current_task"))
+    progress = snapshot.get("progress_summary")
+    if not isinstance(progress, str):
+        progress = ""
+
+    lines: list[str] = [
+        "[TASK CHECKOUT]",
+        f"Previous turn completed: {_turn_id(previous_turn)}",
+        "",
+        "Active task",
+    ]
+
+    if current_task is None:
+        lines.extend(
+            [
+                "  none",
+                "  no active task is present; no task update is needed by default.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"  {current_task.get('id') or 'unknown'}",
+                f"  Status: {current_task.get('status') or snapshot.get('task_state') or 'none'}",
+                f"  Progress: {progress or current_task.get('summary') or current_task.get('body_excerpt') or 'none'}",
+                f"  Last event: {_short_event(snapshot.get('last_event'))}",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "Decision",
+            "  Done -> $task-management + task.propose(finish)",
+            "  Blocked -> $task-management + task.propose(block)",
+            "  Continue -> no task update",
+            "",
+            "Limits",
+            "  No start / switch / confirm in checkout.",
+            "  Stay silent if no task update is needed.",
         ]
     )
     return "\n".join(lines)

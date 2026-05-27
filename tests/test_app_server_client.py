@@ -361,6 +361,97 @@ class AppServerClientTests(unittest.TestCase):
             self.assertEqual(errors, [])
             self.assertEqual(results, [{"thread": {"id": "thread-1", "status": "idle"}}])
 
+    def test_read_notification_returns_server_notification(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+
+            client = APP_SERVER.AppServerClient(socket_path, timeout_seconds=2.0)
+            client.connect()
+            self.addCleanup(client.close)
+            _init, _results, init_errors = self._initialize_client(client, server)
+            self.assertEqual(init_errors, [])
+
+            results: list[dict[str, object]] = []
+            errors: list[BaseException] = []
+
+            def run_read() -> None:
+                try:
+                    results.append(client.read_notification())
+                except BaseException as exc:  # pragma: no cover - exercised on failures
+                    errors.append(exc)
+
+            read_thread = threading.Thread(target=run_read, daemon=True)
+            read_thread.start()
+            server.send_notification("turn/completed", {"thread_id": "thread-1", "turn_id": "turn-1", "status": "completed"})
+            read_thread.join(timeout=2)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(
+                results,
+                [{"method": "turn/completed", "params": {"thread_id": "thread-1", "turn_id": "turn-1", "status": "completed"}}],
+            )
+
+    def test_read_notification_skips_response_shaped_messages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+
+            client = APP_SERVER.AppServerClient(socket_path, timeout_seconds=2.0)
+            client.connect()
+            self.addCleanup(client.close)
+            _init, _results, init_errors = self._initialize_client(client, server)
+            self.assertEqual(init_errors, [])
+
+            results: list[dict[str, object]] = []
+            errors: list[BaseException] = []
+
+            def run_read() -> None:
+                try:
+                    results.append(client.read_notification())
+                except BaseException as exc:  # pragma: no cover - exercised on failures
+                    errors.append(exc)
+
+            read_thread = threading.Thread(target=run_read, daemon=True)
+            read_thread.start()
+            server.send_response(999, {"ignored": True})
+            time.sleep(0.05)
+            self.assertEqual(results, [])
+            self.assertEqual(errors, [])
+            server.send_notification("turn/completed", {"thread_id": "thread-1", "turn_id": "turn-2", "status": "completed"})
+            read_thread.join(timeout=2)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(results[0]["method"], "turn/completed")
+            self.assertEqual(results[0]["params"]["turn_id"], "turn-2")
+
+    def test_client_identity_can_be_set_for_daemon(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+
+            client = APP_SERVER.AppServerClient(
+                socket_path,
+                timeout_seconds=2.0,
+                client_name="buddyswitch_daemon",
+                client_title="BuddySwitch Daemon",
+            )
+            client.connect()
+            self.addCleanup(client.close)
+            init, _results, init_errors = self._initialize_client(client, server)
+
+            params = init["params"]
+            assert isinstance(params, dict)
+            self.assertEqual(params["clientInfo"]["name"], "buddyswitch_daemon")
+            self.assertEqual(params["clientInfo"]["title"], "BuddySwitch Daemon")
+            self.assertEqual(init_errors, [])
+
     def test_text_input_payload_shape_is_codex_compatible(self) -> None:
         self.assertEqual(
             APP_SERVER.text_input_payload("hello"),
