@@ -83,11 +83,21 @@
     return String(value);
   }
 
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   function renderTable(state, elements) {
     elements.instancesBody.innerHTML = '';
     if (state.instances.length === 0) {
       const row = document.createElement('tr');
-      row.innerHTML = '<td colspan="7">No stored instances.</td>';
+      row.className = 'empty-row';
+      row.innerHTML = '<td colspan="7"><span class="empty-state">No stored instances.</span></td>';
       elements.instancesBody.appendChild(row);
       return;
     }
@@ -96,15 +106,16 @@
       const row = document.createElement('tr');
       if (instance.instance_id === state.selectedInstanceId) {
         row.className = 'is-selected';
+        row.setAttribute('aria-current', 'true');
       }
       row.innerHTML = [
-        '<td>' + formatValue(instance.instance_id) + '</td>',
-        '<td>' + formatValue(instance.buddy) + '</td>',
-        '<td>' + formatValue(instance.status) + '</td>',
-        '<td>' + formatValue(instance.app_server_health) + '</td>',
-        '<td>' + formatValue(instance.thread_id) + '</td>',
-        '<td>' + formatValue(instance.browser_port) + '</td>',
-        '<td>' + formatValue(instance.updated_at) + '</td>',
+        '<td><span class="cell-strong mono-value long-value">' + escapeHtml(formatValue(instance.instance_id)) + '</span></td>',
+        '<td>' + escapeHtml(formatValue(instance.buddy)) + '</td>',
+        '<td>' + badge(instance.status) + '</td>',
+        '<td>' + badge(resolveHealthLabel(instance)) + '</td>',
+        '<td><span class="mono-value long-value">' + escapeHtml(formatValue(instance.thread_id)) + '</span></td>',
+        '<td><span class="mono-value">' + escapeHtml(formatValue(instance.browser_port)) + '</span></td>',
+        '<td><span class="cell-muted long-value">' + escapeHtml(formatValue(instance.updated_at)) + '</span></td>',
       ].join('');
       row.addEventListener('click', function () {
         selectInstance(state, elements, instance.instance_id);
@@ -116,18 +127,19 @@
   function renderDetail(state, elements) {
     const instance = state.selectedInstance;
     const detailRows = [
-      ['Instance', instance && instance.instance_id],
-      ['Buddy', instance && instance.buddy],
-      ['Status', instance && instance.status],
-      ['Health', instance && resolveHealthLabel(instance)],
-      ['Thread', instance && instance.thread_id],
-      ['Thread State', instance && instance.thread && instance.thread.status],
-      ['Browser Port', instance && instance.browser_port],
-      ['Updated', instance && instance.updated_at],
-      ['Workspace', instance && instance.workspace_dir],
+      ['Instance', instance && instance.instance_id, 'mono-value long-value'],
+      ['Buddy', instance && instance.buddy, ''],
+      ['Status', instance && instance.status, ''],
+      ['Health', instance && resolveHealthLabel(instance), ''],
+      ['Thread', instance && instance.thread_id, 'mono-value long-value'],
+      ['Thread State', instance && resolveThreadStatus(instance), ''],
+      ['Browser Port', instance && instance.browser_port, 'mono-value'],
+      ['Updated', instance && instance.updated_at, 'long-value'],
+      ['Workspace', instance && instance.workspace_dir, 'mono-value long-value'],
     ];
     elements.instanceDetail.innerHTML = detailRows.map(function (entry) {
-      return '<dt>' + entry[0] + '</dt><dd>' + formatValue(entry[1]) + '</dd>';
+      const valueClass = entry[2] ? ' class="' + entry[2] + '"' : '';
+      return '<dt>' + escapeHtml(entry[0]) + '</dt><dd' + valueClass + '>' + escapeHtml(formatValue(entry[1])) + '</dd>';
     }).join('');
   }
 
@@ -142,6 +154,30 @@
       return instance.app_server.healthy ? 'healthy' : 'unhealthy';
     }
     return '';
+  }
+
+  function resolveThreadStatus(instance) {
+    return instance && instance.thread && typeof instance.thread.status === 'string'
+      ? instance.thread.status
+      : '';
+  }
+
+  function resolveStatusTone(value) {
+    if (value === 'active' || value === 'healthy' || value === 'idle') {
+      return 'healthy';
+    }
+    if (value === 'in_progress' || value === 'active_thread' || value === 'active turn') {
+      return 'busy';
+    }
+    if (value === 'inactive' || value === 'unhealthy' || value === 'stopped' || value === 'interrupted') {
+      return 'danger';
+    }
+    return 'neutral';
+  }
+
+  function badge(value, tone) {
+    const displayValue = formatValue(value);
+    return '<span class="status-badge ' + escapeHtml(tone || resolveStatusTone(displayValue)) + '">' + escapeHtml(displayValue) + '</span>';
   }
 
   function render(state, elements) {

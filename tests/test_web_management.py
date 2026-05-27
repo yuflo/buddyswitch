@@ -1094,7 +1094,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(js_status, 200)
         self.assertIn("computeInstanceActionState", js)
         self.assertEqual(css_status, 200)
-        self.assertIn(".management-shell", css)
+        self.assertIn(".app-shell", css)
 
 
 if __name__ == "__main__":

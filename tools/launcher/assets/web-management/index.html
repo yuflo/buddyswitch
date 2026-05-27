@@ -8,76 +8,111 @@
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body>
-    <div class="management-shell">
-      <header class="topbar">
-        <div>
-          <h1>BuddySwitch Web Management</h1>
-          <p class="subtle">Local browser control for BuddySwitch instances.</p>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="BuddySwitch workspace">
+        <div class="workspace-switcher">
+          <div class="workspace-mark" aria-hidden="true">BS</div>
+          <div>
+            <div class="workspace-name">BuddySwitch</div>
+            <div class="workspace-meta">Local runtime</div>
+          </div>
         </div>
-        <div class="topbar-actions">
-          <span id="server-status" class="status-pill">Checking</span>
-          <button id="refresh-button" type="button">Refresh</button>
-        </div>
-      </header>
 
-      <main class="layout" data-api-instances="/api/instances">
-        <section class="section create-section" aria-labelledby="create-heading">
-          <div class="section-heading">
-            <h2 id="create-heading">Create Instance</h2>
-          </div>
-          <div class="create-controls">
-            <label class="field">
-              <span>Buddy</span>
-              <select id="buddy-select"></select>
-            </label>
-            <button id="create-button" type="button">Create</button>
-          </div>
-        </section>
+        <nav class="sidebar-nav" aria-label="Primary">
+          <span class="nav-item is-active">
+            <span class="nav-glyph" aria-hidden="true"></span>
+            Control room
+          </span>
+        </nav>
 
-        <section class="section table-section" aria-labelledby="instances-heading">
-          <div class="section-heading">
-            <h2 id="instances-heading">Instances</h2>
-          </div>
-          <table class="instances-table">
-            <thead>
-              <tr>
-                <th>Instance</th>
-                <th>Buddy</th>
-                <th>Status</th>
-                <th>App Server</th>
-                <th>Thread</th>
-                <th>Browser</th>
-                <th>Updated</th>
-              </tr>
-            </thead>
-            <tbody id="instances-body"></tbody>
-          </table>
-        </section>
-
-        <section class="section detail-section" aria-labelledby="detail-heading">
-          <div class="section-heading">
-            <h2 id="detail-heading">Selected Instance</h2>
-          </div>
-          <dl id="instance-detail" class="detail-grid"></dl>
-        </section>
-
-        <section class="section action-section" aria-labelledby="action-heading">
-          <div class="section-heading">
-            <h2 id="action-heading">Actions</h2>
-          </div>
-          <label class="field textarea-field">
-            <span>Instruction</span>
-            <textarea id="instruction-input" rows="5" placeholder="Send the next instruction to the selected instance."></textarea>
+        <section class="sidebar-section create-section" aria-labelledby="create-heading">
+          <div class="sidebar-heading" id="create-heading">Create Instance</div>
+          <label class="field compact-field">
+            <span>Buddy</span>
+            <select id="buddy-select"></select>
           </label>
-          <div class="action-row">
-            <button id="send-button" type="button">Send</button>
-            <button id="interrupt-button" type="button">Interrupt</button>
-            <button id="stop-button" type="button">Stop</button>
-            <button id="clear-button" type="button">Clear</button>
-            <button id="resume-button" type="button">Resume</button>
-            <button id="delete-button" type="button">Delete</button>
+          <button id="create-button" class="button primary full-width" type="button">Create</button>
+        </section>
+      </aside>
+
+      <main class="workspace-page" data-api-instances="/api/instances">
+        <header class="page-header">
+          <div class="breadcrumb">BuddySwitch / Web management</div>
+          <div class="title-row">
+            <div>
+              <h1>Instance control room</h1>
+              <p class="page-summary">Create, inspect, steer, and recover local buddy instances from one workspace.</p>
+            </div>
+            <div class="header-actions">
+              <span id="server-status" class="status-pill">Checking</span>
+              <button id="refresh-button" class="button secondary" type="button">Refresh</button>
+            </div>
           </div>
-          <p id="message-banner" class="message-banner" role="status" aria-live="polite"></p>
+        </header>
+
+        <section class="content-grid">
+          <section class="block-panel instance-panel" aria-labelledby="instances-heading">
+            <div class="panel-heading">
+              <div>
+                <h2 id="instances-heading">Instances</h2>
+                <p class="panel-subtitle">Stored local buddy instances</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="instances-table">
+                <thead>
+                  <tr>
+                    <th>Instance</th>
+                    <th>Buddy</th>
+                    <th>Status</th>
+                    <th>App Server</th>
+                    <th>Thread</th>
+                    <th>Browser</th>
+                    <th>Updated</th>
+                  </tr>
+                </thead>
+                <tbody id="instances-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <aside class="detail-column" aria-label="Selected instance controls">
+            <section class="block-panel detail-panel" aria-labelledby="detail-heading">
+              <div class="panel-heading compact">
+                <div>
+                  <h2 id="detail-heading">Selected instance</h2>
+                  <p class="panel-subtitle">Current runtime and workspace details</p>
+                </div>
+              </div>
+              <dl id="instance-detail" class="detail-grid"></dl>
+            </section>
+
+            <section class="block-panel action-panel" aria-labelledby="action-heading">
+              <div class="panel-heading compact">
+                <div>
+                  <h2 id="action-heading">Actions</h2>
+                  <p class="panel-subtitle">Main-thread control and lifecycle recovery</p>
+                </div>
+              </div>
+              <div class="action-body">
+                <label class="field textarea-field">
+                  <span>Instruction</span>
+                  <textarea id="instruction-input" rows="6" placeholder="Send the next instruction to the selected instance."></textarea>
+                </label>
+                <div class="action-group" aria-label="Main thread actions">
+                  <button id="send-button" class="button primary" type="button">Send</button>
+                  <button id="interrupt-button" class="button secondary" type="button">Interrupt</button>
+                </div>
+                <div class="action-group lifecycle-actions" aria-label="Lifecycle actions">
+                  <button id="clear-button" class="button secondary" type="button">Clear</button>
+                  <button id="stop-button" class="button secondary" type="button">Stop</button>
+                  <button id="resume-button" class="button secondary" type="button">Resume</button>
+                  <button id="delete-button" class="button danger" type="button">Delete</button>
+                </div>
+                <p id="message-banner" class="message-banner" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+          </aside>
         </section>
       </main>
     </div>
