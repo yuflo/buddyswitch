@@ -31,6 +31,8 @@ DAEMON_CLIENT_TITLE = "BuddySwitch Daemon"
 DAEMON_PERMISSIONS = "buddyswitch-runtime"
 DAEMON_STOP_GRACE_SECONDS = 2.0
 DAEMON_POLL_SECONDS = 0.05
+DAEMON_READY_TIMEOUT_SECONDS = 5.0
+DAEMON_READY_POLL_SECONDS = 0.05
 
 
 def daemon_runtime_dir(instance_root: Path) -> Path:
@@ -113,6 +115,7 @@ def _state_payload(instance_id: str, main_thread_id: str) -> dict[str, Any]:
         "daemon_origin_turn_ids": [],
         "last_origin_turn_id": None,
         "last_stop_tui_turn_id": None,
+        "ready": None,
         "last_error": None,
     }
 
@@ -131,10 +134,13 @@ def completed_turn_for_stop_tui(notification: dict[str, Any], state: DaemonState
     params = notification.get("params")
     if not isinstance(params, dict):
         return None
+    turn = params.get("turn")
+    if not isinstance(turn, dict):
+        return None
 
-    thread_id = _string_field(params, "thread_id", "threadId")
-    turn_id = _string_field(params, "turn_id", "turnId")
-    status = _string_field(params, "status")
+    thread_id = _string_field(params, "threadId")
+    turn_id = _string_field(turn, "id")
+    status = _string_field(turn, "status")
     if not thread_id or not turn_id:
         return None
     if thread_id != state.payload.get("main_thread_id"):
@@ -144,6 +150,17 @@ def completed_turn_for_stop_tui(notification: dict[str, Any], state: DaemonState
     if state.is_daemon_origin_turn(turn_id):
         return None
     return {"thread_id": thread_id, "turn_id": turn_id, "status": status}
+
+
+def _notification_turn_id(notification: dict[str, Any]) -> str | None:
+    params = notification.get("params")
+    if not isinstance(params, dict):
+        return None
+    turn = params.get("turn")
+    if not isinstance(turn, dict):
+        return None
+    turn_id = _string_field(turn, "id")
+    return turn_id or None
 
 
 class DaemonState:
@@ -168,6 +185,8 @@ class DaemonState:
         payload["daemon_origin_turn_ids"] = [
             item for item in payload["daemon_origin_turn_ids"] if isinstance(item, str) and item
         ][-MAX_DAEMON_ORIGIN_TURN_IDS:]
+        if not isinstance(payload.get("ready"), dict):
+            payload["ready"] = None
         if "last_error" not in payload:
             payload["last_error"] = None
         return cls(path=path, payload=payload)
@@ -190,13 +209,29 @@ class DaemonState:
         self.payload["last_stop_tui_turn_id"] = stop_tui_turn_id
         self.save()
 
-    def record_error(self, *, origin_turn_id: str, message: str) -> None:
+    def record_error(self, *, origin_turn_id: str | None, message: str) -> None:
         self.payload["last_error"] = {
             "origin_turn_id": origin_turn_id,
             "message": message,
             "at": _utc_now(),
         }
         self.save()
+
+    def record_ready(self, *, pid: int, main_thread_id: str) -> None:
+        self.payload["ready"] = {
+            "pid": pid,
+            "main_thread_id": main_thread_id,
+            "at": _utc_now(),
+        }
+        self.save()
+
+    def ready_for(self, pid: int, main_thread_id: str) -> bool:
+        ready = self.payload.get("ready")
+        if not isinstance(ready, dict):
+            return False
+        ready_pid = ready.get("pid")
+        ready_thread_id = ready.get("main_thread_id")
+        return ready_pid == pid and ready_thread_id == main_thread_id
 
 
 class DaemonContext:
@@ -209,6 +244,8 @@ class DaemonContext:
         instance_root: Path,
         main_thread_id: str,
         buddy: str,
+        workspace_dir: Path,
+        project_workspace_dir: Path,
         socket_path: Path,
         permissions: str = DAEMON_PERMISSIONS,
     ) -> None:
@@ -218,6 +255,8 @@ class DaemonContext:
         self.instance_root = instance_root
         self.main_thread_id = main_thread_id
         self.buddy = buddy
+        self.workspace_dir = workspace_dir
+        self.project_workspace_dir = project_workspace_dir
         self.socket_path = socket_path
         self.permissions = permissions
 
@@ -230,9 +269,12 @@ def load_daemon_context(instance_json: Path) -> DaemonContext:
     buddy = _string_field(payload, "buddy")
     main_thread_id = _string_field(payload, "thread_id")
     instance_root_text = _string_field(payload, "instance_root")
-    if not instance_id or not buddy or not main_thread_id or not instance_root_text:
+    workspace_dir_text = _string_field(payload, "workspace_dir")
+    if not instance_id or not buddy or not main_thread_id or not instance_root_text or not workspace_dir_text:
         raise ValueError(f"instance JSON is missing daemon fields: {instance_json}")
     instance_root = Path(instance_root_text)
+    workspace_dir = Path(workspace_dir_text)
+    project_workspace_dir = instance_root.parent.parent / "project" / "workspace"
     socket_text = _string_field(payload, "app_server_socket")
     socket_path = (
         Path(socket_text)
@@ -246,8 +288,31 @@ def load_daemon_context(instance_json: Path) -> DaemonContext:
         instance_root=instance_root,
         main_thread_id=main_thread_id,
         buddy=buddy,
+        workspace_dir=workspace_dir,
+        project_workspace_dir=project_workspace_dir,
         socket_path=socket_path,
     )
+
+
+def bind_main_thread(context: DaemonContext, client: Any) -> None:
+    result = client.request(
+        "thread/resume",
+        {
+            "threadId": context.main_thread_id,
+            "cwd": str(context.workspace_dir),
+            "runtimeWorkspaceRoots": [
+                str(context.workspace_dir),
+                str(context.project_workspace_dir),
+            ],
+            "permissions": context.permissions,
+            "excludeTurns": True,
+        },
+    )
+    thread = result.get("thread")
+    if not isinstance(thread, dict) or _string_field(thread, "id") != context.main_thread_id:
+        raise app_server.AppServerProtocolError(
+            f"thread/resume returned unexpected thread id for {context.instance_id}"
+        )
 
 
 def _turn_id_from_start_result(result: dict[str, Any]) -> str:
@@ -314,10 +379,15 @@ def daemon_status(instance_json: Path) -> dict[str, Any]:
         instance_id=context.instance_id,
         main_thread_id=context.main_thread_id,
     )
+    ready = bool(pid is not None and pid_live and state.ready_for(pid, context.main_thread_id))
+    ready_payload = state.payload.get("ready")
+    ready_main_thread_id = ready_payload.get("main_thread_id") if isinstance(ready_payload, dict) else None
     return {
         "live": bool(pid_live),
         "pid": pid,
         "pid_live": bool(pid_live),
+        "ready": ready,
+        "ready_main_thread_id": ready_main_thread_id,
         "runtime_dir": str(runtime),
         "pid_file": str(pid_path),
         "log_path": str(log_path),
@@ -342,11 +412,16 @@ def start_daemon(instance_json: Path) -> dict[str, Any]:
 
     pid = _read_pid(pid_path)
     if pid is not None and _pid_is_live(pid):
-        status = daemon_status(instance_json)
-        status["started"] = False
-        return status
+        if state.ready_for(pid, context.main_thread_id):
+            status = daemon_status(instance_json)
+            status["started"] = False
+            return status
+        _terminate_pid(pid)
+        _remove_path(pid_path)
     if pid is not None:
         _remove_path(pid_path)
+    state.payload["ready"] = None
+    state.save()
 
     command = [
         sys.executable,
@@ -365,16 +440,27 @@ def start_daemon(instance_json: Path) -> dict[str, Any]:
             cwd=str(context.instance_root),
         )
     _write_text_file(pid_path, str(process.pid))
-    time.sleep(DAEMON_POLL_SECONDS)
-    if process.poll() is not None:
-        _remove_path(pid_path)
-        raise RuntimeError(f"daemon exited early for {context.instance_id}; see {log_path}")
-    status = daemon_status(instance_json)
-    status["started"] = True
-    status["pid"] = process.pid
-    status["pid_live"] = _pid_is_live(process.pid)
-    status["live"] = bool(status["pid_live"])
-    return status
+    deadline = time.monotonic() + DAEMON_READY_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        wait_state = DaemonState.load(
+            instance_root=context.instance_root,
+            instance_id=context.instance_id,
+            main_thread_id=context.main_thread_id,
+        )
+        if wait_state.ready_for(process.pid, context.main_thread_id):
+            status = daemon_status(instance_json)
+            status["started"] = True
+            status["pid"] = process.pid
+            status["pid_live"] = _pid_is_live(process.pid)
+            status["live"] = bool(status["pid_live"])
+            return status
+        if process.poll() is not None:
+            _remove_path(pid_path)
+            raise RuntimeError(f"daemon exited before ready for {context.instance_id}; see {log_path}")
+        time.sleep(DAEMON_READY_POLL_SECONDS)
+    _terminate_pid(process.pid)
+    _remove_path(pid_path)
+    raise RuntimeError(f"daemon did not become ready for {context.instance_id}; see {log_path}")
 
 
 def stop_daemon(instance_json: Path) -> dict[str, Any]:
@@ -401,15 +487,31 @@ def run_daemon(instance_json: Path) -> int:
         main_thread_id=context.main_thread_id,
     )
     state.save()
-    with app_server.AppServerClient(
-        context.socket_path,
-        timeout_seconds=app_server.DEFAULT_RPC_TIMEOUT_SECONDS,
-        client_name=DAEMON_CLIENT_NAME,
-        client_title=DAEMON_CLIENT_TITLE,
-    ) as client:
-        while True:
-            notification = client.read_notification()
-            handle_notification(context, state, client, notification)
+    try:
+        with app_server.AppServerClient(
+            context.socket_path,
+            timeout_seconds=app_server.DEFAULT_RPC_TIMEOUT_SECONDS,
+            client_name=DAEMON_CLIENT_NAME,
+            client_title=DAEMON_CLIENT_TITLE,
+        ) as client:
+            bind_main_thread(context, client)
+            state.record_ready(pid=os.getpid(), main_thread_id=context.main_thread_id)
+            while True:
+                try:
+                    notification = client.read_notification()
+                except app_server.AppServerTimeoutError:
+                    continue
+                except app_server.AppServerError as exc:
+                    state.record_error(origin_turn_id=None, message=str(exc))
+                    return 1
+                try:
+                    handle_notification(context, state, client, notification)
+                except Exception as exc:
+                    state.record_error(origin_turn_id=_notification_turn_id(notification), message=str(exc))
+                    continue
+    except app_server.AppServerError as exc:
+        state.record_error(origin_turn_id=None, message=str(exc))
+        return 1
     return 0
 
 

@@ -2346,7 +2346,7 @@ exec "$real_git" "$@"
             self.assertIn("runtimeWorkspaceRoots", thread_start["params"])
             self.assertNotIn("sandboxPolicy", thread_start["params"])
 
-    def test_start_with_buddy_starts_daemon_for_main_thread(self) -> None:
+    def test_start_with_buddy_starts_ready_daemon_for_main_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
             completed = ctx["completed"]
@@ -2357,12 +2357,36 @@ exec "$real_git" "$@"
             assert isinstance(instance_payload, dict)
             daemon_dir = Path(str(ctx["instance_root"])) / "runtime" / "daemon"
             daemon_state = json.loads((daemon_dir / "state.json").read_text(encoding="utf-8"))
+            daemon_pid = int((daemon_dir / "daemon.pid").read_text(encoding="utf-8").strip())
 
             self.assertTrue((daemon_dir / "daemon.pid").exists())
             self.assertTrue((daemon_dir / "daemon.log").exists())
             self.assertEqual(daemon_state["instance_id"], ctx["instance_id"])
             self.assertEqual(daemon_state["main_thread_id"], instance_payload["thread_id"])
             self.assertEqual(daemon_state["daemon_origin_turn_ids"], [])
+            self.assertEqual(daemon_state["ready"]["pid"], daemon_pid)
+            self.assertEqual(daemon_state["ready"]["main_thread_id"], instance_payload["thread_id"])
+
+            status_result = subprocess.run(
+                [str(LAUNCHER), "instance", "status", str(ctx["instance_id"]), "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
+            status_payload = json.loads(status_result.stdout)
+            self.assertTrue(status_payload["daemon"]["ready"])
+            self.assertEqual(status_payload["daemon"]["ready_main_thread_id"], instance_payload["thread_id"])
+
+            calls = self._read_json_lines(Path(str(ctx["calls_path"])))
+            daemon_resume = next(
+                row
+                for row in calls
+                if row.get("rpc_method") == "thread/resume" and row.get("client_name") == "buddyswitch_daemon"
+            )
+            self.assertEqual(daemon_resume["params"]["threadId"], instance_payload["thread_id"])
 
     def test_start_rejects_codex_args_passthrough(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -3452,7 +3476,7 @@ exec "$real_git" "$@"
             self.assertEqual(thread_start["params"]["sessionStartSource"], "clear")
             self.assertEqual(thread_start["params"]["permissions"], "buddyswitch-runtime")
 
-    def test_clear_restarts_daemon_for_new_main_thread(self) -> None:
+    def test_clear_restarts_ready_daemon_for_new_main_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
                 Path(temp_root),
@@ -3462,6 +3486,9 @@ exec "$real_git" "$@"
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            old_daemon_pid = int(
+                (Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "daemon.pid").read_text(encoding="utf-8").strip()
+            )
 
             clear_result = subprocess.run(
                 [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
@@ -3476,6 +3503,103 @@ exec "$real_git" "$@"
             daemon_state = json.loads((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "state.json").read_text(encoding="utf-8"))
             self.assertEqual(daemon_state["main_thread_id"], "thread-cleared")
             self.assertTrue((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "daemon.pid").exists())
+            new_daemon_pid = int(
+                (Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "daemon.pid").read_text(encoding="utf-8").strip()
+            )
+            self.assertEqual(daemon_state["ready"]["pid"], new_daemon_pid)
+            self.assertEqual(daemon_state["ready"]["main_thread_id"], "thread-cleared")
+            self.assertFalse(self._pid_is_live(old_daemon_pid))
+
+    def test_clear_daemon_start_failure_preserves_new_thread_and_stops_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={
+                    "clear_thread_id": "thread-cleared",
+                    "thread_resume_error_on_count": 2,
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            clear_result = subprocess.run(
+                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(clear_result.returncode, 0)
+            instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
+            self.assertEqual(instance_payload["thread_id"], "thread-cleared")
+            self.assertEqual(instance_payload["status"], "inactive")
+            self.assertIsNone(instance_payload["app_server_pid"])
+            self.assertIsNone(instance_payload["app_server_socket"])
+            self.assertIsNone(instance_payload["app_server_log"])
+
+            status_result = subprocess.run(
+                [str(LAUNCHER), "instance", "status", ctx["instance_id"], "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
+            status_payload = json.loads(status_result.stdout)
+            self.assertEqual(status_payload["status"], "inactive")
+            self.assertFalse(status_payload["app_server"]["healthy"])
+            self.assertFalse(status_payload["daemon"]["live"])
+
+    def test_resume_after_clear_daemon_failure_uses_new_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={
+                    "clear_thread_id": "thread-cleared",
+                    "thread_resume_error_on_count": 2,
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            clear_result = subprocess.run(
+                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(clear_result.returncode, 0)
+
+            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
+            state_payload.pop("thread_resume_error_on_count", None)
+            Path(str(ctx["state_file"])).write_text(json.dumps(state_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            resume_result = subprocess.run(
+                [str(LAUNCHER), "instance", "resume", ctx["instance_id"], "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
+            payload = json.loads(resume_result.stdout)
+            self.assertEqual(payload["thread_id"], "thread-cleared")
+            calls = self._read_json_lines(Path(str(ctx["calls_path"])))
+            resume_calls = [row for row in calls if row.get("rpc_method") == "thread/resume"]
+            self.assertTrue(resume_calls)
+            self.assertEqual(resume_calls[-1]["params"]["threadId"], "thread-cleared")
 
     def test_attach_after_clear_uses_new_thread_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -3699,7 +3823,7 @@ exec "$real_git" "$@"
             self.assertIn("[permissions.buddyswitch-runtime.filesystem]", config_text)
             self._assert_codex_automation_config(config_text, shared_root=Path(str(ctx["shared_root"])))
 
-    def test_instance_resume_starts_daemon_for_original_thread(self) -> None:
+    def test_instance_resume_starts_ready_daemon_for_original_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
             completed = ctx["completed"]
@@ -3732,8 +3856,11 @@ exec "$real_git" "$@"
             self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
             daemon_dir = Path(str(ctx["instance_root"])) / "runtime" / "daemon"
             daemon_state = json.loads((daemon_dir / "state.json").read_text(encoding="utf-8"))
+            daemon_pid = int((daemon_dir / "daemon.pid").read_text(encoding="utf-8").strip())
             self.assertEqual(daemon_state["main_thread_id"], thread_id)
             self.assertTrue((daemon_dir / "daemon.pid").exists())
+            self.assertEqual(daemon_state["ready"]["pid"], daemon_pid)
+            self.assertEqual(daemon_state["ready"]["main_thread_id"], thread_id)
 
     def test_instance_resume_uses_thread_resume_for_original_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -4118,15 +4245,14 @@ exec "$real_git" "$@"
 
     def test_attach_blocks_when_thread_resume_returns_different_thread_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(
-                Path(temp_root),
-                Path(source_home),
-                state_payload={"thread_resume_response_thread_id": "thread-other"},
-            )
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
+            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
+            state_payload["thread_resume_response_thread_id"] = "thread-other"
+            Path(str(ctx["state_file"])).write_text(json.dumps(state_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
             Path(str(ctx["capture_path"])).unlink(missing_ok=True)
             attach_result = subprocess.run(
                 [str(LAUNCHER), "instance", "attach", ctx["instance_id"]],
@@ -4142,22 +4268,19 @@ exec "$real_git" "$@"
 
     def test_attach_blocks_when_thread_resume_preflight_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            ctx = self._start_service_instance(
-                Path(temp_root),
-                Path(source_home),
-                state_payload={
-                    "errors": {
-                        "thread/resume": {
-                            "code": -32004,
-                            "message": "thread not loaded: thread-test",
-                        }
-                    }
-                },
-            )
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home))
             completed = ctx["completed"]
             assert isinstance(completed, subprocess.CompletedProcess)
             self.assertEqual(completed.returncode, 0, msg=completed.stderr)
 
+            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
+            state_payload["errors"] = {
+                "thread/resume": {
+                    "code": -32004,
+                    "message": "thread not loaded: thread-test",
+                }
+            }
+            Path(str(ctx["state_file"])).write_text(json.dumps(state_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
             Path(str(ctx["capture_path"])).unlink(missing_ok=True)
             Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
             attach_result = subprocess.run(
@@ -4383,7 +4506,51 @@ exec "$real_git" "$@"
             self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
             self.assertIn("Daemon health:", status_result.stdout)
 
-    def test_fake_codex_completed_event_triggers_one_stop_task_tui_prompt(self) -> None:
+    def test_fake_codex_requires_daemon_thread_resume_before_notifications(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={
+                    "thread_id": "thr-main",
+                    "daemon_notifications": [
+                        {
+                            "method": "turn/completed",
+                            "params": {
+                                "threadId": "thr-main",
+                                "turn": {
+                                    "id": "turn-user-1",
+                                    "items": [],
+                                    "itemsView": "summary",
+                                    "status": "completed",
+                                    "error": None,
+                                    "startedAt": 0,
+                                    "completedAt": 1,
+                                    "durationMs": 1,
+                                },
+                            },
+                        }
+                    ],
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            rows = self._read_json_lines(Path(str(ctx["calls_path"])))
+            daemon_rows = [
+                row
+                for row in rows
+                if row.get("client_name") == "buddyswitch_daemon"
+                and ((row.get("argv") or [None])[0] == "json-rpc" or row.get("kind") == "daemon-notification")
+            ]
+            sequence = [
+                row.get("rpc_method") if row.get("kind") != "daemon-notification" else row.get("notification_method")
+                for row in daemon_rows
+            ]
+            self.assertEqual(sequence[:4], ["initialize", "initialized", "thread/resume", "turn/completed"])
+
+    def test_fake_codex_real_completed_event_triggers_one_stop_task_tui_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
                 Path(temp_root),
@@ -4395,9 +4562,17 @@ exec "$real_git" "$@"
                         {
                             "method": "turn/completed",
                             "params": {
-                                "thread_id": "thr-main",
-                                "turn_id": "turn-user-1",
-                                "status": "completed",
+                                "threadId": "thr-main",
+                                "turn": {
+                                    "id": "turn-user-1",
+                                    "items": [],
+                                    "itemsView": "summary",
+                                    "status": "completed",
+                                    "error": None,
+                                    "startedAt": 0,
+                                    "completedAt": 1,
+                                    "durationMs": 1,
+                                },
                             },
                         }
                     ],
@@ -4422,6 +4597,95 @@ exec "$real_git" "$@"
             self.assertEqual(daemon_state["daemon_origin_turn_ids"], ["turn-daemon-1"])
             self.assertEqual(daemon_state["last_origin_turn_id"], "turn-user-1")
             self.assertEqual(daemon_state["last_stop_tui_turn_id"], "turn-daemon-1")
+
+    def test_daemon_origin_completion_real_shape_does_not_loop(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={
+                    "thread_id": "thr-main",
+                    "next_turn_id": "turn-daemon-1",
+                    "daemon_notifications": [
+                        {
+                            "method": "turn/completed",
+                            "params": {
+                                "threadId": "thr-main",
+                                "turn": {
+                                    "id": "turn-user-1",
+                                    "items": [],
+                                    "itemsView": "summary",
+                                    "status": "completed",
+                                    "error": None,
+                                    "startedAt": 0,
+                                    "completedAt": 1,
+                                    "durationMs": 1,
+                                },
+                            },
+                        }
+                    ],
+                    "daemon_emit_completion_for_started_turn": True,
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            turn_start_rows = self._wait_for_rpc_rows(Path(str(ctx["calls_path"])), "turn/start")
+            time.sleep(0.5)
+            turn_start_rows = [row for row in self._read_rpc_rows(Path(str(ctx["calls_path"]))) if row.get("rpc_method") == "turn/start"]
+            self.assertEqual(len(turn_start_rows), 1)
+
+    def test_daemon_ignores_other_thread_real_completion_in_fake_codex(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={
+                    "thread_id": "thr-main",
+                    "next_turn_id": "turn-daemon-1",
+                    "daemon_notifications": [
+                        {
+                            "method": "turn/completed",
+                            "params": {
+                                "threadId": "thr-side",
+                                "turn": {
+                                    "id": "turn-side-1",
+                                    "items": [],
+                                    "itemsView": "summary",
+                                    "status": "completed",
+                                    "error": None,
+                                    "startedAt": 0,
+                                    "completedAt": 1,
+                                    "durationMs": 1,
+                                },
+                            },
+                        },
+                        {
+                            "method": "turn/completed",
+                            "params": {
+                                "threadId": "thr-main",
+                                "turn": {
+                                    "id": "turn-user-1",
+                                    "items": [],
+                                    "itemsView": "summary",
+                                    "status": "completed",
+                                    "error": None,
+                                    "startedAt": 0,
+                                    "completedAt": 1,
+                                    "durationMs": 1,
+                                },
+                            },
+                        },
+                    ],
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            turn_start_rows = self._wait_for_rpc_rows(Path(str(ctx["calls_path"])), "turn/start")
+            self.assertEqual(len(turn_start_rows), 1)
 
     def test_list_includes_app_server_health_and_thread_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

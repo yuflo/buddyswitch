@@ -92,6 +92,36 @@ class StopTaskDaemonStateTests(unittest.TestCase):
             self.assertEqual(saved["last_error"]["message"], "turn/start failed")
             self.assertRegex(saved["last_error"]["at"], r"^\d{4}-\d{2}-\d{2}T")
 
+    def test_recording_ready_state_persists_pid_and_main_thread_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = self._instance_root(temp_root)
+            state = INSTANCE_DAEMON.DaemonState.load(
+                instance_root=instance_root,
+                instance_id="inst-dev-daemon",
+                main_thread_id="thr-main",
+            )
+
+            state.record_ready(pid=4321, main_thread_id="thr-main")
+
+            saved = json.loads(INSTANCE_DAEMON.daemon_state_file(instance_root).read_text(encoding="utf-8"))
+            self.assertEqual(saved["ready"]["pid"], 4321)
+            self.assertEqual(saved["ready"]["main_thread_id"], "thr-main")
+            self.assertRegex(saved["ready"]["at"], r"^\d{4}-\d{2}-\d{2}T")
+
+    def test_ready_for_rejects_other_pid_or_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = self._instance_root(temp_root)
+            state = INSTANCE_DAEMON.DaemonState.load(
+                instance_root=instance_root,
+                instance_id="inst-dev-daemon",
+                main_thread_id="thr-main",
+            )
+            state.record_ready(pid=4321, main_thread_id="thr-main")
+
+            self.assertTrue(state.ready_for(4321, "thr-main"))
+            self.assertFalse(state.ready_for(9999, "thr-main"))
+            self.assertFalse(state.ready_for(4321, "thr-other"))
+
 
 class StopTaskDaemonFilterTests(unittest.TestCase):
     def _state(self, temp_root: str) -> object:
@@ -107,13 +137,21 @@ class StopTaskDaemonFilterTests(unittest.TestCase):
         return {
             "method": "turn/completed",
             "params": {
-                "thread_id": thread_id,
-                "turn_id": turn_id,
-                "status": status,
+                "threadId": thread_id,
+                "turn": {
+                    "id": turn_id,
+                    "items": [],
+                    "itemsView": "summary",
+                    "status": status,
+                    "error": None,
+                    "startedAt": 0,
+                    "completedAt": 1 if status != "inProgress" else None,
+                    "durationMs": 1 if status != "inProgress" else None,
+                },
             },
         }
 
-    def test_other_thread_completed_notification_is_ignored(self) -> None:
+    def test_real_completed_other_thread_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             state = self._state(temp_root)
 
@@ -124,14 +162,15 @@ class StopTaskDaemonFilterTests(unittest.TestCase):
 
             self.assertIsNone(previous_turn)
 
-    def test_non_completed_main_thread_notifications_are_ignored(self) -> None:
+    def test_real_non_completed_statuses_are_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             state = self._state(temp_root)
 
             self.assertIsNone(INSTANCE_DAEMON.completed_turn_for_stop_tui(self._completed(status="failed"), state))
             self.assertIsNone(INSTANCE_DAEMON.completed_turn_for_stop_tui(self._completed(status="interrupted"), state))
+            self.assertIsNone(INSTANCE_DAEMON.completed_turn_for_stop_tui(self._completed(status="inProgress"), state))
 
-    def test_completed_daemon_origin_turn_is_ignored(self) -> None:
+    def test_real_daemon_origin_turn_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             state = self._state(temp_root)
             state.record_stop_tui_turn(origin_turn_id="turn-user-1", stop_tui_turn_id="turn-daemon-1")
@@ -143,7 +182,7 @@ class StopTaskDaemonFilterTests(unittest.TestCase):
 
             self.assertIsNone(previous_turn)
 
-    def test_completed_main_thread_user_turn_is_accepted(self) -> None:
+    def test_real_completed_main_thread_user_turn_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             state = self._state(temp_root)
 
@@ -166,6 +205,67 @@ class FakeDaemonClient:
         if self.error is not None:
             raise self.error
         return self.result
+
+
+class FakeBindingClient:
+    def __init__(self, *, result: dict[str, object] | None = None, error: BaseException | None = None) -> None:
+        self.result = result or {"thread": {"id": "thr-main"}}
+        self.error = error
+        self.requests: list[dict[str, object]] = []
+
+    def request(self, method: str, params: dict[str, object] | None) -> dict[str, object]:
+        self.requests.append({"method": method, "params": params or {}})
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+class StopDaemonLoop(RuntimeError):
+    pass
+
+
+class FakeRunDaemonClient:
+    def __init__(
+        self,
+        *,
+        notifications: list[dict[str, object] | BaseException],
+        bind_result: dict[str, object] | None = None,
+        bind_error: BaseException | None = None,
+        turn_start_result: dict[str, object] | None = None,
+        turn_start_error: BaseException | None = None,
+    ) -> None:
+        self.notifications = list(notifications)
+        self.bind_result = bind_result or {"thread": {"id": "thr-main"}}
+        self.bind_error = bind_error
+        self.turn_start_result = turn_start_result or {"turn": {"id": "turn-daemon-1"}}
+        self.turn_start_error = turn_start_error
+        self.requests: list[dict[str, object]] = []
+
+    def __enter__(self) -> FakeRunDaemonClient:
+        return self
+
+    def __exit__(self, _exc_type: object, _exc: object, _tb: object) -> None:
+        return None
+
+    def request(self, method: str, params: dict[str, object] | None) -> dict[str, object]:
+        self.requests.append({"method": method, "params": params or {}})
+        if method == "thread/resume":
+            if self.bind_error is not None:
+                raise self.bind_error
+            return self.bind_result
+        if method == "turn/start":
+            if self.turn_start_error is not None:
+                raise self.turn_start_error
+            return self.turn_start_result
+        raise AssertionError(f"unexpected request method: {method}")
+
+    def read_notification(self) -> dict[str, object]:
+        if not self.notifications:
+            raise StopDaemonLoop("stop")
+        item = self.notifications.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item
 
 
 class StopTaskDaemonSendTests(unittest.TestCase):
@@ -210,7 +310,25 @@ class StopTaskDaemonSendTests(unittest.TestCase):
         INSTANCE_DAEMON.task_tui.render_stop_task_tui = fake_render_stop_task_tui
         return calls
 
-    def test_accepted_completed_turn_sends_one_stop_prompt(self) -> None:
+    def _completed(self, *, thread_id: str = "thr-main", turn_id: str = "turn-user-1", status: str = "completed") -> dict[str, object]:
+        return {
+            "method": "turn/completed",
+            "params": {
+                "threadId": thread_id,
+                "turn": {
+                    "id": turn_id,
+                    "items": [],
+                    "itemsView": "summary",
+                    "status": status,
+                    "error": None,
+                    "startedAt": 0,
+                    "completedAt": 1 if status != "inProgress" else None,
+                    "durationMs": 1 if status != "inProgress" else None,
+                },
+            },
+        }
+
+    def test_real_completed_turn_sends_one_stop_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = INSTANCE_DAEMON.load_daemon_context(instance["instance_json"])
@@ -226,10 +344,7 @@ class StopTaskDaemonSendTests(unittest.TestCase):
                 context,
                 state,
                 client,
-                {
-                    "method": "turn/completed",
-                    "params": {"thread_id": "thr-main", "turn_id": "turn-user-1", "status": "completed"},
-                },
+                self._completed(),
             )
 
             self.assertTrue(sent)
@@ -265,10 +380,7 @@ class StopTaskDaemonSendTests(unittest.TestCase):
                 context,
                 state,
                 client,
-                {
-                    "method": "turn/completed",
-                    "params": {"thread_id": "thr-main", "turn_id": "turn-user-1", "status": "completed"},
-                },
+                self._completed(),
             )
 
             self.assertFalse(sent)
@@ -284,14 +396,78 @@ class StopTaskDaemonSendTests(unittest.TestCase):
                 context,
                 state,
                 client,
-                {
-                    "method": "turn/completed",
-                    "params": {"thread_id": "thr-main", "turn_id": "turn-user-2", "status": "completed"},
-                },
+                self._completed(turn_id="turn-user-2"),
             )
             self.assertTrue(sent_later)
             self.assertEqual([request["method"] for request in client.requests], ["turn/start", "turn/start"])
             self.assertNotIn("turn/steer", [request["method"] for request in client.requests])
+
+
+class StopTaskDaemonBindingTests(unittest.TestCase):
+    def _instance(self, temp_root: str) -> dict[str, Any]:
+        instance_root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        workspace_dir = instance_root / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        instance_json = instance_root / "instance.json"
+        payload: dict[str, Any] = {
+            "instance_id": "inst-dev-daemon",
+            "buddy": "dev",
+            "status": "active",
+            "instance_root": str(instance_root),
+            "workspace_dir": str(workspace_dir),
+            "thread_id": "thr-main",
+            "app_server_socket": str(instance_root / "runtime" / "app-server.sock"),
+        }
+        instance_json.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+        return {
+            "instance_root": instance_root,
+            "workspace_dir": workspace_dir,
+            "instance_json": instance_json,
+            "payload": payload,
+        }
+
+    def test_bind_main_thread_uses_thread_resume_for_current_instance_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = INSTANCE_DAEMON.load_daemon_context(instance["instance_json"])
+            client = FakeBindingClient()
+
+            INSTANCE_DAEMON.bind_main_thread(context, client)
+
+            self.assertEqual([request["method"] for request in client.requests], ["thread/resume"])
+            params = client.requests[0]["params"]
+            assert isinstance(params, dict)
+            self.assertEqual(params["threadId"], "thr-main")
+            self.assertEqual(params["cwd"], str(instance["workspace_dir"]))
+            self.assertEqual(
+                params["runtimeWorkspaceRoots"],
+                [
+                    str(instance["workspace_dir"]),
+                    str(Path(temp_root) / "project" / "workspace"),
+                ],
+            )
+            self.assertEqual(params["permissions"], "buddyswitch-runtime")
+            self.assertEqual(params["excludeTurns"], True)
+
+    def test_bind_main_thread_fails_on_wrong_resumed_thread_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = INSTANCE_DAEMON.load_daemon_context(instance["instance_json"])
+            client = FakeBindingClient(result={"thread": {"id": "thr-other"}})
+
+            with self.assertRaises(INSTANCE_DAEMON.app_server.AppServerProtocolError):
+                INSTANCE_DAEMON.bind_main_thread(context, client)
+
+    def test_bind_main_thread_fails_on_thread_resume_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = INSTANCE_DAEMON.load_daemon_context(instance["instance_json"])
+            client = FakeBindingClient(
+                error=INSTANCE_DAEMON.app_server.AppServerRequestError("thread/resume", -32000, "resume failed"),
+            )
+
+            with self.assertRaises(INSTANCE_DAEMON.app_server.AppServerRequestError):
+                INSTANCE_DAEMON.bind_main_thread(context, client)
 
 
 class StopTaskDaemonLifecycleTests(unittest.TestCase):
@@ -330,6 +506,54 @@ class StopTaskDaemonLifecycleTests(unittest.TestCase):
         INSTANCE_DAEMON.subprocess.Popen = fake_popen
         return commands
 
+    def _patch_sleep_to_record_ready(
+        self,
+        *,
+        instance_root: Path,
+        pid: int,
+        main_thread_id: str = "thr-main",
+    ) -> None:
+        original_sleep = INSTANCE_DAEMON.time.sleep
+        recorded = {"done": False}
+
+        def fake_sleep(_seconds: float) -> None:
+            if not recorded["done"]:
+                state = INSTANCE_DAEMON.DaemonState.load(
+                    instance_root=instance_root,
+                    instance_id="inst-dev-daemon",
+                    main_thread_id=main_thread_id,
+                )
+                state.record_ready(pid=pid, main_thread_id=main_thread_id)
+                recorded["done"] = True
+
+        self.addCleanup(setattr, INSTANCE_DAEMON.time, "sleep", original_sleep)
+        INSTANCE_DAEMON.time.sleep = fake_sleep
+
+    def _patch_monotonic_step(self, *, start: float = 0.0, step: float = 0.1) -> None:
+        original_monotonic = INSTANCE_DAEMON.time.monotonic
+        current = {"value": start - step}
+
+        def fake_monotonic() -> float:
+            current["value"] += step
+            return current["value"]
+
+        self.addCleanup(setattr, INSTANCE_DAEMON.time, "monotonic", original_monotonic)
+        INSTANCE_DAEMON.time.monotonic = fake_monotonic
+
+    def _patch_ready_constants(self, *, timeout_seconds: float, poll_seconds: float) -> None:
+        original_timeout = getattr(INSTANCE_DAEMON, "DAEMON_READY_TIMEOUT_SECONDS", None)
+        original_poll = getattr(INSTANCE_DAEMON, "DAEMON_READY_POLL_SECONDS", None)
+        if hasattr(INSTANCE_DAEMON, "DAEMON_READY_TIMEOUT_SECONDS"):
+            self.addCleanup(setattr, INSTANCE_DAEMON, "DAEMON_READY_TIMEOUT_SECONDS", original_timeout)
+        else:
+            self.addCleanup(delattr, INSTANCE_DAEMON, "DAEMON_READY_TIMEOUT_SECONDS")
+        if hasattr(INSTANCE_DAEMON, "DAEMON_READY_POLL_SECONDS"):
+            self.addCleanup(setattr, INSTANCE_DAEMON, "DAEMON_READY_POLL_SECONDS", original_poll)
+        else:
+            self.addCleanup(delattr, INSTANCE_DAEMON, "DAEMON_READY_POLL_SECONDS")
+        INSTANCE_DAEMON.DAEMON_READY_TIMEOUT_SECONDS = timeout_seconds
+        INSTANCE_DAEMON.DAEMON_READY_POLL_SECONDS = poll_seconds
+
     def _patch_exited_process_start(self, pid: int) -> None:
         original_popen = INSTANCE_DAEMON.subprocess.Popen
 
@@ -356,6 +580,7 @@ class StopTaskDaemonLifecycleTests(unittest.TestCase):
             instance = self._instance(temp_root)
             commands = self._patch_process_start([4321])
             self._patch_pid_live({4321})
+            self._patch_sleep_to_record_ready(instance_root=instance["instance_root"], pid=4321)
 
             first = INSTANCE_DAEMON.start_daemon(instance["instance_json"])
             second = INSTANCE_DAEMON.start_daemon(instance["instance_json"])
@@ -364,6 +589,9 @@ class StopTaskDaemonLifecycleTests(unittest.TestCase):
             self.assertFalse(second["started"])
             self.assertEqual(first["pid"], 4321)
             self.assertEqual(second["pid"], 4321)
+            self.assertTrue(first["ready"])
+            self.assertEqual(first["ready_main_thread_id"], "thr-main")
+            self.assertTrue(second["ready"])
             self.assertEqual(len(commands), 1)
             self.assertTrue(INSTANCE_DAEMON.daemon_pid_file(instance["instance_root"]).exists())
             self.assertTrue(INSTANCE_DAEMON.daemon_log_file(instance["instance_root"]).exists())
@@ -376,15 +604,17 @@ class StopTaskDaemonLifecycleTests(unittest.TestCase):
             INSTANCE_DAEMON.daemon_pid_file(instance["instance_root"]).write_text("9999\n", encoding="utf-8")
             commands = self._patch_process_start([4322])
             self._patch_pid_live({4322})
+            self._patch_sleep_to_record_ready(instance_root=instance["instance_root"], pid=4322)
 
             payload = INSTANCE_DAEMON.start_daemon(instance["instance_json"])
 
             self.assertTrue(payload["started"])
             self.assertEqual(payload["pid"], 4322)
+            self.assertTrue(payload["ready"])
             self.assertEqual(len(commands), 1)
             self.assertEqual(INSTANCE_DAEMON.daemon_pid_file(instance["instance_root"]).read_text(encoding="utf-8").strip(), "4322")
 
-    def test_start_removes_pid_and_fails_when_daemon_exits_early(self) -> None:
+    def test_start_fails_when_process_exits_before_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             self._patch_exited_process_start(4323)
@@ -394,6 +624,45 @@ class StopTaskDaemonLifecycleTests(unittest.TestCase):
                 INSTANCE_DAEMON.start_daemon(instance["instance_json"])
 
             self.assertFalse(INSTANCE_DAEMON.daemon_pid_file(instance["instance_root"]).exists())
+
+    def test_start_fails_when_ready_times_out(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            self._patch_process_start([4324])
+            self._patch_pid_live({4324})
+            self._patch_ready_constants(timeout_seconds=0.2, poll_seconds=0.05)
+            self._patch_monotonic_step(start=0.0, step=0.1)
+            original_terminate = INSTANCE_DAEMON._terminate_pid
+            terminated: list[int] = []
+            self.addCleanup(setattr, INSTANCE_DAEMON, "_terminate_pid", original_terminate)
+            INSTANCE_DAEMON._terminate_pid = lambda pid: terminated.append(pid) or True
+
+            with self.assertRaises(RuntimeError):
+                INSTANCE_DAEMON.start_daemon(instance["instance_json"])
+
+            self.assertEqual(terminated, [4324])
+            self.assertFalse(INSTANCE_DAEMON.daemon_pid_file(instance["instance_root"]).exists())
+
+    def test_start_replaces_live_unready_pid(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            INSTANCE_DAEMON.daemon_pid_file(instance["instance_root"]).parent.mkdir(parents=True, exist_ok=True)
+            INSTANCE_DAEMON.daemon_pid_file(instance["instance_root"]).write_text("9999\n", encoding="utf-8")
+            commands = self._patch_process_start([4325])
+            self._patch_pid_live({9999, 4325})
+            self._patch_sleep_to_record_ready(instance_root=instance["instance_root"], pid=4325)
+            original_terminate = INSTANCE_DAEMON._terminate_pid
+            terminated: list[int] = []
+            self.addCleanup(setattr, INSTANCE_DAEMON, "_terminate_pid", original_terminate)
+            INSTANCE_DAEMON._terminate_pid = lambda pid: terminated.append(pid) or True
+
+            payload = INSTANCE_DAEMON.start_daemon(instance["instance_json"])
+
+            self.assertEqual(terminated, [9999])
+            self.assertTrue(payload["started"])
+            self.assertEqual(payload["pid"], 4325)
+            self.assertTrue(payload["ready"])
+            self.assertEqual(len(commands), 1)
 
     def test_stop_terminates_live_daemon_and_removes_pid(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -420,6 +689,7 @@ class StopTaskDaemonLifecycleTests(unittest.TestCase):
                 instance_id="inst-dev-daemon",
                 main_thread_id="thr-main",
             )
+            state.record_ready(pid=4321, main_thread_id="thr-main")
             state.record_error(origin_turn_id="turn-user-1", message="turn/start failed")
             INSTANCE_DAEMON.daemon_pid_file(instance["instance_root"]).write_text("4321\n", encoding="utf-8")
             self._patch_pid_live({4321})
@@ -429,9 +699,167 @@ class StopTaskDaemonLifecycleTests(unittest.TestCase):
             self.assertEqual(payload["pid"], 4321)
             self.assertTrue(payload["pid_live"])
             self.assertTrue(payload["live"])
+            self.assertTrue(payload["ready"])
+            self.assertEqual(payload["ready_main_thread_id"], "thr-main")
             self.assertEqual(payload["log_path"], str(INSTANCE_DAEMON.daemon_log_file(instance["instance_root"])))
             self.assertEqual(payload["state_path"], str(INSTANCE_DAEMON.daemon_state_file(instance["instance_root"])))
             self.assertEqual(payload["last_error"]["origin_turn_id"], "turn-user-1")
+
+
+class StopTaskDaemonRunLoopTests(unittest.TestCase):
+    def _instance(self, temp_root: str) -> dict[str, Any]:
+        instance_root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        workspace_dir = instance_root / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        instance_json = instance_root / "instance.json"
+        payload: dict[str, Any] = {
+            "instance_id": "inst-dev-daemon",
+            "buddy": "dev",
+            "status": "active",
+            "instance_root": str(instance_root),
+            "workspace_dir": str(workspace_dir),
+            "thread_id": "thr-main",
+            "app_server_socket": str(instance_root / "runtime" / "app-server.sock"),
+        }
+        instance_json.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+        return {
+            "instance_root": instance_root,
+            "instance_json": instance_json,
+            "payload": payload,
+        }
+
+    def _completed(self, *, turn_id: str, thread_id: str = "thr-main", status: str = "completed") -> dict[str, object]:
+        return {
+            "method": "turn/completed",
+            "params": {
+                "threadId": thread_id,
+                "turn": {
+                    "id": turn_id,
+                    "items": [],
+                    "itemsView": "summary",
+                    "status": status,
+                    "error": None,
+                    "startedAt": 0,
+                    "completedAt": 1 if status != "inProgress" else None,
+                    "durationMs": 1 if status != "inProgress" else None,
+                },
+            },
+        }
+
+    def _patch_app_server_client(self, fake_client: FakeRunDaemonClient) -> None:
+        original_client = INSTANCE_DAEMON.app_server.AppServerClient
+
+        def fake_factory(*_args: object, **_kwargs: object) -> FakeRunDaemonClient:
+            return fake_client
+
+        self.addCleanup(setattr, INSTANCE_DAEMON.app_server, "AppServerClient", original_client)
+        INSTANCE_DAEMON.app_server.AppServerClient = fake_factory
+
+    def _patch_snapshot_render(self, *, render_side_effect: list[object] | None = None) -> None:
+        original_snapshot = INSTANCE_DAEMON.task_management.current_snapshot
+        original_render = INSTANCE_DAEMON.task_tui.render_stop_task_tui
+        effects = list(render_side_effect or ["[TASK CHECKOUT]\nContinue -> no task update"])
+
+        def fake_snapshot(**_kwargs: object) -> dict[str, object]:
+            return {
+                "current_task": {"id": "task-1", "status": "active", "summary": "summary"},
+                "last_event": None,
+                "progress_summary": "summary",
+            }
+
+        def fake_render(_snapshot: object, _previous_turn: object) -> str:
+            if not effects:
+                return "[TASK CHECKOUT]\nContinue -> no task update"
+            effect = effects.pop(0)
+            if isinstance(effect, BaseException):
+                raise effect
+            assert isinstance(effect, str)
+            return effect
+
+        self.addCleanup(setattr, INSTANCE_DAEMON.task_management, "current_snapshot", original_snapshot)
+        self.addCleanup(setattr, INSTANCE_DAEMON.task_tui, "render_stop_task_tui", original_render)
+        INSTANCE_DAEMON.task_management.current_snapshot = fake_snapshot
+        INSTANCE_DAEMON.task_tui.render_stop_task_tui = fake_render
+
+    def test_run_daemon_continues_after_notification_idle_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            fake_client = FakeRunDaemonClient(
+                notifications=[
+                    INSTANCE_DAEMON.app_server.AppServerTimeoutError("idle"),
+                    self._completed(turn_id="turn-user-1"),
+                    StopDaemonLoop("stop"),
+                ],
+            )
+            self._patch_app_server_client(fake_client)
+            self._patch_snapshot_render()
+
+            with self.assertRaises(StopDaemonLoop):
+                INSTANCE_DAEMON.run_daemon(instance["instance_json"])
+
+            self.assertEqual([request["method"] for request in fake_client.requests], ["thread/resume", "turn/start"])
+            state = json.loads(INSTANCE_DAEMON.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
+            self.assertIsNone(state["last_error"])
+            self.assertEqual(state["daemon_origin_turn_ids"], ["turn-daemon-1"])
+
+    def test_run_daemon_records_startup_bind_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            fake_client = FakeRunDaemonClient(
+                notifications=[],
+                bind_error=INSTANCE_DAEMON.app_server.AppServerRequestError("thread/resume", -32000, "resume failed"),
+            )
+            self._patch_app_server_client(fake_client)
+
+            result = INSTANCE_DAEMON.run_daemon(instance["instance_json"])
+
+            self.assertEqual(result, 1)
+            state = json.loads(INSTANCE_DAEMON.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
+            self.assertIsNone(state["last_error"]["origin_turn_id"])
+            self.assertIn("thread/resume failed", state["last_error"]["message"])
+
+    def test_run_daemon_records_fatal_app_server_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            fake_client = FakeRunDaemonClient(
+                notifications=[INSTANCE_DAEMON.app_server.AppServerUnavailableError("socket gone")],
+            )
+            self._patch_app_server_client(fake_client)
+
+            result = INSTANCE_DAEMON.run_daemon(instance["instance_json"])
+
+            self.assertEqual(result, 1)
+            state = json.loads(INSTANCE_DAEMON.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
+            self.assertIsNone(state["last_error"]["origin_turn_id"])
+            self.assertIn("socket gone", state["last_error"]["message"])
+
+    def test_run_daemon_records_notification_handler_exception_and_continues(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            fake_client = FakeRunDaemonClient(
+                notifications=[
+                    self._completed(turn_id="turn-user-1"),
+                    self._completed(turn_id="turn-user-2"),
+                    StopDaemonLoop("stop"),
+                ],
+                turn_start_result={"turn": {"id": "turn-daemon-2"}},
+            )
+            self._patch_app_server_client(fake_client)
+            self._patch_snapshot_render(
+                render_side_effect=[
+                    RuntimeError("renderer exploded"),
+                    "[TASK CHECKOUT]\nContinue -> no task update",
+                ]
+            )
+
+            with self.assertRaises(StopDaemonLoop):
+                INSTANCE_DAEMON.run_daemon(instance["instance_json"])
+
+            self.assertEqual([request["method"] for request in fake_client.requests], ["thread/resume", "turn/start"])
+            state = json.loads(INSTANCE_DAEMON.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
+            self.assertEqual(state["last_error"]["origin_turn_id"], "turn-user-1")
+            self.assertIn("renderer exploded", state["last_error"]["message"])
+            self.assertEqual(state["daemon_origin_turn_ids"], ["turn-daemon-2"])
 
 
 if __name__ == "__main__":

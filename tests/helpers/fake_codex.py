@@ -699,19 +699,19 @@ def rpc_result_response(request_id: object, result: dict[str, object]) -> dict[s
     return {"id": request_id, "result": result}
 
 
-def handle_rpc_message(message: dict[str, object], entry: dict[str, object]) -> dict[str, object] | None:
+def handle_rpc_message(
+    message: dict[str, object],
+    entry: dict[str, object],
+    *,
+    client_name: str = "",
+) -> dict[str, object] | None:
     method = message.get("method")
     if not isinstance(method, str):
-        return None
-    if method == "initialized":
         return None
 
     request_id = message.get("id")
     params = message.get("params")
     params_dict = params if isinstance(params, dict) else None
-    if method == "initialize":
-        return rpc_result_response(request_id, {"userAgent": "codex/1.0.0"})
-
     append_calls(
         {
             "argv": ["json-rpc", method],
@@ -719,11 +719,26 @@ def handle_rpc_message(message: dict[str, object], entry: dict[str, object]) -> 
             "params": params,
             "cwd": os.getcwd(),
             "instance_id": entry.get("instance_id"),
+            "client_name": client_name,
         }
     )
+    if method == "initialized":
+        return None
+    if method == "initialize":
+        return rpc_result_response(request_id, {"userAgent": "codex/1.0.0"})
 
     default_thread_id = str(entry.get("instance_id") or "thread-test")
     state = load_server_state(f"thread-{default_thread_id}")
+    if method == "thread/resume":
+        attempt_count = state.get("thread_resume_attempt_count")
+        next_attempt = (attempt_count if isinstance(attempt_count, int) else 0) + 1
+        state["thread_resume_attempt_count"] = next_attempt
+        if isinstance(params_dict, dict):
+            state["last_thread_resume_params"] = dict(params_dict)
+        error_on_count = state.get("thread_resume_error_on_count")
+        if isinstance(error_on_count, int) and next_attempt == error_on_count:
+            save_server_state(state)
+            return rpc_error_response(request_id, -32001, "thread/resume failed")
     errors = state.get("errors", {})
     if isinstance(errors, dict):
         error = errors.get(method)
@@ -822,8 +837,19 @@ def _daemon_notifications(entry: dict[str, object]) -> list[dict[str, object]]:
     return [notification for notification in notifications if isinstance(notification, dict)]
 
 
-def send_daemon_initial_notifications(sock: socket.socket, entry: dict[str, object]) -> None:
+def send_daemon_notifications(sock: socket.socket, entry: dict[str, object], *, client_name: str) -> None:
     for notification in _daemon_notifications(entry):
+        append_calls(
+            {
+                "argv": ["daemon-notification"],
+                "kind": "daemon-notification",
+                "notification_method": notification.get("method"),
+                "params": notification.get("params"),
+                "cwd": os.getcwd(),
+                "instance_id": entry.get("instance_id"),
+                "client_name": client_name,
+            }
+        )
         send_json(sock, notification)
 
 
@@ -832,12 +858,17 @@ def send_daemon_started_turn_completion(
     entry: dict[str, object],
     request: dict[str, object],
     response: dict[str, object] | None,
+    *,
+    client_name: str,
 ) -> None:
     if request.get("method") != "turn/start" or response is None:
         return
     default_thread_id = str(entry.get("instance_id") or "thread-test")
     state = load_server_state(f"thread-{default_thread_id}")
     if not state.get("daemon_emit_completion_for_started_turn"):
+        return
+    subscribed_thread_id = state.get("daemon_subscribed_thread_id")
+    if not isinstance(subscribed_thread_id, str) or not subscribed_thread_id:
         return
     result = response.get("result")
     turn = result.get("turn") if isinstance(result, dict) else None
@@ -847,18 +878,35 @@ def send_daemon_started_turn_completion(
     if not isinstance(turn_id, str) or not turn_id:
         return
     if not isinstance(thread_id, str) or not thread_id:
-        thread_id = _main_thread_id(state)
-    send_json(
-        sock,
-        {
-            "method": "turn/completed",
-            "params": {
-                "thread_id": thread_id,
-                "turn_id": turn_id,
+        thread_id = subscribed_thread_id
+    notification = {
+        "method": "turn/completed",
+        "params": {
+            "threadId": thread_id,
+            "turn": {
+                "id": turn_id,
+                "items": [],
+                "itemsView": "summary",
                 "status": "completed",
+                "error": None,
+                "startedAt": 0,
+                "completedAt": 1,
+                "durationMs": 1,
             },
         },
+    }
+    append_calls(
+        {
+            "argv": ["daemon-notification"],
+            "kind": "daemon-notification",
+            "notification_method": notification.get("method"),
+            "params": notification.get("params"),
+            "cwd": os.getcwd(),
+            "instance_id": entry.get("instance_id"),
+            "client_name": client_name,
+        }
     )
+    send_json(sock, notification)
 
 
 def handle_websocket_connection(sock: socket.socket, entry: dict[str, object]) -> None:
@@ -893,13 +941,25 @@ def handle_websocket_connection(sock: socket.socket, entry: dict[str, object]) -
                 name = client_info.get("name") if isinstance(client_info, dict) else None
                 if isinstance(name, str):
                     client_name = name
-            response = handle_rpc_message(message, entry)
+            response = handle_rpc_message(message, entry, client_name=client_name)
             if response is not None:
                 send_json(sock, response)
-            if client_name == "buddyswitch_daemon" and method == "initialized":
-                send_daemon_initial_notifications(sock, entry)
+            if (
+                client_name == "buddyswitch_daemon"
+                and method == "thread/resume"
+                and isinstance(response, dict)
+                and "result" in response
+            ):
+                params = message.get("params")
+                thread_id = params.get("threadId") if isinstance(params, dict) else None
+                if isinstance(thread_id, str) and thread_id:
+                    default_thread_id = str(entry.get("instance_id") or "thread-test")
+                    state = load_server_state(f"thread-{default_thread_id}")
+                    state["daemon_subscribed_thread_id"] = thread_id
+                    save_server_state(state)
+                send_daemon_notifications(sock, entry, client_name=client_name)
             if client_name == "buddyswitch_daemon":
-                send_daemon_started_turn_completion(sock, entry, message, response)
+                send_daemon_started_turn_completion(sock, entry, message, response, client_name=client_name)
         elif opcode == 0x8:
             try:
                 send_frame(sock, 0x8, payload)

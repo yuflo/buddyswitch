@@ -887,6 +887,10 @@ PY
   buddyswitch_instance_set_thread_id "${instance_id}" "${new_thread_id}" || return $?
   if ! buddyswitch_daemon_start >/dev/null; then
     echo "Daemon start failed for ${instance_id}." >&2
+    buddyswitch_app_server_stop || true
+    buddyswitch_runtime_broker_stop
+    buddyswitch_browser_instance_stop "${instance_id}" || true
+    buddyswitch_instance_clear_app_server "${instance_id}" "inactive"
     return 1
   fi
   if [[ "${json}" -eq 1 ]]; then

@@ -583,8 +583,25 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["previous_thread_id"], "thread-old")
         self.assertEqual(payload["thread_id"], "thread-new")
-        self.assertEqual(payload["turn_id"], "turn-init")
-        self.assertEqual(payload["instance"]["thread_id"], "thread-new")
+
+    def test_clear_route_returns_command_failure_when_launcher_clear_fails(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    ["instance", "clear", "inst-pm-demo", "--json"],
+                    command_error(returncode=1, stderr="Daemon start failed for inst-pm-demo."),
+                ),
+            ]
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=runner.run)
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("POST", "/api/instances/inst-pm-demo/clear", b"")
+
+        self.assertEqual(raised.exception.status, 502)
+        self.assertEqual(raised.exception.code, "COMMAND_FAILED")
+        self.assertEqual(len(runner.calls), 1)
+        self.assertEqual(runner.calls[0][0], ["instance", "clear", "inst-pm-demo", "--json"])
 
     def test_initialize_route_sends_fixed_prompt_and_waits(self) -> None:
         runner = OrderedRunner(
