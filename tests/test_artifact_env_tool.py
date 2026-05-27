@@ -321,7 +321,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("kind", artifact)
         self.assertNotIn("content", artifact)
 
-    def test_create_revision_enforces_manifest_template_permissions(self) -> None:
+    def test_create_revision_enforces_buddy_template_allowlist(self) -> None:
         buddy_cases = (
             ("pm", ("brief", "decision", "note"), ("design", "proof")),
             ("design", ("design", "brief"), ("decision", "note", "proof")),

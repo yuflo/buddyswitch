@@ -499,7 +499,16 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"comment_id": root_id, "resolution_summary": "should fail"},
         )
         self.assertFalse(non_pm.get("ok"), msg=non_pm)
-        self.assertEqual(non_pm.get("permission_boundary"), "comment.pm_review_authority")
+        self.assertEqual((non_pm.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
+        self.assertEqual(non_pm.get("permission_boundary"), "tool.role_authority")
+        self.assertEqual(non_pm.get("required_permission"), "comment.resolve")
+        self.assertEqual(non_pm.get("active_role"), "dev")
+        self.assertEqual(non_pm.get("allowed_roles"), ["pm"])
+        self.assertIs(non_pm.get("state_changed"), False)
+        stored_root = env_store.get_comment(root_id)
+        self.assertIsInstance(stored_root, dict)
+        assert isinstance(stored_root, dict)
+        self.assertEqual(stored_root.get("status"), "open")
 
         blank_summary = self._dispatch(
             instance_json=self._instance_json(instance_id=pm_instance_id, buddy="pm"),

@@ -180,8 +180,13 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         self.assertFalse(denied.get("ok"), msg=denied)
-        self.assertEqual((denied.get("error") or {}).get("code"), "E_TRACK_AUTHORITY")
-        self.assertEqual(denied.get("permission_boundary"), "track.lifecycle_authority")
+        self.assertEqual((denied.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
+        self.assertEqual(denied.get("permission_boundary"), "tool.role_authority")
+        self.assertEqual(denied.get("required_permission"), "track.create")
+        self.assertEqual(denied.get("active_role"), "design")
+        self.assertEqual(denied.get("allowed_roles"), ["pm"])
+        self.assertIs(denied.get("state_changed"), False)
+        self.assertFalse(env_store.track_file("track-denied").exists())
 
     def test_update_now_rejects_owner_buddy_without_state_mutation(self) -> None:
         pm_instance = self._pm_instance()
@@ -925,6 +930,10 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_archive_boundaries(self) -> None:
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-archive").get("ok"))
+        before_archive = env_store.get_track("track-archive")
+        self.assertIsInstance(before_archive, dict)
+        assert isinstance(before_archive, dict)
+        self.assertIsNone(before_archive.get("archived_at"))
 
         design_instance = self._instance_json(instance_id="inst-design-track", buddy="design")
         denied = self._dispatch(
@@ -936,7 +945,16 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"track_id": "track-archive"},
         )
         self.assertFalse(denied.get("ok"), msg=denied)
-        self.assertEqual((denied.get("error") or {}).get("code"), "E_TRACK_AUTHORITY")
+        self.assertEqual((denied.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
+        self.assertEqual(denied.get("permission_boundary"), "tool.role_authority")
+        self.assertEqual(denied.get("required_permission"), "track.archive")
+        self.assertEqual(denied.get("active_role"), "design")
+        self.assertEqual(denied.get("allowed_roles"), ["pm"])
+        self.assertIs(denied.get("state_changed"), False)
+        after_denied_archive = env_store.get_track("track-archive")
+        self.assertIsInstance(after_denied_archive, dict)
+        assert isinstance(after_denied_archive, dict)
+        self.assertIsNone(after_denied_archive.get("archived_at"))
 
         archived = self._dispatch(
             instance_json=pm_instance,

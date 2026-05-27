@@ -125,6 +125,58 @@ print(json.dumps(response, sort_keys=True))
             check=False,
         )
 
+    def _run_router_subprocess_with_blocked_impl(
+        self,
+        *,
+        instance_json: Path,
+        payload: dict[str, object],
+        blocked_module: str,
+        buddy: str = "dev",
+    ) -> subprocess.CompletedProcess[str]:
+        payload_json = json.dumps(payload, ensure_ascii=True)
+        script = f"""
+import importlib.abc
+import json
+import sys
+from pathlib import Path
+
+root = Path({str(ROOT)!r})
+sys.path.insert(0, str(root / "scripts"))
+
+class BlockSelectedImpl(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == {blocked_module!r}:
+            raise RuntimeError("blocked selected _impl import")
+        return None
+
+sys.meta_path.insert(0, BlockSelectedImpl())
+
+import env_manifest
+from env.tool_runtime.registry import dispatch_env_tool_request
+
+manifest_path = Path({str(MANIFEST)!r})
+instance_json = Path({str(instance_json)!r})
+instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
+response = dispatch_env_tool_request(
+    payload=json.loads({payload_json!r}),
+    active_buddy={buddy!r},
+    instance_id=instance_payload["instance_id"],
+    instance_json=instance_json,
+    instance_payload=instance_payload,
+    manifest=env_manifest.load_manifest(manifest_path),
+    manifest_path=manifest_path,
+)
+loaded = sorted(name for name in sys.modules if name.startswith("env.tools.") and name.endswith("._impl"))
+print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
+"""
+        return subprocess.run(
+            ["python3", "-c", script],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
     def test_registry_surface_matches_expected_tools(self) -> None:
         tools = set(tool_registry.supported_tools())
         self.assertEqual(tools, EXPECTED_TOOLS)
@@ -181,6 +233,73 @@ print(json.dumps(response, sort_keys=True))
         self.assertIs(response.get("state_changed"), False)
         self.assertIs(response.get("retryable"), False)
         self.assertIn("blocked message _impl import", str(response.get("why_blocked")))
+
+    def test_role_auth_denies_before_selected_private_impl_import(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-role-deny-before-import", buddy="dev")
+        completed = self._run_router_subprocess_with_blocked_impl(
+            instance_json=instance_json,
+            payload={
+                "tool": "track",
+                "action": "create",
+                "args": {
+                    "track_id": "track-denied",
+                    "title": "Denied",
+                    "outcome": "x",
+                    "appetite": "1d",
+                },
+            },
+            blocked_module="env.tools.track._impl",
+            buddy="dev",
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        payload = json.loads(completed.stdout)
+        response = payload["response"]
+        self.assertFalse(response.get("ok"), msg=payload)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
+        self.assertEqual(response.get("permission_boundary"), "tool.role_authority")
+        self.assertEqual(response.get("required_permission"), "track.create")
+        self.assertEqual(response.get("active_role"), "dev")
+        self.assertEqual(response.get("allowed_roles"), ["pm"])
+        self.assertIs(response.get("state_changed"), False)
+        self.assertEqual(response.get("durability"), "none")
+        self.assertNotIn("env.tools.track._impl", payload["loaded"])
+
+    def test_allowed_role_reaches_selected_private_impl_import(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-pm-role-allow-reaches-import", buddy="pm")
+        completed = self._run_router_subprocess_with_blocked_impl(
+            instance_json=instance_json,
+            payload={
+                "tool": "track",
+                "action": "create",
+                "args": {
+                    "track_id": "track-allowed",
+                    "title": "Allowed",
+                    "outcome": "x",
+                    "appetite": "1d",
+                },
+            },
+            blocked_module="env.tools.track._impl",
+            buddy="pm",
+        )
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        response = json.loads(completed.stdout)["response"]
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL_DISPATCH")
+        self.assertEqual(response.get("permission_boundary"), "env.tool.dispatch")
+        self.assertIn("blocked selected _impl import", str(response.get("why_blocked")))
+
+    def test_role_auth_denial_precedes_args_shape_validation(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-role-deny-before-payload", buddy="dev")
+        response = self._dispatch_env_tool(
+            payload={"tool": "track", "action": "create", "args": "not-an-object"},
+            instance_json=instance_json,
+            buddy="dev",
+        )
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
+        self.assertEqual(response.get("permission_boundary"), "tool.role_authority")
+        self.assertEqual(response.get("required_permission"), "track.create")
+        self.assertEqual(response.get("active_role"), "dev")
 
     def test_selected_dispatch_imports_no_sibling_private_impl_modules(self) -> None:
         instance_json = self._instance_json(instance_id="inst-dev-selected-impl-import", buddy="dev")

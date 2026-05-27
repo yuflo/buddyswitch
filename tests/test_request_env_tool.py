@@ -457,6 +457,7 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             args={"request_id": request_id},
         )
         self.assertFalse(unauthorized_accept.get("ok"), msg=unauthorized_accept)
+        self.assertEqual(unauthorized_accept.get("permission_boundary"), "request.recipient_scope")
 
         accepted = self._dispatch(
             instance_json=dev_instance,

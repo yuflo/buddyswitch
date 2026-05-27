@@ -16,6 +16,7 @@ if str(SCRIPTS) not in sys.path:
 
 import env_manifest  # noqa: E402
 from env.tool_runtime import registry as catalog  # noqa: E402
+from env.tool_runtime import role_auth  # noqa: E402
 from env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
@@ -23,13 +24,13 @@ MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 
 
 class EnvToolPayloadContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
-    def _instance_json(self) -> Path:
+    def _instance_json(self, *, buddy: str = "dev") -> Path:
         path = self._runtime_path("instance-payload-contract.json")
         path.write_text(
             json.dumps(
                 {
                     "instance_id": "inst-payload-contract",
-                    "buddy": "dev",
+                    "buddy": buddy,
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
                     "browser_port": None,
@@ -44,12 +45,12 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         return path
 
-    def _dispatch(self, *, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
-        instance_json = self._instance_json()
+    def _dispatch(self, *, tool: str, action: str, args: dict[str, object], buddy: str = "dev") -> dict[str, object]:
+        instance_json = self._instance_json(buddy=buddy)
         instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
         return dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
-            active_buddy="dev",
+            active_buddy=buddy,
             instance_id="inst-payload-contract",
             instance_json=instance_json,
             instance_payload=instance_payload,
@@ -81,13 +82,19 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                     )
 
     def test_every_action_rejects_unregistered_payload_field_without_state_change(self) -> None:
+        manifest = env_manifest.load_manifest(MANIFEST)
         for tool in sorted(catalog.supported_tools()):
             for action in sorted(catalog.supported_actions(tool)):
                 with self.subTest(tool=tool, action=action):
+                    action_def = catalog.get_action_definition(tool, action)
+                    allowed_roles = role_auth.allowed_roles_for_permission(action_def.required_permission, manifest)
+                    self.assertTrue(allowed_roles, msg=f"{tool}.{action}")
+                    active_role = sorted(allowed_roles)[0]
                     response = self._dispatch(
                         tool=tool,
                         action=action,
                         args={"__unexpected_payload_field__": True},
+                        buddy=active_role,
                     )
                     self.assertFalse(response.get("ok"), msg=response)
                     self.assertIs(response.get("state_changed"), False, msg=response)

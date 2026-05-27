@@ -426,8 +426,11 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
             },
         )
         self.assertFalse(response["ok"])
-        self.assertEqual((response.get("error") or {}).get("code"), "E_TRACK_AUTHORITY")
-        self.assertEqual(response["permission_boundary"], "track.lifecycle_authority")
+        self.assertEqual((response.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
+        self.assertEqual(response["permission_boundary"], "tool.role_authority")
+        self.assertEqual(response.get("required_permission"), "track.create")
+        self.assertEqual(response.get("active_role"), "design")
+        self.assertEqual(response.get("allowed_roles"), ["pm"])
 
     def test_pm_page_prototype_decision_surface_prefers_direct_private_buddybox_directory_without_phrase_rule(self) -> None:
         pm_agents = (ROOT / "tools" / "launcher" / "assets" / "buddies" / "pm" / "AGENTS.md").read_text(

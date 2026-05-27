@@ -12,7 +12,9 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+import env_manifest  # noqa: E402
 from env.tool_runtime import registry as catalog  # noqa: E402
+from env.tool_runtime import role_auth  # noqa: E402
 
 _EXPECTED_TOOLS = {"task", "track", "artifact", "context", "evidence", "search", "message", "comment", "request"}
 _EXPECTED_ACTIONS_BY_TOOL = {
@@ -216,6 +218,30 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertIsInstance(row["writes"], list)
                 self.assertIsInstance(row["does_not_write"], list)
                 self.assertIn(row["durability"], {"none", "transient", "durable"})
+
+    def test_operation_semantics_permissions_are_covered_by_role_policy(self) -> None:
+        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        manifest_roles = role_auth.manifest_role_ids(manifest)
+        for key, row in catalog.operation_semantics().items():
+            required_permission = row["required_permission"]
+            allowed_roles = role_auth.allowed_roles_for_permission(required_permission, manifest)
+            with self.subTest(action=key, required_permission=required_permission):
+                self.assertTrue(allowed_roles)
+                self.assertLessEqual(allowed_roles, manifest_roles)
+
+    def test_operation_semantics_remain_role_neutral(self) -> None:
+        forbidden_role_fields = {
+            "active_role",
+            "active_buddy",
+            "allowed_roles",
+            "allowed_actions",
+            "denied_actions",
+            "denied_action_details",
+            "role_authority_source",
+        }
+        for key, row in catalog.operation_semantics().items():
+            with self.subTest(action=key):
+                self.assertTrue(forbidden_role_fields.isdisjoint(row))
 
     def test_task_current_operation_semantics_are_read_only(self) -> None:
         current = catalog.operation_semantics()["task.current"]

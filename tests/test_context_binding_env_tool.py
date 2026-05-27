@@ -332,22 +332,23 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         snapshot = payload.get("capability_snapshot")
         self.assertIsInstance(snapshot, dict, msg=payload)
         assert isinstance(snapshot, dict)
-        self.assertEqual(
-            set(snapshot),
-            {
-                "active_buddy",
-                "track_lifecycle_authority",
-                "task_visibility",
-                "artifact_publication_path",
-                "comment_target_support",
-                "request_lifecycle_visibility",
-                "search_boundary",
-                "evidence_boundary",
-                "writable_file_surface",
-            },
-        )
-        self.assertEqual(snapshot.get("active_buddy"), "dev")
-        self.assertIn("cannot create/archive", str(snapshot.get("track_lifecycle_authority")))
+        self.assertEqual(snapshot.get("active_role"), "dev")
+        self.assertEqual(snapshot.get("role_authority_source"), "env.tool role action policy")
+        self.assertIn("allowed_actions", snapshot)
+        self.assertIn("denied_actions", snapshot)
+        self.assertIn("denied_action_details", snapshot)
+        self.assertIn("track.list", snapshot.get("allowed_actions", []))
+        self.assertIn("artifact.create_revision", snapshot.get("allowed_actions", []))
+        self.assertIn("request.accept", snapshot.get("allowed_actions", []))
+        self.assertIn("track.create", snapshot.get("denied_actions", []))
+        self.assertIn("track.archive", snapshot.get("denied_actions", []))
+        self.assertIn("comment.resolve", snapshot.get("denied_actions", []))
+        denied_details = snapshot.get("denied_action_details")
+        self.assertIsInstance(denied_details, dict, msg=snapshot)
+        assert isinstance(denied_details, dict)
+        self.assertEqual(denied_details.get("track.create", {}).get("required_permission"), "track.create")
+        self.assertEqual(denied_details.get("track.create", {}).get("allowed_roles"), ["pm"])
+        self.assertNotIn("object_" + "permissions", json.dumps(snapshot, ensure_ascii=True))
         self.assertIn("active-buddy private", str(snapshot.get("task_visibility")))
         artifact_create = tool_registry.operation_semantics()["artifact.create_revision"]
         self.assertEqual(
@@ -718,6 +719,15 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         operation_semantics = payload.get("operation_semantics")
         self.assertIsInstance(operation_semantics, dict, msg=payload)
         assert isinstance(operation_semantics, dict)
+        snapshot = payload.get("capability_snapshot")
+        self.assertIsInstance(snapshot, dict, msg=payload)
+        assert isinstance(snapshot, dict)
+        denied_details = snapshot.get("denied_action_details")
+        self.assertIsInstance(denied_details, dict, msg=snapshot)
+        assert isinstance(denied_details, dict)
+        self.assertEqual(denied_details.get("comment.resolve", {}).get("required_permission"), "comment.resolve")
+        self.assertEqual(denied_details.get("comment.resolve", {}).get("allowed_roles"), ["pm"])
+        self.assertNotIn("object_" + "permissions", json.dumps(payload, ensure_ascii=True))
         self.assertIn("source_workspace", operation_semantics["context.get"]["returns"])
         self.assertIn("writable_surfaces", operation_semantics["context.get"]["returns"])
         self.assertIn("source_workspace", operation_semantics["context.summarize"]["returns"])

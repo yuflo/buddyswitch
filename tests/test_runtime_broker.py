@@ -363,6 +363,27 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(supported["ok"], msg=supported)
 
+        role_denied = self._dispatch(
+            method="env.tool",
+            params={
+                "tool": "track",
+                "action": "create",
+                "args": {
+                    "track_id": "track-broker-role-denied",
+                    "title": "Broker Role Denied",
+                    "outcome": "Denied",
+                    "appetite": "1 day",
+                },
+            },
+            instance_json=instance_json,
+            instance_id="inst-dev-example",
+            buddy="dev",
+        )
+        self.assertFalse(role_denied["ok"], msg=role_denied)
+        self.assertEqual(role_denied["error"]["code"], "E_TOOL_ROLE_AUTH")
+        self.assertEqual(role_denied.get("active_role"), "dev")
+        self.assertEqual(role_denied.get("required_permission"), "track.create")
+
         wrong_instance = self._dispatch(
             method="env.tool",
             params={"tool": "task", "action": "current", "args": {}},

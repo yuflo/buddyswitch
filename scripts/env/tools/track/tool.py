@@ -116,7 +116,7 @@ def _build_definition() -> ToolDefinition:
                 success_effect='Creates one PM-owned shared product outcome thread with initial outcome, appetite, now focus, state, and health.',
                 failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
                 reads=(
-                    'manifest buddy permissions',
+                    'env.tool role-action policy',
                     'existing track ids',
                 ),
                 writes=(

@@ -272,6 +272,29 @@ class RepoConsistencyTests(unittest.TestCase):
                     self.assertEqual(operation["writes"], list(action.writes))
                     self.assertEqual(operation["does_not_write"], list(action.does_not_write))
 
+    def test_env_manifest_has_no_retired_acl_rows(self) -> None:
+        completed = subprocess.run(
+            ["rg", "-n", r"permissions = \[", "buddyswitch/manifest.toml"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        self.assertEqual(completed.stdout.strip(), "")
+
+    def test_active_runtime_has_no_retired_manifest_acl_references(self) -> None:
+        retired_acl_pattern = "buddy_" + "permissions|object_" + "permissions|manual_debug_" + "apis"
+        completed = subprocess.run(
+            ["rg", "-n", retired_acl_pattern, "scripts", "tests", "buddyswitch"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        self.assertEqual(completed.stdout.strip(), "")
+
     def test_forbidden_runtime_surfaces_are_not_shipped(self) -> None:
         self.assertTrue(_FORBIDDEN_RUNTIME_SURFACES.isdisjoint(set(tool_catalog.supported_tools())))
         for tool in sorted(tool_catalog.supported_tools()):

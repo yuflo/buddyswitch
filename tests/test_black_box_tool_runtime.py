@@ -392,7 +392,7 @@ print(json.dumps({
                                 output_schema={"$ref": "ToolResult"},
                                 kind="read",
                                 mutates=MUTATES_NONE,
-                                required_permission="probe.ping",
+                                required_permission="none",
                                 authority="probe",
                                 visibility="test-only probe",
                                 durability="none",

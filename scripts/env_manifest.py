@@ -2,8 +2,9 @@
 """Load and validate the BuddySwitch env manifest.
 
 Manifest skill entries define buddy membership and package paths.
-Buddy rows define persistence boundaries (artifact templates + permissions).
+Buddy rows define routing skills and artifact templates.
 Codex-native package acceptance is owned by Codex after materialization.
+Env tool role-action authority is owned by the runtime tool dispatch policy.
 """
 
 from __future__ import annotations
@@ -23,11 +24,9 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 _SAFE_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
-_SAFE_PERMISSION_PART_RE = re.compile(r"^[a-z][a-z0-9-_]*$")
 _VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", "note")
 _LEGACY_ARTIFACT_KINDS_KEY = "artifact_" + "kinds"
 ADVISORY_RUNTIME_METADATA_POLICY = "advisory"
-DEBUG_API_PERMISSION_SCOPE = "manual_debug_apis"
 BROWSER_COCKPIT_HOST_EXECUTION = {
     "execution_mode": "browser-cockpit-native",
     "browser_mode": "headed-only",
@@ -256,29 +255,6 @@ def _require_string_list(node: dict[str, Any], key: str, label: str, *, allow_em
     return cleaned
 
 
-def _validate_permission(permission: str, label: str) -> None:
-    if "." not in permission:
-        raise ManifestError(f"{label} permission '{permission}' must use '<object>.<action>' format")
-    obj, action = permission.split(".", 1)
-    supported_objects = {
-        "track",
-        "task",
-        "artifact",
-        "context",
-        "evidence",
-        "message",
-        "comment",
-        "request",
-        "search",
-    }
-    if obj not in supported_objects:
-        raise ManifestError(f"{label} permission '{permission}' has unsupported object '{obj}'")
-    if not action:
-        raise ManifestError(f"{label} permission '{permission}' has empty action")
-    if not _SAFE_PERMISSION_PART_RE.match(action):
-        raise ManifestError(f"{label} permission '{permission}' has invalid action '{action}'")
-
-
 def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
     if not path.exists():
         raise ManifestError(f"Manifest not found: {path}")
@@ -334,6 +310,8 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
 
         _require_string(buddy, "label", label)
         _require_string(buddy, "scope", label)
+        if "permissions" in buddy:
+            raise ManifestError(f"{label}.permissions is retired; role-action authority is owned by env.tool runtime policy")
         declared_skills = _require_string_list(buddy, "skills", label, allow_empty=True)
         raw_templates = buddy.get("artifact_templates")
         normalized_artifact_templates: list[str] = []
@@ -369,9 +347,6 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
             raise ManifestError(f"{label}.artifact_templates must not be empty after normalization")
         buddy["artifact_templates"] = normalized_artifact_templates
         buddy.pop(_LEGACY_ARTIFACT_KINDS_KEY, None)
-        permissions = _require_string_list(buddy, "permissions", label)
-        for permission in permissions:
-            _validate_permission(permission, label)
         for declared_skill in declared_skills:
             if declared_skill not in skill_lookup:
                 raise ManifestError(f"{label}.skills contains unknown skill '{declared_skill}'")
@@ -399,21 +374,13 @@ def require_buddy(manifest: dict[str, Any], buddy_id: str) -> dict[str, Any]:
     return buddy
 
 
-def buddy_permissions(manifest: dict[str, Any], buddy_id: str) -> set[str]:
-    buddy = require_buddy(manifest, buddy_id)
-    return set(buddy.get("permissions", []))
-
-
 def buddy_authority_profile(manifest: dict[str, Any], buddy_id: str) -> dict[str, Any]:
     buddy = require_buddy(manifest, buddy_id)
     return {
         "routing_skills": list(buddy.get("skills", [])),
-        "object_permissions": list(buddy.get("permissions", [])),
-        "permission_scope": DEBUG_API_PERMISSION_SCOPE,
         "runtime_note": (
             "buddy->skills controls which runtime packages are materialized under .agents/skills, "
-            "while product writes are explicit env.tool operations over track/task/artifact "
-            "objects. object permission enforcement remains in manual/debug mutation APIs."
+            "while env.tool role-action authority is computed by the runtime tool dispatch policy."
         ),
     }
 

@@ -220,7 +220,6 @@ skills = [
   "request-tool",
 ]
 artifact_templates = ["brief"]
-permissions = ["track.read", "track.update_now", "track.add_material", "track.add_update", "track.add_proof", "task.read", "task.propose", "task.confirm", "artifact.read", "artifact.create", "artifact.update", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "request.read", "request.create", "request.accept", "request.block", "request.complete", "request.cancel", "search.use"]
 
 [[buddies]]
 id = "pm"
@@ -245,36 +244,6 @@ skills = [
   "request-tool",
 ]
 artifact_templates = ["brief", "decision", "note"]
-permissions = [
-  "track.read",
-  "track.create",
-  "track.update_now",
-  "track.add_material",
-  "track.add_update",
-  "track.add_proof",
-  "track.archive",
-  "task.read",
-  "task.propose",
-  "task.confirm",
-  "artifact.read",
-  "artifact.create",
-  "artifact.update",
-  "artifact.delete",
-  "context.read",
-  "evidence.issue",
-  "message.send",
-  "message.list",
-  "comment.add",
-  "comment.list",
-  "comment.resolve",
-  "request.read",
-  "request.create",
-  "request.accept",
-  "request.block",
-  "request.complete",
-  "request.cancel",
-  "search.use",
-]
 
 [[buddies]]
 id = "design"
@@ -282,7 +251,6 @@ label = "Design"
 scope = "Shape UI/UX prototype direction and design artifact outcomes."
 skills = ["shape-prototype", "track-tool", "artifact-tool", "task-management", "message-tool", "comment-tool", "request-tool"]
 artifact_templates = ["design", "brief"]
-permissions = ["track.read", "track.update_now", "track.add_material", "track.add_update", "track.add_proof", "task.read", "task.propose", "task.confirm", "artifact.read", "artifact.create", "artifact.update", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "request.read", "request.create", "request.accept", "request.block", "request.complete", "request.cancel", "search.use"]
 
 [[buddies]]
 id = "dev"
@@ -311,7 +279,6 @@ skills = [
   "request-tool",
 ]
 artifact_templates = ["brief", "note"]
-permissions = ["track.read", "track.update_now", "track.add_material", "track.add_update", "track.add_proof", "task.read", "task.propose", "task.confirm", "artifact.read", "artifact.create", "artifact.update", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "request.read", "request.create", "request.accept", "request.block", "request.complete", "request.cancel", "search.use"]
 
 [[buddies]]
 id = "test"
@@ -319,4 +286,3 @@ label = "Test"
 scope = "Validate behavior and report pass/fail/blocked outcomes."
 skills = ["smoke-test", "track-tool", "artifact-tool", "task-management", "message-tool", "comment-tool", "request-tool"]
 artifact_templates = ["proof"]
-permissions = ["track.read", "track.update_now", "track.add_material", "track.add_update", "track.add_proof", "task.read", "task.propose", "task.confirm", "artifact.read", "artifact.create", "artifact.update", "context.read", "evidence.issue", "message.send", "message.list", "comment.add", "comment.list", "request.read", "request.create", "request.accept", "request.block", "request.complete", "request.cancel", "search.use"]

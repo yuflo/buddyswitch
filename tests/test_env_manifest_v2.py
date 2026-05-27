@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -28,37 +29,26 @@ class EnvManifestV2Tests(unittest.TestCase):
         skill_ids = [row["id"] for row in self.manifest.get("skills", []) if isinstance(row, dict)]
         self.assertNotIn("handoff-tool", skill_ids)
 
-    def test_buddy_permissions_are_runless(self) -> None:
+    def test_buddies_do_not_carry_retired_permission_rows(self) -> None:
         for buddy in self.manifest.get("buddies", []):
             assert isinstance(buddy, dict)
-            permissions = set(buddy.get("permissions", []))
             with self.subTest(buddy=buddy.get("id")):
-                self.assertFalse(any(item.startswith("memory.") for item in permissions))
-                self.assertFalse(any(item.startswith("buddybox.") for item in permissions))
-                self.assertNotIn("run.commit", permissions)
-                self.assertNotIn("binding.get", permissions)
-                self.assertFalse(any(item.startswith("handoff.") for item in permissions))
+                self.assertNotIn("permissions", buddy)
 
-    def test_buddy_permissions_do_not_declare_buddybox_special_cases(self) -> None:
-        for buddy in self.manifest.get("buddies", []):
-            assert isinstance(buddy, dict)
-            buddy_id = str(buddy.get("id"))
-            permissions = set(buddy.get("permissions", []))
-            with self.subTest(buddy=buddy_id):
-                for permission in permissions:
-                    lowered = permission.lower()
-                    self.assertFalse(lowered.startswith("buddybox.read_foreign"))
-                    self.assertFalse(lowered.startswith("buddybox.pm_override"))
-                    self.assertFalse(lowered.startswith("buddybox." + buddy_id + "_"))
-                    self.assertFalse(lowered.startswith("buddybox."))
-
-    def test_memory_permissions_are_rejected_by_validator(self) -> None:
-        with self.assertRaisesRegex(env_manifest.ManifestError, "unsupported object 'memory'"):
-            env_manifest._validate_permission("memory.read", "synthetic")  # noqa: SLF001
-
-    def test_handoff_permissions_are_rejected_by_validator(self) -> None:
-        with self.assertRaisesRegex(env_manifest.ManifestError, "unsupported object 'handoff'"):
-            env_manifest._validate_permission("handoff.read", "synthetic")  # noqa: SLF001
+    def test_legacy_role_acl_rows_are_rejected(self) -> None:
+        manifest_text = self.manifest_path.read_text(encoding="utf-8")
+        legacy_text = manifest_text.replace(
+            'artifact_templates = ["brief"]',
+            'artifact_templates = ["brief"]\npermissions = ["track.read"]',
+            1,
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "manifest.toml"
+            path.write_text(legacy_text, encoding="utf-8")
+            manifest_error = env_manifest.ManifestError
+            retired_key = "per" + "missions"
+            with self.assertRaisesRegex(manifest_error, retired_key + ".*retired"):
+                env_manifest.load_manifest(path)
 
     def test_shared_skill_rows_use_id_and_path_contract(self) -> None:
         for row in self.manifest.get("skills", []):
@@ -69,10 +59,8 @@ class EnvManifestV2Tests(unittest.TestCase):
         for buddy in self.manifest.get("buddies", []):
             assert isinstance(buddy, dict)
             buddy_id = buddy.get("id")
-            permissions = {row for row in buddy.get("permissions", []) if isinstance(row, str)}
             self.assertIsInstance(buddy_id, str)
             assert isinstance(buddy_id, str)
-            self.assertFalse(any(permission.startswith("buddybox.") for permission in permissions), msg=buddy_id)
             skills = {row for row in buddy.get("skills", []) if isinstance(row, str)}
             self.assertNotIn("buddybox-tool", skills, msg=buddy_id)
 
@@ -84,54 +72,21 @@ class EnvManifestV2Tests(unittest.TestCase):
         ]
         self.assertEqual(rows, [])
 
-    def test_message_comment_and_request_permissions_are_supported(self) -> None:
-        """MCT-MAN-001: Manifest validator accepts message/comment/request permission objects."""
-        env_manifest._validate_permission("message.send", "synthetic")  # noqa: SLF001
-        env_manifest._validate_permission("message.list", "synthetic")  # noqa: SLF001
-        env_manifest._validate_permission("comment.add", "synthetic")  # noqa: SLF001
-        env_manifest._validate_permission("comment.list", "synthetic")  # noqa: SLF001
-        env_manifest._validate_permission("comment.resolve", "synthetic")  # noqa: SLF001
-        env_manifest._validate_permission("request.read", "synthetic")  # noqa: SLF001
-        env_manifest._validate_permission("request.create", "synthetic")  # noqa: SLF001
-        env_manifest._validate_permission("request.accept", "synthetic")  # noqa: SLF001
-        env_manifest._validate_permission("request.block", "synthetic")  # noqa: SLF001
-        env_manifest._validate_permission("request.complete", "synthetic")  # noqa: SLF001
-        env_manifest._validate_permission("request.cancel", "synthetic")  # noqa: SLF001
-
-    def test_all_buddies_have_message_comment_request_tools_and_permissions(self) -> None:
-        """MCT-MAN-002: Every buddy has message/comment/request tools and participant permissions."""
+    def test_all_buddies_have_message_comment_request_tools(self) -> None:
+        """MCT-MAN-002: Every buddy has message/comment/request tools."""
         required_tools = {"message-tool", "comment-tool", "request-tool"}
-        required_permissions = {
-            "message.send",
-            "message.list",
-            "comment.add",
-            "comment.list",
-            "request.read",
-            "request.create",
-            "request.accept",
-            "request.block",
-            "request.complete",
-            "request.cancel",
-        }
         for buddy in self.manifest.get("buddies", []):
             assert isinstance(buddy, dict)
             buddy_id = str(buddy.get("id"))
             skills = {row for row in buddy.get("skills", []) if isinstance(row, str)}
-            permissions = {row for row in buddy.get("permissions", []) if isinstance(row, str)}
             with self.subTest(buddy=buddy_id):
                 self.assertTrue(required_tools.issubset(skills), msg=f"{buddy_id} missing tools: {required_tools - skills}")
-                self.assertTrue(required_permissions.issubset(permissions), msg=f"{buddy_id} missing permissions: {required_permissions - permissions}")
-                if buddy_id == "pm":
-                    self.assertIn("comment.resolve", permissions)
-                else:
-                    self.assertNotIn("comment.resolve", permissions)
 
-    def test_pm_manifest_and_profile_exclude_track_advance(self) -> None:
-        pm = next(
-            row for row in self.manifest.get("buddies", []) if isinstance(row, dict) and row.get("id") == "pm"
-        )
-        permissions = set(pm.get("permissions", []))
-        self.assertNotIn("track.advance", permissions)
+    def test_show_buddy_authority_excludes_retired_acl_fields(self) -> None:
+        profile = env_manifest.buddy_authority_profile(self.manifest, "pm")
+        self.assertNotIn("object_" + "permissions", profile)
+        self.assertNotIn("permission_scope", profile)
+        self.assertNotIn("manual_debug_" + "apis", str(profile))
 
     def test_buddies_use_artifact_templates_vocabulary(self) -> None:
         for buddy in self.manifest.get("buddies", []):

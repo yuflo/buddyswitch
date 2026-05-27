@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import env_profiles
+from env.tool_runtime import role_auth
 from env.tool_runtime import registry as tool_registry
-from .tool import DEFINITION
 from env.tool_runtime import results as tool_results
+from .tool import DEFINITION
 
 
 _ACTION_DEFINITION_MAP = {
@@ -301,36 +302,13 @@ def _candidate_task_row(*, task: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _active_buddy_permissions(*, active_buddy: str, manifest: dict[str, Any]) -> set[str]:
-    buddies = manifest.get("buddies")
-    if not isinstance(buddies, list):
-        return set()
-    for buddy in buddies:
-        if not isinstance(buddy, dict) or buddy.get("id") != active_buddy:
-            continue
-        permissions = buddy.get("permissions")
-        if not isinstance(permissions, list):
-            return set()
-        return {row for row in permissions if isinstance(row, str)}
-    return set()
-
-
-def _capability_snapshot(*, active_buddy: str, manifest: dict[str, Any]) -> dict[str, str]:
-    permissions = _active_buddy_permissions(active_buddy=active_buddy, manifest=manifest)
+def _capability_snapshot(*, active_buddy: str, manifest: dict[str, Any]) -> dict[str, Any]:
     operation_semantics = tool_registry.operation_semantics(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS)
     affordances = tool_registry.compact_tool_affordances(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS)
     artifact_create = operation_semantics["artifact.create_revision"]
-
-    can_create_track = "track.create" in permissions
-    can_archive_track = "track.archive" in permissions
-    if can_create_track and can_archive_track:
-        track_lifecycle_authority = "can create/archive PM-owned track lifecycle; shared mutation still follows readable track scope"
-    else:
-        track_lifecycle_authority = "cannot create/archive track lifecycle; may update shared tracks only through granted track actions"
-
-    return {
-        "active_buddy": active_buddy,
-        "track_lifecycle_authority": track_lifecycle_authority,
+    summary = role_auth.role_action_summary(active_buddy, manifest, operation_semantics)
+    summary.update(
+        {
         "task_visibility": str(operation_semantics["task.current"]["visibility"]),
         "artifact_publication_path": " ".join(
             [
@@ -344,7 +322,9 @@ def _capability_snapshot(*, active_buddy: str, manifest: dict[str, Any]) -> dict
         "search_boundary": str(affordances["search"]["object_model"]),
         "evidence_boundary": str(affordances["evidence"]["object_model"]),
         "writable_file_surface": "$BUDDYSWITCH_BUDDYBOX_DIR for persistent private files; $BUDDYSWITCH_INSTANCE_TMP for temporary files.",
-    }
+        }
+    )
+    return summary
 
 
 def _visible_tracks(*, track_filter: str | None, limit_value: int, context: ContextServiceContext) -> list[dict[str, Any]]:
