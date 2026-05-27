@@ -184,6 +184,13 @@ buddyswitch_app_server_thread_resume() {
     --permissions "buddyswitch-runtime"
 }
 
+buddyswitch_app_server_thread_bootstrap() {
+  local thread_id="$1"
+  python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-bootstrap \
+    --socket "$(buddyswitch_app_server_socket)" \
+    --thread-id "${thread_id}"
+}
+
 buddyswitch_app_server_thread_read() {
   local thread_id="$1"
   python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-read \

@@ -326,6 +326,88 @@ class AppServerClientTests(unittest.TestCase):
             self.assertEqual(errors, [])
             self.assertEqual(results[0]["thread"]["id"], "thread-1")
 
+    def test_thread_bootstrap_rollout_injects_minimal_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+
+            results: list[dict[str, object]] = []
+            errors: list[BaseException] = []
+
+            def run_bootstrap() -> None:
+                try:
+                    results.append(APP_SERVER.thread_bootstrap_rollout(socket_path, "thread-1"))
+                except BaseException as exc:
+                    errors.append(exc)
+
+            bootstrap_thread = threading.Thread(target=run_bootstrap, daemon=True)
+            bootstrap_thread.start()
+
+            init = server.next_message()
+            self.assertEqual(init["method"], "initialize")
+            server.send_response(init["id"], {"userAgent": "codex/1.0.0"})
+            self.assertEqual(server.next_message()["method"], "initialized")
+
+            request = server.next_message()
+            self.assertEqual(request["method"], "thread/inject_items")
+            params = request["params"]
+            assert isinstance(params, dict)
+            self.assertEqual(params["threadId"], "thread-1")
+            self.assertEqual(
+                params["items"],
+                [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "[BuddySwitch internal bootstrap marker]",
+                            }
+                        ],
+                    }
+                ],
+            )
+            server.send_response(request["id"], {})
+            bootstrap_thread.join(timeout=2)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(results, [{"ok": True, "thread_id": "thread-1"}])
+
+    def test_thread_bootstrap_rollout_propagates_inject_items_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+
+            errors: list[BaseException] = []
+
+            def run_bootstrap() -> None:
+                try:
+                    APP_SERVER.thread_bootstrap_rollout(socket_path, "thread-1")
+                except BaseException as exc:
+                    errors.append(exc)
+
+            bootstrap_thread = threading.Thread(target=run_bootstrap, daemon=True)
+            bootstrap_thread.start()
+
+            init = server.next_message()
+            self.assertEqual(init["method"], "initialize")
+            server.send_response(init["id"], {"userAgent": "codex/1.0.0"})
+            self.assertEqual(server.next_message()["method"], "initialized")
+
+            request = server.next_message()
+            self.assertEqual(request["method"], "thread/inject_items")
+            server.send_error(request["id"], code=-32000, message="inject failed")
+            bootstrap_thread.join(timeout=2)
+
+            self.assertEqual(len(errors), 1)
+            self.assertIsInstance(errors[0], APP_SERVER.AppServerRequestError)
+            self.assertIn("thread/inject_items failed", str(errors[0]))
+
     def test_request_ignores_notifications_until_matching_response(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = self._socket_path(Path(temp_root))

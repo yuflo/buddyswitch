@@ -9,7 +9,6 @@ import re
 import subprocess
 import sys
 import threading
-import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,10 +20,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 STATIC_ROOT = Path(__file__).resolve().parent / "assets" / "web-management"
 VALID_INSTANCE_ID_RE = re.compile(r"^inst-[A-Za-z0-9._-]+$")
 LOCAL_BIND_HOSTS = {"127.0.0.1", "localhost"}
-INITIALIZE_THREAD_PROMPT = "Initialize this BuddySwitch thread. Do not perform any task or use tools. Reply exactly: ready"
-ACTIVE_THREAD_STATUSES = {"active", "in_progress"}
-DEFAULT_INIT_WAIT_TIMEOUT_SECONDS = 120.0
-DEFAULT_INIT_WAIT_POLL_SECONDS = 0.25
 
 
 @dataclass(frozen=True)
@@ -219,14 +214,10 @@ class WebManagementService:
         repo_root: Path,
         command_runner: Callable[[list[str], float], CommandResult] | Callable[..., CommandResult] | None = None,
         busy_guard: BusyGuard | None = None,
-        init_wait_timeout_seconds: float = DEFAULT_INIT_WAIT_TIMEOUT_SECONDS,
-        init_wait_poll_seconds: float = DEFAULT_INIT_WAIT_POLL_SECONDS,
     ) -> None:
         self._repo_root = repo_root
         self._runner = command_runner or LauncherCommandRunner(repo_root).run
         self._busy_guard = busy_guard or BusyGuard()
-        self._init_wait_timeout_seconds = init_wait_timeout_seconds
-        self._init_wait_poll_seconds = init_wait_poll_seconds
 
     def handle_api(self, method: str, path: str, body: bytes) -> tuple[int, dict[str, Any]]:
         if method == "GET" and path == "/api/health":
@@ -251,8 +242,6 @@ class WebManagementService:
             return 200, {"ok": True, "instance": self._get_instance_status(instance_id)}
         if method == "POST" and action == "clear":
             return 200, self._clear(instance_id)
-        if method == "POST" and action == "initialize":
-            return 200, self._initialize(instance_id)
         if method == "POST" and action == "input":
             return 200, self._send_input(instance_id, body)
         if method == "POST" and action == "side":
@@ -275,8 +264,6 @@ class WebManagementService:
             return path[len(status_prefix) : -len("/status")], "status"
         if path.startswith(status_prefix) and path.endswith("/clear"):
             return path[len(status_prefix) : -len("/clear")], "clear"
-        if path.startswith(status_prefix) and path.endswith("/initialize"):
-            return path[len(status_prefix) : -len("/initialize")], "initialize"
         if path.startswith(status_prefix) and path.endswith("/input"):
             return path[len(status_prefix) : -len("/input")], "input"
         if path.startswith(status_prefix) and path.endswith("/side/close"):
@@ -318,9 +305,7 @@ class WebManagementService:
         instance_id = payload.get("instance_id")
         if not isinstance(instance_id, str) or not instance_id:
             raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid start payload for buddy {buddy}.")
-        init_payload = self._run_initialize_under_lock(instance_id)
-        init_payload["instance_id"] = instance_id
-        return init_payload
+        return {"ok": True, "instance_id": instance_id, "instance": self._get_instance_status(instance_id)}
 
     def _send_input(self, instance_id: str, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
@@ -358,31 +343,13 @@ class WebManagementService:
             result.stdout,
             message=f"Invalid JSON from instance clear for {instance_id}.",
         )
-        init_payload = self._run_initialize_under_lock(instance_id)
+        payload: dict[str, Any] = {"ok": True, "instance": self._get_instance_status(instance_id)}
         previous_thread_id = cleared.get("previous_thread_id")
         thread_id = cleared.get("thread_id")
         if isinstance(previous_thread_id, str):
-            init_payload["previous_thread_id"] = previous_thread_id
+            payload["previous_thread_id"] = previous_thread_id
         if isinstance(thread_id, str):
-            init_payload["thread_id"] = thread_id
-        return init_payload
-
-    def _initialize(self, instance_id: str) -> dict[str, Any]:
-        return self._run_busy(
-            f"instance:{instance_id}",
-            lambda: self._run_initialize_under_lock(instance_id),
-        )
-
-    def _run_initialize_under_lock(self, instance_id: str) -> dict[str, Any]:
-        parsed = self._run_input_command(instance_id, INITIALIZE_THREAD_PROMPT, timeout_seconds=60)
-        final_status = self._wait_for_instance_idle(instance_id)
-        payload: dict[str, Any] = {"ok": True, "instance": final_status}
-        turn_id = parsed.get("turn_id")
-        action = parsed.get("action")
-        if isinstance(turn_id, str):
-            payload["turn_id"] = turn_id
-        if isinstance(action, str):
-            payload["action"] = action
+            payload["thread_id"] = thread_id
         return payload
 
     def _run_input_command(self, instance_id: str, text: str, *, timeout_seconds: float) -> dict[str, Any]:
@@ -599,22 +566,6 @@ class WebManagementService:
             message=f"Invalid JSON from instance status for {instance_id}.",
         )
         return payload
-
-    def _wait_for_instance_idle(self, instance_id: str) -> dict[str, Any]:
-        deadline = time.monotonic() + self._init_wait_timeout_seconds
-        while True:
-            last_status = self._get_instance_status(instance_id)
-            thread = last_status.get("thread") if isinstance(last_status.get("thread"), dict) else {}
-            thread_status = thread.get("status") if isinstance(thread, dict) else None
-            if not isinstance(thread_status, str) or thread_status not in ACTIVE_THREAD_STATUSES:
-                return last_status
-            if time.monotonic() >= deadline:
-                raise HttpError(
-                    status=504,
-                    code="COMMAND_TIMEOUT",
-                    message=f"Initialization did not finish for {instance_id}.",
-                )
-            time.sleep(self._init_wait_poll_seconds)
 
     def _run_command(self, args: list[str], *, timeout_seconds: float) -> CommandResult:
         result = self._runner(args, timeout_seconds=timeout_seconds)

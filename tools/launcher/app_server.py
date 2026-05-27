@@ -59,6 +59,7 @@ External tools may be available according to this thread's current permissions. 
 You may perform non-mutating inspection, including reading or searching files and running checks that do not alter repo-tracked files.
 
 Do not modify files, source, git state, permissions, configuration, or any other workspace state unless the user explicitly requests that mutation in this side conversation. Do not request escalated permissions or broader sandbox access unless the user explicitly requests a mutation that requires it. If the user explicitly requests a mutation, keep it minimal, local to the request, and avoid disrupting the main thread."""
+BOOTSTRAP_MARKER_TEXT = "[BuddySwitch internal bootstrap marker]"
 
 
 class AppServerError(RuntimeError):
@@ -678,6 +679,21 @@ def thread_inject_items(socket_path: Path, thread_id: str, items: list[dict[str,
         )
 
 
+def thread_bootstrap_marker_item() -> dict[str, object]:
+    return {
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": BOOTSTRAP_MARKER_TEXT}],
+    }
+
+
+def thread_bootstrap_rollout(socket_path: Path, thread_id: str) -> dict[str, Any]:
+    if not thread_id:
+        raise AppServerProtocolError("thread bootstrap requires a thread id")
+    thread_inject_items(socket_path, thread_id, [thread_bootstrap_marker_item()])
+    return {"ok": True, "thread_id": thread_id}
+
+
 def thread_read(socket_path: Path, thread_id: str, *, include_turns: bool = False) -> dict[str, Any]:
     with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
         return client.request(
@@ -901,6 +917,12 @@ def _command_thread_resume(args: argparse.Namespace) -> int:
     return 0
 
 
+def _command_thread_bootstrap(args: argparse.Namespace) -> int:
+    payload = thread_bootstrap_rollout(Path(args.socket), args.thread_id)
+    print(json.dumps(payload, ensure_ascii=True))
+    return 0
+
+
 def _command_thread_read(args: argparse.Namespace) -> int:
     payload = thread_read(Path(args.socket), args.thread_id, include_turns=args.include_turns)
     print(json.dumps(payload, ensure_ascii=True))
@@ -1014,6 +1036,11 @@ def build_parser() -> argparse.ArgumentParser:
     thread_resume_parser.add_argument("--shared-project-workspace-dir", required=True)
     thread_resume_parser.add_argument("--permissions", required=True)
     thread_resume_parser.set_defaults(func=_command_thread_resume)
+
+    thread_bootstrap_parser = subparsers.add_parser("thread-bootstrap")
+    thread_bootstrap_parser.add_argument("--socket", required=True)
+    thread_bootstrap_parser.add_argument("--thread-id", required=True)
+    thread_bootstrap_parser.set_defaults(func=_command_thread_bootstrap)
 
     thread_read_parser = subparsers.add_parser("thread-read")
     thread_read_parser.add_argument("--socket", required=True)

@@ -21,7 +21,6 @@
         canStop: false,
         canDelete: false,
         canClear: false,
-        canInitialize: false,
         canResume: false,
       };
     }
@@ -42,7 +41,6 @@
       canStop: isActive,
       canDelete: isInactive,
       canClear: isActive && appServerHealthy && !threadBusy,
-      canInitialize: isActive && appServerHealthy && !threadBusy,
       canResume: isInactive,
     };
   }
@@ -181,7 +179,6 @@
     elements.stopButton.disabled = !actionState.canStop;
     elements.deleteButton.disabled = !actionState.canDelete;
     elements.clearButton.disabled = !actionState.canClear;
-    elements.initializeButton.disabled = !actionState.canInitialize;
     elements.resumeButton.disabled = !actionState.canResume;
   }
 
@@ -283,7 +280,6 @@
       stopButton: document.getElementById('stop-button'),
       deleteButton: document.getElementById('delete-button'),
       clearButton: document.getElementById('clear-button'),
-      initializeButton: document.getElementById('initialize-button'),
       resumeButton: document.getElementById('resume-button'),
       messageBanner: document.getElementById('message-banner'),
     };
@@ -338,13 +334,6 @@
     elements.clearButton.addEventListener('click', function () {
       runMutation(state, elements, 'clear', function () {
         return fetchJson('/api/instances/' + encodeURIComponent(state.selectedInstanceId) + '/clear', {
-          method: 'POST',
-        });
-      });
-    });
-    elements.initializeButton.addEventListener('click', function () {
-      runMutation(state, elements, 'initialize', function () {
-        return fetchJson('/api/instances/' + encodeURIComponent(state.selectedInstanceId) + '/initialize', {
           method: 'POST',
         });
       });

@@ -426,6 +426,8 @@ def _ensure_threads_state(state: dict[str, object]) -> dict[str, dict[str, objec
         main_thread["turns"] = state.get("turns", [])
     if not isinstance(main_thread.get("injected_items"), list):
         main_thread["injected_items"] = []
+    if "rollout_materialized" not in main_thread:
+        main_thread["rollout_materialized"] = bool(main_thread["turns"] or main_thread["injected_items"])
     state["threads"] = threads
     _sync_main_thread_legacy(state)
     return threads
@@ -439,12 +441,15 @@ def _thread_state(state: dict[str, object], thread_id: str) -> dict[str, object]
             "status": {"type": "idle"},
             "turns": [],
             "injected_items": [],
+            "rollout_materialized": False,
         }
         threads[thread_id] = thread
     if not isinstance(thread.get("turns"), list):
         thread["turns"] = []
     if not isinstance(thread.get("injected_items"), list):
         thread["injected_items"] = []
+    if "rollout_materialized" not in thread:
+        thread["rollout_materialized"] = bool(thread["turns"] or thread["injected_items"])
     return thread
 
 
@@ -515,6 +520,7 @@ def build_default_result(method: str, params: dict[str, object] | None, state: d
                     "status": {"type": "idle"},
                     "turns": [],
                     "injected_items": [],
+                    "rollout_materialized": False,
                 },
             }
             return {"thread": default_thread(temp_state, thread_id=clear_thread_id)}
@@ -599,9 +605,23 @@ def maybe_mutate_state(method: str, params: dict[str, object] | None, state: dic
             main_thread = _thread_state(state, main_thread_id)
             main_thread["status"] = {"type": "idle"}
             main_thread["turns"] = []
+            main_thread["injected_items"] = []
+            main_thread["rollout_materialized"] = False
             _sync_main_thread_legacy(state)
             return
-        _ensure_threads_state(state)
+        main_thread = _thread_state(state, main_thread_id)
+        if "thread_status" in state or "turns" in state:
+            if "thread_status" in state:
+                main_thread["status"] = state.get("thread_status", {"type": "idle"})
+            if isinstance(state.get("turns"), list):
+                main_thread["turns"] = state.get("turns", [])
+            main_thread["rollout_materialized"] = bool(main_thread.get("turns") or main_thread.get("injected_items"))
+        else:
+            main_thread["status"] = {"type": "idle"}
+            main_thread["turns"] = []
+            main_thread["injected_items"] = []
+            main_thread["rollout_materialized"] = False
+        _sync_main_thread_legacy(state)
         return
     if method == "thread/resume":
         count = state.get("thread_resume_count")
@@ -627,6 +647,7 @@ def maybe_mutate_state(method: str, params: dict[str, object] | None, state: dic
         items = params.get("items")
         if isinstance(items, list):
             thread["injected_items"] = [*thread.get("injected_items", []), *items]
+            thread["rollout_materialized"] = True
         return
     if method == "turn/start":
         thread_id = str(params.get("threadId")) if isinstance(params, dict) and params.get("threadId") else main_thread_id
@@ -634,6 +655,7 @@ def maybe_mutate_state(method: str, params: dict[str, object] | None, state: dic
         thread = _thread_state(state, thread_id)
         thread["status"] = {"type": "active", "activeFlags": []}
         thread["turns"] = [default_turn(next_turn_id)]
+        thread["rollout_materialized"] = True
         if thread_id == main_thread_id:
             _sync_main_thread_legacy(state)
         return
@@ -750,6 +772,13 @@ def handle_rpc_message(
                 code if isinstance(code, int) else -32001,
                 message_text if isinstance(message_text, str) else f"{method} failed",
             )
+
+    if method == "thread/resume":
+        thread_id = str(params_dict.get("threadId")) if isinstance(params_dict, dict) and params_dict.get("threadId") else _main_thread_id(state)
+        thread = _thread_state(state, thread_id)
+        if thread.get("rollout_materialized") is False:
+            save_server_state(state)
+            return rpc_error_response(request_id, -32600, f"no rollout found for thread id {thread_id}")
 
     responses = state.get("responses", {})
     if isinstance(responses, dict):

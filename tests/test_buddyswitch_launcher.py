@@ -2388,6 +2388,190 @@ exec "$real_git" "$@"
             )
             self.assertEqual(daemon_resume["params"]["threadId"], instance_payload["thread_id"])
 
+    def test_fake_codex_thread_start_is_unmaterialized_until_inject_or_turn_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                buddy="pm",
+                state_payload={
+                    "errors": {
+                        "thread/inject_items": {
+                            "code": -32000,
+                            "message": "inject failed",
+                        }
+                    }
+                },
+            )
+
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertNotEqual(completed.returncode, 0)
+
+            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
+            thread_id = state_payload["thread_id"]
+            thread = state_payload["threads"][thread_id]
+            self.assertFalse(thread["rollout_materialized"])
+            self.assertEqual(thread["turns"], [])
+            self.assertEqual(thread["injected_items"], [])
+
+    def test_fake_codex_inject_items_materializes_target_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
+            main_thread = state_payload["threads"][ctx["instance_payload"]["thread_id"]]
+            self.assertTrue(main_thread["rollout_materialized"])
+            self.assertEqual(main_thread["injected_items"][0]["role"], "assistant")
+
+    def test_fake_codex_turn_start_still_materializes_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
+            thread_id = ctx["instance_payload"]["thread_id"]
+            state_payload["threads"][thread_id]["rollout_materialized"] = False
+            Path(str(ctx["state_file"])).write_text(
+                json.dumps(state_payload, ensure_ascii=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            input_result = subprocess.run(
+                [str(LAUNCHER), "instance", "input", ctx["instance_id"], "--text", "materialize", "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(input_result.returncode, 0, msg=input_result.stderr)
+            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
+            self.assertTrue(state_payload["threads"][thread_id]["rollout_materialized"])
+
+    def test_start_bootstraps_main_thread_rollout_before_daemon_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            calls = self._read_json_lines(Path(str(ctx["calls_path"])))
+            rpc_rows = [row for row in calls if row.get("argv", [])[:1] == ["json-rpc"]]
+            thread_id = ctx["instance_payload"]["thread_id"]
+            relevant = [
+                row
+                for row in rpc_rows
+                if row.get("rpc_method") in {"thread/start", "thread/inject_items", "thread/resume"}
+            ]
+            start_index = next(i for i, row in enumerate(relevant) if row["rpc_method"] == "thread/start")
+            inject_index = next(i for i, row in enumerate(relevant) if row["rpc_method"] == "thread/inject_items")
+            daemon_resume_index = next(
+                i
+                for i, row in enumerate(relevant)
+                if row["rpc_method"] == "thread/resume" and row.get("client_name") == "buddyswitch_daemon"
+            )
+
+            self.assertLess(start_index, inject_index)
+            self.assertLess(inject_index, daemon_resume_index)
+            self.assertEqual(relevant[inject_index]["params"]["threadId"], thread_id)
+            self.assertEqual(relevant[daemon_resume_index]["params"]["threadId"], thread_id)
+
+    def test_start_bootstrap_uses_inject_items_not_turn_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            bootstrap = next(row for row in rpc_rows if row.get("rpc_method") == "thread/inject_items")
+            self.assertEqual(bootstrap["params"]["threadId"], ctx["instance_payload"]["thread_id"])
+            self.assertEqual(
+                bootstrap["params"]["items"],
+                [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "[BuddySwitch internal bootstrap marker]",
+                            }
+                        ],
+                    }
+                ],
+            )
+            self.assertNotIn(
+                "Initialize this " "BuddySwitch thread",
+                json.dumps(self._read_json_lines(Path(str(ctx["calls_path"])))),
+            )
+            launcher_turn_starts = [
+                row
+                for row in rpc_rows
+                if row.get("rpc_method") == "turn/start" and row.get("client_name") == "buddyswitch_launcher"
+            ]
+            self.assertEqual(launcher_turn_starts, [])
+
+    def test_thread_bootstrap_marker_is_minimal_assistant_output_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            bootstrap = next(row for row in rpc_rows if row.get("rpc_method") == "thread/inject_items")
+            self.assertEqual(
+                bootstrap["params"]["items"],
+                [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "[BuddySwitch internal bootstrap marker]",
+                            }
+                        ],
+                    }
+                ],
+            )
+            self.assertNotEqual(bootstrap["params"]["items"][0]["role"], "user")
+
+    def test_start_bootstrap_failure_fails_closed_without_ready_daemon(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                buddy="pm",
+                state_payload={
+                    "errors": {
+                        "thread/inject_items": {
+                            "code": -32000,
+                            "message": "inject failed",
+                        }
+                    }
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("thread/inject_items failed", completed.stderr)
+
+            instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
+            self.assertEqual(instance_payload["status"], "inactive")
+            self.assertIsNone(instance_payload["app_server_pid"])
+            self.assertIsNone(instance_payload["app_server_socket"])
+            self.assertIsNone(instance_payload["app_server_log"])
+            self.assertFalse((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "daemon.pid").exists())
+
     def test_start_rejects_codex_args_passthrough(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -3510,6 +3694,124 @@ exec "$real_git" "$@"
             self.assertEqual(daemon_state["ready"]["main_thread_id"], "thread-cleared")
             self.assertFalse(self._pid_is_live(old_daemon_pid))
 
+    def test_clear_bootstraps_new_thread_before_daemon_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={"clear_thread_id": "thread-cleared"},
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+
+            clear_result = subprocess.run(
+                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(clear_result.returncode, 0, msg=clear_result.stderr)
+
+            calls = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            start = next(row for row in calls if row.get("rpc_method") == "thread/start")
+            inject = next(row for row in calls if row.get("rpc_method") == "thread/inject_items")
+            daemon_resume = next(
+                row
+                for row in calls
+                if row.get("rpc_method") == "thread/resume" and row.get("client_name") == "buddyswitch_daemon"
+            )
+            self.assertEqual(start["params"]["sessionStartSource"], "clear")
+            self.assertEqual(inject["params"]["threadId"], "thread-cleared")
+            self.assertEqual(daemon_resume["params"]["threadId"], "thread-cleared")
+
+    def test_clear_bootstrap_failure_preserves_new_thread_and_stops_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={"clear_thread_id": "thread-cleared"},
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
+            state_payload["errors"] = {
+                "thread/inject_items": {
+                    "code": -32000,
+                    "message": "inject failed",
+                }
+            }
+            Path(str(ctx["state_file"])).write_text(
+                json.dumps(state_payload, ensure_ascii=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            clear_result = subprocess.run(
+                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(clear_result.returncode, 0)
+            self.assertIn("thread/inject_items failed", clear_result.stderr)
+            instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
+            self.assertEqual(instance_payload["thread_id"], "thread-cleared")
+            self.assertEqual(instance_payload["status"], "inactive")
+            self.assertIsNone(instance_payload["app_server_pid"])
+            self.assertIsNone(instance_payload["app_server_socket"])
+            self.assertIsNone(instance_payload["app_server_log"])
+            self.assertFalse((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "daemon.pid").exists())
+
+    def test_clear_daemon_failure_after_bootstrap_preserves_materialized_new_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                state_payload={
+                    "clear_thread_id": "thread-cleared",
+                    "thread_resume_error_on_count": 2,
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            clear_result = subprocess.run(
+                [str(LAUNCHER), "instance", "clear", ctx["instance_id"], "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(clear_result.returncode, 0)
+
+            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
+            self.assertTrue(state_payload["threads"]["thread-cleared"]["rollout_materialized"])
+            state_payload.pop("thread_resume_error_on_count", None)
+            Path(str(ctx["state_file"])).write_text(
+                json.dumps(state_payload, ensure_ascii=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            resume_result = subprocess.run(
+                [str(LAUNCHER), "instance", "resume", ctx["instance_id"], "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
+            self.assertEqual(json.loads(resume_result.stdout)["thread_id"], "thread-cleared")
+
     def test_clear_daemon_start_failure_preserves_new_thread_and_stops_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             ctx = self._start_service_instance(
@@ -3913,6 +4215,84 @@ exec "$real_git" "$@"
             self.assertTrue(resume_calls, "resume must use Codex app-server thread/resume")
             self.assertEqual(resume_calls[-1]["params"]["threadId"], thread_id)
             self.assertEqual(resume_calls[-1]["params"]["excludeTurns"], True)
+
+    def test_instance_resume_does_not_bootstrap_existing_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            instance_id = str(ctx["instance_id"])
+            thread_id = str(ctx["instance_payload"]["thread_id"])
+
+            stop_result = subprocess.run(
+                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            resume_result = subprocess.run(
+                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(resume_result.returncode, 0, msg=resume_result.stderr)
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            resume_calls = [row for row in rpc_rows if row.get("rpc_method") == "thread/resume"]
+            inject_calls = [row for row in rpc_rows if row.get("rpc_method") == "thread/inject_items"]
+            self.assertTrue(resume_calls)
+            self.assertEqual(resume_calls[-1]["params"]["threadId"], thread_id)
+            self.assertEqual(inject_calls, [])
+
+    def test_instance_resume_reports_no_rollout_for_unmaterialized_legacy_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(Path(temp_root), Path(source_home), buddy="pm")
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            instance_id = str(ctx["instance_id"])
+            thread_id = str(ctx["instance_payload"]["thread_id"])
+
+            stop_result = subprocess.run(
+                [str(LAUNCHER), "instance", "stop", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(stop_result.returncode, 0, msg=stop_result.stderr)
+
+            state_payload = json.loads(Path(str(ctx["state_file"])).read_text(encoding="utf-8"))
+            state_payload["threads"][thread_id]["rollout_materialized"] = False
+            Path(str(ctx["state_file"])).write_text(
+                json.dumps(state_payload, ensure_ascii=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            Path(str(ctx["calls_path"])).write_text("", encoding="utf-8")
+            resume_result = subprocess.run(
+                [str(LAUNCHER), "instance", "resume", instance_id, "--json"],
+                cwd=ROOT,
+                env=ctx["env"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(resume_result.returncode, 0)
+            self.assertIn("no rollout found", resume_result.stderr)
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            self.assertEqual([row for row in rpc_rows if row.get("rpc_method") == "thread/inject_items"], [])
 
     def test_instance_resume_human_output_reports_instance_and_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
