@@ -327,6 +327,5 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("No start / switch / confirm in checkout.", tui)
         self.assertNotIn("[USER INPUT]", tui)
 
-
 if __name__ == "__main__":
     unittest.main()
