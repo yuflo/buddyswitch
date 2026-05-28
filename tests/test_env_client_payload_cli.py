@@ -19,6 +19,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.tool_runtime import registry as tool_registry  # noqa: E402
+from runtime_kernel.client import RuntimeBrokerError  # noqa: E402
 
 
 class EnvClientPayloadCliTests(unittest.TestCase):
@@ -160,6 +161,51 @@ class EnvClientPayloadCliTests(unittest.TestCase):
         for tool in sorted(tool_registry.supported_tools()):
             with self.subTest(tool=tool):
                 self.assertNotIn(f"def _dispatch_{tool}(", source)
+
+    def test_broker_role_auth_error_preserves_receipt_fields_at_top_level(self) -> None:
+        receipt = {
+            "tool": "track",
+            "action": "track.create",
+            "category": "auth_denied",
+            "permission_boundary": "tool.role_authority",
+            "auth_source": "env.tool role-action policy",
+            "auth_stage": "pre_dispatch",
+            "executed": False,
+            "state_changed": False,
+            "durability": "none",
+            "retryable": False,
+            "retry_guidance": "Use an action allowed for this role.",
+            "why_blocked": "Action track.create is restricted by env.tool role-action policy.",
+            "impact": "No env action ran and runtime state was unchanged.",
+            "required_permission": "track.create",
+            "active_role": "market",
+            "allowed_roles": ["pm"],
+            "allowed_next_actions": ["Use context.summarize to inspect runtime policy preview for this role."],
+        }
+        error = RuntimeBrokerError(
+            "E_TOOL_ROLE_AUTH",
+            "active role is not allowed to run this tool action",
+            response={
+                "ok": False,
+                "error": {
+                    "code": "E_TOOL_ROLE_AUTH",
+                    "message": "active role is not allowed to run this tool action",
+                },
+                **receipt,
+            },
+            details=dict(receipt),
+        )
+        stdout = io.StringIO()
+        with mock.patch.object(sys, "argv", ["client.py", "track", "create", "--payload", "{}"]):
+            with mock.patch.object(self.client, "request_runtime_broker", side_effect=error):
+                with contextlib.redirect_stdout(stdout):
+                    code = self.client.main()
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(code, 1, msg=output)
+        self.assertEqual((output.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
+        for key, value in receipt.items():
+            with self.subTest(key=key):
+                self.assertEqual(output.get(key), value, msg=output)
 
 
 if __name__ == "__main__":

@@ -77,6 +77,43 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
         self.assertEqual(decision.allowed_roles, ())
         self.assertIn("not covered", decision.reason)
 
+    def test_role_action_summary_returns_runtime_policy_preview_shape(self) -> None:
+        summary = role_auth.role_action_summary("market", self.manifest, self.operation_semantics)
+        old_keys = (
+            "role_" + "authority_" + "source",
+            "allowed_" + "actions",
+            "denied_" + "actions",
+            "denied_" + "action_" + "details",
+            "allowed_" + "action_" + "permissions",
+        )
+        self.assertEqual(summary.get("active_role"), "market")
+        self.assertEqual(summary.get("source"), "env.tool role-action policy")
+        self.assertIs(summary.get("not_authorization_boundary"), True)
+        self.assertIs(summary.get("not_execution_result"), True)
+        self.assertIsInstance(summary.get("available_actions"), list, msg=summary)
+        self.assertIsInstance(summary.get("restricted_actions"), list, msg=summary)
+        self.assertIsInstance(summary.get("restricted_action_details"), dict, msg=summary)
+        for old_key in old_keys:
+            self.assertNotIn(old_key, summary)
+        self.assertIn("track.list", summary["available_actions"])
+        self.assertIn("artifact.create_revision", summary["available_actions"])
+        self.assertIn("request.accept", summary["available_actions"])
+        self.assertIn("track.create", summary["restricted_actions"])
+        self.assertIn("track.archive", summary["restricted_actions"])
+        self.assertIn("comment.resolve", summary["restricted_actions"])
+        details = summary["restricted_action_details"]
+        self.assertEqual(details.get("track.create", {}).get("required_permission"), "track.create")
+        self.assertEqual(details.get("track.create", {}).get("restricted_to_roles"), ["pm"])
+
+    def test_pm_preview_has_no_pm_only_restricted_actions(self) -> None:
+        summary = role_auth.role_action_summary("pm", self.manifest, self.operation_semantics)
+        self.assertNotIn("track.create", summary["restricted_actions"])
+        self.assertNotIn("track.archive", summary["restricted_actions"])
+        self.assertNotIn("comment.resolve", summary["restricted_actions"])
+        self.assertIn("track.create", summary["available_actions"])
+        self.assertIn("track.archive", summary["available_actions"])
+        self.assertIn("comment.resolve", summary["available_actions"])
+
 
 if __name__ == "__main__":
     unittest.main()

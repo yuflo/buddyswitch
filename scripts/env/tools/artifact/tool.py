@@ -336,7 +336,7 @@ def _build_definition() -> ToolDefinition:
                     'buddybox files',
                 ),
                 preconditions=(
-                    'active buddy owns artifact.create permission',
+                    'env.tool role-action policy allows this action for the active role',
                     'status and published_to_track are not accepted create_revision inputs',
                 ),
                 returns=(

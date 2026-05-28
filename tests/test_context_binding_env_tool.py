@@ -332,22 +332,33 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         snapshot = payload.get("capability_snapshot")
         self.assertIsInstance(snapshot, dict, msg=payload)
         assert isinstance(snapshot, dict)
-        self.assertEqual(snapshot.get("active_role"), "dev")
-        self.assertEqual(snapshot.get("role_authority_source"), "env.tool role action policy")
-        self.assertIn("allowed_actions", snapshot)
-        self.assertIn("denied_actions", snapshot)
-        self.assertIn("denied_action_details", snapshot)
-        self.assertIn("track.list", snapshot.get("allowed_actions", []))
-        self.assertIn("artifact.create_revision", snapshot.get("allowed_actions", []))
-        self.assertIn("request.accept", snapshot.get("allowed_actions", []))
-        self.assertIn("track.create", snapshot.get("denied_actions", []))
-        self.assertIn("track.archive", snapshot.get("denied_actions", []))
-        self.assertIn("comment.resolve", snapshot.get("denied_actions", []))
-        denied_details = snapshot.get("denied_action_details")
-        self.assertIsInstance(denied_details, dict, msg=snapshot)
-        assert isinstance(denied_details, dict)
-        self.assertEqual(denied_details.get("track.create", {}).get("required_permission"), "track.create")
-        self.assertEqual(denied_details.get("track.create", {}).get("allowed_roles"), ["pm"])
+        old_keys = (
+            "role_" + "authority_" + "source",
+            "allowed_" + "actions",
+            "denied_" + "actions",
+            "denied_" + "action_" + "details",
+            "allowed_" + "action_" + "permissions",
+        )
+        for old_key in old_keys:
+            self.assertNotIn(old_key, snapshot)
+        preview = snapshot.get("runtime_policy_preview")
+        self.assertIsInstance(preview, dict, msg=snapshot)
+        assert isinstance(preview, dict)
+        self.assertEqual(preview.get("active_role"), "dev")
+        self.assertEqual(preview.get("source"), "env.tool role-action policy")
+        self.assertIs(preview.get("not_authorization_boundary"), True)
+        self.assertIs(preview.get("not_execution_result"), True)
+        self.assertIn("track.list", preview.get("available_actions", []))
+        self.assertIn("artifact.create_revision", preview.get("available_actions", []))
+        self.assertIn("request.accept", preview.get("available_actions", []))
+        self.assertIn("track.create", preview.get("restricted_actions", []))
+        self.assertIn("track.archive", preview.get("restricted_actions", []))
+        self.assertIn("comment.resolve", preview.get("restricted_actions", []))
+        details = preview.get("restricted_action_details")
+        self.assertIsInstance(details, dict, msg=preview)
+        assert isinstance(details, dict)
+        self.assertEqual(details.get("track.create", {}).get("required_permission"), "track.create")
+        self.assertEqual(details.get("track.create", {}).get("restricted_to_roles"), ["pm"])
         self.assertNotIn("object_" + "permissions", json.dumps(snapshot, ensure_ascii=True))
         self.assertIn("active-buddy private", str(snapshot.get("task_visibility")))
         artifact_create = tool_registry.operation_semantics()["artifact.create_revision"]
@@ -722,11 +733,23 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         snapshot = payload.get("capability_snapshot")
         self.assertIsInstance(snapshot, dict, msg=payload)
         assert isinstance(snapshot, dict)
-        denied_details = snapshot.get("denied_action_details")
-        self.assertIsInstance(denied_details, dict, msg=snapshot)
-        assert isinstance(denied_details, dict)
-        self.assertEqual(denied_details.get("comment.resolve", {}).get("required_permission"), "comment.resolve")
-        self.assertEqual(denied_details.get("comment.resolve", {}).get("allowed_roles"), ["pm"])
+        old_keys = (
+            "role_" + "authority_" + "source",
+            "allowed_" + "actions",
+            "denied_" + "actions",
+            "denied_" + "action_" + "details",
+            "allowed_" + "action_" + "permissions",
+        )
+        for old_key in old_keys:
+            self.assertNotIn(old_key, snapshot)
+        preview = snapshot.get("runtime_policy_preview")
+        self.assertIsInstance(preview, dict, msg=snapshot)
+        assert isinstance(preview, dict)
+        details = preview.get("restricted_action_details")
+        self.assertIsInstance(details, dict, msg=preview)
+        assert isinstance(details, dict)
+        self.assertEqual(details.get("comment.resolve", {}).get("required_permission"), "comment.resolve")
+        self.assertEqual(details.get("comment.resolve", {}).get("restricted_to_roles"), ["pm"])
         self.assertNotIn("object_" + "permissions", json.dumps(payload, ensure_ascii=True))
         self.assertIn("source_workspace", operation_semantics["context.get"]["returns"])
         self.assertIn("writable_surfaces", operation_semantics["context.get"]["returns"])

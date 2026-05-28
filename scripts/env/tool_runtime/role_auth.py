@@ -120,31 +120,30 @@ def role_action_summary(
     manifest: dict[str, Any],
     operation_semantics: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    allowed_actions: list[str] = []
-    denied_actions: list[str] = []
-    denied_action_details: dict[str, dict[str, Any]] = {}
-    allowed_permissions: dict[str, str] = {}
+    available_actions: list[str] = []
+    restricted_actions: list[str] = []
+    restricted_action_details: dict[str, dict[str, Any]] = {}
 
     for action_id, semantics in sorted(operation_semantics.items()):
         required_permission = str(semantics.get("required_permission", ""))
         decision = authorize(required_permission, active_role, manifest)
         if decision.allowed:
-            allowed_actions.append(action_id)
-            allowed_permissions[action_id] = required_permission
+            available_actions.append(action_id)
             continue
-        denied_actions.append(action_id)
-        denied_action_details[action_id] = {
+        restricted_actions.append(action_id)
+        restricted_action_details[action_id] = {
             "required_permission": required_permission,
             "active_role": active_role,
-            "allowed_roles": list(decision.allowed_roles),
-            "reason": decision.reason,
+            "restricted_to_roles": list(decision.allowed_roles),
+            "reason": f"active role '{active_role}' is not allowed by env.tool role-action policy",
         }
 
     return {
         "active_role": active_role,
-        "role_authority_source": "env.tool role action policy",
-        "allowed_actions": allowed_actions,
-        "denied_actions": denied_actions,
-        "denied_action_details": denied_action_details,
-        "allowed_action_permissions": allowed_permissions,
+        "source": "env.tool role-action policy",
+        "not_authorization_boundary": True,
+        "not_execution_result": True,
+        "available_actions": available_actions,
+        "restricted_actions": restricted_actions,
+        "restricted_action_details": restricted_action_details,
     }

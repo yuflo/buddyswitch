@@ -306,9 +306,9 @@ def _capability_snapshot(*, active_buddy: str, manifest: dict[str, Any]) -> dict
     operation_semantics = tool_registry.operation_semantics(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS)
     affordances = tool_registry.compact_tool_affordances(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS)
     artifact_create = operation_semantics["artifact.create_revision"]
-    summary = role_auth.role_action_summary(active_buddy, manifest, operation_semantics)
-    summary.update(
-        {
+    runtime_policy_preview = role_auth.role_action_summary(active_buddy, manifest, operation_semantics)
+    return {
+        "runtime_policy_preview": runtime_policy_preview,
         "task_visibility": str(operation_semantics["task.current"]["visibility"]),
         "artifact_publication_path": " ".join(
             [
@@ -322,9 +322,7 @@ def _capability_snapshot(*, active_buddy: str, manifest: dict[str, Any]) -> dict
         "search_boundary": str(affordances["search"]["object_model"]),
         "evidence_boundary": str(affordances["evidence"]["object_model"]),
         "writable_file_surface": "$BUDDYSWITCH_BUDDYBOX_DIR for persistent private files; $BUDDYSWITCH_INSTANCE_TMP for temporary files.",
-        }
-    )
-    return summary
+    }
 
 
 def _visible_tracks(*, track_filter: str | None, limit_value: int, context: ContextServiceContext) -> list[dict[str, Any]]:

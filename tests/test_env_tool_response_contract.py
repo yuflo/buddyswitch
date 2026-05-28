@@ -255,11 +255,22 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         capability_snapshot = summary.get("capability_snapshot")
         self.assertIsInstance(capability_snapshot, dict, msg=summary)
         assert isinstance(capability_snapshot, dict)
-        self.assertEqual(capability_snapshot.get("active_role"), "pm")
-        self.assertEqual(capability_snapshot.get("role_authority_source"), "env.tool role action policy")
-        self.assertIn("allowed_actions", capability_snapshot)
-        self.assertIn("denied_actions", capability_snapshot)
-        self.assertIn("denied_action_details", capability_snapshot)
+        preview = capability_snapshot.get("runtime_policy_preview")
+        self.assertIsInstance(preview, dict, msg=summary)
+        assert isinstance(preview, dict)
+        old_keys = (
+            "role_" + "authority_" + "source",
+            "allowed_" + "actions",
+            "denied_" + "actions",
+            "denied_" + "action_" + "details",
+            "allowed_" + "action_" + "permissions",
+        )
+        self.assertEqual(preview.get("active_role"), "pm")
+        self.assertEqual(preview.get("source"), "env.tool role-action policy")
+        self.assertIs(preview.get("not_authorization_boundary"), True)
+        self.assertIs(preview.get("not_execution_result"), True)
+        for old_key in old_keys:
+            self.assertNotIn(old_key, capability_snapshot)
         self.assertNotIn("object_" + "permissions", json.dumps(capability_snapshot, ensure_ascii=True))
         self.assertIn("open_comment_threads", summary)
         self.assertIn("recent_updates", summary)

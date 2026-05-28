@@ -328,7 +328,7 @@ def _role_auth_rejection(
         permission_boundary="tool.role_authority",
         human_summary="Active role is not allowed to run this tool action.",
         why_blocked=(
-            f"Action {tool}.{action} requires permission '{decision.required_permission}'. "
+            f"Action {tool}.{action} is restricted by env.tool role-action policy. "
             f"Active role '{decision.active_role}' is not allowed; allowed roles: {allowed_roles_text}."
         ),
         impact="No env action ran and runtime state was unchanged.",
@@ -337,24 +337,28 @@ def _role_auth_rejection(
         retryable=False,
         retry_guidance="Use an action allowed for this role, or ask an allowed role to perform this action.",
         allowed_next_actions=[
-            "Use context.summarize to inspect allowed and denied actions for this role.",
-            "Use context.get to inspect role capability details and operation semantics.",
+            "Use context.summarize to inspect runtime policy preview for this role.",
+            "Use context.get to inspect tool payload schema and runtime policy preview.",
         ],
         alternative_capabilities=[
             tool_results.alternative_capability(
                 tool="context",
                 action="summarize",
-                condition="Inspect role allowed and denied actions before choosing another env.tool action.",
+                condition="Inspect runtime policy preview before choosing another env.tool action.",
                 mutates_product_state=False,
             ),
             tool_results.alternative_capability(
                 tool="context",
                 action="get",
-                condition="Inspect required permissions and operation semantics before retrying.",
+                condition="Inspect tool payload schema and runtime policy preview before retrying.",
                 mutates_product_state=False,
             ),
         ],
         extra={
+            "category": "auth_denied",
+            "auth_source": "env.tool role-action policy",
+            "auth_stage": "pre_dispatch",
+            "executed": False,
             "required_permission": decision.required_permission,
             "active_role": decision.active_role,
             "allowed_roles": allowed_roles,
