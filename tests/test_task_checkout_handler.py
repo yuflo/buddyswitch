@@ -43,6 +43,25 @@ class FakeDaemonClient:
         return self.result
 
 
+class FakeActionGateway:
+    def __init__(self, *, result: str = "turn-daemon-1", error: BaseException | None = None) -> None:
+        self.result = result
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    def turn_start(self, text: str, *, handler_name: str, origin_turn_id: str | None) -> str:
+        self.calls.append(
+            {
+                "text": text,
+                "handler_name": handler_name,
+                "origin_turn_id": origin_turn_id,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
 class TaskCheckoutHandlerTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.daemon_core = load_module(DAEMON_CORE_PATH)
@@ -190,36 +209,69 @@ class TaskCheckoutHandlerFilterTests(TaskCheckoutHandlerTestCase):
 
             self.assertIsNone(previous_turn)
 
+    def test_handler_returns_ignored_result_for_ignored_notifications(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.daemon_core.load_daemon_context(instance["instance_json"])
+            state = self._state(instance["instance_root"])
+            state.record_daemon_origin_turn("turn-daemon-1")
+            actions = FakeActionGateway()
+
+            ignored_notifications = [
+                self._completed(thread_id="thr-side"),
+                self._completed(status="failed"),
+                self._completed(turn_id="turn-daemon-1"),
+                {"method": "turn/completed", "params": {}},
+            ]
+
+            for notification in ignored_notifications:
+                result = self.handler.handle_notification(context, state, actions, notification)
+                self.assertEqual(result.status, "ignored")
+
+            self.assertEqual(actions.calls, [])
+
 
 class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
-    def test_accepted_completed_turn_sends_one_turn_start(self) -> None:
+    def test_accepted_completed_turn_uses_action_gateway(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
             calls = self._patch_snapshot_render()
-            client = FakeDaemonClient(result={"turn": {"id": "turn-daemon-1"}})
+            actions = FakeActionGateway(result="turn-daemon-1")
 
-            sent = self.handler.handle_notification(context, state, client, self._completed())
+            result = self.handler.handle_notification(context, state, actions, self._completed())
 
-            self.assertTrue(sent)
-            self.assertEqual([request["method"] for request in client.requests], ["turn/start"])
-            params = client.requests[0]["params"]
-            assert isinstance(params, dict)
-            self.assertEqual(params["threadId"], "thr-main")
-            self.assertEqual(params["permissions"], "buddyswitch-runtime")
-            input_payload = params["input"]
-            assert isinstance(input_payload, list)
-            prompt = input_payload[0]["text"]
+            self.assertEqual(result.status, "handled")
+            self.assertEqual(len(actions.calls), 1)
+            self.assertEqual(actions.calls[0]["handler_name"], "task_checkout")
+            self.assertEqual(actions.calls[0]["origin_turn_id"], "turn-user-1")
+            prompt = actions.calls[0]["text"]
+            assert isinstance(prompt, str)
             self.assertTrue(prompt.startswith("[TASK CHECKOUT]"))
             self.assertNotIn("[TASK CONTEXT]", prompt)
             self.assertNotIn("[USER INPUT]", prompt)
             self.assertEqual([name for name, _payload in calls], ["snapshot", "render"])
+
+    def test_task_checkout_state_uses_standard_action_field(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            context = self.daemon_core.load_daemon_context(instance["instance_json"])
+            state = self._state(instance["instance_root"])
+            self._patch_snapshot_render()
+            client = FakeDaemonClient(result={"turn": {"id": "turn-daemon-1"}})
+            actions = self.daemon_core.ActionGateway(context=context, state=state, client=client)
+
+            result = self.handler.handle_notification(context, state, actions, self._completed())
+
+            self.assertEqual(result.status, "handled")
+            self.assertEqual([request["method"] for request in client.requests], ["turn/start"])
             self.assertTrue(state.is_daemon_origin_turn("turn-daemon-1"))
             saved = json.loads(self.daemon_core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertEqual(saved["handlers"]["task_checkout"]["last_origin_turn_id"], "turn-user-1")
-            self.assertEqual(saved["handlers"]["task_checkout"]["last_checkout_turn_id"], "turn-daemon-1")
+            self.assertEqual(saved["handlers"]["task_checkout"]["last_action_turn_id"], "turn-daemon-1")
             self.assertIsNone(saved["handlers"]["task_checkout"]["last_error"])
+            self.assertNotIn("last_checkout_turn_id", saved["handlers"]["task_checkout"])
 
     def test_missing_turn_id_records_error_and_returns_false(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -228,15 +280,13 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             state = self._state(instance["instance_root"])
             self._patch_snapshot_render()
             client = FakeDaemonClient(result={"turn": {}})
+            actions = self.daemon_core.ActionGateway(context=context, state=state, client=client)
 
-            sent = self.handler.handle_notification(context, state, client, self._completed())
+            result = self.handler.handle_notification(context, state, actions, self._completed())
 
-            self.assertFalse(sent)
-            saved = json.loads(self.daemon_core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
-            self.assertEqual(saved["last_error"]["origin_turn_id"], "turn-user-1")
-            self.assertEqual(saved["last_error"]["handler"], "task_checkout")
-            self.assertIn("turn/start did not return a turn id", saved["last_error"]["message"])
-            self.assertEqual(saved["handlers"]["task_checkout"]["last_error"]["origin_turn_id"], "turn-user-1")
+            self.assertEqual(result.status, "failed")
+            self.assertIn("turn/start did not return a turn id", result.message)
+            self.assertEqual([request["method"] for request in client.requests], ["turn/start"])
 
     def test_turn_start_failure_records_error_without_retry_or_steer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -244,31 +294,27 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
             self._patch_snapshot_render()
-            client = FakeDaemonClient(
+            actions = FakeActionGateway(
                 error=self.task_checkout_handler.app_server.AppServerRequestError("turn/start", -32000, "active thread"),
             )
 
-            sent = self.handler.handle_notification(context, state, client, self._completed())
+            result = self.handler.handle_notification(context, state, actions, self._completed())
 
-            self.assertFalse(sent)
-            self.assertEqual([request["method"] for request in client.requests], ["turn/start"])
-            saved = json.loads(self.daemon_core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
-            self.assertEqual(saved["last_error"]["origin_turn_id"], "turn-user-1")
-            self.assertEqual(saved["last_error"]["handler"], "task_checkout")
-            self.assertIn("turn/start failed", saved["last_error"]["message"])
+            self.assertEqual(result.status, "failed")
+            self.assertIn("turn/start failed", result.message)
+            self.assertEqual(len(actions.calls), 1)
             self.assertFalse(state.is_daemon_origin_turn("turn-user-1"))
 
-            client.error = None
-            client.result = {"turn": {"id": "turn-daemon-2"}}
-            sent_later = self.handler.handle_notification(
+            actions.error = None
+            actions.result = "turn-daemon-2"
+            result_later = self.handler.handle_notification(
                 context,
                 state,
-                client,
+                actions,
                 self._completed(turn_id="turn-user-2"),
             )
-            self.assertTrue(sent_later)
-            self.assertEqual([request["method"] for request in client.requests], ["turn/start", "turn/start"])
-            self.assertNotIn("turn/steer", [request["method"] for request in client.requests])
+            self.assertEqual(result_later.status, "handled")
+            self.assertEqual(len(actions.calls), 2)
 
 
 if __name__ == "__main__":

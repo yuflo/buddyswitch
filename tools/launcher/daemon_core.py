@@ -36,6 +36,16 @@ LEGACY_STATE_FIELDS = (
     "last_origin_turn_id",
     "last_" + "stop" + "_" + "tui" + "_turn_id",
 )
+HANDLER_STATUS_FIELDS = (
+    "registered",
+    "enabled",
+    "active",
+    "last_result",
+    "last_handled_at",
+    "last_origin_turn_id",
+    "last_action_turn_id",
+    "last_error",
+)
 INSTANCE_DAEMON_ENTRYPOINT = HELPER_DIR / "instance_daemon.py"
 
 
@@ -142,6 +152,51 @@ def _notification_turn_id(notification: dict[str, Any]) -> str | None:
     return turn_id or None
 
 
+def _turn_id_from_start_result(result: dict[str, Any]) -> str:
+    turn = result.get("turn")
+    if isinstance(turn, dict):
+        turn_id = turn.get("id")
+        if isinstance(turn_id, str) and turn_id:
+            return turn_id
+    return _string_field(result, "turn_id", "turnId")
+
+
+def _handler_name(handler: Any) -> str:
+    name = getattr(handler, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    return type(handler).__name__
+
+
+def _handler_names(handlers: list[Any] | tuple[Any, ...] | None) -> list[str]:
+    names: list[str] = []
+    for handler in handlers or []:
+        name = _handler_name(handler)
+        if name not in names:
+            names.append(name)
+    return names
+
+
+class HandlerResult:
+    def __init__(self, status: str, message: str | None = None) -> None:
+        if status not in {"ignored", "handled", "failed"}:
+            raise ValueError(f"invalid handler result status: {status}")
+        self.status = status
+        self.message = message
+
+    @classmethod
+    def ignored(cls) -> HandlerResult:
+        return cls("ignored")
+
+    @classmethod
+    def handled(cls) -> HandlerResult:
+        return cls("handled")
+
+    @classmethod
+    def failed(cls, message: str) -> HandlerResult:
+        return cls("failed", message or "handler failed")
+
+
 class DaemonState:
     def __init__(self, *, path: Path, payload: dict[str, Any]) -> None:
         self.path = path
@@ -172,6 +227,9 @@ class DaemonState:
             payload["last_error"] = None
         if not isinstance(payload.get("handlers"), dict):
             payload["handlers"] = {}
+        for handler_name, handler_payload in list(payload["handlers"].items()):
+            if not isinstance(handler_name, str) or not isinstance(handler_payload, dict):
+                payload["handlers"].pop(handler_name, None)
         return cls(path=path, payload=payload)
 
     def save(self) -> None:
@@ -190,15 +248,12 @@ class DaemonState:
         self.payload["daemon_origin_turn_ids"] = turn_ids[-MAX_DAEMON_ORIGIN_TURN_IDS:]
         self.save()
 
-    def record_error(self, *, origin_turn_id: str | None, message: str, handler: str | None = None) -> None:
-        payload = {
+    def record_error(self, *, origin_turn_id: str | None, message: str) -> None:
+        self.payload["last_error"] = {
             "origin_turn_id": origin_turn_id,
             "message": message,
             "at": _utc_now(),
         }
-        if handler:
-            payload["handler"] = handler
-        self.payload["last_error"] = payload
         self.save()
 
     def record_ready(self, *, pid: int, main_thread_id: str) -> None:
@@ -233,10 +288,53 @@ class DaemonState:
         state.update(values)
         self.save()
 
+    def register_handlers(self, handler_names: list[str]) -> None:
+        for handler_name in handler_names:
+            state = self.handler_state(handler_name)
+            values = {
+                "registered": True,
+                "enabled": True,
+                "active": True,
+                "last_result": state.get("last_result"),
+                "last_handled_at": state.get("last_handled_at"),
+                "last_origin_turn_id": state.get("last_origin_turn_id"),
+                "last_action_turn_id": state.get("last_action_turn_id"),
+                "last_error": state.get("last_error"),
+            }
+            state.update(values)
+        self.save()
+
+    def record_handler_result(
+        self,
+        handler_name: str,
+        result: HandlerResult,
+        *,
+        origin_turn_id: str | None,
+    ) -> None:
+        if result.status == "ignored":
+            return
+        values: dict[str, Any] = {"last_result": result.status}
+        if result.status == "handled":
+            values.update(
+                {
+                    "last_handled_at": _utc_now(),
+                    "last_origin_turn_id": origin_turn_id,
+                    "last_error": None,
+                }
+            )
+        elif result.status == "failed":
+            values["last_error"] = {
+                "origin_turn_id": origin_turn_id,
+                "message": result.message or "handler failed",
+                "at": _utc_now(),
+            }
+        self.update_handler_state(handler_name, values)
+
     def record_handler_error(self, handler_name: str, *, origin_turn_id: str | None, message: str) -> None:
         self.update_handler_state(
             handler_name,
             {
+                "last_result": "failed",
                 "last_error": {
                     "origin_turn_id": origin_turn_id,
                     "message": message,
@@ -271,6 +369,36 @@ class DaemonContext:
         self.project_workspace_dir = project_workspace_dir
         self.socket_path = socket_path
         self.permissions = permissions
+
+
+class ActionGateway:
+    def __init__(self, *, context: DaemonContext, state: DaemonState, client: Any) -> None:
+        self.context = context
+        self.state = state
+        self.client = client
+
+    def turn_start(self, text: str, *, handler_name: str, origin_turn_id: str | None) -> str:
+        result = self.client.request(
+            "turn/start",
+            {
+                "threadId": self.context.main_thread_id,
+                "input": app_server.text_input_payload(text),
+                "permissions": self.context.permissions,
+            },
+        )
+        turn_id = _turn_id_from_start_result(result)
+        if not turn_id:
+            raise app_server.AppServerProtocolError("turn/start did not return a turn id")
+        self.state.record_daemon_origin_turn(turn_id)
+        self.state.update_handler_state(
+            handler_name,
+            {
+                "last_origin_turn_id": origin_turn_id,
+                "last_action_turn_id": turn_id,
+                "last_error": None,
+            },
+        )
+        return turn_id
 
 
 def load_daemon_context(instance_json: Path) -> DaemonContext:
@@ -336,17 +464,58 @@ def dispatch_notification(
 ) -> bool:
     handled = False
     origin_turn_id = _notification_turn_id(notification)
+    actions = ActionGateway(context=context, state=state, client=client)
     for handler in handlers:
+        handler_name = _handler_name(handler)
         try:
-            handled = bool(handler.handle_notification(context, state, client, notification)) or handled
+            result = handler.handle_notification(context, state, actions, notification)
         except Exception as exc:
-            handler_name = getattr(handler, "name", type(handler).__name__)
-            state.record_error(origin_turn_id=origin_turn_id, message=str(exc), handler=handler_name)
+            state.record_handler_error(handler_name, origin_turn_id=origin_turn_id, message=str(exc))
             continue
+        if not isinstance(result, HandlerResult):
+            state.record_handler_error(
+                handler_name,
+                origin_turn_id=origin_turn_id,
+                message=f"handler returned invalid result: {type(result).__name__}",
+            )
+            continue
+        state.record_handler_result(handler_name, result, origin_turn_id=origin_turn_id)
+        handled = result.status == "handled" or handled
     return handled
 
 
-def daemon_status(instance_json: Path) -> dict[str, Any]:
+def _handler_status_payload(state: DaemonState, handlers: list[Any] | tuple[Any, ...] | None) -> dict[str, Any]:
+    registered = _handler_names(handlers)
+    persisted = state.payload.get("handlers")
+    persisted_handlers = persisted if isinstance(persisted, dict) else {}
+    names = list(registered)
+    for name in sorted(persisted_handlers):
+        if name not in names:
+            names.append(name)
+
+    items: dict[str, Any] = {}
+    for name in names:
+        raw_state = persisted_handlers.get(name)
+        handler_state = dict(raw_state) if isinstance(raw_state, dict) else {}
+        is_registered = name in registered
+        item = {
+            "registered": is_registered,
+            "enabled": is_registered,
+            "active": is_registered,
+            "last_result": None,
+            "last_handled_at": None,
+            "last_origin_turn_id": None,
+            "last_action_turn_id": None,
+            "last_error": None,
+        }
+        for field in HANDLER_STATUS_FIELDS:
+            if field in handler_state and field not in {"registered", "enabled", "active"}:
+                item[field] = handler_state[field]
+        items[name] = item
+    return {"registered": registered, "items": items}
+
+
+def daemon_status(instance_json: Path, *, handlers: list[Any] | tuple[Any, ...] | None = None) -> dict[str, Any]:
     context = load_daemon_context(instance_json)
     runtime = daemon_runtime_dir(context.instance_root)
     pid_path = daemon_pid_file(context.instance_root)
@@ -376,10 +545,11 @@ def daemon_status(instance_json: Path) -> dict[str, Any]:
         "log_path": str(log_path),
         "state_path": str(state_path),
         "last_error": state.payload.get("last_error"),
+        "handlers": _handler_status_payload(state, handlers),
     }
 
 
-def start_daemon(instance_json: Path) -> dict[str, Any]:
+def start_daemon(instance_json: Path, *, handlers: list[Any] | tuple[Any, ...] | None = None) -> dict[str, Any]:
     context = load_daemon_context(instance_json)
     runtime = daemon_runtime_dir(context.instance_root)
     pid_path = daemon_pid_file(context.instance_root)
@@ -391,12 +561,13 @@ def start_daemon(instance_json: Path) -> dict[str, Any]:
         instance_id=context.instance_id,
         main_thread_id=context.main_thread_id,
     )
+    state.register_handlers(_handler_names(handlers))
     state.save()
 
     pid = _read_pid(pid_path)
     if pid is not None and _pid_is_live(pid):
         if state.ready_for(pid, context.main_thread_id):
-            status = daemon_status(instance_json)
+            status = daemon_status(instance_json, handlers=handlers)
             status["started"] = False
             return status
         _terminate_pid(pid)
@@ -431,7 +602,7 @@ def start_daemon(instance_json: Path) -> dict[str, Any]:
             main_thread_id=context.main_thread_id,
         )
         if wait_state.ready_for(process.pid, context.main_thread_id):
-            status = daemon_status(instance_json)
+            status = daemon_status(instance_json, handlers=handlers)
             status["started"] = True
             status["pid"] = process.pid
             status["pid_live"] = _pid_is_live(process.pid)
@@ -471,6 +642,7 @@ def run_daemon(instance_json: Path, *, handlers: list[Any] | None = None) -> int
     )
     state.save()
     notification_handlers = list(handlers or [])
+    state.register_handlers(_handler_names(notification_handlers))
     try:
         with app_server.AppServerClient(
             context.socket_path,

@@ -59,9 +59,11 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
 
     def test_start_prints_json_from_daemon_core(self) -> None:
         original_start = self.instance_daemon.daemon_core.start_daemon
+        recorded: dict[str, object] = {}
 
-        def fake_start(instance_json: Path) -> dict[str, object]:
+        def fake_start(instance_json: Path, *, handlers: list[object] | None = None) -> dict[str, object]:
             self.assertEqual(instance_json, Path("/tmp/inst.json"))
+            recorded["handlers"] = handlers or []
             return {"started": True, "pid": 4321}
 
         self.addCleanup(setattr, self.instance_daemon.daemon_core, "start_daemon", original_start)
@@ -72,6 +74,10 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(json.loads(output.getvalue()), {"started": True, "pid": 4321})
+        handlers = recorded["handlers"]
+        assert isinstance(handlers, list)
+        self.assertEqual(len(handlers), 1)
+        self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
 
     def test_stop_prints_json_from_daemon_core(self) -> None:
         original_stop = self.instance_daemon.daemon_core.stop_daemon
@@ -91,9 +97,11 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
 
     def test_status_prints_json_from_daemon_core(self) -> None:
         original_status = self.instance_daemon.daemon_core.daemon_status
+        recorded: dict[str, object] = {}
 
-        def fake_status(instance_json: Path) -> dict[str, object]:
+        def fake_status(instance_json: Path, *, handlers: list[object] | None = None) -> dict[str, object]:
             self.assertEqual(instance_json, Path("/tmp/inst.json"))
+            recorded["handlers"] = handlers or []
             return {"live": True, "ready": True}
 
         self.addCleanup(setattr, self.instance_daemon.daemon_core, "daemon_status", original_status)
@@ -104,6 +112,10 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(json.loads(output.getvalue()), {"live": True, "ready": True})
+        handlers = recorded["handlers"]
+        assert isinstance(handlers, list)
+        self.assertEqual(len(handlers), 1)
+        self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
 
     def test_daemon_shell_still_calls_instance_daemon_entrypoint(self) -> None:
         shell_source = DAEMON_SH_PATH.read_text(encoding="utf-8")

@@ -1295,12 +1295,16 @@ payload = json.loads(sys.argv[1])
 app_server = payload.get("app_server") if isinstance(payload.get("app_server"), dict) else {}
 daemon = payload.get("daemon") if isinstance(payload.get("daemon"), dict) else {}
 thread = payload.get("thread") if isinstance(payload.get("thread"), dict) else {}
+daemon_handlers = daemon.get("handlers") if isinstance(daemon.get("handlers"), dict) else {}
+registered_handlers = daemon_handlers.get("registered") if isinstance(daemon_handlers.get("registered"), list) else []
+handler_text = ", ".join(str(item) for item in registered_handlers if isinstance(item, str))
 
 print(f"Instance: {payload.get('instance_id')}")
 print(f"Buddy: {payload.get('buddy')}")
 print(f"Status: {payload.get('status')}")
 print(f"App-server health: {'healthy' if app_server.get('healthy') else 'unhealthy'}")
 print(f"Daemon health: {'healthy' if daemon.get('live') else 'unhealthy'}")
+print(f"Daemon handlers: {handler_text}")
 print(f"Thread id: {payload.get('thread_id') or ''}")
 print(f"Thread status: {thread.get('status') or ''}")
 print(f"Browser port: {payload.get('browser_port') or ''}")

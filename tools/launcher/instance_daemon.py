@@ -42,13 +42,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "run":
             return daemon_core.run_daemon(instance_json, handlers=default_handlers())
         if args.command == "start":
-            print(json.dumps(daemon_core.start_daemon(instance_json), ensure_ascii=True))
+            print(json.dumps(daemon_core.start_daemon(instance_json, handlers=default_handlers()), ensure_ascii=True))
             return 0
         if args.command == "stop":
             print(json.dumps(daemon_core.stop_daemon(instance_json), ensure_ascii=True))
             return 0
         if args.command == "status":
-            print(json.dumps(daemon_core.daemon_status(instance_json), ensure_ascii=True))
+            print(json.dumps(daemon_core.daemon_status(instance_json, handlers=default_handlers()), ensure_ascii=True))
             return 0
     except Exception as exc:
         print(str(exc), file=sys.stderr)

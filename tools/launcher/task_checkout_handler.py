@@ -16,6 +16,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import app_server  # noqa: E402
+import daemon_core  # noqa: E402
 from env.domain import task_management, task_tui  # noqa: E402
 
 
@@ -25,15 +26,6 @@ def _string_field(payload: dict[str, Any], *names: str) -> str:
         if isinstance(value, str) and value:
             return value
     return ""
-
-
-def _turn_id_from_start_result(result: dict[str, Any]) -> str:
-    turn = result.get("turn")
-    if isinstance(turn, dict):
-        turn_id = turn.get("id")
-        if isinstance(turn_id, str) and turn_id:
-            return turn_id
-    return _string_field(result, "turn_id", "turnId")
 
 
 def completed_turn_for_checkout(notification: dict[str, Any], state: Any) -> dict[str, str] | None:
@@ -63,9 +55,9 @@ def completed_turn_for_checkout(notification: dict[str, Any], state: Any) -> dic
 def send_checkout_prompt(
     context: Any,
     state: Any,
-    client: Any,
+    actions: Any,
     previous_turn: dict[str, str],
-) -> bool:
+) -> daemon_core.HandlerResult:
     origin_turn_id = previous_turn["turn_id"]
     try:
         snapshot = task_management.current_snapshot(
@@ -74,31 +66,10 @@ def send_checkout_prompt(
             instance_payload=context.instance_payload,
         )
         prompt = task_tui.render_stop_task_tui(snapshot, previous_turn)
-        result = client.request(
-            "turn/start",
-            {
-                "threadId": context.main_thread_id,
-                "input": app_server.text_input_payload(prompt),
-                "permissions": context.permissions,
-            },
-        )
-        turn_id = _turn_id_from_start_result(result)
-        if not turn_id:
-            raise app_server.AppServerProtocolError("turn/start did not return a turn id")
-        state.record_daemon_origin_turn(turn_id)
-        state.update_handler_state(
-            "task_checkout",
-            {
-                "last_origin_turn_id": origin_turn_id,
-                "last_checkout_turn_id": turn_id,
-                "last_error": None,
-            },
-        )
-        return True
+        actions.turn_start(prompt, handler_name="task_checkout", origin_turn_id=origin_turn_id)
+        return daemon_core.HandlerResult.handled()
     except app_server.AppServerError as exc:
-        state.record_error(origin_turn_id=origin_turn_id, message=str(exc), handler="task_checkout")
-        state.record_handler_error("task_checkout", origin_turn_id=origin_turn_id, message=str(exc))
-        return False
+        return daemon_core.HandlerResult.failed(str(exc))
 
 
 class TaskCheckoutHandler:
@@ -108,10 +79,10 @@ class TaskCheckoutHandler:
         self,
         context: Any,
         state: Any,
-        client: Any,
+        actions: Any,
         notification: dict[str, Any],
-    ) -> bool:
+    ) -> daemon_core.HandlerResult:
         previous_turn = completed_turn_for_checkout(notification, state)
         if previous_turn is None:
-            return False
-        return send_checkout_prompt(context, state, client, previous_turn)
+            return daemon_core.HandlerResult.ignored()
+        return send_checkout_prompt(context, state, actions, previous_turn)

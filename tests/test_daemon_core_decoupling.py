@@ -199,11 +199,11 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
                     self,
                     context: object,
                     state: object,
-                    client: object,
+                    actions: object,
                     notification_payload: dict[str, object],
-                ) -> bool:
+                ) -> object:
                     handled.append(notification_payload)
-                    return False
+                    return daemon_core.HandlerResult.ignored()
 
             with self.assertRaises(StopDaemonLoop):
                 daemon_core.run_daemon(instance["instance_json"], handlers=[NoopHandler()])
