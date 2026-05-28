@@ -22,7 +22,7 @@
 10. 所有相关测试必须通过才算完成，包括：
     - `tests/test_submit_turn.py`
     - `tests/test_web_management.py`
-    - `tests/test_daemon_service_contract.py`
+    - daemon service boundary tests
     - `tests/test_task_checkout_handler.py`
     - 相关 launcher / daemon regression tests
 11. 完成后必须做一次 review 验收，逐条检查 memo acceptance criteria、boundary scan、依赖方向、以及 worktree 干净度。

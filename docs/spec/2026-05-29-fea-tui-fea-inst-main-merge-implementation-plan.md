@@ -94,7 +94,7 @@ Expected:
 ## Task 2: Commit This Plan on fea-tui
 
 **Files:**
-- Create: `docs/spec/2026-05-29-fea-tui-fea-inst-main-merge-plan.md`
+- Create: `docs/spec/2026-05-29-fea-tui-fea-inst-main-merge-implementation-plan.md`
 
 - [ ] **Step 1: Review plan file is present**
 
@@ -107,7 +107,7 @@ Expected: one added plan file.
 - [ ] **Step 2: Commit the plan artifact**
 
 ```bash
-git -C /Users/chen/Dev/buddyswitch/.worktrees/fea-tui add docs/spec/2026-05-29-fea-tui-fea-inst-main-merge-plan.md
+git -C /Users/chen/Dev/buddyswitch/.worktrees/fea-tui add docs/spec/2026-05-29-fea-tui-fea-inst-main-merge-implementation-plan.md
 git -C /Users/chen/Dev/buddyswitch/.worktrees/fea-tui commit -m "docs: plan fea tui and inst merge"
 ```
 
