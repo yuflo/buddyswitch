@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import env_profiles
-from env.tool_runtime import role_auth
 from env.tool_runtime import registry as tool_registry
 from env.tool_runtime import results as tool_results
 from .tool import DEFINITION
@@ -302,11 +301,11 @@ def _candidate_task_row(*, task: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _capability_snapshot(*, active_buddy: str, manifest: dict[str, Any]) -> dict[str, Any]:
+def _capability_snapshot(*, context: ContextServiceContext) -> dict[str, Any]:
     operation_semantics = tool_registry.operation_semantics(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS)
     affordances = tool_registry.compact_tool_affordances(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS)
     artifact_create = operation_semantics["artifact.create_revision"]
-    runtime_policy_preview = role_auth.role_action_summary(active_buddy, manifest, operation_semantics)
+    runtime_policy_preview = context.runtime_policy_preview(operation_semantics)
     return {
         "runtime_policy_preview": runtime_policy_preview,
         "task_visibility": str(operation_semantics["task.current"]["visibility"]),
@@ -644,8 +643,7 @@ def _current_context_sections(
         "message_cues": message_cues,
         "source_workspace": source_workspace,
         "capability_snapshot": _capability_snapshot(
-            active_buddy=active_buddy,
-            manifest=context["manifest"],
+            context=context,
         ),
         "decision_surface": {
             "binding_state": {"state": "runless", "enum_values": ["runless"]},

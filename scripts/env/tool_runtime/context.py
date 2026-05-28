@@ -29,6 +29,8 @@ from env.repos import requests as _request_repo
 from env.repos import runtime_files
 from env.repos import tasks as _task_repo
 from env.repos import tracks as _track_repo
+from env.tool_runtime.actor_profile import AuthSubject
+from env.tool_runtime.actor_profile import RuntimeActorProfile
 
 
 def _load_registry_module():
@@ -386,6 +388,7 @@ class ToolContext(Mapping[str, Any]):
 
     active_buddy: str
     instance_id: str
+    auth_subject: AuthSubject
     instance_json: Path
     instance_payload: dict[str, Any]
     manifest: dict[str, Any]
@@ -414,6 +417,31 @@ class ToolContext(Mapping[str, Any]):
                 manifest_path=self.manifest_path,
             ),
         )
+
+    @classmethod
+    def from_actor_profile(
+        cls,
+        *,
+        actor_profile: RuntimeActorProfile,
+        instance_json: Path,
+        instance_payload: dict[str, Any],
+        manifest: dict[str, Any],
+        manifest_path: Path | None = None,
+    ) -> "ToolContext":
+        return cls(
+            active_buddy=actor_profile.active_buddy,
+            instance_id=actor_profile.instance_id,
+            auth_subject=actor_profile.auth_subject,
+            instance_json=instance_json,
+            instance_payload=instance_payload,
+            manifest=manifest,
+            manifest_path=manifest_path,
+        )
+
+    def runtime_policy_preview(self, operation_semantics: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        from env.tool_runtime import role_auth
+
+        return role_auth.role_action_summary(self.auth_subject, self.manifest, operation_semantics)
 
     def now(self) -> str:
         return datetime.now().astimezone().isoformat(timespec="seconds")

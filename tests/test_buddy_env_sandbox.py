@@ -523,7 +523,6 @@ web_search = "cached"
                 [
                     "codex",
                     "sandbox",
-                    "macos",
                     "--permissions-profile",
                     PERMISSION_PROFILE,
                     "-C",
@@ -579,7 +578,6 @@ web_search = "cached"
                 [
                     "codex",
                     "sandbox",
-                    "macos",
                     "--permissions-profile",
                     PERMISSION_PROFILE,
                     "-C",
@@ -612,7 +610,6 @@ web_search = "cached"
                     [
                         "codex",
                         "sandbox",
-                        "macos",
                         "--permissions-profile",
                         PERMISSION_PROFILE,
                         "-C",
@@ -661,7 +658,6 @@ web_search = "cached"
                 [
                     "codex",
                     "sandbox",
-                    "macos",
                     "--permissions-profile",
                     PERMISSION_PROFILE,
                     "-C",
@@ -683,7 +679,6 @@ web_search = "cached"
                 [
                     "codex",
                     "sandbox",
-                    "macos",
                     "--permissions-profile",
                     PERMISSION_PROFILE,
                     "-C",

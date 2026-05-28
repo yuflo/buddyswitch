@@ -301,7 +301,6 @@ buddyswitch_workspace_cleanup_stale_state_projections
             [
                 "codex",
                 "sandbox",
-                "macos",
                 "--permissions-profile",
                 PERMISSION_PROFILE,
                 "-C",
