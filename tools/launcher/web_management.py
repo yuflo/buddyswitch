@@ -354,7 +354,7 @@ class WebManagementService:
 
     def _run_input_command(self, instance_id: str, text: str, *, timeout_seconds: float) -> dict[str, Any]:
         result = self._run_command(
-            ["instance", "input", instance_id, "--text", text, "--json"],
+            ["instance", "input", instance_id, "--text", text, "--input-wrapper", "task-tui", "--json"],
             timeout_seconds=timeout_seconds,
         )
         return load_command_json_object(

@@ -22,6 +22,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import app_server  # noqa: E402
+import submit_turn as launcher_submit_turn  # noqa: E402
 
 
 MAX_DAEMON_ORIGIN_TURN_IDS = 50
@@ -152,12 +153,7 @@ def _notification_turn_id(notification: dict[str, Any]) -> str | None:
     return turn_id or None
 
 
-def _turn_id_from_start_result(result: dict[str, Any]) -> str:
-    turn = result.get("turn")
-    if isinstance(turn, dict):
-        turn_id = turn.get("id")
-        if isinstance(turn_id, str) and turn_id:
-            return turn_id
+def _turn_id_from_submit_result(result: dict[str, Any]) -> str:
     return _string_field(result, "turn_id", "turnId")
 
 
@@ -372,23 +368,21 @@ class DaemonContext:
 
 
 class ActionGateway:
-    def __init__(self, *, context: DaemonContext, state: DaemonState, client: Any) -> None:
+    def __init__(self, *, context: DaemonContext, state: DaemonState, client: Any | None = None) -> None:
         self.context = context
         self.state = state
         self.client = client
 
-    def turn_start(self, text: str, *, handler_name: str, origin_turn_id: str | None) -> str:
-        result = self.client.request(
-            "turn/start",
-            {
-                "threadId": self.context.main_thread_id,
-                "input": app_server.text_input_payload(text),
-                "permissions": self.context.permissions,
-            },
+    def submit_turn(self, text: str, *, handler_name: str, origin_turn_id: str | None) -> str:
+        result = launcher_submit_turn.submit_turn(
+            socket_path=self.context.socket_path,
+            thread_id=self.context.main_thread_id,
+            text=text,
+            permissions=self.context.permissions,
         )
-        turn_id = _turn_id_from_start_result(result)
+        turn_id = _turn_id_from_submit_result(result)
         if not turn_id:
-            raise app_server.AppServerProtocolError("turn/start did not return a turn id")
+            raise launcher_submit_turn.SubmitTurnError("submit_turn did not return a turn id")
         self.state.record_daemon_origin_turn(turn_id)
         self.state.update_handler_state(
             handler_name,

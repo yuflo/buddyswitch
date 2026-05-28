@@ -49,7 +49,7 @@ class FakeActionGateway:
         self.error = error
         self.calls: list[dict[str, object]] = []
 
-    def turn_start(self, text: str, *, handler_name: str, origin_turn_id: str | None) -> str:
+    def submit_turn(self, text: str, *, handler_name: str, origin_turn_id: str | None) -> str:
         self.calls.append(
             {
                 "text": text,
@@ -138,6 +138,10 @@ class TaskCheckoutHandlerTestCase(unittest.TestCase):
 
 
 class TaskCheckoutHandlerFilterTests(TaskCheckoutHandlerTestCase):
+    def test_task_checkout_handler_source_has_no_app_server_import(self) -> None:
+        source = TASK_CHECKOUT_HANDLER_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("import app_server", source)
+
     def test_completed_main_thread_user_turn_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
@@ -232,7 +236,7 @@ class TaskCheckoutHandlerFilterTests(TaskCheckoutHandlerTestCase):
 
 
 class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
-    def test_accepted_completed_turn_uses_action_gateway(self) -> None:
+    def test_accepted_completed_turn_uses_actions_submit_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
@@ -259,13 +263,18 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
             self._patch_snapshot_render()
-            client = FakeDaemonClient(result={"turn": {"id": "turn-daemon-1"}})
-            actions = self.daemon_core.ActionGateway(context=context, state=state, client=client)
+            actions = self.daemon_core.ActionGateway(context=context, state=state)
+            original_submit_turn = self.daemon_core.launcher_submit_turn.submit_turn
+
+            def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+                return {"action": "start", "turn_id": "turn-daemon-1"}
+
+            self.addCleanup(setattr, self.daemon_core.launcher_submit_turn, "submit_turn", original_submit_turn)
+            self.daemon_core.launcher_submit_turn.submit_turn = fake_submit_turn
 
             result = self.handler.handle_notification(context, state, actions, self._completed())
 
             self.assertEqual(result.status, "handled")
-            self.assertEqual([request["method"] for request in client.requests], ["turn/start"])
             self.assertTrue(state.is_daemon_origin_turn("turn-daemon-1"))
             saved = json.loads(self.daemon_core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertEqual(saved["handlers"]["task_checkout"]["last_origin_turn_id"], "turn-user-1")
@@ -273,35 +282,40 @@ class TaskCheckoutHandlerSendTests(TaskCheckoutHandlerTestCase):
             self.assertIsNone(saved["handlers"]["task_checkout"]["last_error"])
             self.assertNotIn("last_checkout_turn_id", saved["handlers"]["task_checkout"])
 
-    def test_missing_turn_id_records_error_and_returns_false(self) -> None:
+    def test_missing_turn_id_records_error_and_returns_failed_result(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
             self._patch_snapshot_render()
-            client = FakeDaemonClient(result={"turn": {}})
-            actions = self.daemon_core.ActionGateway(context=context, state=state, client=client)
+            actions = self.daemon_core.ActionGateway(context=context, state=state)
+            original_submit_turn = self.daemon_core.launcher_submit_turn.submit_turn
+
+            def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+                return {"action": "start"}
+
+            self.addCleanup(setattr, self.daemon_core.launcher_submit_turn, "submit_turn", original_submit_turn)
+            self.daemon_core.launcher_submit_turn.submit_turn = fake_submit_turn
 
             result = self.handler.handle_notification(context, state, actions, self._completed())
 
             self.assertEqual(result.status, "failed")
-            self.assertIn("turn/start did not return a turn id", result.message)
-            self.assertEqual([request["method"] for request in client.requests], ["turn/start"])
+            self.assertIn("submit_turn did not return a turn id", result.message)
 
-    def test_turn_start_failure_records_error_without_retry_or_steer(self) -> None:
+    def test_submit_turn_failure_returns_failed_handler_result(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
             self._patch_snapshot_render()
             actions = FakeActionGateway(
-                error=self.task_checkout_handler.app_server.AppServerRequestError("turn/start", -32000, "active thread"),
+                error=self.task_checkout_handler.launcher_submit_turn.SubmitTurnError("submit_turn failed: active thread"),
             )
 
             result = self.handler.handle_notification(context, state, actions, self._completed())
 
             self.assertEqual(result.status, "failed")
-            self.assertIn("turn/start failed", result.message)
+            self.assertIn("submit_turn failed", result.message)
             self.assertEqual(len(actions.calls), 1)
             self.assertFalse(state.is_daemon_origin_turn("turn-user-1"))
 

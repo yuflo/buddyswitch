@@ -15,8 +15,8 @@ for candidate in (HELPER_DIR, SCRIPTS):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-import app_server  # noqa: E402
 import daemon_core  # noqa: E402
+import submit_turn as launcher_submit_turn  # noqa: E402
 from env.domain import task_management, task_tui  # noqa: E402
 
 
@@ -66,9 +66,9 @@ def send_checkout_prompt(
             instance_payload=context.instance_payload,
         )
         prompt = task_tui.render_stop_task_tui(snapshot, previous_turn)
-        actions.turn_start(prompt, handler_name="task_checkout", origin_turn_id=origin_turn_id)
+        actions.submit_turn(prompt, handler_name="task_checkout", origin_turn_id=origin_turn_id)
         return daemon_core.HandlerResult.handled()
-    except app_server.AppServerError as exc:
+    except launcher_submit_turn.SubmitTurnError as exc:
         return daemon_core.HandlerResult.failed(str(exc))
 
 

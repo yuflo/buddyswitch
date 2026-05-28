@@ -643,7 +643,16 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             with self.subTest(command_payload=command_payload):
                 runner = FakeRunner()
                 runner.add(
-                    ["instance", "input", "inst-pm-demo", "--text", "Advance the brief", "--json"],
+                    [
+                        "instance",
+                        "input",
+                        "inst-pm-demo",
+                        "--text",
+                        "Advance the brief",
+                        "--input-wrapper",
+                        "task-tui",
+                        "--json",
+                    ],
                     WEB_MANAGEMENT.CommandResult(
                         returncode=0,
                         stdout=json.dumps(command_payload, ensure_ascii=True),
@@ -689,7 +698,16 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 self.assertEqual(
                     runner.calls,
                     [
-                        ["instance", "input", "inst-pm-demo", "--text", "Advance the brief", "--json"],
+                        [
+                            "instance",
+                            "input",
+                            "inst-pm-demo",
+                            "--text",
+                            "Advance the brief",
+                            "--input-wrapper",
+                            "task-tui",
+                            "--json",
+                        ],
                         ["instance", "status", "inst-pm-demo", "--json"],
                     ],
                 )
@@ -853,7 +871,16 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner = OrderedRunner(
             [
                 CommandStep(
-                    ["instance", "input", "inst-pm-demo", "--text", "User task", "--json"],
+                    [
+                        "instance",
+                        "input",
+                        "inst-pm-demo",
+                        "--text",
+                        "User task",
+                        "--input-wrapper",
+                        "task-tui",
+                        "--json",
+                    ],
                     command_json(
                         {
                             "instance_id": "inst-pm-demo",
@@ -881,7 +908,16 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_input_route_returns_structured_error_for_malformed_launcher_json(self) -> None:
         runner = FakeRunner()
         runner.add(
-            ["instance", "input", "inst-pm-demo", "--text", "Advance the brief", "--json"],
+            [
+                "instance",
+                "input",
+                "inst-pm-demo",
+                "--text",
+                "Advance the brief",
+                "--input-wrapper",
+                "task-tui",
+                "--json",
+            ],
             WEB_MANAGEMENT.CommandResult(
                 returncode=0,
                 stdout="{bad json",
