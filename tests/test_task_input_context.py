@@ -327,6 +327,35 @@ class TaskInputContextTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIn("No start / switch / confirm in checkout.", tui)
         self.assertNotIn("[USER INPUT]", tui)
 
+    def test_stop_task_tui_done_task_rendering_requires_no_update(self) -> None:
+        snapshot = {
+            "owner_buddy": "dev",
+            "task_state": "done",
+            "current_task": {
+                "id": "task-0001-ai",
+                "title": "AI news",
+                "status": "done",
+                "summary": "Quickly summarized today's AI news.",
+                "body_excerpt": "Find and summarize AI news.",
+            },
+            "pending_confirmation": None,
+            "recent_events": [],
+            "last_event": {
+                "event": "task.close",
+                "task_id": "task-0001-ai",
+            },
+            "progress_summary": "Quickly summarized today's AI news.",
+        }
+
+        tui = task_tui.render_stop_task_tui(snapshot, {"turn_id": "turn_done"})
+
+        self.assertIn("This is the daemon-created checkout turn.", tui)
+        self.assertIn("Status: done", tui)
+        self.assertIn("Already done -> no task update", tui)
+        self.assertIn("No task update needed -> finish this checkout turn without assistant text", tui)
+        self.assertNotIn("Done -> $task-management + task.propose(finish)", tui)
+        self.assertNotIn("Blocked -> $task-management + task.propose(block)", tui)
+
 
 if __name__ == "__main__":
     unittest.main()
