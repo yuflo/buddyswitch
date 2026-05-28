@@ -14,6 +14,8 @@ import env.tools
 from env.tool_runtime.definition import ActionDefinition
 from env.tool_runtime.definition import ToolDefinition
 from env.tool_runtime.definition import validate_definition
+from env.tool_runtime import actor_profile
+from env.tool_runtime import auth_feedback
 from env.tool_runtime import role_auth
 from env.tool_runtime import results as tool_results
 
@@ -310,62 +312,6 @@ def _normalize_action_for_dispatch(*, tool: str, action: str) -> str:
     return normalized
 
 
-def _role_auth_rejection(
-    *,
-    tool: str,
-    action: str,
-    active_buddy: str,
-    decision: role_auth.AuthDecision,
-) -> dict[str, Any]:
-    allowed_roles = list(decision.allowed_roles)
-    allowed_roles_text = ", ".join(allowed_roles) if allowed_roles else "none"
-    return tool_results.rejection(
-        tool=tool,
-        action=_semantic_action(tool=tool, action=action),
-        active_buddy=active_buddy,
-        code="E_TOOL_ROLE_AUTH",
-        message="active role is not allowed to run this tool action",
-        permission_boundary="tool.role_authority",
-        human_summary="Active role is not allowed to run this tool action.",
-        why_blocked=(
-            f"Action {tool}.{action} is restricted by env.tool role-action policy. "
-            f"Active role '{decision.active_role}' is not allowed; allowed roles: {allowed_roles_text}."
-        ),
-        impact="No env action ran and runtime state was unchanged.",
-        state_changed=False,
-        durability="none",
-        retryable=False,
-        retry_guidance="Use an action allowed for this role, or ask an allowed role to perform this action.",
-        allowed_next_actions=[
-            "Use context.summarize to inspect runtime policy preview for this role.",
-            "Use context.get to inspect tool payload schema and runtime policy preview.",
-        ],
-        alternative_capabilities=[
-            tool_results.alternative_capability(
-                tool="context",
-                action="summarize",
-                condition="Inspect runtime policy preview before choosing another env.tool action.",
-                mutates_product_state=False,
-            ),
-            tool_results.alternative_capability(
-                tool="context",
-                action="get",
-                condition="Inspect tool payload schema and runtime policy preview before retrying.",
-                mutates_product_state=False,
-            ),
-        ],
-        extra={
-            "category": "auth_denied",
-            "auth_source": "env.tool role-action policy",
-            "auth_stage": "pre_dispatch",
-            "executed": False,
-            "required_permission": decision.required_permission,
-            "active_role": decision.active_role,
-            "allowed_roles": allowed_roles,
-        },
-    )
-
-
 def _reject(
     *,
     tool: str | None,
@@ -424,6 +370,16 @@ def dispatch_env_tool_request(
     manifest: dict[str, Any],
     manifest_path: Path | None = None,
 ) -> dict[str, Any]:
+    instance_record = actor_profile.runtime_instance_record_from_dispatch(
+        instance_id=instance_id,
+        active_buddy=active_buddy,
+        instance_json=instance_json,
+        instance_payload=instance_payload,
+    )
+    runtime_actor = actor_profile.resolve_runtime_actor_profile(instance_record)
+    active_buddy = runtime_actor.active_buddy
+    instance_id = runtime_actor.instance_id
+
     raw_tool = payload.get("tool")
     if not isinstance(raw_tool, str) or not raw_tool.strip():
         return _reject(
@@ -522,9 +478,9 @@ def dispatch_env_tool_request(
         )
 
     action_definition = get_action_definition(tool, action)
-    auth_decision = role_auth.authorize(action_definition.required_permission, active_buddy, manifest)
+    auth_decision = role_auth.authorize(action_definition.required_permission, runtime_actor.auth_subject, manifest)
     if not auth_decision.allowed:
-        return _role_auth_rejection(
+        return auth_feedback.role_auth_rejection(
             tool=tool,
             action=action,
             active_buddy=active_buddy,
@@ -552,9 +508,8 @@ def dispatch_env_tool_request(
 
     from env.tool_runtime.context import ToolContext
 
-    context = ToolContext(
-        active_buddy=active_buddy,
-        instance_id=instance_id,
+    context = ToolContext.from_actor_profile(
+        actor_profile=runtime_actor,
         instance_json=instance_json,
         instance_payload=dict(instance_payload),
         manifest=dict(manifest),
