@@ -19,6 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_SERVER_PATH = ROOT / "tools" / "launcher" / "app_server.py"
+APP_SERVER_SHELL_PATH = ROOT / "tools" / "launcher" / "app_server.sh"
 SPEC = importlib.util.spec_from_file_location("buddyswitch_launcher_app_server", APP_SERVER_PATH)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError(f"Unable to load spec for {APP_SERVER_PATH}")
@@ -584,6 +585,34 @@ class AppServerClientTests(unittest.TestCase):
             ]
         )
         self.assertEqual(args.permissions, "buddyswitch-runtime")
+
+    def test_input_command_rejects_legacy_instance_json_argument(self) -> None:
+        parser = APP_SERVER.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(
+                [
+                    "input",
+                    "--socket",
+                    "/tmp/app-server.sock",
+                    "--thread-id",
+                    "thread-1",
+                    "--text",
+                    "Draft brief",
+                    "--permissions",
+                    "buddyswitch-runtime",
+                    "--instance-json",
+                    "/tmp/instance.json",
+                ]
+            )
+
+    def test_app_server_source_has_no_task_tui_input_coupling(self) -> None:
+        source = APP_SERVER_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("task_input_context", source)
+        self.assertNotIn("compose_task_context_input", source)
+        self.assertNotIn("TaskInputContextError", source)
+
+        shell_source = APP_SERVER_SHELL_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("--instance-json", shell_source)
 
     def test_side_commands_require_expected_arguments(self) -> None:
         parser = APP_SERVER.build_parser()
