@@ -206,33 +206,59 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertEqual(saved["handlers"]["exploder"]["last_error"]["message"], "handler exploded")
             self.assertEqual(saved["handlers"]["exploder"]["last_error"]["origin_turn_id"], "turn-user-1")
 
-    def test_action_gateway_turn_start_uses_main_thread_permissions_and_text_payload(self) -> None:
+    def test_action_gateway_submit_turn_delegates_to_launcher_submit_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
-            client = FakeActionClient(result={"turn": {"id": "turn-daemon-1"}})
-            actions = self.core.ActionGateway(context=context, state=state, client=client)
+            actions = self.core.ActionGateway(context=context, state=state)
+            calls: list[dict[str, object]] = []
+            original_submit_turn = self.core.launcher_submit_turn.submit_turn
 
-            turn_id = actions.turn_start("daemon prompt", handler_name="fake", origin_turn_id="turn-user-1")
+            def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+                calls.append(
+                    {
+                        "socket_path": socket_path,
+                        "thread_id": thread_id,
+                        "text": text,
+                        "permissions": permissions,
+                    }
+                )
+                return {"action": "start", "turn_id": "turn-daemon-1"}
+
+            self.addCleanup(setattr, self.core.launcher_submit_turn, "submit_turn", original_submit_turn)
+            self.core.launcher_submit_turn.submit_turn = fake_submit_turn
+
+            turn_id = actions.submit_turn("daemon prompt", handler_name="fake", origin_turn_id="turn-user-1")
 
             self.assertEqual(turn_id, "turn-daemon-1")
-            self.assertEqual([request["method"] for request in client.requests], ["turn/start"])
-            params = client.requests[0]["params"]
-            assert isinstance(params, dict)
-            self.assertEqual(params["threadId"], "thr-main")
-            self.assertEqual(params["permissions"], "buddyswitch-runtime")
-            self.assertEqual(params["input"], self.core.app_server.text_input_payload("daemon prompt"))
+            self.assertEqual(
+                calls,
+                [
+                    {
+                        "socket_path": context.socket_path,
+                        "thread_id": "thr-main",
+                        "text": "daemon prompt",
+                        "permissions": "buddyswitch-runtime",
+                    }
+                ],
+            )
 
-    def test_action_gateway_records_daemon_origin_and_handler_action_state(self) -> None:
+    def test_action_gateway_records_daemon_origin_and_handler_action_state_from_submit_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
-            client = FakeActionClient(result={"turn": {"id": "turn-daemon-1"}})
-            actions = self.core.ActionGateway(context=context, state=state, client=client)
+            actions = self.core.ActionGateway(context=context, state=state)
+            original_submit_turn = self.core.launcher_submit_turn.submit_turn
 
-            actions.turn_start("daemon prompt", handler_name="fake", origin_turn_id="turn-user-1")
+            def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+                return {"action": "start", "turn_id": "turn-daemon-1"}
+
+            self.addCleanup(setattr, self.core.launcher_submit_turn, "submit_turn", original_submit_turn)
+            self.core.launcher_submit_turn.submit_turn = fake_submit_turn
+
+            actions.submit_turn("daemon prompt", handler_name="fake", origin_turn_id="turn-user-1")
 
             saved = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertEqual(saved["daemon_origin_turn_ids"], ["turn-daemon-1"])
@@ -240,35 +266,47 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertEqual(saved["handlers"]["fake"]["last_action_turn_id"], "turn-daemon-1")
             self.assertIsNone(saved["handlers"]["fake"]["last_error"])
 
-    def test_action_gateway_raises_protocol_error_when_turn_id_missing(self) -> None:
+    def test_action_gateway_raises_launcher_submit_turn_error_when_no_turn_id_is_returned(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
-            client = FakeActionClient(result={"turn": {}})
-            actions = self.core.ActionGateway(context=context, state=state, client=client)
+            actions = self.core.ActionGateway(context=context, state=state)
+            original_submit_turn = self.core.launcher_submit_turn.submit_turn
 
-            with self.assertRaises(self.core.app_server.AppServerProtocolError):
-                actions.turn_start("daemon prompt", handler_name="fake", origin_turn_id="turn-user-1")
+            def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+                return {"action": "start"}
+
+            self.addCleanup(setattr, self.core.launcher_submit_turn, "submit_turn", original_submit_turn)
+            self.core.launcher_submit_turn.submit_turn = fake_submit_turn
+
+            with self.assertRaises(self.core.launcher_submit_turn.SubmitTurnError):
+                actions.submit_turn("daemon prompt", handler_name="fake", origin_turn_id="turn-user-1")
 
             self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
-            self.assertEqual([request["method"] for request in client.requests], ["turn/start"])
+            state_path = self.core.daemon_state_file(instance["instance_root"])
+            if state_path.exists():
+                saved = json.loads(state_path.read_text(encoding="utf-8"))
+                self.assertNotIn("fake", saved["handlers"])
 
-    def test_action_gateway_exposes_request_error_without_retry_or_steer(self) -> None:
+    def test_action_gateway_exposes_launcher_submit_turn_error_without_retry_or_steer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
-            client = FakeActionClient(
-                error=self.core.app_server.AppServerRequestError("turn/start", -32000, "active thread"),
-            )
-            actions = self.core.ActionGateway(context=context, state=state, client=client)
+            actions = self.core.ActionGateway(context=context, state=state)
+            original_submit_turn = self.core.launcher_submit_turn.submit_turn
 
-            with self.assertRaises(self.core.app_server.AppServerRequestError):
-                actions.turn_start("daemon prompt", handler_name="fake", origin_turn_id="turn-user-1")
+            def fake_submit_turn(*, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
+                raise self.core.launcher_submit_turn.SubmitTurnError("submit_turn failed: active thread")
 
-            self.assertEqual([request["method"] for request in client.requests], ["turn/start"])
-            self.assertNotIn("turn/steer", [request["method"] for request in client.requests])
+            self.addCleanup(setattr, self.core.launcher_submit_turn, "submit_turn", original_submit_turn)
+            self.core.launcher_submit_turn.submit_turn = fake_submit_turn
+
+            with self.assertRaises(self.core.launcher_submit_turn.SubmitTurnError):
+                actions.submit_turn("daemon prompt", handler_name="fake", origin_turn_id="turn-user-1")
+
+            self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
 
 
 if __name__ == "__main__":
