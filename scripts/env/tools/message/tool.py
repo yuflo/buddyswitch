@@ -152,7 +152,7 @@ def _build_definition() -> ToolDefinition:
                     'buddybox files',
                 ),
                 preconditions=(
-                    'active buddy owns message.list permission',
+                    'env.tool role-action policy allows this action for the active role',
                 ),
                 returns=(
                     'messages',

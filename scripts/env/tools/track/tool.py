@@ -196,7 +196,7 @@ def _build_definition() -> ToolDefinition:
                     'buddybox files',
                 ),
                 preconditions=(
-                    'active buddy owns track.read permission',
+                    'env.tool role-action policy allows this action for the active role',
                 ),
                 returns=(
                     'tracks',

@@ -75,6 +75,30 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             manifest_path=MANIFEST,
         )
 
+    def _assert_role_auth_receipt(
+        self,
+        response: dict[str, object],
+        *,
+        required_permission: str,
+        active_role: str,
+    ) -> None:
+        self.assertFalse(response.get("ok"), msg=response)
+        self.assertEqual((response.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
+        self.assertEqual(response.get("permission_boundary"), "tool.role_authority")
+        self.assertEqual(response.get("category"), "auth_denied")
+        self.assertEqual(response.get("auth_source"), "env.tool role-action policy")
+        self.assertEqual(response.get("auth_stage"), "pre_dispatch")
+        self.assertIs(response.get("executed"), False)
+        self.assertEqual(response.get("required_permission"), required_permission)
+        self.assertEqual(response.get("active_role"), active_role)
+        self.assertEqual(response.get("allowed_roles"), ["pm"])
+        self.assertIs(response.get("state_changed"), False)
+        self.assertEqual(response.get("durability"), "none")
+        why_blocked = str(response.get("why_blocked", ""))
+        self.assertIn("role-action policy", why_blocked)
+        self.assertNotIn("requires permission", why_blocked)
+        self.assertNotIn("owns permission", why_blocked)
+
     def _run_router_subprocess_with_blocked_message_impl(
         self,
         *,
@@ -254,14 +278,11 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         payload = json.loads(completed.stdout)
         response = payload["response"]
-        self.assertFalse(response.get("ok"), msg=payload)
-        self.assertEqual((response.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
-        self.assertEqual(response.get("permission_boundary"), "tool.role_authority")
-        self.assertEqual(response.get("required_permission"), "track.create")
-        self.assertEqual(response.get("active_role"), "dev")
-        self.assertEqual(response.get("allowed_roles"), ["pm"])
-        self.assertIs(response.get("state_changed"), False)
-        self.assertEqual(response.get("durability"), "none")
+        self._assert_role_auth_receipt(
+            response,
+            required_permission="track.create",
+            active_role="dev",
+        )
         self.assertNotIn("env.tools.track._impl", payload["loaded"])
 
     def test_allowed_role_reaches_selected_private_impl_import(self) -> None:
@@ -295,11 +316,12 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
             instance_json=instance_json,
             buddy="dev",
         )
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual((response.get("error") or {}).get("code"), "E_TOOL_ROLE_AUTH")
-        self.assertEqual(response.get("permission_boundary"), "tool.role_authority")
-        self.assertEqual(response.get("required_permission"), "track.create")
-        self.assertEqual(response.get("active_role"), "dev")
+        self._assert_role_auth_receipt(
+            response,
+            required_permission="track.create",
+            active_role="dev",
+        )
+        self.assertNotEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL_PAYLOAD")
 
     def test_selected_dispatch_imports_no_sibling_private_impl_modules(self) -> None:
         instance_json = self._instance_json(instance_id="inst-dev-selected-impl-import", buddy="dev")

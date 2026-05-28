@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -234,14 +235,38 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             "active_role",
             "active_buddy",
             "allowed_roles",
-            "allowed_actions",
-            "denied_actions",
-            "denied_action_details",
-            "role_authority_source",
+            "allowed_" + "actions",
+            "denied_" + "actions",
+            "denied_" + "action_" + "details",
+            "role_" + "authority_" + "source",
+            "runtime_policy_preview",
+            "available_actions",
+            "restricted_actions",
+            "restricted_action_details",
+            "not_authorization_boundary",
+            "not_execution_result",
         }
         for key, row in catalog.operation_semantics().items():
             with self.subTest(action=key):
                 self.assertTrue(forbidden_role_fields.isdisjoint(row))
+
+    def test_tool_catalog_and_operation_semantics_do_not_claim_permission_ownership(self) -> None:
+        catalog_text = json.dumps(catalog.env_tools_description(), ensure_ascii=True).lower()
+        operation_text = json.dumps(catalog.operation_semantics(), ensure_ascii=True).lower()
+        combined = f"{catalog_text}\n{operation_text}"
+        forbidden = (
+            "active buddy owns",
+            "owns message.list permission",
+            "owns task.read permission",
+            "owns task.propose permission",
+            "owns task.confirm permission",
+            "owns artifact.create permission",
+            "owns track.read permission",
+        )
+        for text in forbidden:
+            with self.subTest(text=text):
+                self.assertNotIn(text, combined)
+        self.assertIn("env.tool role-action policy allows this action for the active role", combined)
 
     def test_task_current_operation_semantics_are_read_only(self) -> None:
         current = catalog.operation_semantics()["task.current"]
