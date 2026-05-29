@@ -503,7 +503,14 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_search_source_has_no_direct_json_new_page_open(self) -> None:
         text = (ROOT / "scripts" / "env" / "tools" / "search" / "_impl.py").read_text(encoding="utf-8")
         self.assertNotIn("/json/new", text)
+        self.assertNotIn('"tools"', text)
+        self.assertNotIn('"launcher"', text)
+        self.assertNotIn("tools" + "/launcher", text)
+        self.assertIn('"scripts"', text)
+        self.assertIn('"env"', text)
         self.assertIn("cdp_background_page.py", text)
+        self.assertTrue((ROOT / "scripts" / "env" / "cdp_background_page.py").exists())
+        self.assertFalse((ROOT / "tools" / "launcher" / "cdp_background_page.py").exists())
 
     def test_search_open_browser_rejects_invalid_browser_port(self) -> None:
         for port in ("abc", 0, 70000):

@@ -135,7 +135,7 @@ def _build_search_url(query: str, engine: str) -> str:
 
 
 def _open_browser_page(browser_endpoint: str, target_url: str) -> tuple[bool, str | None]:
-    helper = env_profiles.ROOT / "tools" / "launcher" / "cdp_background_page.py"
+    helper = env_profiles.ROOT / "scripts" / "env" / "cdp_background_page.py"
     try:
         completed = subprocess.run(
             [

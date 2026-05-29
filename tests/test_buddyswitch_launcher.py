@@ -1087,6 +1087,19 @@ exec "$real_git" "$@"
             return exc.errno == errno.EPERM
         return True
 
+    @staticmethod
+    def _first_available_browser_port() -> int:
+        for port in range(9222, 9322):
+            probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            finally:
+                probe.close()
+            return port
+        raise AssertionError("no free browser cockpit port found in range 9222..9321")
+
     def _terminate_registered_process(self, pid_value: object, pgid_value: object | None = None) -> None:
         pid = self._coerce_pid(pid_value)
         if pid is None:
@@ -1519,6 +1532,19 @@ exec "$real_git" "$@"
             self.assertFalse(
                 (workspace_dir / "buddyswitch" / "skills" / "design" / "shape-prototype" / "SKILL.md").exists()
             )
+
+    def test_search_open_browser_helper_stays_inside_runtime_sparse_surface(self) -> None:
+        workspace_text = (ROOT / "tools" / "launcher" / "workspace.sh").read_text(encoding="utf-8")
+        search_text = (ROOT / "scripts" / "env" / "tools" / "search" / "_impl.py").read_text(encoding="utf-8")
+
+        self.assertRegex(workspace_text, r"(?m)^scripts/env/$")
+        self.assertRegex(workspace_text, r"(?m)^tools$")
+        self.assertIn('"scripts"', search_text)
+        self.assertIn('"env"', search_text)
+        self.assertIn("cdp_background_page.py", search_text)
+        self.assertNotIn("tools" + "/launcher", search_text)
+        self.assertTrue((ROOT / "scripts" / "env" / "cdp_background_page.py").exists())
+        self.assertFalse((ROOT / "tools" / "launcher" / "cdp_background_page.py").exists())
 
     def test_instance_start_creates_private_taskbox_for_active_buddy(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -2729,6 +2755,7 @@ exec "$real_git" "$@"
                 self.skipTest(f"port 9222 is not available for the busy-port precondition: {exc}")
         if owns_busy_socket:
             self.addCleanup(busy_socket.close)
+        expected_browser_port = self._first_available_browser_port()
 
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -2786,7 +2813,7 @@ exec "$real_git" "$@"
             )
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             instance_json = json.loads(Path(payload["instance_json"]).read_text(encoding="utf-8"))
-            self.assertEqual(instance_json["browser_port"], 9223)
+            self.assertEqual(instance_json["browser_port"], expected_browser_port)
 
             call_entries = [
                 json.loads(line)
@@ -2794,7 +2821,7 @@ exec "$real_git" "$@"
                 if line.strip()
             ]
             cockpit_add = next(entry for entry in call_entries if entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
-            self._assert_cockpit_proxy_registration(cockpit_add["argv"], "http://127.0.0.1:9223")
+            self._assert_cockpit_proxy_registration(cockpit_add["argv"], f"http://127.0.0.1:{expected_browser_port}")
 
     def test_input_starts_turn_when_thread_idle_defaults_to_raw(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

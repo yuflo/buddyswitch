@@ -26,8 +26,9 @@ def _handle_exit(_signum: int, _frame: object) -> None:
     RUNNING = False
 
 
-for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+for _sig in (signal.SIGTERM, signal.SIGINT):
     signal.signal(_sig, _handle_exit)
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
 
 def append_calls(payload: dict[str, object]) -> None:
@@ -955,7 +956,7 @@ def handle_websocket_connection(sock: socket.socket, entry: dict[str, object]) -
     while RUNNING:
         try:
             opcode, payload = read_frame(sock)
-        except TimeoutError:
+        except (TimeoutError, socket.timeout):
             continue
         except (EOFError, OSError):
             return
@@ -1030,7 +1031,7 @@ def run_fake_app_server(socket_url: str, entry: dict[str, object]) -> int:
         while RUNNING:
             try:
                 client, _addr = server.accept()
-            except TimeoutError:
+            except (TimeoutError, socket.timeout):
                 continue
             except OSError:
                 break
