@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import hashlib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -80,6 +81,14 @@ class RuntimeWorkspaceTestMixin:
 
     def _state_path(self, repo_path: str) -> Path:
         return self.runtime_state_root / repo_path
+
+    def _runtime_instance_id(self, *, buddy: str, label: str) -> str:
+        if isinstance(label, str) and label.startswith(f"inst-{buddy}-"):
+            suffix = label.removeprefix(f"inst-{buddy}-")
+            if len(suffix) == 12 and all(char in "0123456789abcdef" for char in suffix):
+                return label
+        digest = hashlib.sha1(f"{buddy}:{label}".encode("utf-8")).hexdigest()[:12]
+        return f"inst-{buddy}-{digest}"
 
     def _instance_root(self, instance_id: str) -> Path:
         return self.runtime_root / "instances" / instance_id

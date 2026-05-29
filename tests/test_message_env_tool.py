@@ -16,6 +16,8 @@ if str(SCRIPTS) not in sys.path:
 
 import env_legacy_store as env_store  # noqa: E402
 import runtime_kernel.broker as runtime_broker  # noqa: E402
+from env.tool_runtime import daemon_presence  # noqa: E402
+from env.tool_runtime.actor_profile import RuntimeActorAddress  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
@@ -24,6 +26,17 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     _OBJECT_DIRS = ("tracks", "tasks", "artifacts", "comments", "messages")
+
+    def setUp(self) -> None:
+        super().setUp()
+        daemon_presence.clear_registry()
+
+    def _normalized_instance_id(self, *, buddy: str, label: str) -> str:
+        try:
+            return RuntimeActorAddress(buddy_id=buddy, instance_id=label).instance_id
+        except ValueError:
+            suffix = uuid.uuid5(uuid.NAMESPACE_DNS, f"{buddy}:{label}").hex[:12]
+            return f"inst-{buddy}-{suffix}"
 
     def _objects_state(self) -> dict[str, dict[str, object]]:
         snapshot: dict[str, dict[str, object]] = {}
@@ -48,11 +61,12 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.assertEqual(before[object_dir], after[object_dir], msg=object_dir)
 
     def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
+        normalized_instance_id = self._normalized_instance_id(buddy=buddy, label=instance_id)
         path = self._runtime_path("instance.json")
         path.write_text(
             json.dumps(
                 {
-                    "instance_id": instance_id,
+                    "instance_id": normalized_instance_id,
                     "buddy": buddy,
                     "status": status,
                     "workspace_dir": str(self.runtime_root),
@@ -68,12 +82,13 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return path
 
     def _dispatch(self, *, instance_json: Path, instance_id: str, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        normalized_instance_id = self._normalized_instance_id(buddy=buddy, label=instance_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-msg-{uuid.uuid4().hex}",
             "method": "env.tool",
             "params": {
-                "instance_id": instance_id,
+                "instance_id": normalized_instance_id,
                 "active_buddy": buddy,
                 "tool": tool,
                 "action": action,
@@ -109,6 +124,28 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             payload[key] = value
         return payload
 
+    def _register_online_actor(
+        self,
+        *,
+        buddy: str,
+        label: str,
+        endpoint: dict[str, object],
+    ) -> RuntimeActorAddress:
+        address = RuntimeActorAddress(
+            buddy_id=buddy,
+            instance_id=self._normalized_instance_id(buddy=buddy, label=label),
+        )
+        daemon_presence.register_online_actor(actor_address=address, endpoint=endpoint)
+        return address
+
+    def _read_jsonl_events(self, path: Path) -> list[dict[str, object]]:
+        if not path.exists():
+            return []
+        rows: list[dict[str, object]] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            rows.append(json.loads(line))
+        return rows
+
     def test_send_message_creates_inbox_message_for_target_buddy(self):
         instance_json = self._instance_json(instance_id="inst-design-msg", buddy="design")
         before_state = self._objects_state()
@@ -126,6 +163,7 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotEqual(before_state["messages"], after_state["messages"])
         self.assertIn("message_id", response)
         self.assertIn("message", response)
+        self.assertEqual(response.get("notification_status"), "skipped_offline")
         msg = response["message"]
         self.assertEqual(msg["from_buddy"], "design")
         self.assertEqual(msg["to_buddy"], "dev")
@@ -133,6 +171,99 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIsNone(msg["reply_to"])
         self.assertIsInstance(msg["created_at"], str)
         self.assertNotIn("status", msg)
+
+    def test_message_send_online_target_records_reference_only_notification_event(self):
+        event_path = self._runtime_path("dev-message-events.jsonl")
+        target_address = self._register_online_actor(
+            buddy="dev",
+            label="inst-dev-online-message-target",
+            endpoint={"kind": "daemon_state_file", "path": str(event_path)},
+        )
+        instance_json = self._instance_json(instance_id="inst-design-online-msg", buddy="design")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-design-online-msg",
+            buddy="design",
+            tool="message",
+            action="send",
+            args={"to_buddy": "dev", "content": "The reference-only notification should be available."},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("notification_status"), "delivered")
+        events = self._read_jsonl_events(event_path)
+        self.assertEqual(len(events), 1, msg=events)
+        event = events[0]
+        self.assertEqual(event["type"], "message.available")
+        self.assertEqual(event["message_id"], response["message_id"])
+        self.assertEqual(event["to_actor_address"], target_address.to_payload())
+        self.assertEqual(
+            event["from_actor_address"],
+            {
+                "buddy_id": "design",
+                "instance_id": self._normalized_instance_id(buddy="design", label="inst-design-online-msg"),
+            },
+        )
+        for forbidden_field in ("content", "message", "from_buddy", "to_buddy"):
+            self.assertNotIn(forbidden_field, event)
+
+    def test_message_send_delivery_failure_keeps_durable_message(self):
+        self._register_online_actor(
+            buddy="dev",
+            label="inst-dev-delivery-failure",
+            endpoint={"kind": "failing", "message": "target daemon socket closed"},
+        )
+        instance_json = self._instance_json(instance_id="inst-design-delivery-failure", buddy="design")
+        before_state = self._objects_state()
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-design-delivery-failure",
+            buddy="design",
+            tool="message",
+            action="send",
+            args={"to_buddy": "dev", "content": "Durable write must survive delivery failure."},
+        )
+        after_state = self._objects_state()
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("notification_status"), "delivery_failed")
+        self.assertIn("target daemon socket closed", response.get("notification_error", ""))
+        self.assertIn("message_id", response)
+        self.assertNotEqual(before_state["messages"], after_state["messages"])
+        self.assertIsNotNone(env_store.get_message(response["message_id"]))
+
+    def test_message_send_ambiguous_online_actor_keeps_message_without_event(self):
+        first_event_path = self._runtime_path("dev-first-events.jsonl")
+        second_event_path = self._runtime_path("dev-second-events.jsonl")
+        self._register_online_actor(
+            buddy="dev",
+            label="inst-dev-ambiguous-one",
+            endpoint={"kind": "daemon_state_file", "path": str(first_event_path)},
+        )
+        self._register_online_actor(
+            buddy="dev",
+            label="inst-dev-ambiguous-two",
+            endpoint={"kind": "daemon_state_file", "path": str(second_event_path)},
+        )
+        instance_json = self._instance_json(instance_id="inst-pm-ambiguous-msg", buddy="pm")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-ambiguous-msg",
+            buddy="pm",
+            tool="message",
+            action="send",
+            args={"to_buddy": "dev", "content": "Do not choose between multiple online dev actors."},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("notification_status"), "ambiguous_online_actor")
+        self.assertIn("message_id", response)
+        self.assertIsNotNone(env_store.get_message(response["message_id"]))
+        self.assertEqual(self._read_jsonl_events(first_event_path), [])
+        self.assertEqual(self._read_jsonl_events(second_event_path), [])
 
     def test_message_list_returns_only_messages_to_active_buddy(self):
         # Seed messages from different buddies to dev

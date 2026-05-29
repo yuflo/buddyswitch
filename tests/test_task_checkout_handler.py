@@ -69,11 +69,11 @@ class TaskCheckoutHandlerTestCase(unittest.TestCase):
         self.handler = self.task_checkout_handler.TaskCheckoutHandler()
 
     def _instance(self, temp_root: str) -> dict[str, Any]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        instance_root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
         instance_root.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload: dict[str, Any] = {
-            "instance_id": "inst-dev-daemon",
+            "instance_id": "inst-dev-daed00000001",
             "buddy": "dev",
             "status": "active",
             "instance_root": str(instance_root),
@@ -91,7 +91,7 @@ class TaskCheckoutHandlerTestCase(unittest.TestCase):
     def _state(self, instance_root: Path) -> Any:
         return self.daemon_core.DaemonState.load(
             instance_root=instance_root,
-            instance_id="inst-dev-daemon",
+            instance_id="inst-dev-daed00000001",
             main_thread_id="thr-main",
         )
 

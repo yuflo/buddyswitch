@@ -24,21 +24,33 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
         self.instance_json = self._runtime_path("instance.json")
+        self.instance_id = self._instance_id_for("pm")
         self.instance_payload = {
-            "instance_id": "inst-identity-runless",
+            "instance_id": self.instance_id,
             "buddy": "pm",
             "status": "active",
             "workspace_dir": str(self.runtime_root),
         }
         self.instance_json.write_text(json.dumps(self.instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
+    def _instance_id_for(self, buddy: str) -> str:
+        suffix = {
+            "dev": "1de000000001",
+            "pm": "1de000000002",
+            "design": "1de000000003",
+            "market": "1de000000004",
+            "test": "1de000000005",
+        }[buddy]
+        return f"inst-{buddy}-{suffix}"
+
     def _dispatch(self, *, active_buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        instance_id = self._instance_id_for(active_buddy)
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
             active_buddy=active_buddy,
-            instance_id="inst-identity-runless",
+            instance_id=instance_id,
             instance_json=self.instance_json,
-            instance_payload={**self.instance_payload, "buddy": active_buddy},
+            instance_payload={**self.instance_payload, "instance_id": instance_id, "buddy": active_buddy},
             manifest=self.manifest,
             manifest_path=self.manifest_path,
         )

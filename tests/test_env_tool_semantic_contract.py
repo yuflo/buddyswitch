@@ -328,7 +328,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         hyphenated = catalog.dispatch_env_tool_request(
             payload={"tool": "search", "action": "open-browser", "args": {"query": "x"}},
             active_buddy="market",
-            instance_id="inst-semantic-check",
+            instance_id="inst-market-5e0000000001",
             instance_json=ROOT / "tmp" / "does-not-matter.json",
             instance_payload={},
             manifest={"buddies": [{"id": "market"}]},
@@ -341,7 +341,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         canonical = catalog.dispatch_env_tool_request(
             payload={"tool": "search", "action": "open_browser", "args": {"query": "x"}},
             active_buddy="market",
-            instance_id="inst-semantic-check",
+            instance_id="inst-market-5e0000000001",
             instance_json=ROOT / "tmp" / "does-not-matter.json",
             instance_payload={"browser_port": None},
             manifest={"buddies": [{"id": "market"}]},

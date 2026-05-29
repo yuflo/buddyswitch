@@ -41,6 +41,7 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
     def _make_instance_context(self, *, instance_id: str = "instance-a", buddy: str = "dev") -> dict[str, Any]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         instance_root = self._runtime_path(f"instances/{instance_id}")
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -75,6 +76,7 @@ class TaskEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         action: str,
         args: dict[str, object],
     ) -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-task-{uuid.uuid4().hex}",

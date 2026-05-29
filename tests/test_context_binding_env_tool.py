@@ -98,6 +98,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         workspace_dir: Path | None = None,
         path: Path | None = None,
     ) -> Path:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         instance_root = self._runtime_path(f"instances/{instance_id}")
         instance_json_path = path if path is not None else instance_root / "instance.json"
         resolved_workspace_dir = workspace_dir if workspace_dir is not None else self.runtime_root
@@ -125,6 +126,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return instance_json_path
 
     def _dispatch(self, *, instance_json: Path, tool: str, action: str, args: dict[str, object], instance_id: str = "inst-dev-context", buddy: str = "dev") -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-context-{uuid.uuid4().hex}",
@@ -167,9 +169,10 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return payload
 
     def _seed_context_state(self) -> None:
+        instance_id = self._runtime_instance_id(buddy="dev", label="inst-dev-context")
         env_store.create_track("track-context-active", "Context Track", owner_buddy="pm")
         self._seed_taskbox_task(
-            instance_id="inst-dev-context",
+            instance_id=instance_id,
             buddy="dev",
             task_id="task-dev-context",
             title="Context Task",
@@ -223,7 +226,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             health="ok",
         )
         self._seed_taskbox_task(
-            instance_id="inst-dev-context",
+            instance_id=instance_id,
             buddy="dev",
             task_id="task-dev-archived",
             title="Archived task",
@@ -610,7 +613,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_context_summarize_accepts_launcher_project_symlink_source_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             shared_root = Path(temp_dir) / "shared-root"
-            runtime_workspace = shared_root / "instances" / "inst-dev-context" / "workspace"
+            instance_id = self._runtime_instance_id(buddy="dev", label="inst-dev-context")
+            runtime_workspace = shared_root / "instances" / instance_id / "workspace"
             runtime_workspace.mkdir(parents=True, exist_ok=True)
             project_workspace = shared_root / "project" / "workspace"
             shared_source_root = project_workspace / "projects" / "app"
@@ -623,7 +627,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json = self._instance_json(
                 buddy="dev",
                 workspace_dir=runtime_workspace,
-                path=shared_root / "instances" / "inst-dev-context" / "instance.json",
+                path=shared_root / "instances" / instance_id / "instance.json",
             )
 
             payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
@@ -641,7 +645,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_context_summarize_rejects_source_symlink_outside_project_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             shared_root = Path(temp_dir) / "shared-root"
-            runtime_workspace = shared_root / "instances" / "inst-dev-context" / "workspace"
+            instance_id = self._runtime_instance_id(buddy="dev", label="inst-dev-context")
+            runtime_workspace = shared_root / "instances" / instance_id / "workspace"
             runtime_workspace.mkdir(parents=True, exist_ok=True)
             project_workspace = shared_root / "project" / "workspace"
             (project_workspace / "projects" / "app").mkdir(parents=True, exist_ok=True)
@@ -656,7 +661,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json = self._instance_json(
                 buddy="dev",
                 workspace_dir=runtime_workspace,
-                path=shared_root / "instances" / "inst-dev-context" / "instance.json",
+                path=shared_root / "instances" / instance_id / "instance.json",
             )
 
             payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")

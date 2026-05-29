@@ -27,6 +27,7 @@ ALL_BUDDIES = ("pm", "design", "dev", "market", "test")
 
 class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         instance_root = self._instance_root(instance_id)
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -60,6 +61,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         action: str,
         args: dict[str, object],
     ) -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-track-{uuid.uuid4().hex}",
@@ -536,7 +538,13 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-open-attachments").get("ok"))
 
-        pm_source = self._instance_root("inst-pm-track") / "workspace" / "buddybox" / "evidence" / "brief-attachment.txt"
+        pm_source = (
+            self._instance_root(self._runtime_instance_id(buddy="pm", label="inst-pm-track"))
+            / "workspace"
+            / "buddybox"
+            / "evidence"
+            / "brief-attachment.txt"
+        )
         pm_source.parent.mkdir(parents=True, exist_ok=True)
         pm_source.write_text("pm attachment", encoding="utf-8")
 
@@ -581,7 +589,13 @@ class TrackEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertTrue(published_material.get("ok"), msg=published_material)
 
         test_instance = self._instance_json(instance_id="inst-test-track-open", buddy="test")
-        test_source = self._instance_root("inst-test-track-open") / "workspace" / "buddybox" / "evidence" / "proof-attachment.txt"
+        test_source = (
+            self._instance_root(self._runtime_instance_id(buddy="test", label="inst-test-track-open"))
+            / "workspace"
+            / "buddybox"
+            / "evidence"
+            / "proof-attachment.txt"
+        )
         test_source.parent.mkdir(parents=True, exist_ok=True)
         test_source.write_text("proof attachment", encoding="utf-8")
 

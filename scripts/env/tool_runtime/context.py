@@ -30,7 +30,9 @@ from env.repos import runtime_files
 from env.repos import tasks as _task_repo
 from env.repos import tracks as _track_repo
 from env.tool_runtime.actor_profile import AuthSubject
+from env.tool_runtime.actor_profile import RuntimeActorAddress
 from env.tool_runtime.actor_profile import RuntimeActorProfile
+from env.tool_runtime import daemon_presence
 
 
 def _load_registry_module():
@@ -353,6 +355,20 @@ class RegistryCatalogAccess:
         return _load_registry_module().tool_catalog_errors()
 
 
+class DaemonAccess:
+    """Best-effort daemon presence and notification access for runtime tools."""
+
+    def __init__(self, *, actor_address: RuntimeActorAddress) -> None:
+        self._actor_address = actor_address
+
+    def notify_message_available(self, *, message_id: str, to_buddy: str) -> dict[str, Any]:
+        return daemon_presence.deliver_message_available(
+            message_id=message_id,
+            from_actor_address=self._actor_address,
+            to_buddy=to_buddy,
+        )
+
+
 @dataclass(frozen=True)
 class DomainAccess:
     """Host-owned domain validator/normalizer access."""
@@ -388,6 +404,7 @@ class ToolContext(Mapping[str, Any]):
 
     active_buddy: str
     instance_id: str
+    actor_address: RuntimeActorAddress
     auth_subject: AuthSubject
     instance_json: Path
     instance_payload: dict[str, Any]
@@ -417,6 +434,7 @@ class ToolContext(Mapping[str, Any]):
                 manifest_path=self.manifest_path,
             ),
         )
+        object.__setattr__(self, "daemon", DaemonAccess(actor_address=self.actor_address))
 
     @classmethod
     def from_actor_profile(
@@ -431,6 +449,7 @@ class ToolContext(Mapping[str, Any]):
         return cls(
             active_buddy=actor_profile.active_buddy,
             instance_id=actor_profile.instance_id,
+            actor_address=actor_profile.actor_address,
             auth_subject=actor_profile.auth_subject,
             instance_json=instance_json,
             instance_payload=instance_payload,

@@ -49,6 +49,7 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.assertEqual(before[object_dir], after[object_dir], msg=object_dir)
 
     def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         path = self._runtime_path(f"instance-{instance_id}.json")
         path.write_text(
             json.dumps(
@@ -78,6 +79,7 @@ class RequestEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         action: str,
         args: dict[str, object],
     ) -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-request-{uuid.uuid4().hex}",
