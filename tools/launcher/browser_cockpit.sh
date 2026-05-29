@@ -53,6 +53,7 @@ buddyswitch_browser_init_defaults() {
   export BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME="${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME:-chrome-devtools-cockpit}"
   export BUDDYSWITCH_BROWSER_COCKPIT_PROXY="${BUDDYSWITCH_BROWSER_COCKPIT_PROXY:-${BUDDYSWITCH_REPO_ROOT}/tools/launcher/chrome_devtools_cockpit_proxy.py}"
   export BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_PACKAGE="${BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_PACKAGE:-chrome-devtools-mcp@1.1.1}"
+  export BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL="${BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL:-${BUDDYSWITCH_REPO_ROOT}/tools/launcher/cdp_background_page.py}"
 
   if [[ "${BUDDYSWITCH_BROWSER_PROFILE_DIR_EXPLICIT:-0}" == "1" ]]; then
     export BUDDYSWITCH_BROWSER_PROFILE_DIR
@@ -87,6 +88,8 @@ Environment:
   BUDDYSWITCH_BROWSER_LOG_FILE          Chrome log file (default: ${BUDDYSWITCH_BROWSER_LOG_FILE:-<instance>/browser/chrome.log})
   BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME  MCP server name (default: ${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME:-chrome-devtools-cockpit})
   BUDDYSWITCH_BROWSER_COCKPIT_PROXY     BuddySwitch MCP proxy path.
+  BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL
+                                         Helper used to create non-activating ready pages.
   BUDDYSWITCH_BROWSER_CHROME_BIN        Override Chrome binary path.
 EOF
 }
@@ -220,7 +223,9 @@ PY
 }
 
 buddyswitch_browser_create_blank_page() {
-  buddyswitch_browser_cdp_curl --request PUT "$(buddyswitch_browser_url)/json/new?about:blank" >/dev/null
+  python3 "${BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL}" \
+    --browser-url "$(buddyswitch_browser_url)" \
+    --url about:blank >/dev/null
 }
 
 buddyswitch_browser_find_chrome_bin() {

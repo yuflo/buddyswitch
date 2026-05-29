@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import sys
@@ -11,6 +13,7 @@ import unittest
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -25,16 +28,96 @@ from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E4
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
+WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def _websocket_accept_value(key: str) -> str:
+    digest = hashlib.sha1((key + WEBSOCKET_GUID).encode("ascii")).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
+def _read_exact(stream: object, length: int) -> bytes:
+    chunks = b""
+    while len(chunks) < length:
+        chunk = stream.read(length - len(chunks))  # type: ignore[attr-defined]
+        if not chunk:
+            raise EOFError("websocket stream closed")
+        chunks += chunk
+    return chunks
+
+
+def _read_client_text_frame(stream: object) -> str:
+    first, second = _read_exact(stream, 2)
+    opcode = first & 0x0F
+    if opcode != 0x1:
+        raise ValueError(f"expected text frame, got opcode {opcode}")
+    masked = bool(second & 0x80)
+    length = second & 0x7F
+    if length == 126:
+        length = int.from_bytes(_read_exact(stream, 2), "big")
+    elif length == 127:
+        length = int.from_bytes(_read_exact(stream, 8), "big")
+    mask = _read_exact(stream, 4) if masked else b""
+    payload = _read_exact(stream, length)
+    if masked:
+        payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+    return payload.decode("utf-8")
+
+
+def _write_server_text_frame(stream: object, text: str) -> None:
+    payload = text.encode("utf-8")
+    first = 0x80 | 0x1
+    length = len(payload)
+    if length < 126:
+        header = bytes([first, length])
+    elif length < (1 << 16):
+        header = bytes([first, 126]) + length.to_bytes(2, "big")
+    else:
+        header = bytes([first, 127]) + length.to_bytes(8, "big")
+    stream.write(header + payload)  # type: ignore[attr-defined]
+    stream.flush()  # type: ignore[attr-defined]
 
 
 def _make_cdp_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            state.setdefault("requests", []).append({"method": "GET", "path": self.path})
+            parsed = urlparse(self.path)
+            if parsed.path == "/json/version":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                payload = {
+                    "Browser": "test",
+                    "webSocketDebuggerUrl": (
+                        f"ws://127.0.0.1:{self.server.server_port}/devtools/browser/test"  # type: ignore[attr-defined]
+                    ),
+                }
+                self.wfile.write(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+                return
+            if parsed.path == "/devtools/browser/test":
+                key = self.headers.get("Sec-WebSocket-Key")
+                if not key:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+                self.send_response(101)
+                self.send_header("Upgrade", "websocket")
+                self.send_header("Connection", "Upgrade")
+                self.send_header("Sec-WebSocket-Accept", _websocket_accept_value(key))
+                self.end_headers()
+                message = json.loads(_read_client_text_frame(self.rfile))
+                state.setdefault("rpc_requests", []).append(message)
+                response = {"id": message.get("id"), "result": {"targetId": "target-search"}}
+                _write_server_text_frame(self.wfile, json.dumps(response, ensure_ascii=True))
+                return
+            self.send_response(404)
+            self.end_headers()
+
         def do_PUT(self) -> None:  # noqa: N802
             state.setdefault("requests", []).append({"method": "PUT", "path": self.path})
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            self.send_response(500)
             self.end_headers()
-            self.wfile.write(b'{"id":"target-search"}')
 
         def log_message(self, _format: str, *_args: object) -> None:
             return
@@ -164,8 +247,9 @@ class EnvToolResponseContractTests(RuntimeWorkspaceTestMixin, unittest.TestCase)
         server = HTTPServer(("127.0.0.1", 0), _make_cdp_handler(state))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
         self.addCleanup(thread.join, 5)
+        self.addCleanup(server.shutdown)
         return server, thread, int(server.server_port)
 
     def _assert_rejection_contract(self, payload: dict[str, object]) -> None:

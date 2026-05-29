@@ -4,10 +4,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 from typing import Any, TypedDict
-from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.parse import urlencode
 
 import env_profiles
 from env.tool_runtime.context import default_manifest_path as DEFAULT_MANIFEST
@@ -136,20 +135,32 @@ def _build_search_url(query: str, engine: str) -> str:
 
 
 def _open_browser_page(browser_endpoint: str, target_url: str) -> tuple[bool, str | None]:
-    create_url = f"{browser_endpoint}/json/new?{quote(target_url, safe='')}"
-    request = Request(create_url, method="PUT")
-    # The Chrome DevTools endpoint is always local to the instance browser.
-    # Bypass host proxy settings so local loopback requests don't go through HTTP_PROXY.
-    opener = build_opener(ProxyHandler({}))
+    helper = env_profiles.ROOT / "tools" / "launcher" / "cdp_background_page.py"
     try:
-        with opener.open(request, timeout=3.0) as response:
-            if 200 <= response.status < 300:
-                return True, None
-            return False, f"Chrome DevTools returned HTTP {response.status}"
-    except HTTPError as exc:
-        return False, f"Chrome DevTools returned HTTP {exc.code}"
-    except (URLError, OSError, ValueError) as exc:
+        completed = subprocess.run(
+            [
+                "python3",
+                str(helper),
+                "--browser-url",
+                browser_endpoint,
+                "--url",
+                target_url,
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5.0,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "Chrome DevTools Target.createTarget timed out"
+    except OSError as exc:
         return False, str(exc)
+    if completed.returncode == 0:
+        return True, None
+    reason = completed.stderr.strip() or completed.stdout.strip()
+    if reason:
+        return False, reason
+    return False, f"Chrome DevTools Target.createTarget exited with status {completed.returncode}"
 
 
 def _engine_error(*, action: str, context: SearchServiceContext) -> dict[str, Any]:
