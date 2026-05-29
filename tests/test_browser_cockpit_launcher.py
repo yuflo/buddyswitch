@@ -250,6 +250,15 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
 """,
         )
 
+    def _assert_cockpit_proxy_registration(self, argv: list[object], browser_url: str) -> None:
+        self.assertEqual(argv[:3], ["mcp", "add", "chrome-devtools-cockpit"])
+        self.assertIn("--", argv)
+        separator_index = argv.index("--")
+        self.assertEqual(argv[separator_index + 1], "python3")
+        self.assertIn("tools/launcher/chrome_devtools_cockpit_proxy.py", str(argv[separator_index + 2]))
+        self.assertIn(f"--browser-url={browser_url}", argv)
+        self.assertNotIn("chrome-devtools-mcp@latest", argv)
+
     def test_browser_ensure_starts_chrome_with_shared_profile_and_bootstraps_mcps(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -322,6 +331,8 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             ]
             mcp_add_names = [payload["argv"][2] for payload in payloads if payload["argv"][:2] == ["mcp", "add"]]
             self.assertEqual(mcp_add_names, ["chrome-devtools-cockpit"])
+            cockpit_add = next(payload for payload in payloads if payload["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
+            self._assert_cockpit_proxy_registration(cockpit_add["argv"], "http://127.0.0.1:9222")
 
             expected_home = instance_root / "home"
             expected_codex_home = instance_root / "codex-home"
@@ -697,9 +708,78 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             self.assertIn("env browser ensure requires --instance <instance-id>", completed.stderr)
             self.assertFalse(shared_root.exists(), "ensure without --instance must fail before creating shared state")
 
+    def test_browser_ensure_repairs_raw_cockpit_mcp_with_matching_browser_url(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+
+            state_file = temp_root_path / "cdp-state.json"
+            self._write_cdp_state(
+                state_file,
+                version_ok=True,
+                pages=[{"id": "ready", "type": "page", "url": "about:blank"}],
+            )
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_codex(fake_bin / "codex")
+
+            capture_path = temp_root_path / "calls.jsonl"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_id = "inst-pm-browser-raw-mcp"
+            instance_root = self._write_instance_record(shared_root, instance_id)
+            instance_codex_home = instance_root / "codex-home"
+            instance_codex_home.mkdir(parents=True, exist_ok=True)
+            (instance_codex_home / "config.toml").write_text(
+                """
+[mcp_servers.chrome-devtools-cockpit]
+command = "npx"
+args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
+
+            payloads = [
+                json.loads(line)
+                for line in capture_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            remove_index = next(
+                index
+                for index, payload in enumerate(payloads)
+                if payload["argv"][:3] == ["mcp", "remove", "chrome-devtools-cockpit"]
+            )
+            add_index = next(
+                index
+                for index, payload in enumerate(payloads)
+                if payload["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"]
+            )
+            self.assertLess(remove_index, add_index)
+            self._assert_cockpit_proxy_registration(payloads[add_index]["argv"], "http://127.0.0.1:9222")
+
     def test_browser_launcher_source_is_instance_only(self) -> None:
         text = (ROOT / "tools" / "launcher" / "browser_cockpit.sh").read_text(encoding="utf-8")
         self.assertIn("chrome-devtools-cockpit", text)
+        self.assertIn("chrome_devtools_cockpit_proxy.py", text)
+        self.assertNotIn("chrome-devtools-mcp@latest", text)
         self.assertNotIn("chrome/shared-browser", text)
         self.assertNotIn("buddyswitch_browser_ensure_general_mcp", text)
         self.assertNotIn("mcp add \"chrome-devtools\"", text)

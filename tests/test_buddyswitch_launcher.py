@@ -227,6 +227,15 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         else:
             self.assertNotIn(repo_root_resolved, config_text.replace(str(repo_git_common_dir), ""))
 
+    def _assert_cockpit_proxy_registration(self, argv: list[object], browser_url: str) -> None:
+        self.assertEqual(argv[:3], ["mcp", "add", "chrome-devtools-cockpit"])
+        self.assertIn("--", argv)
+        separator_index = argv.index("--")
+        self.assertEqual(argv[separator_index + 1], "python3")
+        self.assertIn("tools/launcher/chrome_devtools_cockpit_proxy.py", str(argv[separator_index + 2]))
+        self.assertIn(f"--browser-url={browser_url}", argv)
+        self.assertNotIn("chrome-devtools-mcp@latest", argv)
+
     def _write_exec(self, path: Path, content: str) -> None:
         path.write_text(content, encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
@@ -2175,7 +2184,7 @@ exec "$real_git" "$@"
             self.assertIn("chrome-devtools-cockpit", mcp_add_names)
             self.assertNotIn("chrome-devtools", mcp_add_names)
             cockpit_add = next(entry for entry in mcp_add_entries if entry["argv"][2] == "chrome-devtools-cockpit")
-            self.assertIn(f"--browser-url=http://127.0.0.1:{browser_port}", cockpit_add["argv"])
+            self._assert_cockpit_proxy_registration(cockpit_add["argv"], f"http://127.0.0.1:{browser_port}")
 
             for relative_path in (
                 "buddyswitch/objects" + "/tasks",
@@ -2711,7 +2720,7 @@ exec "$real_git" "$@"
                 if line.strip()
             ]
             cockpit_add = next(entry for entry in call_entries if entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
-            self.assertIn("--browser-url=http://127.0.0.1:9223", cockpit_add["argv"])
+            self._assert_cockpit_proxy_registration(cockpit_add["argv"], "http://127.0.0.1:9223")
 
     def test_input_starts_turn_when_thread_idle_defaults_to_raw(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -6358,7 +6367,7 @@ exec "$real_git" "$@"
                 if line.strip()
             ]
             cockpit_add = next(entry for entry in call_entries if entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
-            self.assertIn(f"--browser-url=http://127.0.0.1:{browser_port}", cockpit_add["argv"])
+            self._assert_cockpit_proxy_registration(cockpit_add["argv"], f"http://127.0.0.1:{browser_port}")
             self.assertIn(f"--browser-url=http://127.0.0.1:{browser_port}", payload["config_toml"])
 
     def test_start_with_required_buddy_blocks_codex_when_cockpit_mcp_setup_fails(self) -> None:
@@ -8997,7 +9006,7 @@ exit 0
                 if line.strip()
             ]
             cockpit_add = next(entry for entry in call_entries if entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
-            self.assertIn("--browser-url=http://127.0.0.1:9444", cockpit_add["argv"])
+            self._assert_cockpit_proxy_registration(cockpit_add["argv"], "http://127.0.0.1:9444")
 
     def test_env_browser_ensure_repairs_stale_cockpit_mcp_browser_url(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -9090,7 +9099,7 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             )
             self.assertLess(remove_index, add_index)
             cockpit_add = call_entries[add_index]
-            self.assertIn("--browser-url=http://127.0.0.1:9444", cockpit_add["argv"])
+            self._assert_cockpit_proxy_registration(cockpit_add["argv"], "http://127.0.0.1:9444")
 
     def test_browser_ensure_is_blocked_when_runtime_lock_is_held(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:

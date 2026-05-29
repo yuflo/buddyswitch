@@ -51,6 +51,8 @@ buddyswitch_browser_init_defaults() {
 
   export BUDDYSWITCH_BROWSER_PORT="${BUDDYSWITCH_BROWSER_PORT:-9222}"
   export BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME="${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME:-chrome-devtools-cockpit}"
+  export BUDDYSWITCH_BROWSER_COCKPIT_PROXY="${BUDDYSWITCH_BROWSER_COCKPIT_PROXY:-${BUDDYSWITCH_REPO_ROOT}/tools/launcher/chrome_devtools_cockpit_proxy.py}"
+  export BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_PACKAGE="${BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_PACKAGE:-chrome-devtools-mcp@1.1.1}"
 
   if [[ "${BUDDYSWITCH_BROWSER_PROFILE_DIR_EXPLICIT:-0}" == "1" ]]; then
     export BUDDYSWITCH_BROWSER_PROFILE_DIR
@@ -84,6 +86,7 @@ Environment:
   BUDDYSWITCH_BROWSER_PROFILE_DIR       Chrome profile dir (default: ${BUDDYSWITCH_BROWSER_PROFILE_DIR:-<instance>/browser/profile})
   BUDDYSWITCH_BROWSER_LOG_FILE          Chrome log file (default: ${BUDDYSWITCH_BROWSER_LOG_FILE:-<instance>/browser/chrome.log})
   BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME  MCP server name (default: ${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME:-chrome-devtools-cockpit})
+  BUDDYSWITCH_BROWSER_COCKPIT_PROXY     BuddySwitch MCP proxy path.
   BUDDYSWITCH_BROWSER_CHROME_BIN        Override Chrome binary path.
 EOF
 }
@@ -306,15 +309,34 @@ buddyswitch_browser_mcp_browser_url() {
   ' "${config_path}"
 }
 
+buddyswitch_browser_mcp_uses_cockpit_proxy() {
+  local server_name="$1"
+  local config_path section
+
+  config_path="$(buddyswitch_codex_config_path)"
+  if [[ ! -f "${config_path}" ]]; then
+    return 1
+  fi
+
+  section="[mcp_servers.${server_name}]"
+  awk -v section="${section}" '
+    $0 == section { in_section = 1; next }
+    /^\[/ && in_section { exit }
+    in_section && /chrome_devtools_cockpit_proxy\.py/ { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "${config_path}"
+}
+
 buddyswitch_browser_ensure_cockpit_mcp() {
-  local server_name expected_browser_url recorded_browser_url
+  local server_name expected_browser_url recorded_browser_url upstream_command
 
   server_name="${BUDDYSWITCH_BROWSER_COCKPIT_MCP_NAME}"
   expected_browser_url="$(buddyswitch_browser_url)"
+  upstream_command="npx ${BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_PACKAGE}"
 
   if buddyswitch_browser_has_mcp_server "${server_name}"; then
     recorded_browser_url="$(buddyswitch_browser_mcp_browser_url "${server_name}" || true)"
-    if [[ "${recorded_browser_url}" == "${expected_browser_url}" ]]; then
+    if [[ "${recorded_browser_url}" == "${expected_browser_url}" ]] && buddyswitch_browser_mcp_uses_cockpit_proxy "${server_name}"; then
       return 0
     fi
     buddyswitch_browser_remove_mcp_server "${server_name}"
@@ -322,8 +344,9 @@ buddyswitch_browser_ensure_cockpit_mcp() {
 
   buddyswitch_browser_add_mcp_server \
     "${server_name}" \
-    npx \
-    chrome-devtools-mcp@latest \
+    python3 \
+    "${BUDDYSWITCH_BROWSER_COCKPIT_PROXY}" \
+    --upstream-command "${upstream_command}" \
     --browser-url="${expected_browser_url}"
 }
 
