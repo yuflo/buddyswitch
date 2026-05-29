@@ -6,9 +6,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import subprocess
 import sys
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -35,6 +37,11 @@ class HttpError(Exception):
     status: int
     code: str
     message: str
+    details: dict[str, Any] | None = None
+
+
+class TerminalOpenError(Exception):
+    """Raised when the host cannot ask Terminal.app to open the attach command."""
 
 
 class BusyGuard:
@@ -162,13 +169,16 @@ def create_server(host: str, port: int, service: "WebManagementService") -> Thre
                     self._serve_static(STATIC_ROOT / "app.js", "application/javascript; charset=utf-8")
                     return
                 if parsed.path.startswith("/api/"):
-                    self._serve_json(*service.handle_api(self.command, parsed.path, self._read_body()))
+                    self._serve_json(*service.handle_api(self.command, parsed.path, self._read_body(), self.headers))
                     return
                 self._serve_html_404()
             except HttpError as exc:
+                error_payload: dict[str, Any] = {"code": exc.code, "message": exc.message}
+                if exc.details:
+                    error_payload.update(exc.details)
                 self._serve_json(
                     exc.status,
-                    {"ok": False, "error": {"code": exc.code, "message": exc.message}},
+                    {"ok": False, "error": error_payload},
                 )
 
         def _read_body(self) -> bytes:
@@ -213,13 +223,23 @@ class WebManagementService:
         *,
         repo_root: Path,
         command_runner: Callable[[list[str], float], CommandResult] | Callable[..., CommandResult] | None = None,
+        terminal_opener: Callable[[str], None] | None = None,
+        platform_name: str | None = None,
         busy_guard: BusyGuard | None = None,
     ) -> None:
         self._repo_root = repo_root
         self._runner = command_runner or LauncherCommandRunner(repo_root).run
+        self._terminal_opener = terminal_opener or open_macos_terminal_app
+        self._platform_name = platform_name or sys.platform
         self._busy_guard = busy_guard or BusyGuard()
 
-    def handle_api(self, method: str, path: str, body: bytes) -> tuple[int, dict[str, Any]]:
+    def handle_api(
+        self,
+        method: str,
+        path: str,
+        body: bytes,
+        headers: Mapping[str, str] | None = None,
+    ) -> tuple[int, dict[str, Any]]:
         if method == "GET" and path == "/api/health":
             return 200, {"ok": True}
         if method == "GET" and path == "/api/buddies":
@@ -254,6 +274,8 @@ class WebManagementService:
             return 200, self._resume(instance_id)
         if method == "POST" and action == "stop":
             return 200, self._stop(instance_id)
+        if method == "POST" and action == "open-tui":
+            return 200, self._open_tui(instance_id, body, headers)
         if method == "DELETE" and action == "delete":
             return 200, self._delete(instance_id)
         raise HttpError(status=404, code="NOT_FOUND", message="API route not found.")
@@ -276,6 +298,8 @@ class WebManagementService:
             return path[len(status_prefix) : -len("/resume")], "resume"
         if path.startswith(status_prefix) and path.endswith("/stop"):
             return path[len(status_prefix) : -len("/stop")], "stop"
+        if path.startswith(status_prefix) and path.endswith("/open-tui"):
+            return path[len(status_prefix) : -len("/open-tui")], "open-tui"
         if path.startswith(status_prefix):
             instance_id = path[len(status_prefix) :]
             if "/" in instance_id:
@@ -499,6 +523,92 @@ class WebManagementService:
         )
         return {"ok": True, "instance_id": instance_id}
 
+    def _open_tui(
+        self,
+        instance_id: str,
+        body: bytes,
+        headers: Mapping[str, str] | None,
+    ) -> dict[str, Any]:
+        self._validate_open_tui_request(headers, body)
+        instance = self._get_instance_status(instance_id)
+        self._validate_open_tui_instance(instance)
+        command = build_open_tui_attach_command(self._repo_root, instance_id)
+        if self._platform_name != "darwin":
+            raise HttpError(
+                status=400,
+                code="UNSUPPORTED_PLATFORM",
+                message="Could not open Terminal.",
+                details={"command": command},
+            )
+        try:
+            self._terminal_opener(command)
+        except TerminalOpenError as exc:
+            raise HttpError(
+                status=502,
+                code="TERMINAL_OPEN_FAILED",
+                message="Could not open Terminal.",
+                details={"command": command},
+            ) from exc
+        except Exception as exc:
+            raise HttpError(
+                status=502,
+                code="TERMINAL_OPEN_FAILED",
+                message="Could not open Terminal.",
+                details={"command": command},
+            ) from exc
+        return {
+            "ok": True,
+            "instance_id": instance_id,
+            "command": command,
+            "terminal": "Terminal.app",
+        }
+
+    def _validate_open_tui_request(self, headers: Mapping[str, str] | None, body: bytes) -> None:
+        content_type = _header_value(headers, "Content-Type")
+        if content_type is None or content_type.split(";", 1)[0].strip().lower() != "application/json":
+            raise HttpError(
+                status=400,
+                code="INVALID_REQUEST",
+                message="Content-Type must be application/json.",
+            )
+        web_header = _header_value(headers, "X-BuddySwitch-Web")
+        if web_header != "1":
+            raise HttpError(
+                status=400,
+                code="INVALID_REQUEST",
+                message="X-BuddySwitch-Web header is required.",
+            )
+        host_header = _header_value(headers, "Host")
+        host = _hostname_from_host_header(host_header)
+        if host is not None and host not in LOCAL_BIND_HOSTS:
+            raise HttpError(status=403, code="FORBIDDEN", message="Open TUI requires a local Host header.")
+        origin_value = _header_value(headers, "Origin")
+        if origin_value:
+            parsed_origin = urlsplit(origin_value)
+            origin_host = parsed_origin.hostname.lower() if parsed_origin.hostname else None
+            if origin_host not in LOCAL_BIND_HOSTS:
+                raise HttpError(status=403, code="FORBIDDEN", message="Open TUI requires a local Origin header.")
+            if host is not None and origin_host != host:
+                raise HttpError(status=403, code="FORBIDDEN", message="Open TUI requires same-origin headers.")
+            host_netloc = _normalized_host_netloc(host_header)
+            origin_netloc = parsed_origin.netloc.lower()
+            if host_netloc is not None and origin_netloc != host_netloc:
+                raise HttpError(status=403, code="FORBIDDEN", message="Open TUI requires same-origin headers.")
+        payload = self._parse_json_body(body)
+        if payload:
+            raise HttpError(status=400, code="INVALID_REQUEST", message="open-tui does not accept request fields.")
+
+    def _validate_open_tui_instance(self, instance: dict[str, Any]) -> None:
+        if instance.get("status") != "active":
+            raise HttpError(status=409, code="OPEN_TUI_BLOCKED", message="Resume this instance first.")
+        app_server = instance.get("app_server")
+        app_server_healthy = isinstance(app_server, dict) and bool(app_server.get("healthy"))
+        if not app_server_healthy:
+            raise HttpError(status=409, code="OPEN_TUI_BLOCKED", message="Instance is unhealthy.")
+        thread_id = instance.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id.strip():
+            raise HttpError(status=409, code="OPEN_TUI_BLOCKED", message="No thread to attach.")
+
     def _list_buddies(self) -> list[dict[str, str]]:
         result = self._run_command(["instance", "buddies", "--json"], timeout_seconds=10)
         payload = load_command_json_object(result.stdout, message="Invalid JSON from instance buddies.")
@@ -608,6 +718,73 @@ def _first_nonempty_line(text: str) -> str | None:
         if cleaned:
             return cleaned
     return None
+
+
+def _header_value(headers: Mapping[str, str] | None, name: str) -> str | None:
+    if headers is None:
+        return None
+    value = headers.get(name)
+    if value is not None:
+        return str(value)
+    lower_name = name.lower()
+    for key, candidate in headers.items():
+        if key.lower() == lower_name:
+            return str(candidate)
+    return None
+
+
+def _hostname_from_host_header(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    cleaned = value.strip().lower()
+    if cleaned.startswith("["):
+        end = cleaned.find("]")
+        if end > 1:
+            return cleaned[1:end]
+    return cleaned.rsplit(":", 1)[0]
+
+
+def _normalized_host_netloc(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    return value.strip().lower()
+
+
+def build_open_tui_attach_command(repo_root: Path, instance_id: str) -> str:
+    validate_instance_id(instance_id)
+    return (
+        f"cd {shlex.quote(str(repo_root))} "
+        f"&& ./buddyswitch-codex instance attach {shlex.quote(instance_id)}"
+    )
+
+
+def _quote_applescript_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def open_macos_terminal_app(command: str) -> None:
+    script = "\n".join(
+        [
+            'tell application "Terminal"',
+            "  activate",
+            f"  do script {_quote_applescript_string(command)}",
+            "end tell",
+        ]
+    )
+    try:
+        completed = subprocess.run(
+            ["osascript", "-e", script],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise TerminalOpenError("Terminal open timed out.") from exc
+    if completed.returncode != 0:
+        message = _first_nonempty_line(completed.stderr) or _first_nonempty_line(completed.stdout)
+        raise TerminalOpenError(message or "Terminal open failed.")
+
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the BuddySwitch local web management server.")

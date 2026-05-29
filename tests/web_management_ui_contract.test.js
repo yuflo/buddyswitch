@@ -45,6 +45,10 @@ test('production html keeps all real control ids used by the web UI', () => {
     'clear-button',
     'resume-button',
     'delete-button',
+    'open-tui-button',
+    'open-tui-status',
+    'copy-tui-command-button',
+    'open-tui-command',
     'message-banner',
   ].forEach((id) => {
     assertIncludes(indexHtml, `id="${id}"`);
@@ -92,11 +96,14 @@ test('production javascript keeps the real api surface', () => {
     '/stop',
     '/clear',
     '/resume',
+    '/open-tui',
+    'X-BuddySwitch-Web',
   ].forEach((apiPath) => {
     assertIncludes(appJs, apiPath);
   });
 
   assertIncludes(appJs, "method: 'DELETE'");
+  assertIncludes(combinedAssets, 'Copy command');
 });
 
 test('first version does not reintroduce removed initialize ui or route', () => {
@@ -131,6 +138,10 @@ test('first version does not ship mock-only controls', () => {
     'Runtime logs',
     'Artifacts',
     'Threads',
+    'attach-open',
+    'terminal selector',
+    'terminal-select',
+    'open-terminal-choice',
   ].forEach((forbidden) => {
     assertExcludes(combinedAssets, forbidden);
   });

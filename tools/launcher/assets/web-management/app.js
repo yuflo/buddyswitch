@@ -45,6 +45,46 @@
     };
   }
 
+  function computeOpenTuiState(instance, options) {
+    const isMutating = Boolean(options && options.isMutating);
+    if (!instance || isMutating) {
+      return {
+        canOpenTui: false,
+        message: '',
+      };
+    }
+
+    const status = instance.status || '';
+    if (status !== 'active') {
+      return {
+        canOpenTui: false,
+        message: 'Resume this instance first.',
+      };
+    }
+
+    const appServerHealthy = instance.app_server_health === 'healthy'
+      || Boolean(instance.app_server && instance.app_server.healthy);
+    if (!appServerHealthy) {
+      return {
+        canOpenTui: false,
+        message: 'Instance is unhealthy.',
+      };
+    }
+
+    const threadId = typeof instance.thread_id === 'string' ? instance.thread_id.trim() : '';
+    if (!threadId) {
+      return {
+        canOpenTui: false,
+        message: 'No thread to attach.',
+      };
+    }
+
+    return {
+      canOpenTui: true,
+      message: '',
+    };
+  }
+
   function createState() {
     return {
       buddies: [],
@@ -57,6 +97,8 @@
       message: '',
       createPending: false,
       mutationKey: '',
+      openTuiMessage: '',
+      openTuiCommand: '',
     };
   }
 
@@ -216,9 +258,28 @@
     elements.deleteButton.disabled = !actionState.canDelete;
     elements.clearButton.disabled = !actionState.canClear;
     elements.resumeButton.disabled = !actionState.canResume;
+
+    const openTuiState = computeOpenTuiState(state.selectedInstance, {
+      isMutating: Boolean(state.mutationKey),
+    });
+    const openingTui = state.mutationKey === 'open-tui';
+    elements.openTuiButton.disabled = !openTuiState.canOpenTui;
+    elements.openTuiButton.textContent = openingTui ? 'Opening...' : 'Open TUI';
+    elements.openTuiStatus.textContent = openingTui
+      ? 'Opening...'
+      : (openTuiState.canOpenTui ? state.openTuiMessage : openTuiState.message);
+    elements.openTuiCommand.textContent = state.openTuiCommand;
+    elements.openTuiFallback.hidden = !state.openTuiCommand || !openTuiState.canOpenTui;
+    elements.copyTuiCommandButton.disabled = !state.openTuiCommand || !openTuiState.canOpenTui;
+  }
+
+  function clearOpenTuiFeedback(state) {
+    state.openTuiMessage = '';
+    state.openTuiCommand = '';
   }
 
   async function refreshAll(state, elements) {
+    const previousSelectedInstanceId = state.selectedInstanceId;
     const [healthPayload, buddiesPayload, instancesPayload] = await Promise.all([
       fetchJson('/api/health'),
       fetchJson('/api/buddies'),
@@ -241,6 +302,9 @@
     if (!state.selectedInstanceId && state.instances.length > 0) {
       state.selectedInstanceId = state.instances[0].instance_id;
     }
+    if (state.selectedInstanceId !== previousSelectedInstanceId) {
+      clearOpenTuiFeedback(state);
+    }
     await refreshSelectedInstance(state);
     render(state, elements);
   }
@@ -256,6 +320,7 @@
 
   async function selectInstance(state, elements, instanceId) {
     state.selectedInstanceId = instanceId;
+    clearOpenTuiFeedback(state);
     await refreshSelectedInstance(state);
     render(state, elements);
   }
@@ -268,6 +333,7 @@
       state.message = payload && payload.turn_id
         ? 'Action completed for ' + state.selectedInstanceId + ' (' + payload.turn_id + ').'
         : 'Action completed.';
+      clearOpenTuiFeedback(state);
       await refreshAll(state, elements);
     } catch (error) {
       state.message = error.message;
@@ -289,6 +355,7 @@
       });
       state.selectedInstanceId = payload.instance_id;
       state.message = 'Created ' + payload.instance_id + '.';
+      clearOpenTuiFeedback(state);
       await refreshAll(state, elements);
     } catch (error) {
       state.message = error.message;
@@ -297,6 +364,81 @@
       state.createPending = false;
       render(state, elements);
     }
+  }
+
+  function commandFromError(error) {
+    return error
+      && error.payload
+      && error.payload.error
+      && typeof error.payload.error.command === 'string'
+      ? error.payload.error.command
+      : '';
+  }
+
+  async function openTui(state, elements) {
+    const openTuiState = computeOpenTuiState(state.selectedInstance, {
+      isMutating: Boolean(state.mutationKey),
+    });
+    if (!openTuiState.canOpenTui) {
+      state.openTuiMessage = openTuiState.message;
+      render(state, elements);
+      return;
+    }
+
+    state.mutationKey = 'open-tui';
+    state.openTuiMessage = 'Opening...';
+    state.openTuiCommand = '';
+    render(state, elements);
+    try {
+      const payload = await fetchJson('/api/instances/' + encodeURIComponent(state.selectedInstanceId) + '/open-tui', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-BuddySwitch-Web': '1',
+        },
+        body: JSON.stringify({}),
+      });
+      state.openTuiCommand = typeof payload.command === 'string' ? payload.command : '';
+      state.openTuiMessage = 'Terminal opened.';
+    } catch (error) {
+      state.openTuiCommand = commandFromError(error);
+      state.openTuiMessage = 'Could not open Terminal.';
+    } finally {
+      state.mutationKey = '';
+      render(state, elements);
+    }
+  }
+
+  function fallbackCopyText(value) {
+    const textarea = document.createElement('textarea');
+    textarea.value = value;
+    textarea.setAttribute('readonly', 'readonly');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (!copied) {
+      throw new Error('copy failed');
+    }
+  }
+
+  async function copyOpenTuiCommand(state, elements) {
+    if (!state.openTuiCommand) {
+      return;
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(state.openTuiCommand);
+      } else {
+        fallbackCopyText(state.openTuiCommand);
+      }
+      state.openTuiMessage = 'Command copied.';
+    } catch (_error) {
+      state.openTuiMessage = 'Copy failed.';
+    }
+    render(state, elements);
   }
 
   async function bootstrap() {
@@ -317,6 +459,11 @@
       deleteButton: document.getElementById('delete-button'),
       clearButton: document.getElementById('clear-button'),
       resumeButton: document.getElementById('resume-button'),
+      openTuiButton: document.getElementById('open-tui-button'),
+      openTuiStatus: document.getElementById('open-tui-status'),
+      openTuiFallback: document.getElementById('open-tui-fallback'),
+      openTuiCommand: document.getElementById('open-tui-command'),
+      copyTuiCommandButton: document.getElementById('copy-tui-command-button'),
       messageBanner: document.getElementById('message-banner'),
     };
 
@@ -381,6 +528,18 @@
         });
       });
     });
+    elements.openTuiButton.addEventListener('click', function () {
+      openTui(state, elements).catch(function (error) {
+        state.openTuiMessage = error.message;
+        render(state, elements);
+      });
+    });
+    elements.copyTuiCommandButton.addEventListener('click', function () {
+      copyOpenTuiCommand(state, elements).catch(function (error) {
+        state.openTuiMessage = error.message;
+        render(state, elements);
+      });
+    });
     elements.deleteButton.addEventListener('click', function () {
       runMutation(state, elements, 'delete', function () {
         return fetchJson('/api/instances/' + encodeURIComponent(state.selectedInstanceId), {
@@ -388,6 +547,7 @@
         }).then(function (payload) {
           state.selectedInstanceId = '';
           state.selectedInstance = null;
+          clearOpenTuiFeedback(state);
           return payload;
         });
       });
@@ -414,5 +574,6 @@
   return {
     computeCreateEnabled,
     computeInstanceActionState,
+    computeOpenTuiState,
   };
 }));

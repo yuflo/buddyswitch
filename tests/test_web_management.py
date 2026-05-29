@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shlex
 import subprocess
 import sys
 import threading
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import ProxyHandler, Request, build_opener
@@ -86,6 +88,29 @@ def active_status(instance_id: str, thread_id: str, thread_status: str) -> dict[
     }
 
 
+OPEN_TUI_HEADERS = {
+    "Content-Type": "application/json",
+    "X-BuddySwitch-Web": "1",
+    "Host": "127.0.0.1:8765",
+    "Origin": "http://127.0.0.1:8765",
+}
+
+
+def expected_attach_command(instance_id: str) -> str:
+    return f"cd {shlex.quote(str(ROOT))} && ./buddyswitch-codex instance attach {shlex.quote(instance_id)}"
+
+
+class FakeTerminalOpener:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.commands: list[str] = []
+        self.error = error
+
+    def open(self, command: str) -> None:
+        self.commands.append(command)
+        if self.error is not None:
+            raise self.error
+
+
 class OrderedRunner:
     def __init__(self, steps: list[CommandStep]) -> None:
         self.steps = list(steps)
@@ -102,9 +127,24 @@ class OrderedRunner:
 
 
 class WebManagementServerTestCase(unittest.TestCase):
-    def _start_server(self, runner: FakeRunner | None = None) -> tuple[FakeRunner, str]:
+    def _start_server(
+        self,
+        runner: FakeRunner | None = None,
+        *,
+        terminal_opener: Callable[[str], None] | None = None,
+        platform_name: str | None = None,
+    ) -> tuple[FakeRunner, str]:
         fake_runner = runner or FakeRunner()
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, command_runner=fake_runner.run)
+        service_kwargs: dict[str, object] = {}
+        if terminal_opener is not None:
+            service_kwargs["terminal_opener"] = terminal_opener
+        if platform_name is not None:
+            service_kwargs["platform_name"] = platform_name
+        service = WEB_MANAGEMENT.WebManagementService(
+            repo_root=ROOT,
+            command_runner=fake_runner.run,
+            **service_kwargs,
+        )
         server = WEB_MANAGEMENT.create_server("127.0.0.1", 0, service)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -159,6 +199,19 @@ class WebManagementUnitTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "instance id"):
                     WEB_MANAGEMENT.validate_instance_id(instance_id)
         self.assertEqual(WEB_MANAGEMENT.validate_instance_id("inst-pm-demo"), "inst-pm-demo")
+
+    def test_open_tui_task_does_not_expand_launcher_public_surface(self) -> None:
+        self.assertNotIn("attach-open", LAUNCHER.read_text(encoding="utf-8"))
+        result = subprocess.run(
+            [str(LAUNCHER), "instance", "help"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertNotIn("attach-open", result.stdout + result.stderr)
+        self.assertIn("instance attach <instance-id>", result.stdout)
 
     def test_map_command_failure_uses_required_status_codes(self) -> None:
         cases = [
@@ -562,6 +615,220 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["instance"]["status"], "active")
         self.assertEqual(runner.calls[0][0], ["instance", "resume", "inst-pm-demo", "--json"])
+
+    def test_open_tui_route_requires_web_headers_before_status_lookup(self) -> None:
+        for headers in (
+            {},
+            {"Content-Type": "application/json"},
+            {"X-BuddySwitch-Web": "1", "Content-Type": "text/plain"},
+        ):
+            with self.subTest(headers=headers):
+                runner = OrderedRunner([])
+                opener = FakeTerminalOpener()
+                service = WEB_MANAGEMENT.WebManagementService(
+                    repo_root=ROOT,
+                    command_runner=runner.run,
+                    terminal_opener=opener.open,
+                    platform_name="darwin",
+                )
+
+                with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+                    service.handle_api("POST", "/api/instances/inst-pm-demo/open-tui", b"{}", headers)
+
+                self.assertEqual(raised.exception.status, 400)
+                self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(opener.commands, [])
+
+    def test_open_tui_route_rejects_bad_host_or_origin_before_status_lookup(self) -> None:
+        for headers in (
+            {**OPEN_TUI_HEADERS, "Host": "evil.example"},
+            {**OPEN_TUI_HEADERS, "Origin": "https://evil.example"},
+            {**OPEN_TUI_HEADERS, "Host": "127.0.0.1:8765", "Origin": "http://localhost:8765"},
+            {**OPEN_TUI_HEADERS, "Host": "127.0.0.1:8765", "Origin": "http://127.0.0.1:9999"},
+        ):
+            with self.subTest(headers=headers):
+                runner = OrderedRunner([])
+                opener = FakeTerminalOpener()
+                service = WEB_MANAGEMENT.WebManagementService(
+                    repo_root=ROOT,
+                    command_runner=runner.run,
+                    terminal_opener=opener.open,
+                    platform_name="darwin",
+                )
+
+                with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+                    service.handle_api("POST", "/api/instances/inst-pm-demo/open-tui", b"{}", headers)
+
+                self.assertEqual(raised.exception.status, 403)
+                self.assertEqual(raised.exception.code, "FORBIDDEN")
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(opener.commands, [])
+
+    def test_open_tui_route_rejects_arbitrary_request_fields_before_status_lookup(self) -> None:
+        runner = OrderedRunner([])
+        opener = FakeTerminalOpener()
+        service = WEB_MANAGEMENT.WebManagementService(
+            repo_root=ROOT,
+            command_runner=runner.run,
+            terminal_opener=opener.open,
+            platform_name="darwin",
+        )
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api(
+                "POST",
+                "/api/instances/inst-pm-demo/open-tui",
+                b'{"command":"open calculator"}',
+                OPEN_TUI_HEADERS,
+            )
+
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(opener.commands, [])
+
+    def test_open_tui_route_rejects_invalid_instance_id_before_status_lookup(self) -> None:
+        runner = OrderedRunner([])
+        opener = FakeTerminalOpener()
+        service = WEB_MANAGEMENT.WebManagementService(
+            repo_root=ROOT,
+            command_runner=runner.run,
+            terminal_opener=opener.open,
+            platform_name="darwin",
+        )
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("POST", "/api/instances/demo/open-tui", b"{}", OPEN_TUI_HEADERS)
+
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(opener.commands, [])
+
+    def test_open_tui_route_blocks_invalid_runtime_states_before_opener(self) -> None:
+        inactive = active_status("inst-pm-demo", "thread-1", "idle")
+        inactive["status"] = "inactive"
+        inactive["app_server"] = {"healthy": False}
+        unhealthy = active_status("inst-pm-demo", "thread-1", "idle")
+        unhealthy["app_server"] = {"healthy": False}
+        missing_thread = active_status("inst-pm-demo", "thread-1", "idle")
+        missing_thread["thread_id"] = None
+        cases = [
+            (inactive, "Resume this instance first."),
+            (unhealthy, "Instance is unhealthy."),
+            (missing_thread, "No thread to attach."),
+        ]
+        for status_payload, expected_message in cases:
+            with self.subTest(expected_message=expected_message):
+                runner = OrderedRunner(
+                    [
+                        CommandStep(
+                            ["instance", "status", "inst-pm-demo", "--json"],
+                            command_json(status_payload),
+                        )
+                    ]
+                )
+                opener = FakeTerminalOpener()
+                service = WEB_MANAGEMENT.WebManagementService(
+                    repo_root=ROOT,
+                    command_runner=runner.run,
+                    terminal_opener=opener.open,
+                    platform_name="darwin",
+                )
+
+                with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+                    service.handle_api("POST", "/api/instances/inst-pm-demo/open-tui", b"{}", OPEN_TUI_HEADERS)
+
+                self.assertEqual(raised.exception.status, 409)
+                self.assertEqual(raised.exception.code, "OPEN_TUI_BLOCKED")
+                self.assertEqual(raised.exception.message, expected_message)
+                self.assertEqual(len(runner.calls), 1)
+                self.assertEqual(opener.commands, [])
+
+    def test_open_tui_route_rejects_unsupported_os_with_copy_command(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    ["instance", "status", "inst-pm-demo", "--json"],
+                    command_json(active_status("inst-pm-demo", "thread-1", "idle")),
+                )
+            ]
+        )
+        opener = FakeTerminalOpener()
+        service = WEB_MANAGEMENT.WebManagementService(
+            repo_root=ROOT,
+            command_runner=runner.run,
+            terminal_opener=opener.open,
+            platform_name="linux",
+        )
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("POST", "/api/instances/inst-pm-demo/open-tui", b"{}", OPEN_TUI_HEADERS)
+
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(raised.exception.code, "UNSUPPORTED_PLATFORM")
+        self.assertEqual(raised.exception.message, "Could not open Terminal.")
+        self.assertEqual(raised.exception.details["command"], expected_attach_command("inst-pm-demo"))
+        self.assertEqual(opener.commands, [])
+
+    def test_open_tui_route_delegates_to_fake_terminal_opener(self) -> None:
+        runner = FakeRunner()
+        runner.add(
+            ["instance", "status", "inst-pm-demo", "--json"],
+            command_json(active_status("inst-pm-demo", "thread-1", "idle")),
+        )
+        opener = FakeTerminalOpener()
+        _, base_url = self._start_server(runner, terminal_opener=opener.open, platform_name="darwin")
+
+        status, payload = self._request_json(
+            base_url,
+            method="POST",
+            path="/api/instances/inst-pm-demo/open-tui",
+            payload={},
+            headers={"X-BuddySwitch-Web": "1", "Origin": base_url},
+        )
+
+        expected_command = expected_attach_command("inst-pm-demo")
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            payload,
+            {
+                "ok": True,
+                "instance_id": "inst-pm-demo",
+                "command": expected_command,
+                "terminal": "Terminal.app",
+            },
+        )
+        self.assertEqual(opener.commands, [expected_command])
+        self.assertEqual(runner.calls, [["instance", "status", "inst-pm-demo", "--json"]])
+
+    def test_open_tui_route_returns_copy_command_when_terminal_open_fails(self) -> None:
+        runner = OrderedRunner(
+            [
+                CommandStep(
+                    ["instance", "status", "inst-pm-demo", "--json"],
+                    command_json(active_status("inst-pm-demo", "thread-1", "idle")),
+                )
+            ]
+        )
+        opener = FakeTerminalOpener(WEB_MANAGEMENT.TerminalOpenError("automation denied"))
+        service = WEB_MANAGEMENT.WebManagementService(
+            repo_root=ROOT,
+            command_runner=runner.run,
+            terminal_opener=opener.open,
+            platform_name="darwin",
+        )
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("POST", "/api/instances/inst-pm-demo/open-tui", b"{}", OPEN_TUI_HEADERS)
+
+        expected_command = expected_attach_command("inst-pm-demo")
+        self.assertEqual(raised.exception.status, 502)
+        self.assertEqual(raised.exception.code, "TERMINAL_OPEN_FAILED")
+        self.assertEqual(raised.exception.message, "Could not open Terminal.")
+        self.assertEqual(raised.exception.details["command"], expected_command)
+        self.assertEqual(opener.commands, [expected_command])
 
     def test_create_route_returns_structured_error_for_malformed_launcher_json(self) -> None:
         runner = FakeRunner()

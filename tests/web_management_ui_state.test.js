@@ -182,3 +182,98 @@ test('active in-progress instance disables clear while allowing interrupt', () =
     }
   );
 });
+
+test('open tui is disabled without a selected instance', () => {
+  assert.deepEqual(
+    app.computeOpenTuiState(null, { isMutating: false }),
+    {
+      canOpenTui: false,
+      message: '',
+    }
+  );
+});
+
+test('active healthy instance with a thread enables open tui', () => {
+  assert.deepEqual(
+    app.computeOpenTuiState(
+      {
+        status: 'active',
+        app_server_health: 'healthy',
+        thread_id: 'thread-main',
+      },
+      { isMutating: false }
+    ),
+    {
+      canOpenTui: true,
+      message: '',
+    }
+  );
+});
+
+test('inactive instance tells user to resume before opening tui', () => {
+  assert.deepEqual(
+    app.computeOpenTuiState(
+      {
+        status: 'inactive',
+        app_server_health: 'unhealthy',
+        thread_id: 'thread-main',
+      },
+      { isMutating: false }
+    ),
+    {
+      canOpenTui: false,
+      message: 'Resume this instance first.',
+    }
+  );
+});
+
+test('unhealthy instance blocks open tui', () => {
+  assert.deepEqual(
+    app.computeOpenTuiState(
+      {
+        status: 'active',
+        app_server_health: 'unhealthy',
+        thread_id: 'thread-main',
+      },
+      { isMutating: false }
+    ),
+    {
+      canOpenTui: false,
+      message: 'Instance is unhealthy.',
+    }
+  );
+});
+
+test('missing thread blocks open tui', () => {
+  assert.deepEqual(
+    app.computeOpenTuiState(
+      {
+        status: 'active',
+        app_server_health: 'healthy',
+        thread_id: null,
+      },
+      { isMutating: false }
+    ),
+    {
+      canOpenTui: false,
+      message: 'No thread to attach.',
+    }
+  );
+});
+
+test('mutation busy state disables open tui', () => {
+  assert.deepEqual(
+    app.computeOpenTuiState(
+      {
+        status: 'active',
+        app_server_health: 'healthy',
+        thread_id: 'thread-main',
+      },
+      { isMutating: true }
+    ),
+    {
+      canOpenTui: false,
+      message: '',
+    }
+  );
+});
