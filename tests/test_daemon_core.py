@@ -41,9 +41,91 @@ class DaemonCoreTestCase(unittest.TestCase):
 
 class DaemonCoreStateTests(DaemonCoreTestCase):
     def _instance_root(self, temp_root: str) -> Path:
-        root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
         root.mkdir(parents=True, exist_ok=True)
         return root
+
+    def test_daemon_registration_projects_actor_address_and_registry_facts(self) -> None:
+        from env.tool_runtime import daemon_presence
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = self._instance_root(temp_root)
+            workspace_dir = instance_root / "workspace"
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            instance_json = instance_root / "instance.json"
+            instance_json.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "inst-dev-daed00000001",
+                        "buddy": "dev",
+                        "status": "active",
+                        "instance_root": str(instance_root),
+                        "workspace_dir": str(workspace_dir),
+                        "thread_id": "thr-main",
+                        "app_server_socket": str(instance_root / "runtime" / "app-server.sock"),
+                    },
+                    ensure_ascii=True,
+                ),
+                encoding="utf-8",
+            )
+            context = self.core.load_daemon_context(instance_json)
+            registry_path = self.core.daemon_registry_path(context)
+            self.assertEqual(
+                registry_path,
+                daemon_presence.registry_path_for_state_root(Path(temp_root) / "state"),
+            )
+            daemon_presence.clear_registry(registry_path=registry_path)
+
+            row = self.core.register_daemon_presence(context)
+
+            self.assertEqual(
+                row["actor_address"],
+                {"buddy_id": "dev", "instance_id": "inst-dev-daed00000001"},
+            )
+            self.assertEqual(row["status"], "online")
+            self.assertIn("endpoint", row)
+            self.assertIn("heartbeat", row)
+            self.assertIn("last_seen_at", row)
+            self.assertNotIn("buddy", row)
+            self.assertNotIn("daemon_buddy", row)
+            self.assertNotIn("target_buddy_instance", row)
+            self.assertNotIn("endpoint", row["actor_address"])
+            self.assertNotIn("status", row["actor_address"])
+
+            saved = daemon_presence.load_registry(registry_path=registry_path)
+            self.assertEqual(saved["actors"], [row])
+
+    def test_daemon_presence_resolves_offline_single_and_ambiguous_actor_statuses(self) -> None:
+        from env.tool_runtime import daemon_presence
+        from env.tool_runtime.actor_profile import RuntimeActorAddress
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            registry_path = daemon_presence.registry_path_for_state_root(Path(temp_root))
+            daemon_presence.clear_registry(registry_path=registry_path)
+
+            offline = daemon_presence.resolve_notification_target("dev", registry_path=registry_path)
+            self.assertEqual(offline["notification_status"], "skipped_offline")
+            self.assertIsNone(offline["actor_address"])
+
+            first = RuntimeActorAddress("dev", "inst-dev-daed00000001")
+            daemon_presence.register_online_actor(
+                actor_address=first,
+                endpoint={"kind": "daemon_state_file", "path": str(Path(temp_root) / "one.jsonl")},
+                registry_path=registry_path,
+            )
+            single = daemon_presence.resolve_notification_target("dev", registry_path=registry_path)
+            self.assertEqual(single["notification_status"], "target_online")
+            self.assertEqual(single["actor_address"], first.to_payload())
+
+            second = RuntimeActorAddress("dev", "inst-dev-daed00000002")
+            daemon_presence.register_online_actor(
+                actor_address=second,
+                endpoint={"kind": "daemon_state_file", "path": str(Path(temp_root) / "two.jsonl")},
+                registry_path=registry_path,
+            )
+            ambiguous = daemon_presence.resolve_notification_target("dev", registry_path=registry_path)
+            self.assertEqual(ambiguous["notification_status"], "ambiguous_online_actor")
+            self.assertIsNone(ambiguous["actor_address"])
 
     def test_missing_state_initializes_empty_valid_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -51,11 +133,11 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
 
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
-            self.assertEqual(state.payload["instance_id"], "inst-dev-daemon")
+            self.assertEqual(state.payload["instance_id"], "inst-dev-daed00000001")
             self.assertEqual(state.payload["main_thread_id"], "thr-main")
             self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
             self.assertEqual(state.payload["handlers"], {})
@@ -67,7 +149,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -85,7 +167,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -102,7 +184,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -118,7 +200,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -151,7 +233,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -171,7 +253,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -187,7 +269,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -203,7 +285,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
             state.record_ready(pid=4321, main_thread_id="thr-main")
@@ -228,12 +310,12 @@ class FakeBindingClient:
 
 class DaemonCoreBindingTests(DaemonCoreTestCase):
     def _instance(self, temp_root: str) -> dict[str, Any]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        instance_root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload: dict[str, Any] = {
-            "instance_id": "inst-dev-daemon",
+            "instance_id": "inst-dev-daed00000001",
             "buddy": "dev",
             "status": "active",
             "instance_root": str(instance_root),
@@ -284,11 +366,11 @@ class DaemonCoreBindingTests(DaemonCoreTestCase):
 
 class DaemonCoreLifecycleTests(DaemonCoreTestCase):
     def _instance(self, temp_root: str) -> dict[str, Any]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        instance_root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
         instance_root.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload = {
-            "instance_id": "inst-dev-daemon",
+            "instance_id": "inst-dev-daed00000001",
             "buddy": "dev",
             "status": "active",
             "instance_root": str(instance_root),
@@ -332,7 +414,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             if not recorded["done"]:
                 state = self.core.DaemonState.load(
                     instance_root=instance_root,
-                    instance_id="inst-dev-daemon",
+                    instance_id="inst-dev-daed00000001",
                     main_thread_id=main_thread_id,
                 )
                 state.record_ready(pid=pid, main_thread_id=main_thread_id)
@@ -494,7 +576,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             instance = self._instance(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance["instance_root"],
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
             state.record_ready(pid=4321, main_thread_id="thr-main")
@@ -537,7 +619,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             instance = self._instance(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance["instance_root"],
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
             state.record_handler_error("message", origin_turn_id="turn-user-1", message="message failed")
@@ -629,12 +711,12 @@ class ExplodingOnceHandler:
 
 class DaemonCoreRunLoopTests(DaemonCoreTestCase):
     def _instance(self, temp_root: str) -> dict[str, Any]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        instance_root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload: dict[str, Any] = {
-            "instance_id": "inst-dev-daemon",
+            "instance_id": "inst-dev-daed00000001",
             "buddy": "dev",
             "status": "active",
             "instance_root": str(instance_root),

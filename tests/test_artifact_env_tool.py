@@ -25,6 +25,7 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         instance_root = self._runtime_path(f"instances/{instance_id}")
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -58,6 +59,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         action: str,
         args: dict[str, object],
     ) -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-art-{uuid.uuid4().hex}",
@@ -1580,7 +1582,8 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_attach_file_creates_artifact_owned_attachment_summary_without_body_blob(self) -> None:
         instance_id = "inst-design-attach"
         instance_json = self._instance_json(instance_id=instance_id, buddy="design")
-        source = self._runtime_path(f"instances/{instance_id}/workspace/buddybox/screenshots/desktop.png")
+        normalized_instance_id = self._runtime_instance_id(buddy="design", label=instance_id)
+        source = self._runtime_path(f"instances/{normalized_instance_id}/workspace/buddybox/screenshots/desktop.png")
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(b"\x89PNG\r\n\x1a\n")
 
@@ -1684,6 +1687,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_published_attachment_is_readable_by_other_buddy_through_artifact_visibility(self) -> None:
         instance_id = "inst-attach-published"
         instance_pm = self._instance_json(instance_id=instance_id, buddy="pm")
+        normalized_instance_id = self._runtime_instance_id(buddy="pm", label=instance_id)
         created_track = self._create_track(instance_json=instance_pm, instance_id=instance_id, track_id="track-attach-published")
         self.assertTrue(created_track.get("ok"), msg=created_track)
         created = self._dispatch(
@@ -1701,7 +1705,7 @@ class ArtifactEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             },
         )
         self.assertTrue(created.get("ok"), msg=created)
-        source = self._runtime_path(f"instances/{instance_id}/workspace/buddybox/evidence/evidence.txt")
+        source = self._runtime_path(f"instances/{normalized_instance_id}/workspace/buddybox/evidence/evidence.txt")
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text("hello from PM", encoding="utf-8")
         attached = self._dispatch(

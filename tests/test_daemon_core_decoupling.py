@@ -109,12 +109,13 @@ class FakeRunDaemonClient:
 
 class DaemonCoreDecouplingTests(unittest.TestCase):
     def _instance(self, temp_root: str) -> dict[str, Path]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        instance_id = "inst-dev-daed00000002"
+        instance_root = Path(temp_root) / "instances" / instance_id
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload = {
-            "instance_id": "inst-dev-daemon",
+            "instance_id": instance_id,
             "buddy": "dev",
             "status": "active",
             "instance_root": str(instance_root),

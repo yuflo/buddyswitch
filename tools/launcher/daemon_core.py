@@ -23,6 +23,8 @@ for candidate in (HELPER_DIR, SCRIPTS):
 
 import app_server  # noqa: E402
 import submit_turn as launcher_submit_turn  # noqa: E402
+from env.tool_runtime import actor_profile  # noqa: E402
+from env.tool_runtime import daemon_presence  # noqa: E402
 
 
 MAX_DAEMON_ORIGIN_TURN_IDS = 50
@@ -64,6 +66,10 @@ def daemon_log_file(instance_root: Path) -> Path:
 
 def daemon_state_file(instance_root: Path) -> Path:
     return daemon_runtime_dir(instance_root) / "state.json"
+
+
+def daemon_notification_file(instance_root: Path) -> Path:
+    return daemon_runtime_dir(instance_root) / "notifications.jsonl"
 
 
 def _read_text_file(path: Path) -> str:
@@ -428,6 +434,44 @@ def load_daemon_context(instance_json: Path) -> DaemonContext:
     )
 
 
+def daemon_registry_path(context: DaemonContext) -> Path:
+    state_root_raw = os.environ.get("BUDDYSWITCH_STATE_ROOT")
+    if isinstance(state_root_raw, str) and state_root_raw.strip():
+        state_root = Path(state_root_raw.strip()).expanduser().resolve(strict=False)
+    else:
+        state_root = context.instance_root.parent.parent / "state"
+    return daemon_presence.registry_path_for_state_root(state_root)
+
+
+def actor_address_for_context(context: DaemonContext) -> actor_profile.RuntimeActorAddress:
+    record = actor_profile.runtime_instance_record_from_dispatch(
+        instance_id=context.instance_id,
+        active_buddy=context.buddy,
+        instance_json=context.instance_json,
+        instance_payload=context.instance_payload,
+    )
+    return actor_profile.resolve_runtime_actor_profile(record).actor_address
+
+
+def register_daemon_presence(context: DaemonContext) -> dict[str, Any]:
+    return daemon_presence.register_online_actor(
+        actor_address=actor_address_for_context(context),
+        endpoint={
+            "kind": "daemon_state_file",
+            "path": str(daemon_notification_file(context.instance_root)),
+        },
+        heartbeat={"kind": "daemon_ready_state"},
+        registry_path=daemon_registry_path(context),
+    )
+
+
+def unregister_daemon_presence(context: DaemonContext) -> None:
+    daemon_presence.unregister_actor(
+        actor_address=actor_address_for_context(context),
+        registry_path=daemon_registry_path(context),
+    )
+
+
 def bind_main_thread(context: DaemonContext, client: Any) -> None:
     result = client.request(
         "thread/resume",
@@ -619,6 +663,7 @@ def stop_daemon(instance_json: Path) -> dict[str, Any]:
     if pid is not None and _pid_is_live(pid):
         terminated = _terminate_pid(pid)
     _remove_path(pid_path)
+    unregister_daemon_presence(context)
     return {
         "ok": True,
         "pid": pid,
@@ -637,6 +682,7 @@ def run_daemon(instance_json: Path, *, handlers: list[Any] | None = None) -> int
     state.save()
     notification_handlers = list(handlers or [])
     state.register_handlers(_handler_names(notification_handlers))
+    registered = False
     try:
         with app_server.AppServerClient(
             context.socket_path,
@@ -646,6 +692,8 @@ def run_daemon(instance_json: Path, *, handlers: list[Any] | None = None) -> int
         ) as client:
             bind_main_thread(context, client)
             state.record_ready(pid=os.getpid(), main_thread_id=context.main_thread_id)
+            register_daemon_presence(context)
+            registered = True
             while True:
                 try:
                     notification = client.read_notification()
@@ -658,4 +706,7 @@ def run_daemon(instance_json: Path, *, handlers: list[Any] | None = None) -> int
     except app_server.AppServerError as exc:
         state.record_error(origin_turn_id=None, message=str(exc))
         return 1
+    finally:
+        if registered:
+            unregister_daemon_presence(context)
     return 0

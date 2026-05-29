@@ -24,6 +24,7 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _instance_json(self, *, buddy: str, instance_id: str) -> Path:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         path = self._runtime_path(f"instances/{instance_id}/instance.json")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -53,6 +54,7 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         action: str,
         args: dict[str, object],
     ) -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         envelope = runtime_broker.dispatch_runtime_request(
             request={
                 "protocol": PROTOCOL,

@@ -59,6 +59,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         buddy: str = "pm",
         status: str = "active",
     ) -> Path:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         instance_root = self._instance_root(instance_id)
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -94,6 +95,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         buddy: str = "pm",
         instance_json: Path,
     ) -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         request_params = dict(params)
         request_params.setdefault("instance_id", instance_id)
         request_params.setdefault("active_buddy", buddy)
@@ -188,7 +190,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("permission_boundary"), "env.tool", msg=response)
 
     def test_context_reports_direct_buddybox_writable_surface(self) -> None:
-        instance_root = self._instance_root("inst-pm-alt-workspace")
+        instance_id = self._runtime_instance_id(buddy="pm", label="inst-pm-alt-workspace")
+        instance_root = self._instance_root(instance_id)
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         (workspace_dir / "AGENTS.md").write_text("# BuddySwitch Runtime Workspace\n", encoding="utf-8")
@@ -196,7 +199,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_json.write_text(
             json.dumps(
                 {
-                    "instance_id": "inst-pm-alt-workspace",
+                    "instance_id": instance_id,
                     "buddy": "pm",
                     "status": "active",
                     "instance_root": str(instance_root),
@@ -221,7 +224,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 "action": "summarize",
                 "args": {},
             },
-            instance_id="inst-pm-alt-workspace",
+            instance_id=instance_id,
             buddy="pm",
             instance_json=instance_json,
         )
@@ -245,7 +248,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(self._runtime_path("state/buddyswitch/local/buddybox/pm/broker/out.txt").exists())
 
     def test_direct_buddybox_files_use_shared_state_root(self) -> None:
-        instance_root = self._instance_root("inst-pm-alt-workspace-lifecycle")
+        instance_id = self._runtime_instance_id(buddy="pm", label="inst-pm-alt-workspace-lifecycle")
+        instance_root = self._instance_root(instance_id)
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         (workspace_dir / "AGENTS.md").write_text("# BuddySwitch Runtime Workspace\n", encoding="utf-8")
@@ -253,7 +257,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_json.write_text(
             json.dumps(
                 {
-                    "instance_id": "inst-pm-alt-workspace-lifecycle",
+                    "instance_id": instance_id,
                     "buddy": "pm",
                     "status": "active",
                     "instance_root": str(instance_root),
@@ -313,7 +317,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             )
             self.assertTrue(created["ok"], msg=created)
 
-        self.assertEqual([session["instance_id"] for session in lock_sessions], ["inst-pm-example", "inst-pm-example"])
+        expected_instance_id = json.loads(instance_json.read_text(encoding="utf-8"))["instance_id"]
+        self.assertEqual([session["instance_id"] for session in lock_sessions], [expected_instance_id, expected_instance_id])
         self.assertTrue(all(session["instance_json"] == instance_json for session in lock_sessions))
 
     def test_rejects_wrong_instance_id(self) -> None:
@@ -330,9 +335,10 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_rejects_wrong_active_buddy(self) -> None:
         instance_json = self._instance_json(buddy="pm")
+        active_instance_id = json.loads(instance_json.read_text(encoding="utf-8"))["instance_id"]
         response = self._dispatch(
             method="prepare",
-            params={"text": PM_REQUEST},
+            params={"text": PM_REQUEST, "instance_id": active_instance_id},
             buddy="market",
             instance_json=instance_json,
         )
@@ -353,6 +359,7 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def test_env_tool_supports_active_instance_and_identity_checks(self) -> None:
         instance_json = self._instance_json(instance_id="inst-dev-example", buddy="dev", status="active")
+        active_instance_id = json.loads(instance_json.read_text(encoding="utf-8"))["instance_id"]
 
         supported = self._dispatch(
             method="env.tool",
@@ -396,9 +403,8 @@ class RuntimeBrokerTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         wrong_buddy = self._dispatch(
             method="env.tool",
-            params={"tool": "task", "action": "current", "args": {}},
+            params={"tool": "task", "action": "current", "args": {}, "instance_id": active_instance_id},
             instance_json=instance_json,
-            instance_id="inst-dev-example",
             buddy="pm",
         )
         self.assertFalse(wrong_buddy["ok"])

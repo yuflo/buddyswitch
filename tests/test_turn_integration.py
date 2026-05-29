@@ -23,11 +23,12 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         super().setUp()
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
+        self.instance_id = self._runtime_instance_id(buddy="pm", label="inst-runless-integration")
         self.instance_json = self._runtime_path("instance.json")
         self.instance_json.write_text(
             json.dumps(
                 {
-                    "instance_id": "inst-runless-integration",
+                    "instance_id": self.instance_id,
                     "buddy": "pm",
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
@@ -41,8 +42,9 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
 
     def _dispatch(self, *, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label="inst-runless-integration")
         instance_payload = {
-            "instance_id": "inst-runless-integration",
+            "instance_id": instance_id,
             "buddy": buddy,
             "status": "active",
             "workspace_dir": str(self.runtime_root),
@@ -51,7 +53,7 @@ class TurnRuntimeIntegrationTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
             active_buddy=buddy,
-            instance_id="inst-runless-integration",
+            instance_id=instance_id,
             instance_json=self.instance_json,
             instance_payload=instance_payload,
             manifest=self.manifest,

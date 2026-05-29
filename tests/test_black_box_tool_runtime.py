@@ -452,9 +452,9 @@ description = registry.env_tools_description().get("probe", {{}})
 payload = registry.dispatch_env_tool_request(
     payload={{"tool": "probe", "action": "ping", "args": {{"message": "hello"}}}},
     active_buddy="dev",
-    instance_id="inst-probe",
+    instance_id="inst-dev-000000000002",
     instance_json=Path("instance.json"),
-    instance_payload={{"instance_id": "inst-probe", "buddy": "dev", "workspace_dir": str(root)}},
+    instance_payload={{"instance_id": "inst-dev-000000000002", "buddy": "dev", "workspace_dir": str(root)}},
     manifest={{"buddies": [{{"id": "dev"}}]}},
     manifest_path=None,
 )
@@ -505,10 +505,10 @@ sys.meta_path.insert(0, BlockMessageImpl())
 
 base = {
     "active_buddy": "dev",
-    "instance_id": "inst-dev-black-box",
+    "instance_id": "inst-dev-000000000001",
     "instance_json": root / "tmp-instance.json",
     "instance_payload": {
-        "instance_id": "inst-dev-black-box",
+        "instance_id": "inst-dev-000000000001",
         "buddy": "dev",
         "workspace_dir": str(root),
     },

@@ -220,9 +220,9 @@ registry.clear_cache()
 result = registry.dispatch_env_tool_request(
     payload={{"tool": "probe", "action": "ping", "args": {{"message": "hello"}}}},
     active_buddy="dev",
-    instance_id="inst-probe",
+    instance_id="inst-dev-000000000003",
     instance_json=Path("instance.json"),
-    instance_payload={{"instance_id": "inst-probe", "buddy": "dev", "workspace_dir": str(root)}},
+    instance_payload={{"instance_id": "inst-dev-000000000003", "buddy": "dev", "workspace_dir": str(root)}},
     manifest={{"buddies": [{{"id": "dev"}}]}},
     manifest_path=None,
 )
