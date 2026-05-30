@@ -47,12 +47,14 @@ class BrowserCockpitLauncherTests(unittest.TestCase):
         pages: list[dict[str, object]] | None = None,
         allow_put_new_about_blank: bool = False,
         allow_get_new_about_blank: bool = False,
+        allow_background_create_about_blank: bool = False,
     ) -> None:
         payload = {
             "version_ok": version_ok,
             "pages": pages or [],
             "allow_put_new_about_blank": allow_put_new_about_blank,
             "allow_get_new_about_blank": allow_get_new_about_blank,
+            "allow_background_create_about_blank": allow_background_create_about_blank,
         }
         path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
@@ -230,6 +232,78 @@ exit 0
 """,
         )
 
+    def _write_fake_background_page_tool(self, path: Path) -> None:
+        self._write_exec(
+            path,
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+browser_url = None
+target_url = None
+index = 0
+while index < len(args):
+    arg = args[index]
+    if arg == "--browser-url" and index + 1 < len(args):
+        browser_url = args[index + 1]
+        index += 2
+        continue
+    if arg.startswith("--browser-url="):
+        browser_url = arg.split("=", 1)[1]
+        index += 1
+        continue
+    if arg == "--url" and index + 1 < len(args):
+        target_url = args[index + 1]
+        index += 2
+        continue
+    if arg.startswith("--url="):
+        target_url = arg.split("=", 1)[1]
+        index += 1
+        continue
+    index += 1
+
+entry = {
+    "method": "CDP",
+    "path": "Target.createTarget",
+    "browser_url": browser_url,
+    "params": {"url": target_url, "background": True},
+}
+calls_file_raw = os.environ.get("BUDDYSWITCH_TEST_CDP_CALLS_FILE") or os.environ.get("BUDDYSWITCH_TEST_CALLS")
+if calls_file_raw:
+    calls_file = Path(calls_file_raw)
+    calls_file.parent.mkdir(parents=True, exist_ok=True)
+    with calls_file.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=True) + "\\n")
+
+state_file_raw = os.environ.get("BUDDYSWITCH_TEST_CDP_STATE_FILE")
+if not state_file_raw:
+    print("missing fake CDP state file", file=sys.stderr)
+    raise SystemExit(1)
+state_path = Path(state_file_raw)
+state = json.loads(state_path.read_text(encoding="utf-8"))
+if target_url != "about:blank" or state.get("allow_background_create_about_blank") is not True:
+    print("background target creation disabled", file=sys.stderr)
+    raise SystemExit(1)
+
+pages = list(state.get("pages", []))
+if not any(
+    isinstance(page, dict)
+    and page.get("type") == "page"
+    and isinstance(page.get("url"), str)
+    and page.get("url") == "about:blank"
+    for page in pages
+):
+    pages.append({"id": "target-about-blank", "type": "page", "url": "about:blank"})
+    state["pages"] = pages
+    state_path.write_text(json.dumps(state, ensure_ascii=True, indent=2) + "\\n", encoding="utf-8")
+
+print('{"targetId":"target-about-blank"}')
+""",
+        )
+
     def _write_fake_codex(self, path: Path) -> None:
         self._write_exec(
             path,
@@ -250,6 +324,15 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
 """,
         )
 
+    def _assert_cockpit_proxy_registration(self, argv: list[object], browser_url: str) -> None:
+        self.assertEqual(argv[:3], ["mcp", "add", "chrome-devtools-cockpit"])
+        self.assertIn("--", argv)
+        separator_index = argv.index("--")
+        self.assertEqual(argv[separator_index + 1], "python3")
+        self.assertIn("tools/launcher/chrome_devtools_cockpit_proxy.py", str(argv[separator_index + 2]))
+        self.assertIn(f"--browser-url={browser_url}", argv)
+        self.assertNotIn("chrome-devtools-mcp@latest", argv)
+
     def test_browser_ensure_starts_chrome_with_shared_profile_and_bootstraps_mcps(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -262,12 +345,12 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 state_file,
                 version_ok=False,
                 pages=[],
-                allow_put_new_about_blank=True,
-                allow_get_new_about_blank=False,
+                allow_background_create_about_blank=True,
             )
             self._write_fake_curl(fake_bin / "curl")
             self._write_fake_chrome(fake_bin / "fake-chrome")
             self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_background_page_tool(fake_bin / "background-page")
 
             capture_path = temp_root_path / "calls.jsonl"
             chrome_argv_path = temp_root_path / "chrome-argv.jsonl"
@@ -278,6 +361,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
             env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
             env["BUDDYSWITCH_TEST_CHROME_ARGV_FILE"] = str(chrome_argv_path)
 
@@ -322,6 +406,8 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             ]
             mcp_add_names = [payload["argv"][2] for payload in payloads if payload["argv"][:2] == ["mcp", "add"]]
             self.assertEqual(mcp_add_names, ["chrome-devtools-cockpit"])
+            cockpit_add = next(payload for payload in payloads if payload["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
+            self._assert_cockpit_proxy_registration(cockpit_add["argv"], "http://127.0.0.1:9222")
 
             expected_home = instance_root / "home"
             expected_codex_home = instance_root / "codex-home"
@@ -497,7 +583,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                     self.assertEqual(status.returncode, 0, msg=status.stderr)
                     self.assertIn("Browser cockpit ready:", status.stdout)
 
-    def test_browser_ensure_rejects_intro_only_when_put_new_fails(self) -> None:
+    def test_browser_ensure_rejects_endpoint_only_when_background_ready_page_creation_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -510,12 +596,12 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 state_file,
                 version_ok=True,
                 pages=[{"id": "intro", "type": "page", "url": "chrome://intro/"}],
-                allow_put_new_about_blank=False,
-                allow_get_new_about_blank=False,
+                allow_background_create_about_blank=False,
             )
             self._write_fake_curl(fake_bin / "curl")
             self._write_fake_chrome(fake_bin / "fake-chrome")
             self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_background_page_tool(fake_bin / "background-page")
 
             capture_path = temp_root_path / "calls.jsonl"
 
@@ -526,6 +612,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
             env["BUDDYSWITCH_TEST_CDP_CALLS_FILE"] = str(calls_file)
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -548,9 +635,8 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 for line in calls_file.read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
-            self.assertTrue(
-                any(call["method"] == "PUT" and call["path"] == "/json/new" and call["query"] == "about:blank" for call in calls)
-            )
+            self.assertTrue(any(call.get("path") == "Target.createTarget" for call in calls))
+            self.assertFalse(any(call.get("path") == "/json/new" for call in calls))
 
     def test_browser_ensure_uses_bounded_timeouts_for_cdp_probes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -565,12 +651,12 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 state_file,
                 version_ok=True,
                 pages=[{"id": "intro", "type": "page", "url": "chrome://intro/"}],
-                allow_put_new_about_blank=True,
-                allow_get_new_about_blank=False,
+                allow_background_create_about_blank=True,
             )
             self._write_fake_curl(fake_bin / "curl")
             self._write_fake_chrome(fake_bin / "fake-chrome")
             self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_background_page_tool(fake_bin / "background-page")
 
             capture_path = temp_root_path / "calls.jsonl"
 
@@ -581,6 +667,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
             env["BUDDYSWITCH_TEST_CDP_CALLS_FILE"] = str(calls_file)
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -602,14 +689,16 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 for line in calls_file.read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
-            for probe_path in ("/json/version", "/json/list", "/json/new"):
+            for probe_path in ("/json/version", "/json/list"):
                 probe_calls = [call for call in calls if call.get("path") == probe_path]
                 self.assertTrue(probe_calls, msg=f"Expected at least one call for {probe_path}")
                 for call in probe_calls:
                     self.assertNotEqual(call.get("connect_timeout"), "", msg=f"{probe_path} missing --connect-timeout")
                     self.assertNotEqual(call.get("max_time"), "", msg=f"{probe_path} missing --max-time")
+            self.assertTrue(any(call.get("path") == "Target.createTarget" for call in calls))
+            self.assertFalse(any(call.get("path") == "/json/new" for call in calls))
 
-    def test_browser_ensure_repairs_intro_only_with_put_json_new(self) -> None:
+    def test_browser_ensure_repairs_intro_only_with_background_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
@@ -622,12 +711,12 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 state_file,
                 version_ok=True,
                 pages=[{"id": "intro", "type": "page", "url": "chrome://intro/"}],
-                allow_put_new_about_blank=True,
-                allow_get_new_about_blank=False,
+                allow_background_create_about_blank=True,
             )
             self._write_fake_curl(fake_bin / "curl")
             self._write_fake_chrome(fake_bin / "fake-chrome")
             self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_background_page_tool(fake_bin / "background-page")
 
             capture_path = temp_root_path / "calls.jsonl"
 
@@ -638,6 +727,7 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
             env["BUDDYSWITCH_TEST_CDP_CALLS_FILE"] = str(calls_file)
             env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_BROWSER_BACKGROUND_PAGE_TOOL"] = str(fake_bin / "background-page")
             env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
 
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -658,11 +748,11 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
                 for line in calls_file.read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
-            self.assertTrue(
-                any(call["method"] == "PUT" and call["path"] == "/json/new" and call["query"] == "about:blank" for call in calls)
-            )
+            background_calls = [call for call in calls if call.get("path") == "Target.createTarget"]
+            self.assertEqual(len(background_calls), 1, msg=calls)
+            self.assertEqual(background_calls[0].get("params"), {"url": "about:blank", "background": True})
             self.assertFalse(
-                any(call["method"] == "GET" and call["path"] == "/json/new" and call["query"] == "about:blank" for call in calls)
+                any(call.get("path") == "/json/new" and call.get("query") == "about:blank" for call in calls)
             )
 
             state = json.loads(state_file.read_text(encoding="utf-8"))
@@ -697,9 +787,81 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
             self.assertIn("env browser ensure requires --instance <instance-id>", completed.stderr)
             self.assertFalse(shared_root.exists(), "ensure without --instance must fail before creating shared state")
 
+    def test_browser_ensure_repairs_raw_cockpit_mcp_with_matching_browser_url(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+
+            state_file = temp_root_path / "cdp-state.json"
+            self._write_cdp_state(
+                state_file,
+                version_ok=True,
+                pages=[{"id": "ready", "type": "page", "url": "about:blank"}],
+            )
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_codex(fake_bin / "codex")
+
+            capture_path = temp_root_path / "calls.jsonl"
+
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            shared_root = source_home_path / ".codex-buddyswitch"
+            instance_id = "inst-pm-browser-raw-mcp"
+            instance_root = self._write_instance_record(shared_root, instance_id)
+            instance_codex_home = instance_root / "codex-home"
+            instance_codex_home.mkdir(parents=True, exist_ok=True)
+            (instance_codex_home / "config.toml").write_text(
+                """
+[mcp_servers.chrome-devtools-cockpit]
+command = "npx"
+args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "env", "browser", "ensure", "--instance", instance_id],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, msg=f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}")
+
+            payloads = [
+                json.loads(line)
+                for line in capture_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            remove_index = next(
+                index
+                for index, payload in enumerate(payloads)
+                if payload["argv"][:3] == ["mcp", "remove", "chrome-devtools-cockpit"]
+            )
+            add_index = next(
+                index
+                for index, payload in enumerate(payloads)
+                if payload["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"]
+            )
+            self.assertLess(remove_index, add_index)
+            self._assert_cockpit_proxy_registration(payloads[add_index]["argv"], "http://127.0.0.1:9222")
+
     def test_browser_launcher_source_is_instance_only(self) -> None:
         text = (ROOT / "tools" / "launcher" / "browser_cockpit.sh").read_text(encoding="utf-8")
         self.assertIn("chrome-devtools-cockpit", text)
+        self.assertIn("chrome_devtools_cockpit_proxy.py", text)
+        self.assertIn("scripts/env/cdp_background_page.py", text)
+        self.assertNotIn("tools" + "/launcher/cdp_background_page.py", text)
+        self.assertNotIn("/json/new?about:blank", text)
+        self.assertNotIn("chrome-devtools-mcp@latest", text)
         self.assertNotIn("chrome/shared-browser", text)
         self.assertNotIn("buddyswitch_browser_ensure_general_mcp", text)
         self.assertNotIn("mcp add \"chrome-devtools\"", text)

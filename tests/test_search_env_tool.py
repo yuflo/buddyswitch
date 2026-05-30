@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import subprocess
@@ -22,20 +24,110 @@ from env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
 from tests.runtime_root_test_helper import RuntimeWorkspaceTestMixin  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def _websocket_accept_value(key: str) -> str:
+    digest = hashlib.sha1((key + WEBSOCKET_GUID).encode("ascii")).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
+def _read_exact(stream: object, length: int) -> bytes:
+    chunks = b""
+    while len(chunks) < length:
+        chunk = stream.read(length - len(chunks))  # type: ignore[attr-defined]
+        if not chunk:
+            raise EOFError("websocket stream closed")
+        chunks += chunk
+    return chunks
+
+
+def _read_client_text_frame(stream: object) -> str:
+    first, second = _read_exact(stream, 2)
+    opcode = first & 0x0F
+    if opcode != 0x1:
+        raise ValueError(f"expected text frame, got opcode {opcode}")
+    masked = bool(second & 0x80)
+    length = second & 0x7F
+    if length == 126:
+        length = int.from_bytes(_read_exact(stream, 2), "big")
+    elif length == 127:
+        length = int.from_bytes(_read_exact(stream, 8), "big")
+    mask = _read_exact(stream, 4) if masked else b""
+    payload = _read_exact(stream, length)
+    if masked:
+        payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+    return payload.decode("utf-8")
+
+
+def _write_server_text_frame(stream: object, text: str) -> None:
+    payload = text.encode("utf-8")
+    first = 0x80 | 0x1
+    length = len(payload)
+    if length < 126:
+        header = bytes([first, length])
+    elif length < (1 << 16):
+        header = bytes([first, 126]) + length.to_bytes(2, "big")
+    else:
+        header = bytes([first, 127]) + length.to_bytes(8, "big")
+    stream.write(header + payload)  # type: ignore[attr-defined]
+    stream.flush()  # type: ignore[attr-defined]
 
 
 def _make_cdp_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            state.setdefault("requests", []).append({"method": "GET", "path": self.path})
+            parsed = urlparse(self.path)
+            if parsed.path == "/json/version":
+                if state.get("version_fail"):
+                    self.send_response(500)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                payload = {
+                    "Browser": "test",
+                    "webSocketDebuggerUrl": (
+                        f"ws://127.0.0.1:{self.server.server_port}/devtools/browser/test"  # type: ignore[attr-defined]
+                    ),
+                }
+                self.wfile.write(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+                return
+
+            if parsed.path == "/devtools/browser/test":
+                key = self.headers.get("Sec-WebSocket-Key")
+                if not key:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+                self.send_response(101)
+                self.send_header("Upgrade", "websocket")
+                self.send_header("Connection", "Upgrade")
+                self.send_header("Sec-WebSocket-Accept", _websocket_accept_value(key))
+                self.end_headers()
+
+                raw_message = _read_client_text_frame(self.rfile)
+                message = json.loads(raw_message)
+                state.setdefault("rpc_requests", []).append(message)
+                if state.get("fail"):
+                    response = {
+                        "id": message.get("id"),
+                        "error": {"code": -32000, "message": "simulated cdp create target failure"},
+                    }
+                else:
+                    response = {"id": message.get("id"), "result": {"targetId": "target-search"}}
+                _write_server_text_frame(self.wfile, json.dumps(response, ensure_ascii=True))
+                return
+
+            self.send_response(404)
+            self.end_headers()
+
         def do_PUT(self) -> None:  # noqa: N802
             state.setdefault("requests", []).append({"method": "PUT", "path": self.path})
-            if state.get("fail"):
-                self.send_response(500)
-                self.end_headers()
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            self.send_response(500)
             self.end_headers()
-            self.wfile.write(b'{"id":"target-search"}')
 
         def log_message(self, _format: str, *_args: object) -> None:
             return
@@ -100,8 +192,9 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         server = HTTPServer(("127.0.0.1", 0), _make_cdp_handler(state))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
         self.addCleanup(thread.join, 5)
+        self.addCleanup(server.shutdown)
         return server, thread, int(server.server_port)
 
     def test_search_cli_help_exposes_status_request_and_open_browser(self) -> None:
@@ -316,7 +409,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BACKEND_UNAVAILABLE")
         self.assertIn("No BuddySwitch-managed search API provider is configured", response.get("reason", ""))
 
-    def test_search_open_browser_opens_cdp_page_with_encoded_target_url(self) -> None:
+    def test_search_open_browser_creates_background_cdp_target(self) -> None:
         state: dict[str, object] = {"requests": []}
         _server, _thread, port = self._start_cdp_server(state)
         instance_json = self._instance_json(browser_port=port)
@@ -334,11 +427,18 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         requests = state.get("requests")
         self.assertIsInstance(requests, list, msg=state)
         assert isinstance(requests, list)
-        self.assertEqual(len(requests), 1)
-        self.assertEqual(requests[0]["method"], "PUT")
-        parsed = urlparse(requests[0]["path"])
-        self.assertEqual(parsed.path, "/json/new")
-        self.assertEqual(unquote(parsed.query), target_url)
+        self.assertFalse(any(urlparse(request["path"]).path == "/json/new" for request in requests))
+        rpc_requests = state.get("rpc_requests")
+        self.assertIsInstance(rpc_requests, list, msg=state)
+        assert isinstance(rpc_requests, list)
+        self.assertEqual(len(rpc_requests), 1)
+        rpc = rpc_requests[0]
+        self.assertEqual(rpc.get("method"), "Target.createTarget")
+        params = rpc.get("params")
+        self.assertIsInstance(params, dict, msg=rpc)
+        assert isinstance(params, dict)
+        self.assertEqual(params.get("url"), target_url)
+        self.assertIs(params.get("background"), True)
 
     def test_search_open_browser_encodes_queries_for_supported_engines(self) -> None:
         cases = (
@@ -359,8 +459,16 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 )
                 self.assertTrue(response.get("ok"), msg=response)
                 self.assertEqual(response.get("target_url"), expected_target_url)
-                request_path = state["requests"][0]["path"]  # type: ignore[index]
-                self.assertIn(quote(expected_target_url, safe=""), request_path)
+                requests = state.get("requests")
+                self.assertIsInstance(requests, list, msg=state)
+                assert isinstance(requests, list)
+                self.assertFalse(any(urlparse(request["path"]).path == "/json/new" for request in requests))
+                rpc_requests = state.get("rpc_requests")
+                self.assertIsInstance(rpc_requests, list, msg=state)
+                assert isinstance(rpc_requests, list)
+                params = rpc_requests[0]["params"]
+                self.assertEqual(params["url"], expected_target_url)
+                self.assertIs(params["background"], True)
 
     def test_search_open_browser_returns_recovery_feedback_when_browser_missing(self) -> None:
         instance_json = self._instance_json(browser_port=None)
@@ -393,6 +501,18 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_OPEN_FAILED")
         self.assertEqual(response.get("target_url"), "https://www.google.com/search?q=creator+analytics+pain")
         self.assertEqual(response.get("browser_endpoint"), f"http://127.0.0.1:{port}")
+
+    def test_search_source_has_no_direct_json_new_page_open(self) -> None:
+        text = (ROOT / "scripts" / "env" / "tools" / "search" / "_impl.py").read_text(encoding="utf-8")
+        self.assertNotIn("/json/new", text)
+        self.assertNotIn('"tools"', text)
+        self.assertNotIn('"launcher"', text)
+        self.assertNotIn("tools" + "/launcher", text)
+        self.assertIn('"scripts"', text)
+        self.assertIn('"env"', text)
+        self.assertIn("cdp_background_page.py", text)
+        self.assertTrue((ROOT / "scripts" / "env" / "cdp_background_page.py").exists())
+        self.assertFalse((ROOT / "tools" / "launcher" / "cdp_background_page.py").exists())
 
     def test_search_open_browser_rejects_invalid_browser_port(self) -> None:
         for port in ("abc", 0, 70000):
