@@ -41,9 +41,80 @@ class DaemonCoreTestCase(unittest.TestCase):
 
 class DaemonCoreStateTests(DaemonCoreTestCase):
     def _instance_root(self, temp_root: str) -> Path:
-        root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
         root.mkdir(parents=True, exist_ok=True)
         return root
+
+    def test_daemon_registration_projects_actor_address_and_registry_facts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = self._instance_root(temp_root)
+            workspace_dir = instance_root / "workspace"
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            instance_json = instance_root / "instance.json"
+            instance_json.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "inst-dev-daed00000001",
+                        "buddy": "dev",
+                        "status": "active",
+                        "instance_root": str(instance_root),
+                        "workspace_dir": str(workspace_dir),
+                        "thread_id": "thr-main",
+                        "app_server_socket": str(instance_root / "runtime" / "app-server.sock"),
+                    },
+                    ensure_ascii=True,
+                ),
+                encoding="utf-8",
+            )
+            context = self.core.load_daemon_context(instance_json)
+            actor_address = self.core.actor_address_for_context(context)
+            calls: list[dict[str, Any]] = []
+            original_register = self.core.daemon_client.register_actor
+
+            def fake_register_actor(**kwargs: Any) -> dict[str, Any]:
+                calls.append(kwargs)
+                return {"record": {"actor_address": kwargs["actor_address"], "endpoint": kwargs["endpoint"]}}
+
+            self.addCleanup(setattr, self.core.daemon_client, "register_actor", original_register)
+            self.core.daemon_client.register_actor = fake_register_actor
+
+            row = self.core.register_daemon_actor(context, actor_address)["record"]
+
+            self.assertEqual(
+                row["actor_address"],
+                {"buddy_id": "dev", "instance_id": "inst-dev-daed00000001"},
+            )
+            self.assertEqual(row["endpoint"]["kind"], "daemon_mailbox_socket")
+            self.assertEqual(row["endpoint"]["socket_path"], str(self.core.daemon_mailbox.mailbox_socket_path(context.instance_root)))
+            self.assertEqual(calls[0]["heartbeat"], {"kind": "central_daemon_rpc"})
+            self.assertEqual(calls[0]["socket_path"], self.core.central_daemon_socket_path(context))
+
+    def test_daemon_reachability_client_uses_explicit_actor_address(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = self._instance_root(temp_root)
+            workspace_dir = instance_root / "workspace"
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            instance_json = instance_root / "instance.json"
+            instance_json.write_text(
+                json.dumps(
+                    {
+                        "instance_id": "inst-dev-daed00000001",
+                        "buddy": "dev",
+                        "status": "active",
+                        "instance_root": str(instance_root),
+                        "workspace_dir": str(workspace_dir),
+                        "thread_id": "thr-main",
+                        "app_server_socket": str(instance_root / "runtime" / "app-server.sock"),
+                    },
+                    ensure_ascii=True,
+                ),
+                encoding="utf-8",
+            )
+            context = self.core.load_daemon_context(instance_json)
+            actor_address = self.core.actor_address_for_context(context)
+
+            self.assertEqual(actor_address.to_payload(), {"buddy_id": "dev", "instance_id": "inst-dev-daed00000001"})
+            self.assertNotIn("to_buddy", self.core.register_daemon_actor.__code__.co_varnames)
 
     def test_missing_state_initializes_empty_valid_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -51,11 +122,11 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
 
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
-            self.assertEqual(state.payload["instance_id"], "inst-dev-daemon")
+            self.assertEqual(state.payload["instance_id"], "inst-dev-daed00000001")
             self.assertEqual(state.payload["main_thread_id"], "thr-main")
             self.assertEqual(state.payload["daemon_origin_turn_ids"], [])
             self.assertEqual(state.payload["handlers"], {})
@@ -67,7 +138,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -85,7 +156,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -102,7 +173,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -118,7 +189,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -151,7 +222,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -171,7 +242,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -187,7 +258,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
 
@@ -203,7 +274,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance_root,
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
             state.record_ready(pid=4321, main_thread_id="thr-main")
@@ -228,12 +299,12 @@ class FakeBindingClient:
 
 class DaemonCoreBindingTests(DaemonCoreTestCase):
     def _instance(self, temp_root: str) -> dict[str, Any]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        instance_root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload: dict[str, Any] = {
-            "instance_id": "inst-dev-daemon",
+            "instance_id": "inst-dev-daed00000001",
             "buddy": "dev",
             "status": "active",
             "instance_root": str(instance_root),
@@ -284,11 +355,11 @@ class DaemonCoreBindingTests(DaemonCoreTestCase):
 
 class DaemonCoreLifecycleTests(DaemonCoreTestCase):
     def _instance(self, temp_root: str) -> dict[str, Any]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        instance_root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
         instance_root.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload = {
-            "instance_id": "inst-dev-daemon",
+            "instance_id": "inst-dev-daed00000001",
             "buddy": "dev",
             "status": "active",
             "instance_root": str(instance_root),
@@ -332,7 +403,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             if not recorded["done"]:
                 state = self.core.DaemonState.load(
                     instance_root=instance_root,
-                    instance_id="inst-dev-daemon",
+                    instance_id="inst-dev-daed00000001",
                     main_thread_id=main_thread_id,
                 )
                 state.record_ready(pid=pid, main_thread_id=main_thread_id)
@@ -480,21 +551,56 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             terminated: list[int] = []
             self._patch_pid_live({4321})
             original_terminate = self.core._terminate_pid
+            original_unregister = self.core.unregister_daemon_actor
+            unregistered: list[dict[str, object]] = []
             self.addCleanup(setattr, self.core, "_terminate_pid", original_terminate)
+            self.addCleanup(setattr, self.core, "unregister_daemon_actor", original_unregister)
             self.core._terminate_pid = lambda pid: terminated.append(pid) or True
+            self.core.unregister_daemon_actor = lambda context, actor_address: unregistered.append(
+                {"context": context, "actor_address": actor_address.to_payload()}
+            ) or {"record": {"actor_address": actor_address.to_payload()}}
 
             payload = self.core.stop_daemon(instance["instance_json"])
 
             self.assertTrue(payload["terminated"])
             self.assertEqual(terminated, [4321])
+            self.assertEqual(unregistered[0]["actor_address"], {"buddy_id": "dev", "instance_id": "inst-dev-daed00000001"})
             self.assertFalse(self.core.daemon_pid_file(instance["instance_root"]).exists())
+
+    def test_stop_daemon_does_not_fail_when_central_unregister_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            self.core.daemon_pid_file(instance["instance_root"]).parent.mkdir(parents=True, exist_ok=True)
+            self.core.daemon_pid_file(instance["instance_root"]).write_text("4321\n", encoding="utf-8")
+            terminated: list[int] = []
+            self._patch_pid_live({4321})
+            original_terminate = self.core._terminate_pid
+            original_unregister = self.core.unregister_daemon_actor
+            self.addCleanup(setattr, self.core, "_terminate_pid", original_terminate)
+            self.addCleanup(setattr, self.core, "unregister_daemon_actor", original_unregister)
+            self.core._terminate_pid = lambda pid: terminated.append(pid) or True
+
+            def fail_unregister(_context: object, _actor_address: object) -> dict[str, object]:
+                raise RuntimeError("central daemon unavailable")
+
+            self.core.unregister_daemon_actor = fail_unregister
+
+            payload = self.core.stop_daemon(instance["instance_json"])
+
+            self.assertTrue(payload["terminated"])
+            self.assertEqual(payload["unregister_status"], "failed")
+            self.assertIn("central daemon unavailable", payload["unregister_error"])
+            self.assertEqual(terminated, [4321])
+            self.assertFalse(self.core.daemon_pid_file(instance["instance_root"]).exists())
+            state = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
+            self.assertIn("central daemon unavailable", state["last_error"]["message"])
 
     def test_daemon_status_reports_paths_live_state_and_last_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance["instance_root"],
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
             state.record_ready(pid=4321, main_thread_id="thr-main")
@@ -521,7 +627,14 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             class FakeHandler:
                 name = "task_checkout"
 
-            payload = self.core.daemon_status(instance["instance_json"], handlers=[FakeHandler()])
+            class FakeMailboxHandler:
+                name = "message_available"
+
+            payload = self.core.daemon_status(
+                instance["instance_json"],
+                handlers=[FakeHandler()],
+                mailbox_handlers=[FakeMailboxHandler()],
+            )
 
             self.assertEqual(payload["handlers"]["registered"], ["task_checkout"])
             item = payload["handlers"]["items"]["task_checkout"]
@@ -531,21 +644,42 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertIsNone(item["last_result"])
             self.assertIsNone(item["last_error"])
             self.assertIsNone(item["last_action_turn_id"])
+            self.assertNotIn("message_available", payload["handlers"]["items"])
+            self.assertEqual(payload["mailbox_handlers"]["registered"], ["message_available"])
+            mailbox_item = payload["mailbox_handlers"]["items"]["message_available"]
+            self.assertIs(mailbox_item["registered"], True)
+            self.assertIs(mailbox_item["enabled"], True)
+            self.assertIs(mailbox_item["active"], True)
+            self.assertIsNone(mailbox_item["last_result"])
+            self.assertIsNone(mailbox_item["last_error"])
+            self.assertIsNone(mailbox_item["last_action_turn_id"])
 
     def test_daemon_status_includes_persisted_unregistered_handler_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             state = self.core.DaemonState.load(
                 instance_root=instance["instance_root"],
-                instance_id="inst-dev-daemon",
+                instance_id="inst-dev-daed00000001",
                 main_thread_id="thr-main",
             )
             state.record_handler_error("message", origin_turn_id="turn-user-1", message="message failed")
+            state.record_handler_error(
+                "message_available",
+                origin_turn_id="turn-user-2",
+                message="message available failed",
+            )
 
             class FakeHandler:
                 name = "task_checkout"
 
-            payload = self.core.daemon_status(instance["instance_json"], handlers=[FakeHandler()])
+            class FakeMailboxHandler:
+                name = "message_available"
+
+            payload = self.core.daemon_status(
+                instance["instance_json"],
+                handlers=[FakeHandler()],
+                mailbox_handlers=[FakeMailboxHandler()],
+            )
 
             self.assertEqual(payload["handlers"]["registered"], ["task_checkout"])
             message_state = payload["handlers"]["items"]["message"]
@@ -553,6 +687,12 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertIs(message_state["enabled"], False)
             self.assertIs(message_state["active"], False)
             self.assertEqual(message_state["last_error"]["message"], "message failed")
+            self.assertNotIn("message_available", payload["handlers"]["items"])
+            mailbox_state = payload["mailbox_handlers"]["items"]["message_available"]
+            self.assertIs(mailbox_state["registered"], True)
+            self.assertIs(mailbox_state["enabled"], True)
+            self.assertIs(mailbox_state["active"], True)
+            self.assertEqual(mailbox_state["last_error"]["message"], "message available failed")
 
 
 class FakeRunDaemonClient:
@@ -629,12 +769,12 @@ class ExplodingOnceHandler:
 
 class DaemonCoreRunLoopTests(DaemonCoreTestCase):
     def _instance(self, temp_root: str) -> dict[str, Any]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        instance_root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload: dict[str, Any] = {
-            "instance_id": "inst-dev-daemon",
+            "instance_id": "inst-dev-daed00000001",
             "buddy": "dev",
             "status": "active",
             "instance_root": str(instance_root),
@@ -676,6 +816,49 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
         self.addCleanup(setattr, self.core.app_server, "AppServerClient", original_client)
         self.core.app_server.AppServerClient = fake_factory
 
+    def _patch_daemon_communication(self) -> dict[str, list[object]]:
+        original_start_mailbox = self.core.start_daemon_mailbox
+        original_register = self.core.register_daemon_actor
+        original_heartbeat = self.core.heartbeat_daemon_actor
+        original_unregister = self.core.unregister_daemon_actor
+        calls: dict[str, list[object]] = {
+            "mailbox_started": [],
+            "mailbox_closed": [],
+            "registered": [],
+            "heartbeat": [],
+            "unregistered": [],
+        }
+
+        class FakeMailbox:
+            def close(self) -> None:
+                calls["mailbox_closed"].append(True)
+
+        def fake_start_mailbox(**kwargs: object) -> FakeMailbox:
+            calls["mailbox_started"].append(kwargs)
+            return FakeMailbox()
+
+        def fake_register(context: object, actor_address: object) -> dict[str, object]:
+            calls["registered"].append(getattr(actor_address, "to_payload")())
+            return {"record": {"actor_address": getattr(actor_address, "to_payload")()}}
+
+        def fake_heartbeat(context: object, actor_address: object) -> dict[str, object]:
+            calls["heartbeat"].append(getattr(actor_address, "to_payload")())
+            return {"record": {"actor_address": getattr(actor_address, "to_payload")()}}
+
+        def fake_unregister(context: object, actor_address: object) -> dict[str, object]:
+            calls["unregistered"].append(getattr(actor_address, "to_payload")())
+            return {"record": {"actor_address": getattr(actor_address, "to_payload")()}}
+
+        self.addCleanup(setattr, self.core, "start_daemon_mailbox", original_start_mailbox)
+        self.addCleanup(setattr, self.core, "register_daemon_actor", original_register)
+        self.addCleanup(setattr, self.core, "heartbeat_daemon_actor", original_heartbeat)
+        self.addCleanup(setattr, self.core, "unregister_daemon_actor", original_unregister)
+        self.core.start_daemon_mailbox = fake_start_mailbox
+        self.core.register_daemon_actor = fake_register
+        self.core.heartbeat_daemon_actor = fake_heartbeat
+        self.core.unregister_daemon_actor = fake_unregister
+        return calls
+
     def test_run_daemon_continues_after_notification_idle_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
@@ -688,12 +871,17 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
                 ],
             )
             self._patch_app_server_client(fake_client)
+            communication = self._patch_daemon_communication()
 
             with self.assertRaises(StopDaemonLoop):
                 self.core.run_daemon(instance["instance_json"], handlers=[handler])
 
             self.assertEqual([request["method"] for request in fake_client.requests], ["thread/resume"])
             self.assertEqual(handler.notifications, [self._completed(turn_id="turn-user-1")])
+            self.assertEqual(len(communication["mailbox_started"]), 1)
+            self.assertEqual(len(communication["heartbeat"]), 1)
+            self.assertEqual(len(communication["unregistered"]), 1)
+            self.assertEqual(len(communication["mailbox_closed"]), 1)
             state = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertIsNone(state["last_error"])
 
@@ -704,6 +892,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
                 notifications=[self.core.app_server.AppServerUnavailableError("socket gone")],
             )
             self._patch_app_server_client(fake_client)
+            self._patch_daemon_communication()
 
             result = self.core.run_daemon(instance["instance_json"], handlers=[])
 
@@ -727,6 +916,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
                 ],
             )
             self._patch_app_server_client(fake_client)
+            self._patch_daemon_communication()
 
             with self.assertRaises(StopDaemonLoop):
                 self.core.run_daemon(instance["instance_json"], handlers=[exploding, recorder])
@@ -768,6 +958,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
                 ],
             )
             self._patch_app_server_client(fake_client)
+            self._patch_daemon_communication()
 
             with self.assertRaises(StopDaemonLoop):
                 self.core.run_daemon(

@@ -1,18 +1,19 @@
 ---
 name: message-tool
-description: Use when sending and reading direct buddy-to-buddy inbox messages through runtime env tools.
+description: Use when sending and reading direct runtime actor-address messages through env.tool.
 ---
 
 # Message Tool
 
 ## Purpose
 
-Send and read direct buddy-to-buddy inbox messages through the runtime env.tool layer.
+Send direct messages to online runtime actor addresses and read message context through the runtime env.tool layer.
 
 ## Runtime Route
-- CLI: `python3 scripts/env/client.py message send --payload '{"to_buddy":"design","content":"Please review track-alpha."}'`
+
+- CLI: `python3 scripts/env/client.py message <action> --payload '<json-object>'`
 - Broker method: `env.tool`
-- Discover current operations, payload keys, effects, and recovery guidance with `context.get.tool_catalog['message']` or `python3 scripts/turn_runtime.py status`.
+- Discover exact operations, payload keys, effects, and recovery guidance with `context.get.tool_catalog['message']` or `python3 scripts/turn_runtime.py status`.
 
 ## CLI Payload Rule
 
@@ -20,24 +21,42 @@ Send and read direct buddy-to-buddy inbox messages through the runtime env.tool 
 - Do not pass a filesystem path to `--payload`.
 - For long markdown bodies, generate JSON with `python3 - <<'PY'` and pass it via command substitution.
 
-```bash
-python3 scripts/env/client.py message send --payload '{"to_buddy":"design","content":"Please review the PRD on track-alpha."}'
-```
-
 ## Workflow Notes
 
-- Use this tool for direct buddy-to-buddy inbox communication.
-- Start with `python3 scripts/env/client.py context summarize --payload '{}'` so message actions run against current runtime-visible buddy ids and state.
-- For exact operations, payload keys, optional keys, and response fields, inspect `context.get.tool_catalog['message']` or `python3 scripts/turn_runtime.py status`.
+Find an online target actor first:
+
+```bash
+python3 scripts/env/client.py message contacts --payload '{"buddy":"market"}'
+```
+
+Send by copying `contact.actor_address` into `target_actor_address`:
+
+```bash
+python3 scripts/env/client.py message send --payload '{"target_actor_address":{"buddy_id":"market","instance_id":"inst-market-ae219d1e9e24"},"content":"Please review track-alpha."}'
+```
+
+Read active actor inbox messages:
+
+```bash
+python3 scripts/env/client.py message list --payload '{}'
+```
+
+Read active actor visible bidirectional context with a target buddy or exact actor:
+
+```bash
+python3 scripts/env/client.py message conversation --payload '{"buddy":"market","limit":20}'
+```
 
 ## Key Boundary Rules
 
-- Messages are direct buddy-to-buddy only. Each has exactly `from_buddy` and `to_buddy`.
-- Message objects are immutable after creation. No edit or delete.
-- Active buddy cannot send to itself.
-- Reply envelopes must stay within the same conversation pair.
-- List returns only inbox (to_buddy = active_buddy), not outbox.
-- `message.list` does not accept `box`; it is always the active buddy inbox. Use `request.list` when you need inbox/outbox request filtering.
+- `message.contacts` returns online contact rows with `contact.actor_address`.
+- `message.send` requires `target_actor_address` copied from a current contact row.
+- `message.list` reads only the active actor inbox; it does not accept `box`.
+- `message.conversation` reads active actor visible bidirectional messages with a selected target buddy or actor.
+- Message objects are immutable after creation. No edit or removal workflow exists for normal users.
+- Active buddy cannot send to another actor with the same buddy id.
+- Reply envelopes must stay within the same two-actor conversation pair.
+- Use `request.list` when you need inbox/outbox request filtering.
 
 ## Verification
 
@@ -51,5 +70,4 @@ python3 scripts/env/client.py message list --payload '{}'
 - Do not use for broadcast, group messaging, or multi-recipient sends.
 - Do not use for read receipts, unread counts, or message status tracking.
 - Do not use for object-level discussion; use `comment.add` for track/artifact comments.
-- Do not attempt to edit or delete sent messages.
 - Do not assume extra status or object-linking fields are accepted in send payloads; confirm allowed keys through runtime discovery first.

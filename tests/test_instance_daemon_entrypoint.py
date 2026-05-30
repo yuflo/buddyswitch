@@ -16,6 +16,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 INSTANCE_DAEMON_PATH = ROOT / "tools" / "launcher" / "instance_daemon.py"
 DAEMON_SH_PATH = ROOT / "tools" / "launcher" / "daemon.sh"
+CENTRAL_DAEMON_PATH = ROOT / "tools" / "launcher" / "central_daemon.py"
 MODULE_COUNTER = count()
 
 
@@ -39,9 +40,15 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         recorded: dict[str, object] = {}
         original_run = self.instance_daemon.daemon_core.run_daemon
 
-        def fake_run(instance_json: Path, *, handlers: list[object] | None = None) -> int:
+        def fake_run(
+            instance_json: Path,
+            *,
+            handlers: list[object] | None = None,
+            mailbox_handlers: list[object] | None = None,
+        ) -> int:
             recorded["instance_json"] = instance_json
             recorded["handlers"] = handlers or []
+            recorded["mailbox_handlers"] = mailbox_handlers or []
             return 0
 
         self.addCleanup(setattr, self.instance_daemon.daemon_core, "run_daemon", original_run)
@@ -55,6 +62,11 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(len(handlers), 1)
         self.assertEqual(type(handlers[0]).__name__, "TaskCheckoutHandler")
         self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
+        mailbox_handlers = recorded["mailbox_handlers"]
+        assert isinstance(mailbox_handlers, list)
+        self.assertEqual(len(mailbox_handlers), 1)
+        self.assertEqual(type(mailbox_handlers[0]).__name__, "MessageAvailableHandler")
+        self.assertEqual(getattr(mailbox_handlers[0], "name", None), "message_available")
         self.assertEqual(recorded["instance_json"], Path("/tmp/inst.json"))
 
     def test_start_prints_json_from_daemon_core(self) -> None:
@@ -99,9 +111,15 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         original_status = self.instance_daemon.daemon_core.daemon_status
         recorded: dict[str, object] = {}
 
-        def fake_status(instance_json: Path, *, handlers: list[object] | None = None) -> dict[str, object]:
+        def fake_status(
+            instance_json: Path,
+            *,
+            handlers: list[object] | None = None,
+            mailbox_handlers: list[object] | None = None,
+        ) -> dict[str, object]:
             self.assertEqual(instance_json, Path("/tmp/inst.json"))
             recorded["handlers"] = handlers or []
+            recorded["mailbox_handlers"] = mailbox_handlers or []
             return {"live": True, "ready": True}
 
         self.addCleanup(setattr, self.instance_daemon.daemon_core, "daemon_status", original_status)
@@ -116,10 +134,21 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         assert isinstance(handlers, list)
         self.assertEqual(len(handlers), 1)
         self.assertEqual(getattr(handlers[0], "name", None), "task_checkout")
+        mailbox_handlers = recorded["mailbox_handlers"]
+        assert isinstance(mailbox_handlers, list)
+        self.assertEqual(len(mailbox_handlers), 1)
+        self.assertEqual(getattr(mailbox_handlers[0], "name", None), "message_available")
 
     def test_daemon_shell_still_calls_instance_daemon_entrypoint(self) -> None:
         shell_source = DAEMON_SH_PATH.read_text(encoding="utf-8")
         self.assertIn("instance_daemon.py", shell_source)
+
+    def test_daemon_shell_ensures_central_daemon_lifecycle(self) -> None:
+        shell_source = DAEMON_SH_PATH.read_text(encoding="utf-8")
+        self.assertIn("central_daemon.py", shell_source)
+        self.assertIn("buddyswitch_central_daemon_ensure", shell_source)
+        self.assertIn("buddyswitch_central_daemon_stop_if_idle", shell_source)
+        self.assertTrue(CENTRAL_DAEMON_PATH.exists())
 
 
 if __name__ == "__main__":

@@ -14,33 +14,107 @@ def _build_definition() -> ToolDefinition:
     return ToolDefinition(
         id='message',
         title='Buddy Messages',
-        description='Send and list direct buddy-to-buddy inbox messages.',
+        description='Discover online actor contacts, send direct actor-address messages, and list inbox messages.',
         cli_resource='message',
         command="python3 scripts/env/client.py message <action> --payload '<json-object>'",
-        scope='direct buddy-to-buddy inbox messaging',
-        capability_boundary='Messages are direct buddy-to-buddy scope only.',
+        scope='direct runtime actor inbox messaging',
+        capability_boundary='Messages are direct runtime actor-address scope only.',
         object_model=(
-            'Messages are direct buddy-to-buddy inbox rows. They are informal direct communication and do not mutate tracks, artifacts, tasks, comments, or request lifecycle state.'
+            'Messages are direct actor-address inbox rows. They are informal direct communication and do not mutate tracks, artifacts, tasks, comments, or request lifecycle state.'
         ),
         use_when=(
-            'You need direct inbox messaging between manifest-declared buddies.',
+            'You need direct inbox messaging between online runtime actors.',
         ),
         do_not_use_when=(
             'You need object-level discussion; use comment tool actions.',
         ),
         actions=(
             ActionDefinition(
-                name='send',
-                title='message.send',
-                description='Send one direct message to another manifest buddy.',
+                name='contacts',
+                title='message.contacts',
+                description='List online actor contacts that can receive direct messages.',
                 input_schema={
                     'type': 'object',
                     'additionalProperties': False,
-                    'required': ['to_buddy', 'content'],
+                    'required': [],
                     'properties': {
-                        'to_buddy': {
+                        'buddy': {
                             'type': 'string',
-                            'description': 'manifest buddy id recipient; must differ from active_buddy.',
+                            'description': 'Optional manifest buddy id filter for online actor contacts.',
+                        },
+                    },
+                },
+                output_schema={
+                    '$ref': 'ToolResult',
+                },
+                kind='read',
+                mutates='none',
+                required_permission='message.contacts',
+                authority='message.actor_contact_discovery',
+                visibility='online actor contact summary',
+                durability='none',
+                result_content_level='actor address contact rows',
+                success_effect='Returns online actor addresses discovered through central daemon contacts.',
+                failure_state_guarantee='Rejected contact reads do not mutate runtime state.',
+                reads=(
+                    'central daemon online contacts',
+                ),
+                writes=(),
+                does_not_write=(
+                    'messages',
+                    'tracks',
+                    'tasks',
+                    'artifacts',
+                    'comments',
+                    'requests',
+                    'buddybox files',
+                ),
+                preconditions=(
+                    'env.tool role-action policy allows this action for the active role',
+                ),
+                returns=(
+                    'contacts',
+                    'count',
+                ),
+                use_when=(
+                    'You need contact discovery for a target actor address before message.send.',
+                ),
+                do_not_use_when=(
+                    'You already have a current contact actor_address or need to read inbox messages.',
+                ),
+                risk_hints={
+                    'read_only': True,
+                    'destructive': False,
+                    'idempotent': True,
+                    'open_world': False,
+                    'requires_human_approval': False,
+                    'external_effect': False,
+                },
+            ),
+            ActionDefinition(
+                name='send',
+                title='message.send',
+                description='Send one direct message to an online runtime actor address.',
+                input_schema={
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['target_actor_address', 'content'],
+                    'properties': {
+                        'target_actor_address': {
+                            'type': 'object',
+                            'additionalProperties': False,
+                            'required': ['buddy_id', 'instance_id'],
+                            'properties': {
+                                'buddy_id': {
+                                    'type': 'string',
+                                    'description': 'Target runtime actor buddy id.',
+                                },
+                                'instance_id': {
+                                    'type': 'string',
+                                    'description': 'Target runtime actor instance id.',
+                                },
+                            },
+                            'description': 'Exact RuntimeActorAddress returned by message.contacts.',
                         },
                         'content': {
                             'type': 'string',
@@ -61,14 +135,15 @@ def _build_definition() -> ToolDefinition:
                 authority='message.direct_buddy_channel',
                 visibility='sender and recipient direct message visibility',
                 durability='durable',
-                result_content_level='message row and id',
-                success_effect='Sends one direct inbox message to another manifest buddy.',
-                failure_state_guarantee='Rejected writes do not mutate runtime objects; response explains the permission, payload, lifecycle, or visibility boundary.',
+                result_content_level='message id and delivery status',
+                success_effect='Creates one durable inbox message and delivers a message.available signal to the target daemon.',
+                failure_state_guarantee='Rejected non-writes do not mutate runtime objects; delivery failures clean up the message or report an indeterminate write.',
                 reads=(
                     'manifest buddy ids',
+                    'central daemon actor reachability',
                 ),
                 writes=(
-                    'direct buddy inbox message',
+                    'direct actor-address inbox message',
                 ),
                 does_not_write=(
                     'tracks',
@@ -80,18 +155,18 @@ def _build_definition() -> ToolDefinition:
                     'browser session',
                 ),
                 preconditions=(
-                    'to_buddy is a declared manifest buddy',
-                    'to_buddy != active_buddy',
+                    'target_actor_address is a declared manifest buddy actor address',
+                    'target_actor_address is online and not the active buddy',
                 ),
                 returns=(
                     'message_id',
-                    'message',
+                    'delivery_status',
                 ),
                 use_when=(
-                    'You need to deliver a direct buddy-to-buddy inbox message to a specific manifest buddy.',
+                    'You need to deliver a direct inbox message to a specific online actor address.',
                 ),
                 do_not_use_when=(
-                    'You only need inbox reads (use message.list) or target-scoped track/artifact discussion (use comment.add).',
+                    'You only have a buddy id but no actor address (use message.contacts) or need target-scoped track/artifact discussion (use comment.add).',
                 ),
                 risk_hints={
                     'read_only': False,
@@ -162,6 +237,95 @@ def _build_definition() -> ToolDefinition:
                 ),
                 do_not_use_when=(
                     'You need to create a new direct message (use message.send) or discuss a track/artifact target thread (use comment.add).',
+                ),
+                risk_hints={
+                    'read_only': True,
+                    'destructive': False,
+                    'idempotent': True,
+                    'open_world': False,
+                    'requires_human_approval': False,
+                    'external_effect': False,
+                },
+            ),
+            ActionDefinition(
+                name='conversation',
+                title='message.conversation',
+                description='Read active actor visible bidirectional direct messages with one target actor or buddy.',
+                input_schema={
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': [],
+                    'properties': {
+                        'target_actor_address': {
+                            'type': 'object',
+                            'additionalProperties': False,
+                            'required': ['buddy_id', 'instance_id'],
+                            'properties': {
+                                'buddy_id': {
+                                    'type': 'string',
+                                    'description': 'Target runtime actor buddy id.',
+                                },
+                                'instance_id': {
+                                    'type': 'string',
+                                    'description': 'Target runtime actor instance id.',
+                                },
+                            },
+                            'description': 'Exact RuntimeActorAddress for the other conversation participant.',
+                        },
+                        'buddy': {
+                            'type': 'string',
+                            'description': 'Target manifest buddy id for all visible actor-address conversations with that buddy.',
+                        },
+                        'q': {
+                            'type': 'string',
+                            'description': 'Optional case-insensitive keyword filter over visible conversation content.',
+                        },
+                        'limit': {
+                            'type': 'integer',
+                            'description': 'Optional maximum number of latest conversation messages to return.',
+                            'minimum': 1,
+                        },
+                    },
+                },
+                output_schema={
+                    '$ref': 'ToolResult',
+                },
+                kind='read',
+                mutates='none',
+                required_permission='message.conversation',
+                authority='message.active_actor_conversation',
+                visibility='active actor visible direct conversation messages',
+                durability='none',
+                result_content_level='message rows',
+                success_effect='Lists active actor visible bidirectional direct messages for the selected target actor or buddy.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and do not create messages.',
+                reads=(
+                    'active actor visible direct messages',
+                ),
+                writes=(),
+                does_not_write=(
+                    'messages',
+                    'tracks',
+                    'tasks',
+                    'artifacts',
+                    'comments',
+                    'requests',
+                    'buddybox files',
+                ),
+                preconditions=(
+                    'exactly one of target_actor_address or buddy is provided',
+                    'target selector is a declared manifest buddy outside the active buddy',
+                ),
+                returns=(
+                    'messages',
+                    'count',
+                    'selector',
+                ),
+                use_when=(
+                    'You need bidirectional context between the active actor and one target actor or buddy.',
+                ),
+                do_not_use_when=(
+                    'You only need active actor inbox messages (use message.list) or need to send a new message (use message.send).',
                 ),
                 risk_hints={
                     'read_only': True,

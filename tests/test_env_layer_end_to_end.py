@@ -27,27 +27,51 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         super().setUp()
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
-        self.instance_root = self._instance_root("inst-e2e-runless")
-        self.instance_json = self.instance_root / "instance.json"
-        self.workspace_dir = self.instance_root / "workspace"
-        self.workspace_dir.mkdir(parents=True, exist_ok=True)
-        self.instance_payload = {
-            "instance_id": "inst-e2e-runless",
-            "buddy": "pm",
-            "status": "active",
-            "instance_root": str(self.instance_root),
-            "workspace_dir": str(self.workspace_dir),
-            "browser_port": 9333,
-        }
-        self.instance_json.write_text(json.dumps(self.instance_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        self.instances: dict[str, dict[str, object]] = {}
+        for buddy in ("pm", "design", "dev", "test", "market"):
+            instance_id = self._runtime_instance_id(buddy=buddy, label="inst-e2e-runless")
+            instance_root = self._instance_root(instance_id)
+            workspace_dir = instance_root / "workspace"
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            instance_json = instance_root / "instance.json"
+            payload = {
+                "instance_id": instance_id,
+                "buddy": buddy,
+                "status": "active",
+                "instance_root": str(instance_root),
+                "workspace_dir": str(workspace_dir),
+                "browser_port": 9333,
+            }
+            instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+            self.instances[buddy] = {
+                "instance_id": instance_id,
+                "instance_root": instance_root,
+                "instance_json": instance_json,
+                "workspace_dir": workspace_dir,
+                "payload": payload,
+            }
+        self.workspace_dir = self._workspace_dir("pm")
+
+    def _workspace_dir(self, buddy: str) -> Path:
+        workspace_dir = self.instances[buddy]["workspace_dir"]
+        self.assertIsInstance(workspace_dir, Path)
+        assert isinstance(workspace_dir, Path)
+        return workspace_dir
 
     def _dispatch(self, *, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        instance = self.instances[buddy]
+        instance_json = instance["instance_json"]
+        instance_payload = instance["payload"]
+        self.assertIsInstance(instance_json, Path)
+        self.assertIsInstance(instance_payload, dict)
+        assert isinstance(instance_json, Path)
+        assert isinstance(instance_payload, dict)
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
             active_buddy=buddy,
-            instance_id="inst-e2e-runless",
-            instance_json=self.instance_json,
-            instance_payload={**self.instance_payload, "buddy": buddy},
+            instance_id=str(instance["instance_id"]),
+            instance_json=instance_json,
+            instance_payload=instance_payload,
             manifest=self.manifest,
             manifest_path=self.manifest_path,
         )
@@ -88,12 +112,12 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return self._dispatch(buddy=buddy, tool="artifact", action="create_revision", args=args)
 
     def _instance_task_snapshot(self) -> dict[str, str]:
-        taskbox_root = self._instance_root("inst-e2e-runless") / "taskbox"
-        if not taskbox_root.exists():
+        instances_root = self.runtime_root / "instances"
+        if not instances_root.exists():
             return {}
         return {
-            path.relative_to(taskbox_root).as_posix(): path.read_text(encoding="utf-8")
-            for path in sorted(taskbox_root.rglob("*.json"))
+            path.relative_to(instances_root).as_posix(): path.read_text(encoding="utf-8")
+            for path in sorted(instances_root.glob("*/taskbox/**/*.json"))
         }
 
     def test_pm_design_dev_test_track_artifact_publication_flow(self) -> None:
@@ -305,7 +329,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertTrue(design_draft.get("ok"), msg=design_draft)
 
-        source = self.workspace_dir / "buddybox" / "screenshots" / "desktop.png"
+        source = self._workspace_dir("design") / "buddybox" / "screenshots" / "desktop.png"
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(b"\x89PNG\r\n")
 
@@ -598,13 +622,14 @@ class EnvLayerProductRootSplitTests(unittest.TestCase):
     def test_object_writes_use_state_root_when_workspace_and_state_are_split(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             shared_root = Path(temp_dir) / "shared"
-            workspace_dir = shared_root / "instances" / "inst-e2e-product" / "workspace"
+            instance_id = "inst-pm-e2e000000001"
+            workspace_dir = shared_root / "instances" / instance_id / "workspace"
             state_root = shared_root / "state"
             workspace_dir.mkdir(parents=True, exist_ok=True)
             (workspace_dir / "AGENTS.md").write_text("# BuddySwitch Runtime Workspace\n", encoding="utf-8")
 
             updates = {
-                "BUDDYSWITCH_INSTANCE_ID": "inst-e2e-product",
+                "BUDDYSWITCH_INSTANCE_ID": instance_id,
                 "BUDDYSWITCH_ACTIVE_BUDDY": "pm",
                 "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
                 "BUDDYSWITCH_WORKSPACE_DIR": str(workspace_dir),

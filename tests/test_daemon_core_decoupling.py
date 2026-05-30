@@ -109,12 +109,13 @@ class FakeRunDaemonClient:
 
 class DaemonCoreDecouplingTests(unittest.TestCase):
     def _instance(self, temp_root: str) -> dict[str, Path]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        instance_id = "inst-dev-daed00000002"
+        instance_root = Path(temp_root) / "instances" / instance_id
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload = {
-            "instance_id": "inst-dev-daemon",
+            "instance_id": instance_id,
             "buddy": "dev",
             "status": "active",
             "instance_root": str(instance_root),
@@ -151,6 +152,25 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
 
         self.addCleanup(setattr, daemon_core.app_server, "AppServerClient", original_client)
         daemon_core.app_server.AppServerClient = fake_factory
+
+    def _patch_daemon_communication(self, daemon_core: Any) -> None:
+        original_start_mailbox = daemon_core.start_daemon_mailbox
+        original_register = daemon_core.register_daemon_actor
+        original_heartbeat = daemon_core.heartbeat_daemon_actor
+        original_unregister = daemon_core.unregister_daemon_actor
+
+        class FakeMailbox:
+            def close(self) -> None:
+                return None
+
+        self.addCleanup(setattr, daemon_core, "start_daemon_mailbox", original_start_mailbox)
+        self.addCleanup(setattr, daemon_core, "register_daemon_actor", original_register)
+        self.addCleanup(setattr, daemon_core, "heartbeat_daemon_actor", original_heartbeat)
+        self.addCleanup(setattr, daemon_core, "unregister_daemon_actor", original_unregister)
+        daemon_core.start_daemon_mailbox = lambda **_kwargs: FakeMailbox()
+        daemon_core.register_daemon_actor = lambda _context, actor_address: {"record": {"actor_address": actor_address.to_payload()}}
+        daemon_core.heartbeat_daemon_actor = lambda _context, actor_address: {"record": {"actor_address": actor_address.to_payload()}}
+        daemon_core.unregister_daemon_actor = lambda _context, actor_address: {"record": {"actor_address": actor_address.to_payload()}}
 
     def test_daemon_core_imports_without_task_domain_modules(self) -> None:
         module = _load_module(DAEMON_CORE_PATH, block_task_imports=True)
@@ -190,6 +210,7 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
                 ]
             )
             self._patch_app_server_client(daemon_core, fake_client)
+            self._patch_daemon_communication(daemon_core)
             handled: list[dict[str, object]] = []
 
             class NoopHandler:
@@ -222,6 +243,7 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
                 ]
             )
             self._patch_app_server_client(daemon_core, fake_client)
+            self._patch_daemon_communication(daemon_core)
 
             with self.assertRaises(StopDaemonLoop):
                 daemon_core.run_daemon(instance["instance_json"], handlers=[])

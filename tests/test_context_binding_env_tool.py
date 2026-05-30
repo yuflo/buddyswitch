@@ -98,6 +98,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         workspace_dir: Path | None = None,
         path: Path | None = None,
     ) -> Path:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         instance_root = self._runtime_path(f"instances/{instance_id}")
         instance_json_path = path if path is not None else instance_root / "instance.json"
         resolved_workspace_dir = workspace_dir if workspace_dir is not None else self.runtime_root
@@ -125,6 +126,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return instance_json_path
 
     def _dispatch(self, *, instance_json: Path, tool: str, action: str, args: dict[str, object], instance_id: str = "inst-dev-context", buddy: str = "dev") -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-context-{uuid.uuid4().hex}",
@@ -167,9 +169,10 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return payload
 
     def _seed_context_state(self) -> None:
+        instance_id = self._runtime_instance_id(buddy="dev", label="inst-dev-context")
         env_store.create_track("track-context-active", "Context Track", owner_buddy="pm")
         self._seed_taskbox_task(
-            instance_id="inst-dev-context",
+            instance_id=instance_id,
             buddy="dev",
             task_id="task-dev-context",
             title="Context Task",
@@ -223,7 +226,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             health="ok",
         )
         self._seed_taskbox_task(
-            instance_id="inst-dev-context",
+            instance_id=instance_id,
             buddy="dev",
             task_id="task-dev-archived",
             title="Archived task",
@@ -484,18 +487,26 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("art-context-owner-draft-untracked", ids)
 
     def test_context_summarize_includes_compact_active_inbox_message_cues(self) -> None:
-        root = env_store.create_message(from_buddy="pm", to_buddy="dev", content="Need proof asset")
-        reply = env_store.create_message(from_buddy="design", to_buddy="dev", content="Screenshot ready", reply_to=root["id"])
-        env_store.create_message(from_buddy="dev", to_buddy="pm", content="Sent by dev only")
-        env_store.create_message(from_buddy="market", to_buddy="pm", content="Not dev inbox")
+        dev = {"buddy_id": "dev", "instance_id": self._runtime_instance_id(buddy="dev", label="inst-dev-context")}
+        pm = {"buddy_id": "pm", "instance_id": self._runtime_instance_id(buddy="pm", label="inst-pm-context")}
+        design = {"buddy_id": "design", "instance_id": self._runtime_instance_id(buddy="design", label="inst-design-context")}
+        market = {"buddy_id": "market", "instance_id": self._runtime_instance_id(buddy="market", label="inst-market-context")}
+        root = env_store.create_message(from_actor_address=pm, to_actor_address=dev, content="Need proof asset")
+        reply = env_store.create_message(from_actor_address=design, to_actor_address=dev, content="Screenshot ready", reply_to=root["id"])
+        env_store.create_message(from_actor_address=dev, to_actor_address=pm, content="Sent by dev only")
+        env_store.create_message(from_actor_address=market, to_actor_address=pm, content="Not dev inbox")
 
         instance_json = self._instance_json()
         payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
         self.assertTrue(payload.get("ok"), msg=payload)
+        self.assertEqual(payload.get("actor_address"), dev)
         cues = payload.get("message_cues")
         self.assertIsInstance(cues, dict, msg=payload)
         assert isinstance(cues, dict)
-        rows = cues.get("latest")
+        self.assertEqual(cues.get("inbox_source_of_truth"), "message.list")
+        self.assertEqual(cues.get("conversation_source_of_truth"), "message.conversation")
+        self.assertIn("message.contacts", cues.get("target_discovery", ""))
+        rows = cues.get("latest_inbox")
         self.assertIsInstance(rows, list, msg=cues)
         assert isinstance(rows, list)
         ids = [row.get("message_id") for row in rows if isinstance(row, dict)]
@@ -504,9 +515,13 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            self.assertEqual(row.get("to_buddy"), "dev")
+            self.assertEqual(row.get("to_actor_address"), dev)
+            self.assertIn(row.get("from_actor_address"), [pm, design])
             self.assertNotIn("content", row)
         self.assertGreaterEqual(cues.get("count", 0), 2)
+        message_source = payload.get("context_sources", {}).get("messages", {})
+        self.assertIn("message.list", str(message_source.get("source_of_truth")))
+        self.assertIn("message.conversation", str(message_source.get("source_of_truth")))
 
     def test_context_list_sources_excludes_handoffs(self) -> None:
         instance_json = self._instance_json()
@@ -610,7 +625,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_context_summarize_accepts_launcher_project_symlink_source_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             shared_root = Path(temp_dir) / "shared-root"
-            runtime_workspace = shared_root / "instances" / "inst-dev-context" / "workspace"
+            instance_id = self._runtime_instance_id(buddy="dev", label="inst-dev-context")
+            runtime_workspace = shared_root / "instances" / instance_id / "workspace"
             runtime_workspace.mkdir(parents=True, exist_ok=True)
             project_workspace = shared_root / "project" / "workspace"
             shared_source_root = project_workspace / "projects" / "app"
@@ -623,7 +639,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json = self._instance_json(
                 buddy="dev",
                 workspace_dir=runtime_workspace,
-                path=shared_root / "instances" / "inst-dev-context" / "instance.json",
+                path=shared_root / "instances" / instance_id / "instance.json",
             )
 
             payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")
@@ -641,7 +657,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def test_context_summarize_rejects_source_symlink_outside_project_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             shared_root = Path(temp_dir) / "shared-root"
-            runtime_workspace = shared_root / "instances" / "inst-dev-context" / "workspace"
+            instance_id = self._runtime_instance_id(buddy="dev", label="inst-dev-context")
+            runtime_workspace = shared_root / "instances" / instance_id / "workspace"
             runtime_workspace.mkdir(parents=True, exist_ok=True)
             project_workspace = shared_root / "project" / "workspace"
             (project_workspace / "projects" / "app").mkdir(parents=True, exist_ok=True)
@@ -656,7 +673,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json = self._instance_json(
                 buddy="dev",
                 workspace_dir=runtime_workspace,
-                path=shared_root / "instances" / "inst-dev-context" / "instance.json",
+                path=shared_root / "instances" / instance_id / "instance.json",
             )
 
             payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, buddy="dev")

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 import uuid
@@ -30,7 +30,9 @@ from env.repos import runtime_files
 from env.repos import tasks as _task_repo
 from env.repos import tracks as _track_repo
 from env.tool_runtime.actor_profile import AuthSubject
+from env.tool_runtime.actor_profile import RuntimeActorAddress
 from env.tool_runtime.actor_profile import RuntimeActorProfile
+from env.tool_runtime import daemon_client
 
 
 def _load_registry_module():
@@ -175,13 +177,29 @@ class RuntimeObjectAccess:
             rows = [row for row in rows if row.get("status") == status]
         return rows
 
-    def send_message(self, to_buddy: str, content: str, reply_to: str | None) -> dict[str, Any]:
-        return _message_repo.create_message(from_buddy="", to_buddy=to_buddy, content=content, reply_to=reply_to)
+    def send_message(
+        self,
+        from_actor_address: RuntimeActorAddress | dict[str, Any],
+        to_actor_address: RuntimeActorAddress | dict[str, Any],
+        content: str,
+        reply_to: str | None,
+    ) -> dict[str, Any]:
+        return _message_repo.create_message(
+            from_actor_address=from_actor_address,
+            to_actor_address=to_actor_address,
+            content=content,
+            reply_to=reply_to,
+        )
 
     def list_messages(self, buddy: str | None) -> list[dict[str, Any]]:
         rows = _message_repo.list_messages()
         if isinstance(buddy, str) and buddy.strip():
-            rows = [row for row in rows if row.get("from_buddy") == buddy]
+            rows = [
+                row
+                for row in rows
+                if isinstance(row.get("from_actor_address"), dict)
+                and row["from_actor_address"].get("buddy_id") == buddy
+            ]
         return rows
 
     def runtime_sources(self) -> dict[str, Any]:
@@ -353,6 +371,56 @@ class RegistryCatalogAccess:
         return _load_registry_module().tool_catalog_errors()
 
 
+def _actor_address_payload(value: RuntimeActorAddress | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(value, RuntimeActorAddress):
+        return value.to_payload()
+    return RuntimeActorAddress.from_payload(value).to_payload()
+
+
+class DaemonAccess:
+    """Explicit central daemon access for runtime tools."""
+
+    def __init__(self, *, actor_address: RuntimeActorAddress) -> None:
+        self._actor_address = actor_address
+
+    def list_contacts(self, *, buddy_id: str | None = None) -> dict[str, Any]:
+        return daemon_client.list_contacts(buddy_id=buddy_id)
+
+    def check_reachability(self, *, target_actor_address: RuntimeActorAddress | dict[str, Any]) -> dict[str, Any]:
+        return daemon_client.check_reachability(
+            target_actor_address=_actor_address_payload(target_actor_address),
+        )
+
+    def deliver_signal(
+        self,
+        *,
+        signal_type: str,
+        target_actor_address: RuntimeActorAddress | dict[str, Any],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        signal = {
+            "signal_id": f"sig-{uuid.uuid4().hex}",
+            "type": signal_type,
+            "source_actor_address": self._actor_address.to_payload(),
+            "target_actor_address": _actor_address_payload(target_actor_address),
+            "payload": dict(payload),
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        return daemon_client.deliver_signal(signal=signal)
+
+    def deliver_message_available(
+        self,
+        *,
+        message_id: str,
+        target_actor_address: RuntimeActorAddress | dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.deliver_signal(
+            signal_type="message.available",
+            target_actor_address=target_actor_address,
+            payload={"message_id": message_id},
+        )
+
+
 @dataclass(frozen=True)
 class DomainAccess:
     """Host-owned domain validator/normalizer access."""
@@ -388,6 +456,7 @@ class ToolContext(Mapping[str, Any]):
 
     active_buddy: str
     instance_id: str
+    actor_address: RuntimeActorAddress
     auth_subject: AuthSubject
     instance_json: Path
     instance_payload: dict[str, Any]
@@ -417,6 +486,7 @@ class ToolContext(Mapping[str, Any]):
                 manifest_path=self.manifest_path,
             ),
         )
+        object.__setattr__(self, "daemon", DaemonAccess(actor_address=self.actor_address))
 
     @classmethod
     def from_actor_profile(
@@ -431,6 +501,7 @@ class ToolContext(Mapping[str, Any]):
         return cls(
             active_buddy=actor_profile.active_buddy,
             instance_id=actor_profile.instance_id,
+            actor_address=actor_profile.actor_address,
             auth_subject=actor_profile.auth_subject,
             instance_json=instance_json,
             instance_payload=instance_payload,

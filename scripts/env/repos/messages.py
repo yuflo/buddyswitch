@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from env.tool_runtime.actor_profile import RuntimeActorAddress
 from . import runtime_files
 
 
@@ -29,6 +30,15 @@ def _require_non_empty_text(value: Any, field: str) -> str:
     return value.strip()
 
 
+def _actor_payload(value: RuntimeActorAddress | dict[str, Any], field: str) -> dict[str, str]:
+    try:
+        if isinstance(value, RuntimeActorAddress):
+            return value.to_payload()
+        return RuntimeActorAddress.from_payload(value).to_payload()
+    except Exception as exc:
+        raise ValueError(f"{field} must be a valid RuntimeActorAddress: {exc}") from exc
+
+
 def _message_file(message_id: str) -> Path:
     normalized_id = runtime_files.require_id(message_id, "message id")
     return runtime_files.MESSAGES_DIR / f"{normalized_id}.json"
@@ -40,8 +50,8 @@ def _normalize_message(message: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"unsupported message fields: {', '.join(forbidden)}")
 
     msg_id = runtime_files.require_id(message.get("id", ""), "message.id")
-    from_buddy = _require_non_empty_text(message.get("from_buddy"), "message.from_buddy")
-    to_buddy = _require_non_empty_text(message.get("to_buddy"), "message.to_buddy")
+    from_actor_address = _actor_payload(message.get("from_actor_address"), "message.from_actor_address")
+    to_actor_address = _actor_payload(message.get("to_actor_address"), "message.to_actor_address")
     content = _require_non_empty_text(message.get("content"), "message.content")
     reply_to = message.get("reply_to")
     if reply_to is not None:
@@ -50,8 +60,8 @@ def _normalize_message(message: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "id": msg_id,
-        "from_buddy": from_buddy,
-        "to_buddy": to_buddy,
+        "from_actor_address": from_actor_address,
+        "to_actor_address": to_actor_address,
         "content": content,
         "reply_to": reply_to,
         "created_at": created_at,
@@ -82,15 +92,29 @@ def save_message(message: dict[str, Any]) -> dict[str, Any]:
     return normalized_message
 
 
+def delete_message(message_id: str) -> bool:
+    path = _message_file(message_id)
+    runtime_files.require_runtime_workspace_write_root()
+    try:
+        path.unlink()
+        try:
+            runtime_files.MESSAGES_DIR.rmdir()
+        except OSError:
+            pass
+        return True
+    except FileNotFoundError:
+        return False
+
+
 def create_message(
     *,
-    from_buddy: str,
-    to_buddy: str,
+    from_actor_address: RuntimeActorAddress | dict[str, Any],
+    to_actor_address: RuntimeActorAddress | dict[str, Any],
     content: str,
     reply_to: str | None = None,
 ) -> dict[str, Any]:
-    normalized_from = _require_non_empty_text(from_buddy, "from_buddy")
-    normalized_to = _require_non_empty_text(to_buddy, "to_buddy")
+    normalized_from = _actor_payload(from_actor_address, "from_actor_address")
+    normalized_to = _actor_payload(to_actor_address, "to_actor_address")
     normalized_content = _require_non_empty_text(content, "content")
     if reply_to is not None:
         runtime_files.require_id(reply_to, "reply_to")
@@ -99,8 +123,8 @@ def create_message(
     runtime_files.require_id(message_id, "message id")
     message = {
         "id": message_id,
-        "from_buddy": normalized_from,
-        "to_buddy": normalized_to,
+        "from_actor_address": normalized_from,
+        "to_actor_address": normalized_to,
         "content": normalized_content,
         "reply_to": reply_to,
         "created_at": runtime_files.now_iso(),

@@ -45,12 +45,12 @@ class DaemonServiceContractTests(unittest.TestCase):
         self.core = load_daemon_core()
 
     def _instance(self, temp_root: str) -> dict[str, Any]:
-        instance_root = Path(temp_root) / "instances" / "inst-dev-daemon"
+        instance_root = Path(temp_root) / "instances" / "inst-dev-daed00000001"
         workspace_dir = instance_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         instance_json = instance_root / "instance.json"
         payload: dict[str, Any] = {
-            "instance_id": "inst-dev-daemon",
+            "instance_id": "inst-dev-daed00000001",
             "buddy": "dev",
             "status": "active",
             "instance_root": str(instance_root),
@@ -68,7 +68,7 @@ class DaemonServiceContractTests(unittest.TestCase):
     def _state(self, instance_root: Path) -> Any:
         return self.core.DaemonState.load(
             instance_root=instance_root,
-            instance_id="inst-dev-daemon",
+            instance_id="inst-dev-daed00000001",
             main_thread_id="thr-main",
         )
 

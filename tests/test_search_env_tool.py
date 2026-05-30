@@ -51,6 +51,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         buddy: str = "market",
         browser_port: object = 9222,
     ) -> Path:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         instance_json = self._runtime_path(f"{instance_id}.json")
         instance_json.write_text(
             json.dumps(
@@ -82,6 +83,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_id: str = "inst-search-example",
         buddy: str = "market",
     ) -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         manifest = env_manifest.load_manifest(MANIFEST)
         instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
         return dispatch_env_tool_request(
@@ -373,7 +375,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_UNAVAILABLE")
         self.assertEqual(
             response.get("command_hint"),
-            "./buddyswitch-codex env browser ensure --instance inst-search-example",
+            f"./buddyswitch-codex env browser ensure --instance {self._runtime_instance_id(buddy='market', label='inst-search-example')}",
         )
 
     def test_search_open_browser_reports_cdp_open_failure_with_target_url(self) -> None:

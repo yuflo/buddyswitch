@@ -130,6 +130,8 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         search_request = catalog.get_action_definition("search", "request").input_schema
         search_open = catalog.get_action_definition("search", "open_browser").input_schema
         message_send = catalog.get_action_definition("message", "send").input_schema
+        message_conversation_action = catalog.get_action_definition("message", "conversation")
+        message_conversation = message_conversation_action.input_schema
         request_create = catalog.get_action_definition("request", "create").input_schema
         request_list = catalog.get_action_definition("request", "list").input_schema
         request_complete = catalog.get_action_definition("request", "complete").input_schema
@@ -223,7 +225,34 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(search_request["properties"]["engine"].get("enum"), ["google", "web", "reddit", "x"])
         self.assertEqual(search_open["properties"]["engine"].get("enum"), ["google", "web", "reddit", "x"])
 
-        self.assertIn("manifest buddy id", message_send["properties"]["to_buddy"].get("description", ""))
+        self.assertEqual(set(message_send.get("required", [])), {"target_actor_address", "content"})
+        self.assertNotIn("to_buddy", message_send.get("properties", {}))
+        target_actor_address = message_send["properties"]["target_actor_address"]
+        self.assertEqual(target_actor_address.get("type"), "object")
+        self.assertIs(target_actor_address.get("additionalProperties"), False)
+        self.assertEqual(set(target_actor_address.get("required", [])), {"buddy_id", "instance_id"})
+        self.assertEqual(target_actor_address.get("properties", {}).get("buddy_id", {}).get("type"), "string")
+        self.assertEqual(target_actor_address.get("properties", {}).get("instance_id", {}).get("type"), "string")
+        message_contacts = catalog.get_action_definition("message", "contacts").input_schema
+        self.assertEqual(message_contacts.get("required"), [])
+        self.assertEqual(set(message_contacts.get("properties", {})), {"buddy"})
+
+        self.assertEqual(message_conversation_action.kind, "read")
+        self.assertEqual(message_conversation_action.mutates, "none")
+        self.assertEqual(message_conversation_action.required_permission, "message.conversation")
+        self.assertEqual(message_conversation_action.durability, "none")
+        self.assertEqual(message_conversation.get("required"), [])
+        conversation_properties = message_conversation.get("properties", {})
+        self.assertEqual(set(conversation_properties), {"target_actor_address", "buddy", "q", "limit"})
+        self.assertNotIn("box", conversation_properties)
+        self.assertNotIn("to_buddy", conversation_properties)
+        self.assertNotIn("from_buddy", conversation_properties)
+        conversation_target = conversation_properties["target_actor_address"]
+        self.assertEqual(conversation_target.get("type"), "object")
+        self.assertIs(conversation_target.get("additionalProperties"), False)
+        self.assertEqual(set(conversation_target.get("required", [])), {"buddy_id", "instance_id"})
+        self.assertEqual(conversation_target.get("properties", {}).get("buddy_id", {}).get("type"), "string")
+        self.assertEqual(conversation_target.get("properties", {}).get("instance_id", {}).get("type"), "string")
 
         self.assertIn("track_id", request_create.get("required", []))
         self.assertIn("to_buddy", request_create.get("required", []))

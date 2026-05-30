@@ -733,11 +733,39 @@ class RuntimeSkillsTests(unittest.TestCase):
     def test_shared_message_skill_prevents_observed_invalid_calls(self) -> None:
         message_skill = self.SHARED_TOOL_SKILLS["message"].read_text(encoding="utf-8").lower()
 
+        self.assertIn("message contacts --payload", message_skill)
+        self.assertIn("target_actor_address", message_skill)
+        self.assertIn("contact.actor_address", message_skill)
+        self.assertIn("message send --payload '{\"target_actor_address\"", message_skill)
+        self.assertIn("message conversation --payload", message_skill)
         self.assertIn("message list --payload '{}'", message_skill)
         self.assertIn("does not accept `box`", message_skill)
         self.assertIn("request.list", message_skill)
+        self.assertIn("context.get.tool_catalog['message']", message_skill)
+        self.assertNotIn("to_buddy", message_skill)
+        self.assertNotIn("from_buddy", message_skill)
+        self.assertNotIn('"actor_address":', message_skill)
+        self.assertNotIn('"message":', message_skill)
         self.assertNotIn('message list --payload \'{"box":"inbox"}\'', message_skill)
         self.assertNotIn('message list --payload "{\\"box\\":\\"inbox\\"}"', message_skill)
+
+        for buddy in ("pm", "market"):
+            with self.subTest(materialized_for=buddy):
+                with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+                    workspace = Path(temp_dir) / f"{buddy}-workspace"
+                    workspace.mkdir()
+                    runtime_skills.install_runtime_skills(
+                        manifest_path=ROOT / "buddyswitch/manifest.toml",
+                        buddy_id=buddy,
+                        workspace=workspace,
+                    )
+                    installed = (workspace / ".agents" / "skills" / "message-tool" / "SKILL.md").read_text(
+                        encoding="utf-8"
+                    ).lower()
+                    self.assertIn("target_actor_address", installed)
+                    self.assertIn("message conversation --payload", installed)
+                    self.assertNotIn("to_buddy", installed)
+                    self.assertNotIn("from_buddy", installed)
 
     def test_message_comment_shared_tool_skills_stay_atomic(self) -> None:
         """MCT-SURF-006: Message/comment skills don't teach non-goal features."""

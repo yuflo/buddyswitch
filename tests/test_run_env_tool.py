@@ -26,11 +26,12 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
         self.manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        self.instance_id = self._runtime_instance_id(buddy="pm", label="inst-pm-runless")
         self.instance_json = self._runtime_path("instance.json")
         self.instance_json.write_text(
             json.dumps(
                 {
-                    "instance_id": "inst-pm-runless",
+                    "instance_id": self.instance_id,
                     "buddy": "pm",
                     "status": "active",
                     "workspace_dir": str(self.runtime_root),
@@ -44,12 +45,13 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
     def _dispatch(self, *, tool: str, action: str, args: dict[str, object] | None = None, buddy: str = "pm") -> dict[str, object]:
         payload = {"tool": tool, "action": action, "args": args or {}}
+        instance_id = self._runtime_instance_id(buddy=buddy, label="inst-pm-runless")
         return tool_router.dispatch_env_tool_request(
             payload=payload,
             active_buddy=buddy,
-            instance_id="inst-pm-runless",
+            instance_id=instance_id,
             instance_json=self.instance_json,
-            instance_payload={"instance_id": "inst-pm-runless", "buddy": buddy, "workspace_dir": str(self.runtime_root)},
+            instance_payload={"instance_id": instance_id, "buddy": buddy, "workspace_dir": str(self.runtime_root)},
             manifest=self.manifest,
             manifest_path=ROOT / "buddyswitch" / "manifest.toml",
         )

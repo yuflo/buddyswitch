@@ -146,6 +146,7 @@ def _make_cdp_handler(state: _CDPState) -> type[BaseHTTPRequestHandler]:
 
 class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _instance_json(self, *, buddy: str = "market", instance_id: str = "inst-market") -> Path:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         path = self._runtime_path(f"instances/{instance_id}/instance.json")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -167,6 +168,7 @@ class MarketBrowserEvidenceTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return path
 
     def _dispatch(self, *, instance_json: Path, instance_id: str, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         envelope = runtime_broker.dispatch_runtime_request(
             request={
                 "protocol": PROTOCOL,

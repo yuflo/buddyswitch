@@ -24,6 +24,7 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     def _instance_json(self, *, instance_id: str, buddy: str, status: str = "active") -> Path:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         path = self._runtime_path("instance.json")
         path.write_text(
             json.dumps(
@@ -44,6 +45,7 @@ class CommentEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         return path
 
     def _dispatch(self, *, instance_json: Path, instance_id: str, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         request = {
             "protocol": PROTOCOL,
             "request_id": f"req-comment-{uuid.uuid4().hex}",

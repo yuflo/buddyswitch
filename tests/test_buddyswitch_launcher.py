@@ -119,6 +119,18 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         return shared_root / "run" / "locks" / "runtime.owner.lock"
 
     @staticmethod
+    def _first_available_local_port(start: int, *, limit: int = 50) -> int:
+        for port in range(start, start + limit):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    probe.bind(("127.0.0.1", port))
+                except OSError:
+                    continue
+                return port
+        raise AssertionError(f"no available localhost TCP port found from {start}")
+
+    @staticmethod
     def _repo_git_common_dir(repo_root: Path = ROOT) -> Path:
         output = subprocess.check_output(
             ["git", "-C", str(repo_root), "rev-parse", "--git-common-dir"],
@@ -2646,6 +2658,7 @@ exec "$real_git" "$@"
                 self.skipTest(f"port 9222 is not available for the busy-port precondition: {exc}")
         if owns_busy_socket:
             self.addCleanup(busy_socket.close)
+        expected_browser_port = self._first_available_local_port(9223)
 
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -2703,7 +2716,7 @@ exec "$real_git" "$@"
             )
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
             instance_json = json.loads(Path(payload["instance_json"]).read_text(encoding="utf-8"))
-            self.assertEqual(instance_json["browser_port"], 9223)
+            self.assertEqual(instance_json["browser_port"], expected_browser_port)
 
             call_entries = [
                 json.loads(line)
@@ -2711,7 +2724,7 @@ exec "$real_git" "$@"
                 if line.strip()
             ]
             cockpit_add = next(entry for entry in call_entries if entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"])
-            self.assertIn("--browser-url=http://127.0.0.1:9223", cockpit_add["argv"])
+            self.assertIn(f"--browser-url=http://127.0.0.1:{expected_browser_port}", cockpit_add["argv"])
 
     def test_input_starts_turn_when_thread_idle_defaults_to_raw(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

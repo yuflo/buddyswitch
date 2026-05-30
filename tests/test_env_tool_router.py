@@ -36,6 +36,7 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
     )
 
     def _instance_json(self, *, instance_id: str = "inst-dev-example", buddy: str = "dev") -> Path:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         path = self._runtime_path("instance.json")
         path.write_text(
             json.dumps(
@@ -63,6 +64,7 @@ class EnvToolRouterTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         instance_id: str = "inst-dev-example",
         buddy: str = "dev",
     ) -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label=instance_id)
         manifest = env_manifest.load_manifest(MANIFEST)
         instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
         return tool_registry.dispatch_env_tool_request(

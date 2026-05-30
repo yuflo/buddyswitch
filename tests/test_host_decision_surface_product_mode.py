@@ -24,10 +24,11 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         super().setUp()
         self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
-        self.instance_root = self._runtime_path("instances/inst-market-decision-surface")
+        self.instance_id = self._runtime_instance_id(buddy="market", label="inst-market-decision-surface")
+        self.instance_root = self._runtime_path(f"instances/{self.instance_id}")
         self.instance_json = self.instance_root / "instance.json"
         self.instance_payload = {
-            "instance_id": "inst-market-decision-surface",
+            "instance_id": self.instance_id,
             "buddy": "market",
             "status": "active",
             "instance_root": str(self.instance_root),
@@ -66,12 +67,13 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
 
     def _dispatch(self, *, buddy: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
+        instance_id = self._runtime_instance_id(buddy=buddy, label="inst-market-decision-surface")
         return tool_router.dispatch_env_tool_request(
             payload={"tool": tool, "action": action, "args": args},
             active_buddy=buddy,
-            instance_id="inst-market-decision-surface",
+            instance_id=instance_id,
             instance_json=self.instance_json,
-            instance_payload={**self.instance_payload, "buddy": buddy},
+            instance_payload={**self.instance_payload, "instance_id": instance_id, "buddy": buddy},
             manifest=self.manifest,
             manifest_path=self.manifest_path,
         )
