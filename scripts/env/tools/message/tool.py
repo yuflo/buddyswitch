@@ -247,6 +247,95 @@ def _build_definition() -> ToolDefinition:
                     'external_effect': False,
                 },
             ),
+            ActionDefinition(
+                name='conversation',
+                title='message.conversation',
+                description='Read active actor visible bidirectional direct messages with one target actor or buddy.',
+                input_schema={
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': [],
+                    'properties': {
+                        'target_actor_address': {
+                            'type': 'object',
+                            'additionalProperties': False,
+                            'required': ['buddy_id', 'instance_id'],
+                            'properties': {
+                                'buddy_id': {
+                                    'type': 'string',
+                                    'description': 'Target runtime actor buddy id.',
+                                },
+                                'instance_id': {
+                                    'type': 'string',
+                                    'description': 'Target runtime actor instance id.',
+                                },
+                            },
+                            'description': 'Exact RuntimeActorAddress for the other conversation participant.',
+                        },
+                        'buddy': {
+                            'type': 'string',
+                            'description': 'Target manifest buddy id for all visible actor-address conversations with that buddy.',
+                        },
+                        'q': {
+                            'type': 'string',
+                            'description': 'Optional case-insensitive keyword filter over visible conversation content.',
+                        },
+                        'limit': {
+                            'type': 'integer',
+                            'description': 'Optional maximum number of latest conversation messages to return.',
+                            'minimum': 1,
+                        },
+                    },
+                },
+                output_schema={
+                    '$ref': 'ToolResult',
+                },
+                kind='read',
+                mutates='none',
+                required_permission='message.conversation',
+                authority='message.active_actor_conversation',
+                visibility='active actor visible direct conversation messages',
+                durability='none',
+                result_content_level='message rows',
+                success_effect='Lists active actor visible bidirectional direct messages for the selected target actor or buddy.',
+                failure_state_guarantee='Rejected reads do not mutate runtime state and do not create messages.',
+                reads=(
+                    'active actor visible direct messages',
+                ),
+                writes=(),
+                does_not_write=(
+                    'messages',
+                    'tracks',
+                    'tasks',
+                    'artifacts',
+                    'comments',
+                    'requests',
+                    'buddybox files',
+                ),
+                preconditions=(
+                    'exactly one of target_actor_address or buddy is provided',
+                    'target selector is a declared manifest buddy outside the active buddy',
+                ),
+                returns=(
+                    'messages',
+                    'count',
+                    'selector',
+                ),
+                use_when=(
+                    'You need bidirectional context between the active actor and one target actor or buddy.',
+                ),
+                do_not_use_when=(
+                    'You only need active actor inbox messages (use message.list) or need to send a new message (use message.send).',
+                ),
+                risk_hints={
+                    'read_only': True,
+                    'destructive': False,
+                    'idempotent': True,
+                    'open_world': False,
+                    'requires_human_approval': False,
+                    'external_effect': False,
+                },
+            ),
         ),
     )
 

@@ -57,7 +57,16 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(daemon_core.stop_daemon(instance_json), ensure_ascii=True))
             return 0
         if args.command == "status":
-            print(json.dumps(daemon_core.daemon_status(instance_json, handlers=default_handlers()), ensure_ascii=True))
+            print(
+                json.dumps(
+                    daemon_core.daemon_status(
+                        instance_json,
+                        handlers=default_handlers(),
+                        mailbox_handlers=default_mailbox_handlers(),
+                    ),
+                    ensure_ascii=True,
+                )
+            )
             return 0
     except Exception as exc:
         print(str(exc), file=sys.stderr)

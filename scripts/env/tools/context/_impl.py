@@ -519,8 +519,9 @@ def _message_cues(*, limit_value: int, context: ContextServiceContext) -> dict[s
     ]
     return {
         "count": len(inbox),
-        "latest": latest,
-        "source_of_truth": "message.list",
+        "latest_inbox": latest,
+        "inbox_source_of_truth": "message.list",
+        "conversation_source_of_truth": "message.conversation",
         "target_discovery": "Use message.contacts to discover online target actor addresses.",
     }
 
@@ -716,9 +717,9 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "artifact.list / artifact.get via runtime env tools",
         },
         "messages": {
-            "description": "Direct buddy inbox messages, read through message.list.",
-            "scope": "active-buddy inbox communication",
-            "source_of_truth": "message.list via runtime env tools",
+            "description": "Direct actor-address messages: inbox through message.list, bidirectional visible context through message.conversation.",
+            "scope": "active actor inbox and direct conversation communication",
+            "source_of_truth": "message.list and message.conversation via runtime env tools",
         },
         "comments": {
             "description": "Target-scoped comments on tracks and artifacts, read through comment.list.",
@@ -816,6 +817,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "open_comment_threads": sections["open_comment_threads"],
         "recent_updates": sections["recent_updates"],
         "message_cues": sections["message_cues"],
+        "context_sources": context_sources_desc(),
         "actor_address": sections["actor_address"],
         "writable_surfaces": sections["writable_surfaces"],
         "tool_affordances": tool_registry.compact_tool_affordances(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS),

@@ -627,7 +627,14 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             class FakeHandler:
                 name = "task_checkout"
 
-            payload = self.core.daemon_status(instance["instance_json"], handlers=[FakeHandler()])
+            class FakeMailboxHandler:
+                name = "message_available"
+
+            payload = self.core.daemon_status(
+                instance["instance_json"],
+                handlers=[FakeHandler()],
+                mailbox_handlers=[FakeMailboxHandler()],
+            )
 
             self.assertEqual(payload["handlers"]["registered"], ["task_checkout"])
             item = payload["handlers"]["items"]["task_checkout"]
@@ -637,6 +644,15 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertIsNone(item["last_result"])
             self.assertIsNone(item["last_error"])
             self.assertIsNone(item["last_action_turn_id"])
+            self.assertNotIn("message_available", payload["handlers"]["items"])
+            self.assertEqual(payload["mailbox_handlers"]["registered"], ["message_available"])
+            mailbox_item = payload["mailbox_handlers"]["items"]["message_available"]
+            self.assertIs(mailbox_item["registered"], True)
+            self.assertIs(mailbox_item["enabled"], True)
+            self.assertIs(mailbox_item["active"], True)
+            self.assertIsNone(mailbox_item["last_result"])
+            self.assertIsNone(mailbox_item["last_error"])
+            self.assertIsNone(mailbox_item["last_action_turn_id"])
 
     def test_daemon_status_includes_persisted_unregistered_handler_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -647,11 +663,23 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
                 main_thread_id="thr-main",
             )
             state.record_handler_error("message", origin_turn_id="turn-user-1", message="message failed")
+            state.record_handler_error(
+                "message_available",
+                origin_turn_id="turn-user-2",
+                message="message available failed",
+            )
 
             class FakeHandler:
                 name = "task_checkout"
 
-            payload = self.core.daemon_status(instance["instance_json"], handlers=[FakeHandler()])
+            class FakeMailboxHandler:
+                name = "message_available"
+
+            payload = self.core.daemon_status(
+                instance["instance_json"],
+                handlers=[FakeHandler()],
+                mailbox_handlers=[FakeMailboxHandler()],
+            )
 
             self.assertEqual(payload["handlers"]["registered"], ["task_checkout"])
             message_state = payload["handlers"]["items"]["message"]
@@ -659,6 +687,12 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertIs(message_state["enabled"], False)
             self.assertIs(message_state["active"], False)
             self.assertEqual(message_state["last_error"]["message"], "message failed")
+            self.assertNotIn("message_available", payload["handlers"]["items"])
+            mailbox_state = payload["mailbox_handlers"]["items"]["message_available"]
+            self.assertIs(mailbox_state["registered"], True)
+            self.assertIs(mailbox_state["enabled"], True)
+            self.assertIs(mailbox_state["active"], True)
+            self.assertEqual(mailbox_state["last_error"]["message"], "message available failed")
 
 
 class FakeRunDaemonClient:

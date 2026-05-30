@@ -229,6 +229,50 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertIs(contact["sendable"], True)
         self.assertEqual(contact["last_seen_at"], "2026-05-30T00:00:00Z")
 
+    def test_message_contacts_marks_active_buddy_rows_not_sendable(self) -> None:
+        active_pm = self._actor_address(buddy="pm", label="inst-pm-contacts-self")
+        other_pm = self._actor_address(buddy="pm", label="inst-pm-other")
+        market = self._actor_address(buddy="market", label="inst-market-contacts")
+        self._patch_daemon(
+            contacts={
+                "contacts": [
+                    {"actor_address": active_pm, "status": "online"},
+                    {"actor_address": other_pm, "status": "online"},
+                    {"actor_address": market, "status": "online"},
+                ],
+                "count": 3,
+            }
+        )
+        instance_json = self._instance_json(instance_id="inst-pm-contacts-self", buddy="pm")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-pm-contacts-self",
+            buddy="pm",
+            tool="message",
+            action="contacts",
+            args={},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("count"), 3)
+        self.assertEqual(response.get("sendable_count"), 1)
+        contacts = response.get("contacts")
+        self.assertIsInstance(contacts, list, msg=response)
+        assert isinstance(contacts, list)
+        by_instance = {
+            row["actor_address"]["instance_id"]: row
+            for row in contacts
+            if isinstance(row, dict) and isinstance(row.get("actor_address"), dict)
+        }
+        for address in (active_pm, other_pm):
+            row = by_instance[address["instance_id"]]
+            self.assertEqual(row["buddy_id"], "pm")
+            self.assertIs(row["sendable"], False)
+            self.assertIn("same buddy_id", row.get("why_not_sendable", ""))
+        self.assertIs(by_instance[market["instance_id"]]["sendable"], True)
+        self.assertIn("target_actor_address", " ".join(response.get("allowed_next_actions", [])))
+
     def test_message_contacts_rejects_unknown_buddy_filter(self) -> None:
         calls = self._patch_daemon()
         instance_json = self._instance_json(instance_id="inst-pm-contacts-unknown", buddy="pm")
@@ -505,6 +549,207 @@ class MessageEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         messages = response.get("messages", [])
         self.assertEqual(len(messages), 1, msg=response)
         self.assertEqual(messages[0]["from_actor_address"], design)
+
+    def test_message_conversation_returns_visible_bidirectional_actor_messages(self) -> None:
+        active = self._actor_address(buddy="dev", label="inst-dev-conversation")
+        other_dev = self._actor_address(buddy="dev", label="inst-dev-conversation-other")
+        pm = self._actor_address(buddy="pm", label="inst-pm-conversation")
+        design = self._actor_address(buddy="design", label="inst-design-conversation")
+        market = self._actor_address(buddy="market", label="inst-market-conversation")
+        first = message_repo.save_message(
+            {
+                "id": "msg-conv-visible-1",
+                "from_actor_address": pm,
+                "to_actor_address": active,
+                "content": "PM to active Dev",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+            }
+        )
+        second = message_repo.save_message(
+            {
+                "id": "msg-conv-visible-2",
+                "from_actor_address": active,
+                "to_actor_address": pm,
+                "content": "Dev to PM",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:02Z",
+            }
+        )
+        message_repo.save_message(
+            {
+                "id": "msg-conv-visible-other-dev",
+                "from_actor_address": pm,
+                "to_actor_address": other_dev,
+                "content": "PM to other Dev",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:03Z",
+            }
+        )
+        message_repo.save_message(
+            {
+                "id": "msg-conv-visible-design",
+                "from_actor_address": design,
+                "to_actor_address": pm,
+                "content": "Design to PM",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:04Z",
+            }
+        )
+        message_repo.save_message(
+            {
+                "id": "msg-conv-visible-market",
+                "from_actor_address": market,
+                "to_actor_address": active,
+                "content": "Market to Dev",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:05Z",
+            }
+        )
+        instance_json = self._instance_json(instance_id="inst-dev-conversation", buddy="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-conversation",
+            buddy="dev",
+            tool="message",
+            action="conversation",
+            args={"target_actor_address": pm},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("read_scope"), "active actor visible direct conversation messages")
+        self.assertEqual(response.get("selector"), {"target_actor_address": pm})
+        messages = response.get("messages")
+        self.assertIsInstance(messages, list, msg=response)
+        assert isinstance(messages, list)
+        self.assertEqual([row["id"] for row in messages], [first["id"], second["id"]])
+        self.assertEqual(response.get("count"), 2)
+        self.assertEqual({row["content"] for row in messages}, {"PM to active Dev", "Dev to PM"})
+
+    def test_message_conversation_buddy_selector_returns_visible_bidirectional_buddy_messages(self) -> None:
+        active = self._actor_address(buddy="dev", label="inst-dev-conversation-buddy")
+        pm_one = self._actor_address(buddy="pm", label="inst-pm-conversation-one")
+        pm_two = self._actor_address(buddy="pm", label="inst-pm-conversation-two")
+        design = self._actor_address(buddy="design", label="inst-design-conversation-buddy")
+        one = message_repo.save_message(
+            {
+                "id": "msg-conv-buddy-1",
+                "from_actor_address": pm_one,
+                "to_actor_address": active,
+                "content": "PM one",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:01Z",
+            }
+        )
+        two = message_repo.save_message(
+            {
+                "id": "msg-conv-buddy-2",
+                "from_actor_address": active,
+                "to_actor_address": pm_two,
+                "content": "PM two",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:02Z",
+            }
+        )
+        message_repo.save_message(
+            {
+                "id": "msg-conv-buddy-design",
+                "from_actor_address": design,
+                "to_actor_address": active,
+                "content": "Design",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:03Z",
+            }
+        )
+        message_repo.save_message(
+            {
+                "id": "msg-conv-buddy-internal",
+                "from_actor_address": pm_one,
+                "to_actor_address": pm_two,
+                "content": "PM internal",
+                "reply_to": None,
+                "created_at": "2026-05-30T00:00:04Z",
+            }
+        )
+        instance_json = self._instance_json(instance_id="inst-dev-conversation-buddy", buddy="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-conversation-buddy",
+            buddy="dev",
+            tool="message",
+            action="conversation",
+            args={"buddy": "pm"},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual(response.get("selector"), {"buddy": "pm"})
+        messages = response.get("messages", [])
+        self.assertEqual([row["id"] for row in messages], [one["id"], two["id"]])
+
+    def test_message_conversation_requires_exactly_one_selector(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-conversation-selector", buddy="dev")
+        target = self._actor_address(buddy="pm", label="inst-pm-conversation-selector")
+        for args in ({}, {"buddy": "pm", "target_actor_address": target}):
+            with self.subTest(args=args):
+                response = self._dispatch(
+                    instance_json=instance_json,
+                    instance_id="inst-dev-conversation-selector",
+                    buddy="dev",
+                    tool="message",
+                    action="conversation",
+                    args=args,
+                )
+                self.assertFalse(response.get("ok"), msg=response)
+                self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
+                self.assertEqual(set(response.get("correctable_fields", [])), {"target_actor_address", "buddy"})
+
+    def test_message_conversation_rejects_old_direction_fields(self) -> None:
+        instance_json = self._instance_json(instance_id="inst-dev-conversation-old-fields", buddy="dev")
+        for field, value in (("box", "inbox"), ("to_buddy", "pm"), ("from_buddy", "pm")):
+            with self.subTest(field=field):
+                response = self._dispatch(
+                    instance_json=instance_json,
+                    instance_id="inst-dev-conversation-old-fields",
+                    buddy="dev",
+                    tool="message",
+                    action="conversation",
+                    args={"buddy": "pm", field: value},
+                )
+                self.assertFalse(response.get("ok"), msg=response)
+                self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
+                self.assertEqual(response.get("correctable_fields"), [field])
+
+    def test_message_conversation_applies_latest_limit_then_returns_chronological(self) -> None:
+        active = self._actor_address(buddy="dev", label="inst-dev-conversation-limit")
+        pm = self._actor_address(buddy="pm", label="inst-pm-conversation-limit")
+        rows = []
+        for index in range(5):
+            row = message_repo.save_message(
+                {
+                    "id": f"msg-conv-limit-{index}",
+                    "from_actor_address": pm if index % 2 == 0 else active,
+                    "to_actor_address": active if index % 2 == 0 else pm,
+                    "content": f"message {index}",
+                    "reply_to": None,
+                    "created_at": f"2026-05-30T00:00:0{index}Z",
+                }
+            )
+            rows.append(row)
+        instance_json = self._instance_json(instance_id="inst-dev-conversation-limit", buddy="dev")
+
+        response = self._dispatch(
+            instance_json=instance_json,
+            instance_id="inst-dev-conversation-limit",
+            buddy="dev",
+            tool="message",
+            action="conversation",
+            args={"buddy": "pm", "limit": 3},
+        )
+
+        self.assertTrue(response.get("ok"), msg=response)
+        self.assertEqual([row["id"] for row in response.get("messages", [])], [row["id"] for row in rows[2:5]])
 
     def test_message_send_reply_to_accepts_same_visible_actor_conversation_pair(self) -> None:
         self._patch_daemon()

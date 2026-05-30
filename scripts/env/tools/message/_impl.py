@@ -278,7 +278,8 @@ def contacts_message(*, args: dict[str, Any], context: MessageServiceContext) ->
             ],
         )
     rows = raw_contacts.get("contacts") if isinstance(raw_contacts.get("contacts"), list) else []
-    contacts = context.rules.message.normalize_contact_rows(rows)
+    contacts = context.rules.message.normalize_contact_rows(rows, active_actor_address=context.actor_address)
+    sendable_count = sum(1 for row in contacts if row.get("sendable") is True)
     return tool_results.success(
         tool="message",
         action=action,
@@ -288,11 +289,12 @@ def contacts_message(*, args: dict[str, Any], context: MessageServiceContext) ->
         durability="none",
         read_scope="online actor contacts from central daemon",
         allowed_next_actions=[
-            "Use message.send with a contact actor_address when you need to send a direct message.",
+            "Use message.send with contact.actor_address copied into target_actor_address.",
         ],
         extra={
             "contacts": contacts,
             "count": len(contacts),
+            "sendable_count": sendable_count,
             "filters": {"buddy": request["buddy"]},
         },
     )
@@ -498,8 +500,86 @@ def list_messages(*, args: dict[str, Any], context: MessageServiceContext) -> di
     )
 
 
+def conversation_messages(*, args: dict[str, Any], context: MessageServiceContext) -> dict[str, Any]:
+    action = "message.conversation"
+    active_buddy = context["active_buddy"]
+    manifest_buddies = _manifest_buddy_ids(context)
+
+    try:
+        context.rules.message.ensure_active_buddy_is_manifest_declared(
+            active_buddy=active_buddy,
+            manifest_buddy_ids=manifest_buddies,
+        )
+        request = context.rules.message.prepare_conversation_request(
+            args=args,
+            source_actor_address=context.actor_address,
+            manifest_buddy_ids=manifest_buddies,
+            allowed_fields=_allowed_fields("conversation"),
+        )
+    except context.rules.message.MessagePayloadError as exc:
+        return _reject_payload(
+            action=action,
+            active_buddy=active_buddy,
+            message=str(exc),
+            correctable_fields=exc.correctable_fields,
+        )
+    except context.rules.message.MessageScopeError as exc:
+        return _reject_scope(
+            action=action,
+            active_buddy=active_buddy,
+            code=exc.code,
+            message=str(exc),
+            permission_boundary=exc.permission_boundary,
+            human_summary=exc.human_summary,
+            why_blocked=exc.why_blocked,
+            retryable=exc.retryable,
+            correctable_fields=exc.correctable_fields,
+        )
+
+    target_actor = request["target_actor_address"]
+    target_buddy = request["buddy"]
+    messages = context.rules.message.filter_conversation_messages(
+        messages=context.repos.message.list_messages(),
+        active_actor_address=context.actor_address,
+        target_actor_address=target_actor,
+        target_buddy=target_buddy,
+        q=request["q"],
+        limit=request["limit"],
+    )
+    selector: dict[str, Any]
+    if target_actor is not None:
+        selector = {"target_actor_address": target_actor.to_payload()}
+    else:
+        selector = {"buddy": target_buddy}
+
+    return tool_results.success(
+        tool="message",
+        action=action,
+        active_buddy=active_buddy,
+        effect_summary=f"Returned {len(messages)} visible conversation message(s) for active actor '{context.actor_address.instance_id}'.",
+        state_changed=False,
+        durability="none",
+        read_scope="active actor visible direct conversation messages",
+        allowed_next_actions=[
+            "Use message.list when you only need active actor inbox messages.",
+            "Use message.contacts before sending a new direct message.",
+        ],
+        extra={
+            "messages": messages,
+            "count": len(messages),
+            "selector": selector,
+            "actor_address": context.actor_address.to_payload(),
+            "filters": {
+                "q": request["q"],
+                "limit": request["limit"],
+            },
+        },
+    )
+
+
 _ACTION_HANDLERS = {
     'contacts': contacts_message,
+    'conversation': conversation_messages,
     'list': list_messages,
     'send': send_message,
 }

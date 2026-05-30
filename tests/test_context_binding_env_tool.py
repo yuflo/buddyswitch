@@ -503,9 +503,10 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         cues = payload.get("message_cues")
         self.assertIsInstance(cues, dict, msg=payload)
         assert isinstance(cues, dict)
-        self.assertEqual(cues.get("source_of_truth"), "message.list")
+        self.assertEqual(cues.get("inbox_source_of_truth"), "message.list")
+        self.assertEqual(cues.get("conversation_source_of_truth"), "message.conversation")
         self.assertIn("message.contacts", cues.get("target_discovery", ""))
-        rows = cues.get("latest")
+        rows = cues.get("latest_inbox")
         self.assertIsInstance(rows, list, msg=cues)
         assert isinstance(rows, list)
         ids = [row.get("message_id") for row in rows if isinstance(row, dict)]
@@ -518,6 +519,9 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             self.assertIn(row.get("from_actor_address"), [pm, design])
             self.assertNotIn("content", row)
         self.assertGreaterEqual(cues.get("count", 0), 2)
+        message_source = payload.get("context_sources", {}).get("messages", {})
+        self.assertIn("message.list", str(message_source.get("source_of_truth")))
+        self.assertIn("message.conversation", str(message_source.get("source_of_truth")))
 
     def test_context_list_sources_excludes_handoffs(self) -> None:
         instance_json = self._instance_json()

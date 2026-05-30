@@ -51,6 +51,13 @@ class ListRequest(TypedDict):
     limit: int
 
 
+class ConversationRequest(TypedDict):
+    target_actor_address: RuntimeActorAddress | None
+    buddy: str | None
+    q: str | None
+    limit: int
+
+
 GetMessage = Callable[[str], Optional[dict[str, Any]]]
 
 
@@ -267,6 +274,83 @@ def prepare_list_request(*, args: dict[str, Any], manifest_buddy_ids: set[str], 
     return {"buddy": normalized_buddy, "q": q, "limit": limit_raw}
 
 
+def prepare_conversation_request(
+    *,
+    args: dict[str, Any],
+    source_actor_address: RuntimeActorAddress,
+    manifest_buddy_ids: set[str],
+    allowed_fields: set[str],
+) -> ConversationRequest:
+    _reject_unknown_fields(args, allowed_fields)
+
+    has_target_actor = "target_actor_address" in args and args.get("target_actor_address") is not None
+    has_buddy = "buddy" in args and args.get("buddy") is not None
+    if has_target_actor == has_buddy:
+        raise MessagePayloadError(
+            "exactly one of target_actor_address or buddy is required",
+            correctable_fields=["target_actor_address", "buddy"],
+        )
+
+    target_actor: RuntimeActorAddress | None = None
+    buddy: str | None = None
+    if has_target_actor:
+        try:
+            target_actor = RuntimeActorAddress.from_payload(args.get("target_actor_address"))
+        except Exception as exc:
+            raise MessagePayloadError(
+                f"target_actor_address must be a valid RuntimeActorAddress: {exc}",
+                correctable_fields=["target_actor_address"],
+            ) from exc
+        if target_actor.buddy_id not in manifest_buddy_ids:
+            raise MessagePayloadError(
+                f"unknown target actor buddy: {target_actor.buddy_id}",
+                correctable_fields=["target_actor_address"],
+            )
+        if target_actor.buddy_id == source_actor_address.buddy_id:
+            raise MessageScopeError(
+                message="cannot read a message conversation with the same buddy actor",
+                permission_boundary="message.self_conversation",
+                human_summary="Same-buddy message conversations are not supported.",
+                why_blocked="message.conversation requires the selected target buddy to differ from the active buddy.",
+                retryable=True,
+                correctable_fields=["target_actor_address"],
+            )
+    else:
+        buddy_raw = args.get("buddy")
+        if not isinstance(buddy_raw, str) or not buddy_raw.strip():
+            raise MessagePayloadError("buddy must be a non-empty string when provided", correctable_fields=["buddy"])
+        buddy = buddy_raw.strip()
+        if buddy not in manifest_buddy_ids:
+            raise MessagePayloadError(f"unknown buddy selector: {buddy}", correctable_fields=["buddy"])
+        if buddy == source_actor_address.buddy_id:
+            raise MessageScopeError(
+                message="cannot read a message conversation with the active buddy",
+                permission_boundary="message.self_conversation",
+                human_summary="Same-buddy message conversations are not supported.",
+                why_blocked="message.conversation requires the selected target buddy to differ from the active buddy.",
+                retryable=True,
+                correctable_fields=["buddy"],
+            )
+
+    q_raw = args.get("q")
+    q: str | None = None
+    if q_raw is not None:
+        if not isinstance(q_raw, str):
+            raise MessagePayloadError("q must be a string", correctable_fields=["q"])
+        q = q_raw.strip().lower() or None
+
+    limit_raw = args.get("limit", 20)
+    if not isinstance(limit_raw, int) or limit_raw <= 0:
+        raise MessagePayloadError("limit must be a positive integer", correctable_fields=["limit"])
+
+    return {
+        "target_actor_address": target_actor,
+        "buddy": buddy,
+        "q": q,
+        "limit": limit_raw,
+    }
+
+
 def filter_inbox_messages(
     *,
     messages: list[dict[str, Any]],
@@ -292,7 +376,44 @@ def filter_inbox_messages(
     return inbox[:limit]
 
 
-def normalize_contact_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def filter_conversation_messages(
+    *,
+    messages: list[dict[str, Any]],
+    active_actor_address: RuntimeActorAddress,
+    target_actor_address: RuntimeActorAddress | None = None,
+    target_buddy: str | None = None,
+    q: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    conversation: list[dict[str, Any]] = []
+    for message in messages:
+        from_actor = _message_actor(message, "from_actor_address")
+        to_actor = _message_actor(message, "to_actor_address")
+        if from_actor == active_actor_address:
+            other_actor = to_actor
+        elif to_actor == active_actor_address:
+            other_actor = from_actor
+        else:
+            continue
+        if target_actor_address is not None and other_actor != target_actor_address:
+            continue
+        if target_buddy is not None and other_actor.buddy_id != target_buddy:
+            continue
+        if q and q not in str(message.get("content") or "").lower():
+            continue
+        conversation.append(message)
+
+    conversation.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")), reverse=True)
+    limited = conversation[:limit]
+    limited.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
+    return limited
+
+
+def normalize_contact_rows(
+    rows: list[dict[str, Any]],
+    *,
+    active_actor_address: RuntimeActorAddress,
+) -> list[dict[str, Any]]:
     contacts: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
@@ -303,13 +424,21 @@ def normalize_contact_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         status = row.get("status")
         contact_status = status if isinstance(status, str) and status else "online"
-        contacts.append(
-            {
-                "buddy_id": actor_address["buddy_id"],
-                "actor_address": actor_address,
-                "contact_status": contact_status,
-                "sendable": contact_status == "online",
-                "last_seen_at": row.get("last_seen_at") if isinstance(row.get("last_seen_at"), str) else None,
-            }
-        )
+        why_not_sendable: str | None = None
+        sendable = contact_status == "online"
+        if actor_address["buddy_id"] == active_actor_address.buddy_id:
+            sendable = False
+            why_not_sendable = "message.send rejects targets with the same buddy_id as the active actor"
+        elif contact_status != "online":
+            why_not_sendable = f"contact_status is {contact_status}"
+        contact = {
+            "buddy_id": actor_address["buddy_id"],
+            "actor_address": actor_address,
+            "contact_status": contact_status,
+            "sendable": sendable,
+            "last_seen_at": row.get("last_seen_at") if isinstance(row.get("last_seen_at"), str) else None,
+        }
+        if why_not_sendable is not None:
+            contact["why_not_sendable"] = why_not_sendable
+        contacts.append(contact)
     return contacts

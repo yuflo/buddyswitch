@@ -586,14 +586,26 @@ def dispatch_notification(
     return handled
 
 
-def _handler_status_payload(state: DaemonState, handlers: list[Any] | tuple[Any, ...] | None) -> dict[str, Any]:
+def _handler_status_payload(
+    state: DaemonState,
+    handlers: list[Any] | tuple[Any, ...] | None,
+    *,
+    include_unregistered: bool = True,
+    excluded_persisted_names: set[str] | None = None,
+) -> dict[str, Any]:
     registered = _handler_names(handlers)
+    excluded = excluded_persisted_names or set()
     persisted = state.payload.get("handlers")
     persisted_handlers = persisted if isinstance(persisted, dict) else {}
     names = list(registered)
-    for name in sorted(persisted_handlers):
-        if name not in names:
-            names.append(name)
+    if include_unregistered:
+        for name in sorted(persisted_handlers):
+            if name not in names and name not in excluded:
+                names.append(name)
+    else:
+        for name in sorted(persisted_handlers):
+            if name in registered and name not in names:
+                names.append(name)
 
     items: dict[str, Any] = {}
     for name in names:
@@ -617,7 +629,12 @@ def _handler_status_payload(state: DaemonState, handlers: list[Any] | tuple[Any,
     return {"registered": registered, "items": items}
 
 
-def daemon_status(instance_json: Path, *, handlers: list[Any] | tuple[Any, ...] | None = None) -> dict[str, Any]:
+def daemon_status(
+    instance_json: Path,
+    *,
+    handlers: list[Any] | tuple[Any, ...] | None = None,
+    mailbox_handlers: list[Any] | tuple[Any, ...] | None = None,
+) -> dict[str, Any]:
     context = load_daemon_context(instance_json)
     runtime = daemon_runtime_dir(context.instance_root)
     pid_path = daemon_pid_file(context.instance_root)
@@ -636,6 +653,7 @@ def daemon_status(instance_json: Path, *, handlers: list[Any] | tuple[Any, ...] 
     ready = bool(pid is not None and pid_live and state.ready_for(pid, context.main_thread_id))
     ready_payload = state.payload.get("ready")
     ready_main_thread_id = ready_payload.get("main_thread_id") if isinstance(ready_payload, dict) else None
+    mailbox_handler_names = set(_handler_names(mailbox_handlers))
     return {
         "live": bool(pid_live),
         "pid": pid,
@@ -647,7 +665,16 @@ def daemon_status(instance_json: Path, *, handlers: list[Any] | tuple[Any, ...] 
         "log_path": str(log_path),
         "state_path": str(state_path),
         "last_error": state.payload.get("last_error"),
-        "handlers": _handler_status_payload(state, handlers),
+        "handlers": _handler_status_payload(
+            state,
+            handlers,
+            excluded_persisted_names=mailbox_handler_names,
+        ),
+        "mailbox_handlers": _handler_status_payload(
+            state,
+            mailbox_handlers,
+            include_unregistered=False,
+        ),
     }
 
 

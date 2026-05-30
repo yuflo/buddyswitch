@@ -25,7 +25,7 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     "context": {"get", "summarize", "list_sources"},
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request", "open_browser"},
-    "message": {"contacts", "send", "list"},
+    "message": {"contacts", "send", "list", "conversation"},
     "comment": {"add", "list", "resolve"},
     "request": {"create", "list", "get", "accept", "block", "complete", "cancel"},
 }
