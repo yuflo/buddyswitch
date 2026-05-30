@@ -22,9 +22,10 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import app_server  # noqa: E402
+import daemon_mailbox  # noqa: E402
 import submit_turn as launcher_submit_turn  # noqa: E402
 from env.tool_runtime import actor_profile  # noqa: E402
-from env.tool_runtime import daemon_presence  # noqa: E402
+from env.tool_runtime import daemon_client  # noqa: E402
 
 
 MAX_DAEMON_ORIGIN_TURN_IDS = 50
@@ -66,10 +67,6 @@ def daemon_log_file(instance_root: Path) -> Path:
 
 def daemon_state_file(instance_root: Path) -> Path:
     return daemon_runtime_dir(instance_root) / "state.json"
-
-
-def daemon_notification_file(instance_root: Path) -> Path:
-    return daemon_runtime_dir(instance_root) / "notifications.jsonl"
 
 
 def _read_text_file(path: Path) -> str:
@@ -434,15 +431,6 @@ def load_daemon_context(instance_json: Path) -> DaemonContext:
     )
 
 
-def daemon_registry_path(context: DaemonContext) -> Path:
-    state_root_raw = os.environ.get("BUDDYSWITCH_STATE_ROOT")
-    if isinstance(state_root_raw, str) and state_root_raw.strip():
-        state_root = Path(state_root_raw.strip()).expanduser().resolve(strict=False)
-    else:
-        state_root = context.instance_root.parent.parent / "state"
-    return daemon_presence.registry_path_for_state_root(state_root)
-
-
 def actor_address_for_context(context: DaemonContext) -> actor_profile.RuntimeActorAddress:
     record = actor_profile.runtime_instance_record_from_dispatch(
         instance_id=context.instance_id,
@@ -453,23 +441,99 @@ def actor_address_for_context(context: DaemonContext) -> actor_profile.RuntimeAc
     return actor_profile.resolve_runtime_actor_profile(record).actor_address
 
 
-def register_daemon_presence(context: DaemonContext) -> dict[str, Any]:
-    return daemon_presence.register_online_actor(
-        actor_address=actor_address_for_context(context),
+def central_daemon_socket_path(context: DaemonContext) -> Path:
+    raw_socket = os.environ.get("BUDDYSWITCH_CENTRAL_DAEMON_SOCKET")
+    if isinstance(raw_socket, str) and raw_socket.strip():
+        return Path(raw_socket.strip()).expanduser().resolve(strict=False)
+    raw_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
+    if isinstance(raw_shared_root, str) and raw_shared_root.strip():
+        shared_root = Path(raw_shared_root.strip()).expanduser().resolve(strict=False)
+    else:
+        shared_root = context.instance_root.parent.parent
+    return daemon_client.central_daemon_socket_path_for_shared_root(shared_root)
+
+
+def register_daemon_actor(
+    context: DaemonContext,
+    actor_address: actor_profile.RuntimeActorAddress,
+) -> dict[str, Any]:
+    return daemon_client.register_actor(
+        actor_address=actor_address.to_payload(),
         endpoint={
-            "kind": "daemon_state_file",
-            "path": str(daemon_notification_file(context.instance_root)),
+            "kind": "daemon_mailbox_socket",
+            "socket_path": str(daemon_mailbox.mailbox_socket_path(context.instance_root)),
         },
-        heartbeat={"kind": "daemon_ready_state"},
-        registry_path=daemon_registry_path(context),
+        heartbeat={"kind": "central_daemon_rpc"},
+        socket_path=central_daemon_socket_path(context),
     )
 
 
-def unregister_daemon_presence(context: DaemonContext) -> None:
-    daemon_presence.unregister_actor(
-        actor_address=actor_address_for_context(context),
-        registry_path=daemon_registry_path(context),
+def unregister_daemon_actor(
+    context: DaemonContext,
+    actor_address: actor_profile.RuntimeActorAddress,
+) -> dict[str, Any]:
+    return daemon_client.unregister_actor(
+        actor_address=actor_address.to_payload(),
+        socket_path=central_daemon_socket_path(context),
     )
+
+
+def safe_unregister_daemon_actor(
+    context: DaemonContext,
+    actor_address: actor_profile.RuntimeActorAddress,
+    *,
+    state: DaemonState | None = None,
+) -> dict[str, Any]:
+    try:
+        result = unregister_daemon_actor(context, actor_address)
+    except Exception as exc:
+        message = str(exc)
+        if state is not None and state.payload.get("last_error") is None:
+            state.record_error(origin_turn_id=None, message=message)
+        return {
+            "unregister_status": "failed",
+            "unregister_error": message,
+        }
+    return {
+        "unregister_status": "ok",
+        "unregister_result": result,
+    }
+
+
+def heartbeat_daemon_actor(
+    context: DaemonContext,
+    actor_address: actor_profile.RuntimeActorAddress,
+) -> dict[str, Any]:
+    return daemon_client.heartbeat_actor(
+        actor_address=actor_address.to_payload(),
+        socket_path=central_daemon_socket_path(context),
+    )
+
+
+def start_daemon_mailbox(
+    *,
+    context: DaemonContext,
+    state: DaemonState,
+    actor_address: actor_profile.RuntimeActorAddress,
+    mailbox_handlers: list[Any] | tuple[Any, ...],
+) -> daemon_mailbox.DaemonMailboxServer:
+    server = daemon_mailbox.DaemonMailboxServer(
+        socket_path=daemon_mailbox.mailbox_socket_path(context.instance_root),
+        local_actor_address=actor_address,
+        handlers=mailbox_handlers,
+        context=context,
+        state=state,
+        actions_factory=lambda: ActionGateway(context=context, state=state),
+    )
+    thread = __import__("threading").Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + DAEMON_READY_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if daemon_mailbox.mailbox_socket_path(context.instance_root).exists():
+            return server
+        time.sleep(DAEMON_READY_POLL_SECONDS)
+    server.close()
+    raise RuntimeError(f"daemon mailbox did not become ready for {context.instance_id}")
 
 
 def bind_main_thread(context: DaemonContext, client: Any) -> None:
@@ -657,23 +721,37 @@ def start_daemon(instance_json: Path, *, handlers: list[Any] | tuple[Any, ...] |
 
 def stop_daemon(instance_json: Path) -> dict[str, Any]:
     context = load_daemon_context(instance_json)
+    actor_address = actor_address_for_context(context)
+    state = DaemonState.load(
+        instance_root=context.instance_root,
+        instance_id=context.instance_id,
+        main_thread_id=context.main_thread_id,
+    )
     pid_path = daemon_pid_file(context.instance_root)
     pid = _read_pid(pid_path)
     terminated = True
     if pid is not None and _pid_is_live(pid):
         terminated = _terminate_pid(pid)
     _remove_path(pid_path)
-    unregister_daemon_presence(context)
-    return {
+    unregister = safe_unregister_daemon_actor(context, actor_address, state=state)
+    payload = {
         "ok": True,
         "pid": pid,
         "terminated": bool(terminated),
         "pid_file": str(pid_path),
     }
+    payload.update(unregister)
+    return payload
 
 
-def run_daemon(instance_json: Path, *, handlers: list[Any] | None = None) -> int:
+def run_daemon(
+    instance_json: Path,
+    *,
+    handlers: list[Any] | None = None,
+    mailbox_handlers: list[Any] | None = None,
+) -> int:
     context = load_daemon_context(instance_json)
+    actor_address = actor_address_for_context(context)
     state = DaemonState.load(
         instance_root=context.instance_root,
         instance_id=context.instance_id,
@@ -681,8 +759,10 @@ def run_daemon(instance_json: Path, *, handlers: list[Any] | None = None) -> int
     )
     state.save()
     notification_handlers = list(handlers or [])
+    local_mailbox_handlers = list(mailbox_handlers or [])
     state.register_handlers(_handler_names(notification_handlers))
     registered = False
+    mailbox_server: daemon_mailbox.DaemonMailboxServer | None = None
     try:
         with app_server.AppServerClient(
             context.socket_path,
@@ -692,12 +772,19 @@ def run_daemon(instance_json: Path, *, handlers: list[Any] | None = None) -> int
         ) as client:
             bind_main_thread(context, client)
             state.record_ready(pid=os.getpid(), main_thread_id=context.main_thread_id)
-            register_daemon_presence(context)
+            mailbox_server = start_daemon_mailbox(
+                context=context,
+                state=state,
+                actor_address=actor_address,
+                mailbox_handlers=local_mailbox_handlers,
+            )
+            register_daemon_actor(context, actor_address)
             registered = True
             while True:
                 try:
                     notification = client.read_notification()
                 except app_server.AppServerTimeoutError:
+                    heartbeat_daemon_actor(context, actor_address)
                     continue
                 except app_server.AppServerError as exc:
                     state.record_error(origin_turn_id=None, message=str(exc))
@@ -708,5 +795,7 @@ def run_daemon(instance_json: Path, *, handlers: list[Any] | None = None) -> int
         return 1
     finally:
         if registered:
-            unregister_daemon_presence(context)
+            safe_unregister_daemon_actor(context, actor_address, state=state)
+        if mailbox_server is not None:
+            mailbox_server.close()
     return 0

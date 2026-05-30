@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Boundary tests for the new daemon communication path."""
+
+from __future__ import annotations
+
+import ast
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+DAEMON_OWNED_FILES = [
+    ROOT / "tools" / "launcher" / "daemon_core.py",
+    ROOT / "tools" / "launcher" / "instance_daemon.py",
+    ROOT / "tools" / "launcher" / "central_daemon.py",
+    ROOT / "tools" / "launcher" / "central_daemon_core.py",
+    ROOT / "tools" / "launcher" / "daemon_mailbox.py",
+    ROOT / "tools" / "launcher" / "message_available_handler.py",
+    ROOT / "scripts" / "env" / "tool_runtime" / "daemon_client.py",
+    ROOT / "scripts" / "env" / "tool_runtime" / "context.py",
+]
+
+
+def _existing_sources() -> list[Path]:
+    return [path for path in DAEMON_OWNED_FILES if path.exists()]
+
+
+def _imported_modules(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module_name = node.module or ""
+            if module_name:
+                imported.add(module_name)
+            for alias in node.names:
+                imported.add(f"{module_name}.{alias.name}" if module_name else alias.name)
+    return imported
+
+
+def _class_source(path: Path, class_name: str) -> str:
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            return ast.get_source_segment(source, node) or ""
+    raise AssertionError(f"{class_name} not found in {path}")
+
+
+class DaemonCommunicationBoundaryTests(unittest.TestCase):
+    def test_daemon_uses_central_client_not_daemon_presence_helper(self) -> None:
+        imports_by_file = {path: _imported_modules(path) for path in _existing_sources()}
+        flattened = {module for imports in imports_by_file.values() for module in imports}
+
+        self.assertIn("env.tool_runtime.daemon_client", flattened)
+        self.assertNotIn("env.tool_runtime.daemon_presence", flattened)
+        self.assertFalse((ROOT / "scripts" / "env" / "tool_runtime" / "daemon_presence.py").exists())
+
+    def test_no_direct_notification_file_append_endpoint_in_daemon_delivery(self) -> None:
+        delivery_files = [
+            path
+            for path in _existing_sources()
+            if path.name not in {"central_daemon.py"}
+        ]
+        source = "\n".join(path.read_text(encoding="utf-8") for path in delivery_files)
+
+        self.assertNotIn("notifications.jsonl", source)
+        self.assertNotIn('"daemon_state_file"', source)
+        self.assertNotIn("'daemon_state_file'", source)
+        self.assertNotIn("_append_event_to_endpoint", source)
+        self.assertNotIn("open(\"a\"", source)
+
+    def test_no_fuzzy_to_buddy_or_ambiguous_status_in_daemon_delivery_path(self) -> None:
+        daemon_delivery_files = [
+            path
+            for path in _existing_sources()
+            if path.name not in {"context.py"}
+        ]
+        source = "\n".join(path.read_text(encoding="utf-8") for path in daemon_delivery_files)
+        source += "\n" + _class_source(ROOT / "scripts" / "env" / "tool_runtime" / "context.py", "DaemonAccess")
+
+        self.assertNotIn("to_buddy: str", source)
+        self.assertNotIn("to_buddy=", source)
+        self.assertNotIn("notify_message_available", source)
+        self.assertNotIn("resolve_notification_target", source)
+        self.assertNotIn("ambiguous_online_actor", source)
+
+
+if __name__ == "__main__":
+    unittest.main()

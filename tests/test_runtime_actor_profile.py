@@ -13,6 +13,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from env.tool_runtime import auth_feedback  # noqa: E402
+from env.tool_runtime import context as runtime_context  # noqa: E402
 from env.tool_runtime import registry as tool_registry  # noqa: E402
 from env.tool_runtime.actor_profile import AuthSubject  # noqa: E402
 from env.tool_runtime.actor_profile import RuntimeActorAddress  # noqa: E402
@@ -188,6 +189,80 @@ class RuntimeActorProfileTests(unittest.TestCase):
         self.assertEqual(preview.get("active_role"), "dev")
         self.assertIn("track.list", preview.get("available_actions", []))
         self.assertIn("track.create", preview.get("restricted_actions", []))
+
+    def test_tool_context_daemon_access_uses_explicit_central_daemon_client(self) -> None:
+        instance_json = ROOT / "tmp" / "inst-design-daemon" / "instance.json"
+        profile = resolve_runtime_actor_profile(
+            RuntimeInstanceRecord(
+                instance_id="inst-design-daemon",
+                buddy_id="design",
+                instance_json=instance_json,
+                payload={"instance_id": "inst-design-daemon", "buddy": "design", "workspace_dir": str(ROOT)},
+            )
+        )
+        context = ToolContext.from_actor_profile(
+            actor_profile=profile,
+            instance_json=instance_json,
+            instance_payload=dict(profile.instance_record.payload),
+            manifest={"buddies": [{"id": "design"}, {"id": "dev"}]},
+            manifest_path=None,
+        )
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        original_list_contacts = runtime_context.daemon_client.list_contacts
+        original_check_reachability = runtime_context.daemon_client.check_reachability
+        original_deliver_event = runtime_context.daemon_client.deliver_event
+
+        def fake_list_contacts(*, buddy_id: str | None = None) -> dict[str, object]:
+            calls.append(("contacts", {"buddy_id": buddy_id}))
+            return {"contacts": [], "count": 0}
+
+        def fake_check_reachability(*, target_actor_address: dict[str, object]) -> dict[str, object]:
+            calls.append(("reachability", {"target_actor_address": target_actor_address}))
+            return {"reachability_status": "online", "target_actor_address": target_actor_address}
+
+        def fake_deliver_event(*, event: dict[str, object]) -> dict[str, object]:
+            calls.append(("deliver", {"event": event}))
+            return {"delivery_status": "delivered", "notification_event": event}
+
+        try:
+            runtime_context.daemon_client.list_contacts = fake_list_contacts
+            runtime_context.daemon_client.check_reachability = fake_check_reachability
+            runtime_context.daemon_client.deliver_event = fake_deliver_event
+
+            context.daemon.list_contacts(buddy_id="dev")
+            context.daemon.check_reachability(
+                target_actor_address={"buddy_id": "dev", "instance_id": "inst-dev-daemon"}
+            )
+            context.daemon.deliver_message_available(
+                message_id="msg-123",
+                target_actor_address=RuntimeActorAddress("dev", "inst-dev-daemon"),
+            )
+        finally:
+            runtime_context.daemon_client.list_contacts = original_list_contacts
+            runtime_context.daemon_client.check_reachability = original_check_reachability
+            runtime_context.daemon_client.deliver_event = original_deliver_event
+
+        self.assertEqual(calls[0], ("contacts", {"buddy_id": "dev"}))
+        self.assertEqual(
+            calls[1],
+            (
+                "reachability",
+                {"target_actor_address": {"buddy_id": "dev", "instance_id": "inst-dev-daemon"}},
+            ),
+        )
+        event = calls[2][1]["event"]
+        self.assertEqual(
+            event,
+            {
+                "type": "message.available",
+                "message_id": "msg-123",
+                "from_actor_address": {"buddy_id": "design", "instance_id": "inst-design-daemon"},
+                "to_actor_address": {"buddy_id": "dev", "instance_id": "inst-dev-daemon"},
+            },
+        )
+        self.assertNotIn("to_buddy", event)
+        self.assertNotIn("content", event)
 
     def test_runtime_boundary_ownership_is_searchable(self) -> None:
         self.assertFalse(hasattr(tool_registry, "_role_auth_rejection"))

@@ -32,7 +32,7 @@ from env.repos import tracks as _track_repo
 from env.tool_runtime.actor_profile import AuthSubject
 from env.tool_runtime.actor_profile import RuntimeActorAddress
 from env.tool_runtime.actor_profile import RuntimeActorProfile
-from env.tool_runtime import daemon_presence
+from env.tool_runtime import daemon_client
 
 
 def _load_registry_module():
@@ -355,17 +355,40 @@ class RegistryCatalogAccess:
         return _load_registry_module().tool_catalog_errors()
 
 
+def _actor_address_payload(value: RuntimeActorAddress | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(value, RuntimeActorAddress):
+        return value.to_payload()
+    return RuntimeActorAddress.from_payload(value).to_payload()
+
+
 class DaemonAccess:
-    """Best-effort daemon presence and notification access for runtime tools."""
+    """Explicit central daemon access for runtime tools."""
 
     def __init__(self, *, actor_address: RuntimeActorAddress) -> None:
         self._actor_address = actor_address
 
-    def notify_message_available(self, *, message_id: str, to_buddy: str) -> dict[str, Any]:
-        return daemon_presence.deliver_message_available(
-            message_id=message_id,
-            from_actor_address=self._actor_address,
-            to_buddy=to_buddy,
+    def list_contacts(self, *, buddy_id: str | None = None) -> dict[str, Any]:
+        return daemon_client.list_contacts(buddy_id=buddy_id)
+
+    def check_reachability(self, *, target_actor_address: RuntimeActorAddress | dict[str, Any]) -> dict[str, Any]:
+        return daemon_client.check_reachability(
+            target_actor_address=_actor_address_payload(target_actor_address),
+        )
+
+    def deliver_message_available(
+        self,
+        *,
+        message_id: str,
+        target_actor_address: RuntimeActorAddress | dict[str, Any],
+    ) -> dict[str, Any]:
+        event = {
+            "type": "message.available",
+            "message_id": message_id,
+            "from_actor_address": self._actor_address.to_payload(),
+            "to_actor_address": _actor_address_payload(target_actor_address),
+        }
+        return daemon_client.deliver_event(
+            event=event,
         )
 
 

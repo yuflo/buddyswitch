@@ -162,18 +162,6 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
         return _reject_payload(action=action, active_buddy=active_buddy, message=str(exc))
 
     to_buddy = request["to_buddy"]
-    try:
-        notification = context.daemon.notify_message_available(
-            message_id=message["id"],
-            to_buddy=to_buddy,
-        )
-    except Exception as exc:
-        notification = {
-            "notification_status": "delivery_failed",
-            "to_actor_address": None,
-            "online_actor_count": None,
-            "notification_error": str(exc),
-        }
     return tool_results.success(
         tool="message",
         action=action,
@@ -186,7 +174,7 @@ def send_message(*, args: dict[str, Any], context: MessageServiceContext) -> dic
         allowed_next_actions=[
             "Use message.list to read your inbox.",
         ],
-        extra={"message_id": message["id"], "message": message, **notification},
+        extra={"message_id": message["id"], "message": message},
     )
 
 

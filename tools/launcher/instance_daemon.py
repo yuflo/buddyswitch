@@ -16,11 +16,16 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import daemon_core  # noqa: E402
+import message_available_handler  # noqa: E402
 import task_checkout_handler  # noqa: E402
 
 
 def default_handlers() -> list[object]:
     return [task_checkout_handler.TaskCheckoutHandler()]
+
+
+def default_mailbox_handlers() -> list[object]:
+    return [message_available_handler.MessageAvailableHandler()]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,7 +45,11 @@ def main(argv: list[str] | None = None) -> int:
     instance_json = Path(args.instance_json)
     try:
         if args.command == "run":
-            return daemon_core.run_daemon(instance_json, handlers=default_handlers())
+            return daemon_core.run_daemon(
+                instance_json,
+                handlers=default_handlers(),
+                mailbox_handlers=default_mailbox_handlers(),
+            )
         if args.command == "start":
             print(json.dumps(daemon_core.start_daemon(instance_json, handlers=default_handlers()), ensure_ascii=True))
             return 0
