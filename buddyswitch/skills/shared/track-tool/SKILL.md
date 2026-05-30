@@ -11,7 +11,8 @@ description: Use when you need shared track-page context, PM lifecycle actions, 
 - Apply PM-owned lifecycle create/archive when authority allows.
 
 ## Runtime Route
-- CLI: `python3 scripts/env/client.py track add-material --payload '{"track_id":"track-alpha","artifact_id":"art-alpha","label":"Design Direction","summary":"Current design direction."}'`
+- Primary: use native BuddySwitch env MCP tools such as `track__add_material` when available.
+- Fallback CLI: `python3 scripts/env/client.py track add-material --payload '{"track_id":"track-alpha","artifact_id":"art-alpha","label":"Design Direction","summary":"Current design direction."}'`
 - Broker method: `env.tool`
 - Discover current operations, payload keys, effects, and recovery guidance with `context.get.tool_catalog['track']` or `python3 scripts/turn_runtime.py status`.
 

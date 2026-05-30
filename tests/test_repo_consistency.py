@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import unittest
@@ -354,12 +355,13 @@ class RepoConsistencyTests(unittest.TestCase):
             path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(buddy=buddy):
-                self.assertIn("authoritative runtime tool list", text)
+                self.assertIn("prefer native buddyswitch env mcp tools", text)
+                self.assertIn("authoritative fallback runtime tool list", text)
                 self.assertIn("runtime tool examples include", text)
                 self.assertIn("context summarize --payload '{}'", text)
                 self.assertIn("context get --payload '{}'", text)
                 self.assertIn("track open --payload '{\"track_id\":\"<track-id>\"}'", text)
-                self.assertIn("task get --payload '{\"task_id\":\"<task-id>\"}'", text)
+                self.assertIn("task current --payload '{\"history_limit\":8}'", text)
                 self.assertIn("artifact get --payload '{\"artifact_id\":\"<artifact-id>\"}'", text)
                 self.assertIn("request get --payload '{\"request_id\":\"<request-id>\"}'", text)
                 self.assertIn("search status --payload '{}'", text)
@@ -375,6 +377,34 @@ class RepoConsistencyTests(unittest.TestCase):
                 self.assertNotIn("attach" + "-task", text)
                 self.assertNotIn("detach" + "-task", text)
                 self.assertNotIn("use explicit ids and env tools (`", text)
+
+    def test_active_env_client_examples_match_runtime_registry(self) -> None:
+        targets = [
+            ROOT / "tools" / "launcher" / "assets" / "buddies",
+            ROOT / "buddyswitch" / "skills",
+            ROOT / "framework" / "contracts",
+            ROOT / "README.md",
+        ]
+        pattern = re.compile(r"python3\s+scripts/env/client\.py\s+([a-z][a-z0-9_]*)\s+([a-z][a-z0-9_-]*)")
+        violations: list[str] = []
+
+        for target in targets:
+            files = [target] if target.is_file() else sorted(target.rglob("*.md"))
+            for path in files:
+                text = path.read_text(encoding="utf-8")
+                for line_number, line in enumerate(text.splitlines(), start=1):
+                    for match in pattern.finditer(line):
+                        tool = match.group(1)
+                        action = match.group(2).replace("-", "_")
+                        if tool not in tool_catalog.supported_tools():
+                            violations.append(f"{path.relative_to(ROOT)}:{line_number}: unsupported tool {tool}")
+                            continue
+                        if action not in tool_catalog.supported_actions(tool):
+                            violations.append(
+                                f"{path.relative_to(ROOT)}:{line_number}: unsupported action {tool}.{action}"
+                            )
+
+        self.assertEqual(violations, [], msg="\n".join(violations))
 
     def test_stable_guidance_does_not_point_to_internal_tool_contract_surfaces(self) -> None:
         targets = [

@@ -642,6 +642,7 @@ class RuntimeSkillsTests(unittest.TestCase):
         for path in skill_paths:
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertIn("native buddyswitch env mcp tools", text)
                 self.assertIn("context.get.tool_catalog", text)
                 self.assertIn("turn_runtime.py status", text)
 
@@ -651,10 +652,8 @@ class RuntimeSkillsTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             lowered = text.lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
-                self.assertIn(
-                    "Use context.get or python3 scripts/turn_runtime.py status for the authoritative runtime tool list.",
-                    text,
-                )
+                self.assertIn("Prefer native BuddySwitch env MCP tools", text)
+                self.assertIn("authoritative fallback runtime tool list", lowered)
                 self.assertIn("Runtime tool examples include", text)
                 self.assertNotIn("Use explicit ids and env tools (`", text)
                 self.assertNotIn(f"env tools (`{supported_tool_names}`)", lowered)

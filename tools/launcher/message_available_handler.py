@@ -54,8 +54,9 @@ class MessageAvailableHandler:
             message_id = runtime_files.require_id(payload.get("message_id"), "message_id")
             prompt = (
                 "[MESSAGE AVAILABLE]\n"
-                f"message_id: {message_id}\n"
-                "Use message.list to read the message when ready."
+                "A direct message is available for this actor.\n"
+                "Use native `message__list` to read the inbox, or `message__conversation` for bidirectional context.\n"
+                "Fallback CLI: `python3 scripts/env/client.py message list --payload '{}'`."
             )
             actions.submit_turn(
                 prompt,

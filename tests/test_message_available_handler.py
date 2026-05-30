@@ -154,8 +154,11 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             prompt = call["text"]
             self.assertIsInstance(prompt, str)
             self.assertIn("[MESSAGE AVAILABLE]", prompt)
-            self.assertIn("message_id: msg-readable", prompt)
-            self.assertIn("message.list", prompt)
+            self.assertNotIn("message_id: msg-readable", prompt)
+            self.assertIn("message__list", prompt)
+            self.assertIn("message__conversation", prompt)
+            self.assertIn("message list --payload '{}'", prompt)
+            self.assertNotIn("message.list", prompt)
             self.assertNotIn("content", prompt)
             self.assertNotIn("message body", prompt.lower())
 

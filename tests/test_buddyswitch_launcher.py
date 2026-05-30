@@ -248,6 +248,28 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         self.assertIn(f"--browser-url={browser_url}", argv)
         self.assertNotIn("chrome-devtools-mcp@latest", argv)
 
+    def _assert_env_mcp_registration(
+        self,
+        argv: list[object],
+        *,
+        instance_id: str,
+        buddy: str,
+        broker_socket: str,
+    ) -> None:
+        self.assertEqual(argv[:3], ["mcp", "add", "buddyswitch-env"])
+        self.assertIn("--", argv)
+        separator_index = argv.index("--")
+        self.assertEqual(argv[separator_index + 1], "python3")
+        self.assertIn("tools/launcher/env_tool_mcp_server.py", str(argv[separator_index + 2]))
+        self.assertIn("--repo-root", argv)
+        self.assertIn(str(ROOT), argv)
+        self.assertIn("--instance-id", argv)
+        self.assertIn(instance_id, argv)
+        self.assertIn("--buddy", argv)
+        self.assertIn(buddy, argv)
+        self.assertIn("--broker-socket", argv)
+        self.assertIn(broker_socket, argv)
+
     def _write_exec(self, path: Path, content: str) -> None:
         path.write_text(content, encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
@@ -2130,7 +2152,8 @@ exec "$real_git" "$@"
             copied_agents = (workspace_dir / "AGENTS.md").read_text(encoding="utf-8").lower()
             for token in (
                 "guidance only and not the permission source",
-                "authoritative runtime tool list",
+                "prefer native buddyswitch env mcp tools",
+                "authoritative fallback runtime tool list",
                 "runtime tool examples include",
                 "python3 scripts/env/client.py context summarize",
                 "## output rule",
@@ -2235,6 +2258,7 @@ exec "$real_git" "$@"
             config_text = (instance_root / "codex-home" / "config.toml").read_text(encoding="utf-8")
             self._assert_codex_automation_config(config_text, shared_root=shared_root)
             self.assertIn("[mcp_servers.chrome-devtools-cockpit]", config_text)
+            self.assertIn("[mcp_servers.buddyswitch-env]", config_text)
             self.assertIn('default_tools_approval_mode = "approve"', config_text)
             self.assertIn("unix_sockets = {", config_text)
             resolved_broker_socket = str(Path(payload["runtime_broker_socket"]).resolve(strict=False))
@@ -2280,8 +2304,16 @@ exec "$real_git" "$@"
             ]
             mcp_add_entries = [entry for entry in call_entries if entry["argv"][:2] == ["mcp", "add"]]
             mcp_add_names = [entry["argv"][2] for entry in mcp_add_entries]
+            self.assertIn("buddyswitch-env", mcp_add_names)
             self.assertIn("chrome-devtools-cockpit", mcp_add_names)
             self.assertNotIn("chrome-devtools", mcp_add_names)
+            env_mcp_add = next(entry for entry in mcp_add_entries if entry["argv"][2] == "buddyswitch-env")
+            self._assert_env_mcp_registration(
+                env_mcp_add["argv"],
+                instance_id=payload["instance_id"],
+                buddy="pm",
+                broker_socket=str(payload["runtime_broker_socket"]),
+            )
             cockpit_add = next(entry for entry in mcp_add_entries if entry["argv"][2] == "chrome-devtools-cockpit")
             self._assert_cockpit_proxy_registration(cockpit_add["argv"], f"http://127.0.0.1:{browser_port}")
 
@@ -6334,7 +6366,7 @@ exec "$real_git" "$@"
                 if line.strip()
             ]
             self.assertFalse(
-                any(entry.get("argv", [])[:2] == ["mcp", "add"] for entry in call_entries),
+                any(entry.get("argv", [])[:3] == ["mcp", "add", "chrome-devtools-cockpit"] for entry in call_entries),
                 "endpoint-only optional-browser startup must not treat MCP setup as ready",
             )
             payload = json.loads(capture_path.read_text(encoding="utf-8"))
@@ -6609,8 +6641,12 @@ exec "$real_git" "$@"
                 and entry.get("path") == "Target.createTarget"
                 and entry.get("params") == {"url": "about:blank", "background": True}
             )
-            first_codex_call_index = next(index for index, entry in enumerate(timeline) if isinstance(entry.get("argv"), list))
-            self.assertLess(background_index, first_codex_call_index)
+            cockpit_mcp_index = next(
+                index
+                for index, entry in enumerate(timeline)
+                if entry.get("argv", [])[:3] == ["mcp", "add", "chrome-devtools-cockpit"]
+            )
+            self.assertLess(background_index, cockpit_mcp_index)
             self.assertFalse(
                 any(
                     entry.get("path") == "/json/new"

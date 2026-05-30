@@ -11,7 +11,8 @@ Send direct messages to online runtime actor addresses and read message context 
 
 ## Runtime Route
 
-- CLI: `python3 scripts/env/client.py message <action> --payload '<json-object>'`
+- Primary: use native BuddySwitch env MCP tools such as `message__contacts`, `message__send`, `message__list`, and `message__conversation` when available.
+- Fallback CLI: `python3 scripts/env/client.py message <action> --payload '<json-object>'`
 - Broker method: `env.tool`
 - Discover exact operations, payload keys, effects, and recovery guidance with `context.get.tool_catalog['message']` or `python3 scripts/turn_runtime.py status`.
 

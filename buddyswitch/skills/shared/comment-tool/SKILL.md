@@ -10,7 +10,8 @@ description: Use when adding, listing, and PM-resolving comments on readable tra
 Add, list, and PM-resolve plain-text comments on readable track, artifact, and artifact_section targets through the runtime env.tool layer.
 
 ## Runtime Route
-- CLI: `python3 scripts/env/client.py comment add --payload '{"target_type":"track","target_id":"track-alpha","content":"Design direction is ready."}'`
+- Primary: use native BuddySwitch env MCP tools such as `comment__add` when available.
+- Fallback CLI: `python3 scripts/env/client.py comment add --payload '{"target_type":"track","target_id":"track-alpha","content":"Design direction is ready."}'`
 - Broker method: `env.tool`
 - Discover current operations, payload keys, effects, and recovery guidance with `context.get.tool_catalog['comment']` or `python3 scripts/turn_runtime.py status`.
 

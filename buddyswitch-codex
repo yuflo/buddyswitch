@@ -232,6 +232,10 @@ start_locked_bootstrap() {
   buddyswitch_instance_activate "${requested_instance_id}" "${requested_buddy}" "inactive" >/dev/null
   buddyswitch_runtime_broker_ensure
   buddyswitch_patch_codex_config
+  if ! buddyswitch_env_mcp_ensure; then
+    buddyswitch_runtime_broker_stop
+    return 1
+  fi
   if ! buddyswitch_browser_bootstrap; then
     buddyswitch_runtime_broker_stop
     return 1

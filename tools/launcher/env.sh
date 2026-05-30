@@ -32,6 +32,8 @@ buddyswitch_env_init() {
   export BUDDYSWITCH_RUN_STATE_DIR="${shared_root}/run"
   export BUDDYSWITCH_RUNTIME_LOCK_HELPER="${BUDDYSWITCH_RUNTIME_LOCK_HELPER:-${BUDDYSWITCH_RUNTIME_LOCK_HELPER_DEFAULT}}"
   export BUDDYSWITCH_REPO_ROOT="${BUDDYSWITCH_REPO_ROOT:-${REPO_ROOT:-$(cd "${BUDDYSWITCH_LAUNCHER_DIR}/../.." && pwd)}}"
+  export BUDDYSWITCH_ENV_MCP_NAME="${BUDDYSWITCH_ENV_MCP_NAME:-buddyswitch-env}"
+  export BUDDYSWITCH_ENV_MCP_SERVER="${BUDDYSWITCH_ENV_MCP_SERVER:-${BUDDYSWITCH_REPO_ROOT}/tools/launcher/env_tool_mcp_server.py}"
 
   buddyswitch_workspace_init_defaults
 }
@@ -139,6 +141,125 @@ EOF
 
 buddyswitch_codex_config_path() {
   printf '%s/config.toml\n' "${BUDDYSWITCH_CODEX_HOME}"
+}
+
+buddyswitch_env_mcp_has_server() {
+  local server_name="$1"
+  local config_path
+
+  config_path="$(buddyswitch_codex_config_path)"
+  if [[ ! -f "${config_path}" ]]; then
+    return 1
+  fi
+
+  grep -Eq "^\\[mcp_servers\\.${server_name}\\]$" "${config_path}"
+}
+
+buddyswitch_env_mcp_matches_instance() {
+  local server_name="$1"
+  local config_path
+  local active_buddy
+
+  config_path="$(buddyswitch_codex_config_path)"
+  active_buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
+  if [[ ! -f "${config_path}" ]]; then
+    return 1
+  fi
+  if [[ -z "${BUDDYSWITCH_INSTANCE_ID:-}" || -z "${active_buddy}" || -z "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET:-}" ]]; then
+    return 1
+  fi
+
+  python3 - "${config_path}" "${server_name}" "${BUDDYSWITCH_ENV_MCP_SERVER}" "${BUDDYSWITCH_REPO_ROOT}" "${BUDDYSWITCH_INSTANCE_ID}" "${active_buddy}" "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" <<'PY'
+import sys
+from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    import tomli as tomllib
+
+config_path = Path(sys.argv[1])
+server_name = sys.argv[2]
+server_path = sys.argv[3]
+repo_root = sys.argv[4]
+instance_id = sys.argv[5]
+buddy = sys.argv[6]
+broker_socket = sys.argv[7]
+
+try:
+    payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+
+server = payload.get("mcp_servers", {}).get(server_name)
+if not isinstance(server, dict):
+    raise SystemExit(1)
+args = server.get("args")
+if server.get("command") != "python3" or not isinstance(args, list):
+    raise SystemExit(1)
+
+required = [
+    server_path,
+    "--repo-root",
+    repo_root,
+    "--instance-id",
+    instance_id,
+    "--buddy",
+    buddy,
+    "--broker-socket",
+    broker_socket,
+]
+for value in required:
+    if value not in args:
+        raise SystemExit(1)
+PY
+}
+
+buddyswitch_env_mcp_remove_server() {
+  local server_name="$1"
+  buddyswitch_run_codex mcp remove "${server_name}"
+}
+
+buddyswitch_env_mcp_add_server() {
+  local server_name="$1"
+  local active_buddy
+  active_buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
+
+  if [[ -z "${active_buddy}" ]]; then
+    echo "BuddySwitch env MCP registration requires an active buddy." >&2
+    return 2
+  fi
+  if [[ -z "${BUDDYSWITCH_INSTANCE_ID:-}" ]]; then
+    echo "BuddySwitch env MCP registration requires BUDDYSWITCH_INSTANCE_ID." >&2
+    return 2
+  fi
+  if [[ -z "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET:-}" ]]; then
+    echo "BuddySwitch env MCP registration requires BUDDYSWITCH_RUNTIME_BROKER_SOCKET." >&2
+    return 2
+  fi
+
+  buddyswitch_run_codex mcp add "${server_name}" -- \
+    python3 \
+    "${BUDDYSWITCH_ENV_MCP_SERVER}" \
+    --repo-root "${BUDDYSWITCH_REPO_ROOT}" \
+    --instance-id "${BUDDYSWITCH_INSTANCE_ID}" \
+    --buddy "${active_buddy}" \
+    --broker-socket "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" || return $?
+  buddyswitch_patch_codex_config
+}
+
+buddyswitch_env_mcp_ensure() {
+  local server_name
+  server_name="${BUDDYSWITCH_ENV_MCP_NAME}"
+
+  if buddyswitch_env_mcp_has_server "${server_name}"; then
+    if buddyswitch_env_mcp_matches_instance "${server_name}"; then
+      return 0
+    fi
+    buddyswitch_env_mcp_remove_server "${server_name}" || return $?
+  fi
+
+  buddyswitch_env_mcp_add_server "${server_name}"
 }
 
 buddyswitch_validate_buddy_id() {

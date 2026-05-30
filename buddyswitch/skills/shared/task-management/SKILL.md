@@ -7,7 +7,8 @@ description: Use when current user input may continue, create, switch, confirm, 
 
 ## Principles
 - Task state is active-buddy private state stored in the instance-local taskbox.
-- Use env.tool for task state; do not edit taskbox files or runtime state files directly.
+- Use native BuddySwitch env MCP tools for task state when available; fallback CLI still routes through env.tool.
+- Do not edit taskbox files or runtime state files directly.
 - Use `context.get.tool_catalog['task']`, `context.summarize`, or `python3 scripts/turn_runtime.py status` for exact payload and response details.
 - `--payload` takes one JSON object string.
 - Runtime response fields are authoritative for effects, rejection reasons, and recovery.

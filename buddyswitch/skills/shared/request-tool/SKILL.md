@@ -10,7 +10,8 @@ description: Use when creating and managing durable cross-buddy requests on read
 Create and manage durable cross-buddy request lifecycle state on readable tracks.
 
 ## Runtime Route
-- CLI: `python3 scripts/env/client.py request create --payload '{"track_id":"track-alpha","to_buddy":"dev","title":"Implement scoped flow","summary":"Build from the approved design artifact.","target_refs":[{"type":"artifact","id":"art-design-r1"}]}'`
+- Primary: use native BuddySwitch env MCP tools such as `request__create` when available.
+- Fallback CLI: `python3 scripts/env/client.py request create --payload '{"track_id":"track-alpha","to_buddy":"dev","title":"Implement scoped flow","summary":"Build from the approved design artifact.","target_refs":[{"type":"artifact","id":"art-design-r1"}]}'`
 - Broker method: `env.tool`
 - Discover current operations, payload keys, effects, and recovery guidance with `context.get.tool_catalog['request']` or `python3 scripts/turn_runtime.py status`.
 
