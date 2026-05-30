@@ -25,7 +25,7 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     "context": {"get", "summarize", "list_sources"},
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request", "open_browser"},
-    "message": {"send", "list"},
+    "message": {"contacts", "send", "list"},
     "comment": {"add", "list", "resolve"},
     "request": {"create", "list", "get", "accept", "block", "complete", "cancel"},
 }
@@ -143,6 +143,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("context", "get", ("full", "catalog", "summarize")),
             ("context", "summarize", ("compact", "summary", "get")),
             ("context", "list_sources", ("source", "descriptor", "catalog")),
+            ("message", "contacts", ("contact", "actor", "send")),
             ("message", "send", ("inbox", "buddy", "comment")),
             ("message", "list", ("inbox", "read", "comment")),
             ("comment", "resolve", ("pm", "thread", "resolved")),

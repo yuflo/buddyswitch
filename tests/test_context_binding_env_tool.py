@@ -487,17 +487,24 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn("art-context-owner-draft-untracked", ids)
 
     def test_context_summarize_includes_compact_active_inbox_message_cues(self) -> None:
-        root = env_store.create_message(from_buddy="pm", to_buddy="dev", content="Need proof asset")
-        reply = env_store.create_message(from_buddy="design", to_buddy="dev", content="Screenshot ready", reply_to=root["id"])
-        env_store.create_message(from_buddy="dev", to_buddy="pm", content="Sent by dev only")
-        env_store.create_message(from_buddy="market", to_buddy="pm", content="Not dev inbox")
+        dev = {"buddy_id": "dev", "instance_id": self._runtime_instance_id(buddy="dev", label="inst-dev-context")}
+        pm = {"buddy_id": "pm", "instance_id": self._runtime_instance_id(buddy="pm", label="inst-pm-context")}
+        design = {"buddy_id": "design", "instance_id": self._runtime_instance_id(buddy="design", label="inst-design-context")}
+        market = {"buddy_id": "market", "instance_id": self._runtime_instance_id(buddy="market", label="inst-market-context")}
+        root = env_store.create_message(from_actor_address=pm, to_actor_address=dev, content="Need proof asset")
+        reply = env_store.create_message(from_actor_address=design, to_actor_address=dev, content="Screenshot ready", reply_to=root["id"])
+        env_store.create_message(from_actor_address=dev, to_actor_address=pm, content="Sent by dev only")
+        env_store.create_message(from_actor_address=market, to_actor_address=pm, content="Not dev inbox")
 
         instance_json = self._instance_json()
         payload = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={})
         self.assertTrue(payload.get("ok"), msg=payload)
+        self.assertEqual(payload.get("actor_address"), dev)
         cues = payload.get("message_cues")
         self.assertIsInstance(cues, dict, msg=payload)
         assert isinstance(cues, dict)
+        self.assertEqual(cues.get("source_of_truth"), "message.list")
+        self.assertIn("message.contacts", cues.get("target_discovery", ""))
         rows = cues.get("latest")
         self.assertIsInstance(rows, list, msg=cues)
         assert isinstance(rows, list)
@@ -507,7 +514,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            self.assertEqual(row.get("to_buddy"), "dev")
+            self.assertEqual(row.get("to_actor_address"), dev)
+            self.assertIn(row.get("from_actor_address"), [pm, design])
             self.assertNotIn("content", row)
         self.assertGreaterEqual(cues.get("count", 0), 2)
 

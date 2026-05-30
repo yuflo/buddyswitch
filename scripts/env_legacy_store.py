@@ -9,6 +9,7 @@ from typing import Any
 
 from env.repos import artifacts as artifact_repo
 from env.repos import runtime_files
+from env.tool_runtime.actor_profile import RuntimeActorAddress
 
 VALID_TRACK_STATE = ("active", "blocked", "review", "done")
 VALID_TRACK_HEALTH = ("ok", "risk", "blocked", "stale")
@@ -363,6 +364,21 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _legacy_actor_address_for_buddy(buddy_id: str) -> dict[str, str]:
+    normalized_buddy = _require_non_empty_text(buddy_id, "buddy_id")
+    return RuntimeActorAddress(
+        buddy_id=normalized_buddy,
+        instance_id=f"inst-{normalized_buddy}-legacy",
+    ).to_payload()
+
+
+def _message_actor_payload(value: Any, field: str) -> dict[str, str]:
+    try:
+        return RuntimeActorAddress.from_payload(value).to_payload()
+    except Exception as exc:
+        raise ValueError(f"{field} must be a valid RuntimeActorAddress: {exc}") from exc
+
+
 def validate_message(message: dict[str, Any]) -> dict[str, Any]:
     forbidden_fields = {"status", "read_at", "track_id", "task_id", "artifact_id", "recipients", "broadcast"}
     forbidden = sorted(key for key in message if key in forbidden_fields)
@@ -370,8 +386,12 @@ def validate_message(message: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"unsupported message fields: {', '.join(forbidden)}")
 
     msg_id = require_id(message.get("id", ""), "message.id")
-    from_buddy = _require_non_empty_text(message.get("from_buddy"), "message.from_buddy")
-    to_buddy = _require_non_empty_text(message.get("to_buddy"), "message.to_buddy")
+    if "from_actor_address" in message or "to_actor_address" in message:
+        from_actor_address = _message_actor_payload(message.get("from_actor_address"), "message.from_actor_address")
+        to_actor_address = _message_actor_payload(message.get("to_actor_address"), "message.to_actor_address")
+    else:
+        from_actor_address = _legacy_actor_address_for_buddy(_require_non_empty_text(message.get("from_buddy"), "message.from_buddy"))
+        to_actor_address = _legacy_actor_address_for_buddy(_require_non_empty_text(message.get("to_buddy"), "message.to_buddy"))
     content = _require_non_empty_text(message.get("content"), "message.content")
     reply_to = message.get("reply_to")
     if reply_to is not None:
@@ -380,8 +400,8 @@ def validate_message(message: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "id": msg_id,
-        "from_buddy": from_buddy,
-        "to_buddy": to_buddy,
+        "from_actor_address": from_actor_address,
+        "to_actor_address": to_actor_address,
         "content": content,
         "reply_to": reply_to,
         "created_at": created_at,
@@ -1125,15 +1145,25 @@ def save_message(message: dict[str, Any]) -> dict[str, Any]:
 
 def create_message(
     *,
-    from_buddy: str,
-    to_buddy: str,
+    from_actor_address: dict[str, Any] | RuntimeActorAddress | None = None,
+    to_actor_address: dict[str, Any] | RuntimeActorAddress | None = None,
+    from_buddy: str | None = None,
+    to_buddy: str | None = None,
     content: str,
     reply_to: str | None = None,
 ) -> dict[str, Any]:
-    if not isinstance(from_buddy, str) or not from_buddy.strip():
-        raise ValueError("from_buddy must be a non-empty string")
-    if not isinstance(to_buddy, str) or not to_buddy.strip():
-        raise ValueError("to_buddy must be a non-empty string")
+    if from_actor_address is None:
+        if not isinstance(from_buddy, str) or not from_buddy.strip():
+            raise ValueError("from_actor_address or from_buddy must be provided")
+        normalized_from = _legacy_actor_address_for_buddy(from_buddy)
+    else:
+        normalized_from = _message_actor_payload(from_actor_address, "from_actor_address")
+    if to_actor_address is None:
+        if not isinstance(to_buddy, str) or not to_buddy.strip():
+            raise ValueError("to_actor_address or to_buddy must be provided")
+        normalized_to = _legacy_actor_address_for_buddy(to_buddy)
+    else:
+        normalized_to = _message_actor_payload(to_actor_address, "to_actor_address")
     if not isinstance(content, str) or not content.strip():
         raise ValueError("content must be a non-empty string")
     if reply_to is not None:
@@ -1143,8 +1173,8 @@ def create_message(
     require_id(message_id, "message id")
     message = {
         "id": message_id,
-        "from_buddy": from_buddy.strip(),
-        "to_buddy": to_buddy.strip(),
+        "from_actor_address": normalized_from,
+        "to_actor_address": normalized_to,
         "content": content.strip(),
         "reply_to": reply_to,
         "created_at": now_iso(),

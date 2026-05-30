@@ -177,13 +177,29 @@ class RuntimeObjectAccess:
             rows = [row for row in rows if row.get("status") == status]
         return rows
 
-    def send_message(self, to_buddy: str, content: str, reply_to: str | None) -> dict[str, Any]:
-        return _message_repo.create_message(from_buddy="", to_buddy=to_buddy, content=content, reply_to=reply_to)
+    def send_message(
+        self,
+        from_actor_address: RuntimeActorAddress | dict[str, Any],
+        to_actor_address: RuntimeActorAddress | dict[str, Any],
+        content: str,
+        reply_to: str | None,
+    ) -> dict[str, Any]:
+        return _message_repo.create_message(
+            from_actor_address=from_actor_address,
+            to_actor_address=to_actor_address,
+            content=content,
+            reply_to=reply_to,
+        )
 
     def list_messages(self, buddy: str | None) -> list[dict[str, Any]]:
         rows = _message_repo.list_messages()
         if isinstance(buddy, str) and buddy.strip():
-            rows = [row for row in rows if row.get("from_buddy") == buddy]
+            rows = [
+                row
+                for row in rows
+                if isinstance(row.get("from_actor_address"), dict)
+                and row["from_actor_address"].get("buddy_id") == buddy
+            ]
         return rows
 
     def runtime_sources(self) -> dict[str, Any]:

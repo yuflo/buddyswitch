@@ -223,7 +223,17 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertEqual(search_request["properties"]["engine"].get("enum"), ["google", "web", "reddit", "x"])
         self.assertEqual(search_open["properties"]["engine"].get("enum"), ["google", "web", "reddit", "x"])
 
-        self.assertIn("manifest buddy id", message_send["properties"]["to_buddy"].get("description", ""))
+        self.assertEqual(set(message_send.get("required", [])), {"target_actor_address", "content"})
+        self.assertNotIn("to_buddy", message_send.get("properties", {}))
+        target_actor_address = message_send["properties"]["target_actor_address"]
+        self.assertEqual(target_actor_address.get("type"), "object")
+        self.assertIs(target_actor_address.get("additionalProperties"), False)
+        self.assertEqual(set(target_actor_address.get("required", [])), {"buddy_id", "instance_id"})
+        self.assertEqual(target_actor_address.get("properties", {}).get("buddy_id", {}).get("type"), "string")
+        self.assertEqual(target_actor_address.get("properties", {}).get("instance_id", {}).get("type"), "string")
+        message_contacts = catalog.get_action_definition("message", "contacts").input_schema
+        self.assertEqual(message_contacts.get("required"), [])
+        self.assertEqual(set(message_contacts.get("properties", {})), {"buddy"})
 
         self.assertIn("track_id", request_create.get("required", []))
         self.assertIn("to_buddy", request_create.get("required", []))

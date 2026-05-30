@@ -21,6 +21,7 @@ COMMON_ROLE_PERMISSIONS = frozenset(
         "artifact.read",
         "artifact.create",
         "artifact.update",
+        "message.contacts",
         "message.send",
         "message.list",
         "comment.add",

@@ -498,10 +498,11 @@ def _recent_update_rows(
     return rows[:limit_value]
 
 
-def _message_cues(*, active_buddy: str, limit_value: int, context: ContextServiceContext) -> dict[str, Any]:
+def _message_cues(*, limit_value: int, context: ContextServiceContext) -> dict[str, Any]:
+    active_actor_address = context.actor_address
     inbox = context.rules.message.filter_inbox_messages(
         messages=context.repos.message.list_messages(),
-        active_buddy=active_buddy,
+        active_actor_address=active_actor_address,
         sender_buddy=None,
         q=None,
         limit=limit_value,
@@ -509,14 +510,19 @@ def _message_cues(*, active_buddy: str, limit_value: int, context: ContextServic
     latest = [
         {
             "message_id": row.get("id"),
-            "from_buddy": row.get("from_buddy"),
-            "to_buddy": row.get("to_buddy"),
+            "from_actor_address": row.get("from_actor_address"),
+            "to_actor_address": row.get("to_actor_address"),
             "reply_to": row.get("reply_to"),
             "created_at": row.get("created_at"),
         }
         for row in inbox
     ]
-    return {"count": len(inbox), "latest": latest}
+    return {
+        "count": len(inbox),
+        "latest": latest,
+        "source_of_truth": "message.list",
+        "target_discovery": "Use message.contacts to discover online target actor addresses.",
+    }
 
 
 def _visible_requests(
@@ -612,7 +618,8 @@ def _current_context_sections(
         tracks=visible_tracks,
         limit_value=limit_value,
     )
-    message_cues = _message_cues(active_buddy=active_buddy, limit_value=limit_value, context=context)
+    actor_address = context.actor_address.to_payload()
+    message_cues = _message_cues(limit_value=limit_value, context=context)
     source_workspace = _build_source_workspace(
         active_buddy=active_buddy,
         instance_payload=instance_payload,
@@ -641,6 +648,7 @@ def _current_context_sections(
         "open_comment_threads": open_comment_threads,
         "recent_updates": recent_updates,
         "message_cues": message_cues,
+        "actor_address": actor_address,
         "source_workspace": source_workspace,
         "capability_snapshot": _capability_snapshot(
             context=context,
@@ -808,6 +816,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "open_comment_threads": sections["open_comment_threads"],
         "recent_updates": sections["recent_updates"],
         "message_cues": sections["message_cues"],
+        "actor_address": sections["actor_address"],
         "writable_surfaces": sections["writable_surfaces"],
         "tool_affordances": tool_registry.compact_tool_affordances(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS),
         "capability_snapshot": sections["capability_snapshot"],
