@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 import uuid
@@ -375,20 +375,33 @@ class DaemonAccess:
             target_actor_address=_actor_address_payload(target_actor_address),
         )
 
+    def deliver_signal(
+        self,
+        *,
+        signal_type: str,
+        target_actor_address: RuntimeActorAddress | dict[str, Any],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        signal = {
+            "signal_id": f"sig-{uuid.uuid4().hex}",
+            "type": signal_type,
+            "source_actor_address": self._actor_address.to_payload(),
+            "target_actor_address": _actor_address_payload(target_actor_address),
+            "payload": dict(payload),
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        return daemon_client.deliver_signal(signal=signal)
+
     def deliver_message_available(
         self,
         *,
         message_id: str,
         target_actor_address: RuntimeActorAddress | dict[str, Any],
     ) -> dict[str, Any]:
-        event = {
-            "type": "message.available",
-            "message_id": message_id,
-            "from_actor_address": self._actor_address.to_payload(),
-            "to_actor_address": _actor_address_payload(target_actor_address),
-        }
-        return daemon_client.deliver_event(
-            event=event,
+        return self.deliver_signal(
+            signal_type="message.available",
+            target_actor_address=target_actor_address,
+            payload={"message_id": message_id},
         )
 
 

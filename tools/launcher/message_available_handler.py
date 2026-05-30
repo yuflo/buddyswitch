@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daemon mailbox handler for message.available events."""
+"""Daemon signal handler for message.available."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 
 import daemon_core  # noqa: E402
 import daemon_mailbox  # noqa: E402
+from env.repos import runtime_files  # noqa: E402
 from env.tool_runtime.actor_profile import RuntimeActorAddress  # noqa: E402
 
 
@@ -29,30 +30,37 @@ def _context_actor_address(context: Any) -> RuntimeActorAddress:
 class MessageAvailableHandler:
     name = "message_available"
 
-    def handle_mailbox_event(
+    def handles(self, signal: dict[str, Any]) -> bool:
+        return isinstance(signal, dict) and signal.get("type") == "message.available"
+
+    def handle_signal(
         self,
         context: Any,
         state: Any,
         actions: Any,
-        event: dict[str, Any],
+        signal: dict[str, Any],
     ) -> daemon_core.HandlerResult:
-        if not isinstance(event, dict) or event.get("type") != "message.available":
+        if not self.handles(signal):
             return daemon_core.HandlerResult.ignored()
         try:
-            normalized = daemon_mailbox.validate_mailbox_event(event)
+            normalized = daemon_mailbox.validate_daemon_signal(signal)
             local_actor = _context_actor_address(context)
-            target_actor = RuntimeActorAddress.from_payload(normalized["to_actor_address"])
+            target_actor = RuntimeActorAddress.from_payload(normalized["target_actor_address"])
             if target_actor != local_actor:
-                return daemon_core.HandlerResult.failed("wrong target actor for message.available event")
+                return daemon_core.HandlerResult.failed("wrong target actor for message.available signal")
+            payload = normalized["payload"]
+            if not isinstance(payload, dict):
+                return daemon_core.HandlerResult.failed("message.available payload must be an object")
+            message_id = runtime_files.require_id(payload.get("message_id"), "message_id")
             prompt = (
                 "[MESSAGE AVAILABLE]\n"
-                f"message_id: {normalized['message_id']}\n"
+                f"message_id: {message_id}\n"
                 "Use message.list to read the message when ready."
             )
             actions.submit_turn(
                 prompt,
                 handler_name=self.name,
-                origin_turn_id=normalized["message_id"],
+                origin_turn_id=message_id,
             )
             return daemon_core.HandlerResult.handled()
         except Exception as exc:

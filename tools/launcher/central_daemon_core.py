@@ -183,8 +183,10 @@ class CentralDaemonService:
                 return self._contacts(params)
             if method == "actor.check_reachability":
                 return self._reachability(params)
+            if method == "signal.deliver":
+                return self._deliver_signal(params)
             if method == "event.deliver":
-                return self._deliver(params)
+                return self._deliver_signal(params)
         raise CentralDaemonError("unknown_method", f"unsupported central daemon method: {method}")
 
     def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -297,55 +299,67 @@ class CentralDaemonService:
             "record": row,
         }
 
-    def _deliver(self, params: dict[str, Any]) -> dict[str, Any]:
+    def _deliver_signal(self, params: dict[str, Any]) -> dict[str, Any]:
+        candidate = params.get("signal")
+        if candidate is None:
+            candidate = params.get("event")
         try:
-            event = daemon_mailbox.validate_mailbox_event(params.get("event"))
+            signal = daemon_mailbox.validate_daemon_signal(candidate)
         except Exception as exc:
             return {
-                "delivery_status": "invalid_event",
-                "notification_error": str(exc),
+                "delivery_status": "invalid_signal",
+                "handling_status": "ignored",
+                "signal_error": str(exc),
             }
-        reachability = self._reachability({"target_actor_address": event["to_actor_address"]})
+        reachability = self._reachability({"target_actor_address": signal["target_actor_address"]})
         if reachability["reachability_status"] != "online":
             return {
                 "delivery_status": "target_not_online",
+                "handling_status": "ignored",
                 "reachability_status": reachability["reachability_status"],
-                "to_actor_address": event["to_actor_address"],
+                "target_actor_address": signal["target_actor_address"],
             }
         record = reachability.get("record")
         endpoint = record.get("endpoint") if isinstance(record, dict) else None
         if not isinstance(endpoint, dict) or endpoint.get("kind") != "daemon_mailbox_socket":
             return {
                 "delivery_status": "delivery_failed",
-                "notification_error": "target endpoint is not daemon_mailbox_socket",
-                "to_actor_address": event["to_actor_address"],
-                "notification_event": event,
+                "handling_status": "ignored",
+                "signal_error": "target endpoint is not daemon_mailbox_socket",
+                "target_actor_address": signal["target_actor_address"],
+                "signal": signal,
             }
         socket_raw = endpoint.get("socket_path")
         if not isinstance(socket_raw, str) or not socket_raw.strip():
             return {
                 "delivery_status": "delivery_failed",
-                "notification_error": "target mailbox socket_path is required",
-                "to_actor_address": event["to_actor_address"],
-                "notification_event": event,
+                "handling_status": "ignored",
+                "signal_error": "target mailbox socket_path is required",
+                "target_actor_address": signal["target_actor_address"],
+                "signal": signal,
             }
         envelope = daemon_client.request_mailbox(
             "mailbox.deliver",
-            {"event": event},
+            {"signal": signal},
             socket_path=Path(socket_raw),
         )
         if envelope.get("ok") is not True:
             error = envelope.get("error") if isinstance(envelope.get("error"), dict) else {}
             return {
                 "delivery_status": "delivery_failed",
-                "notification_error": error.get("message") if isinstance(error.get("message"), str) else "mailbox delivery failed",
-                "to_actor_address": event["to_actor_address"],
-                "notification_event": event,
+                "handling_status": "ignored",
+                "signal_error": error.get("message") if isinstance(error.get("message"), str) else "mailbox delivery failed",
+                "target_actor_address": signal["target_actor_address"],
+                "signal": signal,
             }
+        result = envelope.get("result") if isinstance(envelope.get("result"), dict) else {}
+        handling_status = result.get("handling_status") if isinstance(result.get("handling_status"), str) else "ignored"
         return {
             "delivery_status": "delivered",
-            "to_actor_address": event["to_actor_address"],
-            "notification_event": event,
+            "handling_status": handling_status,
+            "target_actor_address": signal["target_actor_address"],
+            "signal": signal,
+            "handling_result": result,
         }
 
 

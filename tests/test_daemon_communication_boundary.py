@@ -86,6 +86,31 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         self.assertNotIn("resolve_notification_target", source)
         self.assertNotIn("ambiguous_online_actor", source)
 
+    def test_daemon_base_delivery_uses_generic_signal_not_message_event_shape(self) -> None:
+        base_files = [
+            path
+            for path in _existing_sources()
+            if path.name not in {"message_available_handler.py", "context.py"}
+        ]
+        source = "\n".join(path.read_text(encoding="utf-8") for path in base_files)
+
+        self.assertIn("signal.deliver", source)
+        self.assertIn("deliver_signal", source)
+        self.assertIn("validate_daemon_signal", source)
+        self.assertNotIn("message_available_event", source)
+        self.assertNotIn("validate_mailbox_event", source)
+        self.assertNotIn("handle_mailbox_event", source)
+        self.assertNotIn("from_actor_address", source)
+        self.assertNotIn("to_actor_address", source)
+        self.assertNotIn('"message_id"', source)
+
+    def test_message_available_handler_owns_message_signal_payload_semantics(self) -> None:
+        handler_source = (ROOT / "tools" / "launcher" / "message_available_handler.py").read_text(encoding="utf-8")
+
+        self.assertIn("message.available", handler_source)
+        self.assertIn("message_id", handler_source)
+        self.assertIn("handle_signal", handler_source)
+
 
 if __name__ == "__main__":
     unittest.main()

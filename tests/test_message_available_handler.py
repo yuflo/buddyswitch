@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for daemon-side message.available mailbox handler."""
+"""Tests for daemon-side message.available signal handler."""
 
 from __future__ import annotations
 
@@ -76,46 +76,75 @@ class MessageAvailableHandlerTests(unittest.TestCase):
         )
         return {"context": context, "state": state}
 
-    def _event(self, *, to_buddy: str = "dev", to_instance: str = "inst-dev-daemon") -> dict[str, Any]:
+    def _signal(
+        self,
+        *,
+        signal_type: str = "message.available",
+        to_buddy: str = "dev",
+        to_instance: str = "inst-dev-daemon",
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return {
-            "type": "message.available",
-            "message_id": "msg-readable",
-            "from_actor_address": {"buddy_id": "pm", "instance_id": "inst-pm-daemon"},
-            "to_actor_address": {"buddy_id": to_buddy, "instance_id": to_instance},
+            "signal_id": "sig-readable",
+            "type": signal_type,
+            "source_actor_address": {"buddy_id": "pm", "instance_id": "inst-pm-daemon"},
+            "target_actor_address": {"buddy_id": to_buddy, "instance_id": to_instance},
+            "payload": {"message_id": "msg-readable"} if payload is None else payload,
+            "created_at": "2026-05-30T00:00:00Z",
         }
 
-    def test_message_available_handler_ignores_non_message_available_events(self) -> None:
+    def test_message_available_handler_ignores_non_message_available_signals(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             actions = FakeActionGateway()
+            signal = self._signal(signal_type="task.updated", payload={"task_id": "task-1"})
 
-            result = self.handler.handle_mailbox_event(instance["context"], instance["state"], actions, {"type": "task.checkout"})
+            self.assertFalse(self.handler.handles(signal))
+            result = self.handler.handle_signal(instance["context"], instance["state"], actions, signal)
 
             self.assertEqual(result.status, "ignored")
             self.assertEqual(actions.calls, [])
 
-    def test_message_available_handler_rejects_event_for_other_actor_address(self) -> None:
+    def test_message_available_handler_rejects_signal_for_other_actor_address(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             actions = FakeActionGateway()
 
-            result = self.handler.handle_mailbox_event(
+            result = self.handler.handle_signal(
                 instance["context"],
                 instance["state"],
                 actions,
-                self._event(to_buddy="design", to_instance="inst-design-daemon"),
+                self._signal(to_buddy="design", to_instance="inst-design-daemon"),
             )
 
             self.assertEqual(result.status, "failed")
             self.assertIn("wrong target actor", result.message)
             self.assertEqual(actions.calls, [])
 
-    def test_message_available_handler_submits_read_prompt_through_action_gateway(self) -> None:
+    def test_message_available_handler_rejects_missing_payload_message_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             actions = FakeActionGateway()
 
-            result = self.handler.handle_mailbox_event(instance["context"], instance["state"], actions, self._event())
+            result = self.handler.handle_signal(
+                instance["context"],
+                instance["state"],
+                actions,
+                self._signal(payload={}),
+            )
+
+            self.assertEqual(result.status, "failed")
+            self.assertIn("message_id", result.message)
+            self.assertEqual(actions.calls, [])
+
+    def test_message_available_handler_submits_read_prompt_through_action_gateway(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            actions = FakeActionGateway()
+            signal = self._signal()
+
+            self.assertTrue(self.handler.handles(signal))
+            result = self.handler.handle_signal(instance["context"], instance["state"], actions, signal)
 
             self.assertEqual(result.status, "handled")
             self.assertEqual(len(actions.calls), 1)
@@ -135,7 +164,7 @@ class MessageAvailableHandlerTests(unittest.TestCase):
             instance = self._instance(temp_root)
             actions = FakeActionGateway(error=RuntimeError("submit failed"))
 
-            result = self.handler.handle_mailbox_event(instance["context"], instance["state"], actions, self._event())
+            result = self.handler.handle_signal(instance["context"], instance["state"], actions, self._signal())
 
             self.assertEqual(result.status, "failed")
             self.assertIn("submit failed", result.message)

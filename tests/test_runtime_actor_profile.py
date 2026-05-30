@@ -211,7 +211,7 @@ class RuntimeActorProfileTests(unittest.TestCase):
 
         original_list_contacts = runtime_context.daemon_client.list_contacts
         original_check_reachability = runtime_context.daemon_client.check_reachability
-        original_deliver_event = runtime_context.daemon_client.deliver_event
+        original_deliver_signal = runtime_context.daemon_client.deliver_signal
 
         def fake_list_contacts(*, buddy_id: str | None = None) -> dict[str, object]:
             calls.append(("contacts", {"buddy_id": buddy_id}))
@@ -221,14 +221,14 @@ class RuntimeActorProfileTests(unittest.TestCase):
             calls.append(("reachability", {"target_actor_address": target_actor_address}))
             return {"reachability_status": "online", "target_actor_address": target_actor_address}
 
-        def fake_deliver_event(*, event: dict[str, object]) -> dict[str, object]:
-            calls.append(("deliver", {"event": event}))
-            return {"delivery_status": "delivered", "notification_event": event}
+        def fake_deliver_signal(*, signal: dict[str, object]) -> dict[str, object]:
+            calls.append(("deliver", {"signal": signal}))
+            return {"delivery_status": "delivered", "signal": signal}
 
         try:
             runtime_context.daemon_client.list_contacts = fake_list_contacts
             runtime_context.daemon_client.check_reachability = fake_check_reachability
-            runtime_context.daemon_client.deliver_event = fake_deliver_event
+            runtime_context.daemon_client.deliver_signal = fake_deliver_signal
 
             context.daemon.list_contacts(buddy_id="dev")
             context.daemon.check_reachability(
@@ -241,7 +241,7 @@ class RuntimeActorProfileTests(unittest.TestCase):
         finally:
             runtime_context.daemon_client.list_contacts = original_list_contacts
             runtime_context.daemon_client.check_reachability = original_check_reachability
-            runtime_context.daemon_client.deliver_event = original_deliver_event
+            runtime_context.daemon_client.deliver_signal = original_deliver_signal
 
         self.assertEqual(calls[0], ("contacts", {"buddy_id": "dev"}))
         self.assertEqual(
@@ -251,18 +251,26 @@ class RuntimeActorProfileTests(unittest.TestCase):
                 {"target_actor_address": {"buddy_id": "dev", "instance_id": "inst-dev-daemon"}},
             ),
         )
-        event = calls[2][1]["event"]
+        signal = calls[2][1]["signal"]
         self.assertEqual(
-            event,
+            {
+                "type": signal["type"],
+                "source_actor_address": signal["source_actor_address"],
+                "target_actor_address": signal["target_actor_address"],
+                "payload": signal["payload"],
+            },
             {
                 "type": "message.available",
-                "message_id": "msg-123",
-                "from_actor_address": {"buddy_id": "design", "instance_id": "inst-design-daemon"},
-                "to_actor_address": {"buddy_id": "dev", "instance_id": "inst-dev-daemon"},
+                "source_actor_address": {"buddy_id": "design", "instance_id": "inst-design-daemon"},
+                "target_actor_address": {"buddy_id": "dev", "instance_id": "inst-dev-daemon"},
+                "payload": {"message_id": "msg-123"},
             },
         )
-        self.assertNotIn("to_buddy", event)
-        self.assertNotIn("content", event)
+        self.assertRegex(signal["signal_id"], r"^sig-")
+        self.assertIsInstance(signal["created_at"], str)
+        self.assertNotIn("message_id", signal)
+        self.assertNotIn("to_buddy", signal)
+        self.assertNotIn("content", signal)
 
     def test_runtime_boundary_ownership_is_searchable(self) -> None:
         self.assertFalse(hasattr(tool_registry, "_role_auth_rejection"))

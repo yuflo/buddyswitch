@@ -233,5 +233,5 @@ def check_reachability(*, target_actor_address: dict[str, Any], socket_path: Pat
     )
 
 
-def deliver_event(*, event: dict[str, Any], socket_path: Path | None = None) -> dict[str, Any]:
-    return request_central_daemon("event.deliver", {"event": event}, socket_path=socket_path)
+def deliver_signal(*, signal: dict[str, Any], socket_path: Path | None = None) -> dict[str, Any]:
+    return request_central_daemon("signal.deliver", {"signal": signal}, socket_path=socket_path)

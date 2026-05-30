@@ -1,0 +1,857 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daemon Team Sharing: Online Actor Coordination</title>
+  <style>
+    :root {
+      --ink: #17191c;
+      --muted: #626b75;
+      --line: #d8dde3;
+      --paper: #fbfcfd;
+      --soft: #f3f6f8;
+      --panel: #ffffff;
+      --accent: #0f766e;
+      --accent-dark: #115e59;
+      --blue: #1d4ed8;
+      --amber: #a15c07;
+      --red: #b42318;
+      --green: #166534;
+      --shadow: 0 22px 70px rgba(30, 38, 48, 0.11);
+      --radius: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, #eef4f4 0, #fbfcfd 330px),
+        var(--paper);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.94em;
+    }
+
+    .page {
+      width: min(1220px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 42px 0 70px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.12fr) minmax(330px, 0.88fr);
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .hero-main,
+    .hero-side,
+    .panel {
+      border: 1px solid rgba(23, 25, 28, 0.1);
+      background: rgba(255, 255, 255, 0.86);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .hero-main {
+      min-height: 405px;
+      padding: 34px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .eyebrow {
+      margin: 0 0 16px;
+      color: var(--accent-dark);
+      font-size: 13px;
+      font-weight: 780;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 900px;
+      margin: 0;
+      font-size: clamp(38px, 5vw, 72px);
+      line-height: 1.03;
+      letter-spacing: 0;
+    }
+
+    .hero-copy {
+      max-width: 760px;
+      margin: 26px 0 0;
+      color: #303842;
+      font-size: 19px;
+    }
+
+    .hero-side {
+      padding: 24px;
+      display: grid;
+      gap: 16px;
+      align-content: start;
+    }
+
+    .north-star {
+      border-left: 4px solid var(--accent);
+      padding: 18px;
+      background: #effaf8;
+      border-radius: 10px;
+      font-size: 18px;
+      font-weight: 760;
+    }
+
+    .facts {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .facts li {
+      display: grid;
+      grid-template-columns: 116px 1fr;
+      gap: 12px;
+      padding: 13px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      font-size: 14px;
+    }
+
+    .facts strong {
+      color: var(--accent-dark);
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 28px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      border: 1px solid rgba(15, 118, 110, 0.25);
+      background: rgba(15, 118, 110, 0.08);
+      color: #0f4f4a;
+      border-radius: 999px;
+      padding: 5px 11px;
+      font-size: 13px;
+      font-weight: 720;
+      white-space: nowrap;
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 28px 0;
+      padding: 12px 0;
+      background: rgba(251, 252, 253, 0.92);
+      border-bottom: 1px solid rgba(23, 25, 28, 0.08);
+      backdrop-filter: blur(14px);
+    }
+
+    .nav a {
+      text-decoration: none;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      padding: 8px 12px;
+      color: #2d343d;
+      font-size: 13px;
+      font-weight: 720;
+    }
+
+    .section {
+      margin-top: 28px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: end;
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 29px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .section-note {
+      max-width: 610px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .panel {
+      padding: 22px;
+      background: #fff;
+      box-shadow: none;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 18px;
+    }
+
+    .card p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      margin-bottom: 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(15, 118, 110, 0.24);
+      background: rgba(15, 118, 110, 0.08);
+      color: var(--accent-dark);
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 780;
+    }
+
+    .tag.blue {
+      border-color: rgba(29, 78, 216, 0.22);
+      background: rgba(29, 78, 216, 0.07);
+      color: var(--blue);
+    }
+
+    .tag.amber {
+      border-color: rgba(161, 92, 7, 0.25);
+      background: rgba(161, 92, 7, 0.08);
+      color: var(--amber);
+    }
+
+    .tag.red {
+      border-color: rgba(180, 35, 24, 0.22);
+      background: rgba(180, 35, 24, 0.07);
+      color: var(--red);
+    }
+
+    .diagram {
+      display: grid;
+      gap: 14px;
+      background:
+        linear-gradient(90deg, rgba(15, 118, 110, 0.06), transparent 35%, rgba(29, 78, 216, 0.05)),
+        #fff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 18px;
+    }
+
+    .lane {
+      display: grid;
+      grid-template-columns: 190px 1fr;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .lane-label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 72px;
+      border-radius: 10px;
+      border: 1px solid rgba(23, 25, 28, 0.12);
+      background: #f8fafb;
+      color: #2b333c;
+      font-weight: 780;
+      text-align: center;
+      padding: 12px;
+    }
+
+    .lane-body {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .node {
+      min-height: 72px;
+      display: grid;
+      align-content: center;
+      gap: 4px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 12px;
+    }
+
+    .node strong {
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    .node span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .node.accent {
+      border-color: rgba(15, 118, 110, 0.28);
+      background: #effaf8;
+    }
+
+    .node.blue {
+      border-color: rgba(29, 78, 216, 0.22);
+      background: #f0f5ff;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .step {
+      min-height: 126px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 13px;
+      position: relative;
+    }
+
+    .step:not(:last-child)::after {
+      content: ">";
+      position: absolute;
+      right: -10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--accent);
+      font-weight: 850;
+      z-index: 2;
+    }
+
+    .step-num {
+      width: 25px;
+      height: 25px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 780;
+      margin-bottom: 10px;
+    }
+
+    .step h4 {
+      margin: 0 0 6px;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    .step p {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      font-size: 14px;
+    }
+
+    .table th,
+    .table td {
+      border-bottom: 1px solid var(--line);
+      padding: 13px 14px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .table th {
+      background: #f6f8fa;
+      color: #2e3640;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .table td {
+      color: #374151;
+    }
+
+    .codebox {
+      margin: 0;
+      white-space: pre-wrap;
+      border: 1px solid #cfd6de;
+      border-radius: 10px;
+      background: #0f1720;
+      color: #e8f3f2;
+      padding: 16px;
+      overflow: auto;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 14px;
+    }
+
+    .callout {
+      border: 1px solid rgba(161, 92, 7, 0.24);
+      border-left: 4px solid var(--amber);
+      background: #fff8ec;
+      border-radius: 10px;
+      padding: 16px;
+      color: #3b2f1d;
+    }
+
+    .ok {
+      color: var(--green);
+      font-weight: 760;
+    }
+
+    .warn {
+      color: var(--amber);
+      font-weight: 760;
+    }
+
+    .bad {
+      color: var(--red);
+      font-weight: 760;
+    }
+
+    .roadmap {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .phase {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 16px;
+    }
+
+    .phase small {
+      display: block;
+      color: var(--accent-dark);
+      font-weight: 780;
+      margin-bottom: 8px;
+    }
+
+    .phase p {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .footer {
+      margin-top: 32px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .grid-3,
+      .grid-2,
+      .split,
+      .roadmap {
+        grid-template-columns: 1fr;
+      }
+
+      .lane {
+        grid-template-columns: 1fr;
+      }
+
+      .lane-body {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      .step:not(:last-child)::after {
+        content: "v";
+        right: 16px;
+        top: auto;
+        bottom: -17px;
+        transform: none;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .page {
+        width: min(100vw - 24px, 1220px);
+        padding-top: 24px;
+      }
+
+      .hero-main {
+        padding: 24px;
+        min-height: 0;
+      }
+
+      .facts li,
+      .lane-body {
+        grid-template-columns: 1fr;
+      }
+
+      .section-head {
+        display: grid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="hero-main">
+        <div>
+          <p class="eyebrow">Daemon Team Sharing · 2026-05-30</p>
+          <h1>Daemon 不是某个业务的后台进程，而是 actor runtime 的守护与协作层。</h1>
+          <p class="hero-copy">
+            这份分享面向 message 团队和后续接入 daemon 的业务团队。它说明 daemon 当前已经交付的能力、我们认为正确的架构边界，以及近期必须完成的解耦方向。
+          </p>
+        </div>
+        <div class="meta">
+          <span class="pill">runtime actor sidecar</span>
+          <span class="pill">presence control plane</span>
+          <span class="pill">online signal delivery</span>
+          <span class="pill">local action gateway</span>
+        </div>
+      </div>
+
+      <aside class="hero-side">
+        <div class="north-star">
+          daemon guards each actor runtime and provides online actor coordination: presence, reachability, cross-actor signal delivery, signal handling, and local action triggering.
+        </div>
+        <ul class="facts">
+          <li><strong>不是</strong><span>message store、task engine、workflow engine、plugin platform。</span></li>
+          <li><strong>负责</strong><span>在线 actor 可达、信号到达、目标 daemon 接收、本地 handler 触发。</span></li>
+          <li><strong>边界</strong><span>actor_profile owns address；business owns durable data；daemon owns runtime coordination。</span></li>
+        </ul>
+      </aside>
+    </section>
+
+    <nav class="nav" aria-label="Page sections">
+      <a href="#positioning">定位</a>
+      <a href="#planes">三层能力</a>
+      <a href="#current">当前事实</a>
+      <a href="#business">业务接入</a>
+      <a href="#message">Message 示例</a>
+      <a href="#next">近期迭代</a>
+      <a href="#contracts">契约</a>
+    </nav>
+
+    <section class="section" id="positioning">
+      <div class="section-head">
+        <h2>1. Daemon 的产品定位</h2>
+        <p class="section-note">daemon 团队负责守护本地 actor runtime，并提供跨 actor 在线协作能力；不是把各业务系统搬进 daemon。</p>
+      </div>
+      <div class="panel split">
+        <div class="card">
+          <span class="tag">Correct framing</span>
+          <h3>central daemon + instance daemon</h3>
+          <p>
+            central daemon 是 actor network control plane，维护在线 registry、contacts、reachability、delivery routing。
+            instance daemon 是每个 buddy instance 的 runtime sidecar，接收本地/远程信号并通过 ActionGateway 唤醒本地 actor。
+          </p>
+        </div>
+        <div class="card">
+          <span class="tag red">Wrong framing</span>
+          <h3>业务后台或流程引擎</h3>
+          <p>
+            daemon 不保存 message 正文，不判断 task 生命周期，不处理 request/artifact/comment 的业务状态，也不做通用 workflow engine。
+            业务规则属于业务模块；daemon 提供 runtime 守护、在线协作和受控 action 触发底座。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="planes">
+      <div class="section-head">
+        <h2>2. 三层能力</h2>
+        <p class="section-note">从业务团队视角，daemon 暴露的是 presence、communication、execution 三条主能力。</p>
+      </div>
+      <div class="grid-3">
+        <article class="card">
+          <span class="tag">Presence Plane</span>
+          <h3>谁在线，谁可达</h3>
+          <p>daemon 启动后注册自己的 <code>actor_address</code>、endpoint、heartbeat、status。central daemon 提供 <code>contacts.list</code> 和 <code>actor.check_reachability</code>。</p>
+        </article>
+        <article class="card">
+          <span class="tag blue">Communication Plane</span>
+          <h3>跨 actor 在线信号投递</h3>
+          <p>业务传入明确 <code>target_actor_address</code>。central daemon 只向在线 target daemon 投递信号；离线不持久化，不替业务存数据。</p>
+        </article>
+        <article class="card">
+          <span class="tag amber">Execution Plane</span>
+          <h3>目标 daemon 本地触发</h3>
+          <p>target daemon 接收 signal 后分发给 handler。handler 如需影响 buddy，只能通过 <code>ActionGateway</code>，例如 <code>submit_turn</code>。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>3. 架构视图</h2>
+        <p class="section-note">identity、runtime coordination、business data 必须保持分层。跨 buddy 通信是 daemon 的核心能力，不是 handler dispatch 的附属品。</p>
+      </div>
+      <div class="diagram">
+        <div class="lane">
+          <div class="lane-label">Identity</div>
+          <div class="lane-body">
+            <div class="node accent"><strong>actor_profile</strong><span>RuntimeActorAddress</span></div>
+            <div class="node"><strong>source actor</strong><span>buddy_id + instance_id</span></div>
+            <div class="node"><strong>target actor</strong><span>buddy_id + instance_id</span></div>
+            <div class="node"><strong>business tools</strong><span>consume address only</span></div>
+          </div>
+        </div>
+        <div class="lane">
+          <div class="lane-label">Daemon</div>
+          <div class="lane-body">
+            <div class="node blue"><strong>central daemon</strong><span>registry / routing</span></div>
+            <div class="node blue"><strong>instance daemon</strong><span>runtime sidecar</span></div>
+            <div class="node blue"><strong>mailbox</strong><span>online ingress</span></div>
+            <div class="node blue"><strong>ActionGateway</strong><span>local actor action</span></div>
+          </div>
+        </div>
+        <div class="lane">
+          <div class="lane-label">Business</div>
+          <div class="lane-body">
+            <div class="node"><strong>message</strong><span>durable message data</span></div>
+            <div class="node"><strong>task</strong><span>task snapshot / TUI</span></div>
+            <div class="node"><strong>future handlers</strong><span>business payload</span></div>
+            <div class="node"><strong>business repos</strong><span>own persistence</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="current">
+      <div class="section-head">
+        <h2>4. 当前已经支持什么</h2>
+        <p class="section-note">这不是蓝图。下面是当前 fea-daemon 已经落地的能力和仍需修正的边界。</p>
+      </div>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Area</th>
+            <th>Current capability</th>
+            <th>Boundary note</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="ok">已落地</span> central daemon</td>
+            <td><code>daemon.register</code>、<code>daemon.unregister</code>、<code>daemon.heartbeat</code>、<code>daemon.registry</code>。</td>
+            <td>single writer registry；identity 字段统一使用 <code>actor_address</code>。</td>
+          </tr>
+          <tr>
+            <td><span class="ok">已落地</span> discovery / reachability</td>
+            <td><code>contacts.list</code>、<code>actor.check_reachability</code>。</td>
+            <td>给 message.contacts / send 前可达性判断使用；不做模糊 <code>to_buddy</code> 解析。</td>
+          </tr>
+          <tr>
+            <td><span class="ok">已落地</span> mailbox delivery</td>
+            <td><code>event.deliver</code> 找 target endpoint，投递到 target daemon <code>mailbox.sock</code>。</td>
+            <td>online only；离线不排队；mailbox 不是业务 store。</td>
+          </tr>
+          <tr>
+            <td><span class="ok">已落地</span> task checkout</td>
+            <td>监听 app-server <code>turn/completed</code>，触发 STOP Task TUI。</td>
+            <td>这是 local signal -> ActionGateway 的业务 handler 示例。</td>
+          </tr>
+          <tr>
+            <td><span class="warn">需解耦</span> message.available</td>
+            <td>target daemon 收到 <code>message.available</code> 后 submit read prompt。</td>
+            <td>当前 mailbox 层仍理解 message event shape；下一步应下沉为 generic daemon signal envelope。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section" id="business">
+      <div class="section-head">
+        <h2>5. 业务团队如何接入 daemon</h2>
+        <p class="section-note">业务团队接入 daemon，不是把业务逻辑交给 daemon，而是使用 daemon 的在线协作能力。</p>
+      </div>
+      <div class="flow">
+        <div class="step"><span class="step-num">1</span><h4>持久数据归业务</h4><p>message、task、request 等业务对象由各自模块写入自己的 repo。</p></div>
+        <div class="step"><span class="step-num">2</span><h4>发现在线 actor</h4><p>需要时调用 contacts / reachability。已有明确地址时不强制查询。</p></div>
+        <div class="step"><span class="step-num">3</span><h4>构造业务 signal</h4><p>业务决定 type 和 payload；daemon 只要求明确 source / target actor。</p></div>
+        <div class="step"><span class="step-num">4</span><h4>central daemon route</h4><p>只向当前 online target daemon 投递，不替业务做离线保存。</p></div>
+        <div class="step"><span class="step-num">5</span><h4>target mailbox ingress</h4><p>目标 daemon 校验 target actor，并把 signal 交给本地 dispatcher。</p></div>
+        <div class="step"><span class="step-num">6</span><h4>handler owns semantics</h4><p>业务 handler 校验 payload，决定要不要触发本地 actor。</p></div>
+        <div class="step"><span class="step-num">7</span><h4>ActionGateway only</h4><p>handler 通过 submit_turn 等受控入口影响本地 buddy。</p></div>
+      </div>
+    </section>
+
+    <section class="section" id="message">
+      <div class="section-head">
+        <h2>6. Message 团队接入方式</h2>
+        <p class="section-note">message 是 daemon communication plane 的第一个跨 actor 业务消费者，但 message 数据仍属于 message。</p>
+      </div>
+      <div class="grid-2">
+        <div class="panel">
+          <h3>升级后 message 主链路</h3>
+          <pre class="codebox">message.send(target_actor_address, content)
+  -> check reachability through central daemon
+  -> reject if target is not online
+  -> create durable message object
+  -> deliver signal through daemon
+  -> target daemon handler submit read prompt
+  -> target buddy calls message.list</pre>
+        </div>
+        <div class="panel">
+          <h3>业务 signal 的建议形态</h3>
+          <pre class="codebox">{
+  "signal_id": "sig-...",
+  "source": "mailbox",
+  "type": "message.available",
+  "source_actor_address": {...},
+  "target_actor_address": {...},
+  "payload": {
+    "message_id": "msg-..."
+  },
+  "created_at": "..."
+}</pre>
+        </div>
+      </div>
+      <div class="callout" style="margin-top:14px;">
+        message 正文不进入 daemon event，不进入 mailbox，不写接收方 daemon 目录。daemon 只投递“有一条 message 可读”的在线信号；message durable store 才是数据事实。
+      </div>
+    </section>
+
+    <section class="section" id="next">
+      <div class="section-head">
+        <h2>7. 近期迭代规划</h2>
+        <p class="section-note">这不是长期平台蓝图，而是为了让 message 和后续业务接入时边界不被污染的近期工作。</p>
+      </div>
+      <div class="roadmap">
+        <div class="phase">
+          <small>P0 · event 解耦</small>
+          <h3>引入 generic signal envelope</h3>
+          <p>mailbox 不再理解 <code>message_id</code> 或 <code>message.available</code> 字段，只校验通用 envelope 和 target actor。</p>
+        </div>
+        <div class="phase">
+          <small>P1 · ingress 分层</small>
+          <h3>local / remote 入口保持清晰</h3>
+          <p>Task TUI 继续走本地 runtime notification；remote mailbox event 解耦为通用 <code>DaemonSignalEnvelope</code>。两条线共享 <code>ActionGateway</code> 和 handler state。</p>
+        </div>
+        <div class="phase">
+          <small>P2 · handler contract</small>
+          <h3>收敛 handler 接口</h3>
+          <p>业务 handler 实现 <code>handle_signal</code>，返回 ignored / handled / failed；daemon 记录状态和错误。</p>
+        </div>
+        <div class="phase">
+          <small>P3 · message 接入</small>
+          <h3>message 作为消费者</h3>
+          <p>message.send 使用 daemon reachability + signal delivery；MessageAvailableHandler 负责 payload 校验和 read prompt。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="contracts">
+      <div class="section-head">
+        <h2>8. 给业务团队的契约</h2>
+        <p class="section-note">接入 daemon 时，业务团队只需要记住这几条硬边界。</p>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <span class="tag">You own</span>
+          <h3>业务数据和业务规则</h3>
+          <p>message owns durable message object；task owns task snapshot and TUI semantics；future business modules own their payload validation and object lifecycle.</p>
+        </div>
+        <div class="card">
+          <span class="tag blue">Daemon owns</span>
+          <h3>在线协作和本地触发</h3>
+          <p>daemon owns presence, reachability, online signal delivery, mailbox ingress, signal dispatch, handler state, and ActionGateway.</p>
+        </div>
+        <div class="card">
+          <span class="tag amber">Do not ask daemon to</span>
+          <h3>保存业务事实</h3>
+          <p>不要把正文、对象状态、业务权限、离线队列交给 daemon。需要持久化就写入业务 store。</p>
+        </div>
+        <div class="card">
+          <span class="tag red">Do not couple</span>
+          <h3>不要把业务 shape 放进 mailbox</h3>
+          <p>mailbox 只能认识 daemon signal envelope。具体业务 payload 应由 typed handler 解释。</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      Source context: current fea-daemon implementation, message/daemon boundary memo, central daemon communication upgrade tests. This page is a working architecture memo for team alignment, not a release note.
+    </footer>
+  </main>
+</body>
+</html>

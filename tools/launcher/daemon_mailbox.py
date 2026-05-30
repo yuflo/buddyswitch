@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Instance daemon mailbox socket and event validation."""
+"""Instance daemon mailbox socket and signal validation."""
 
 from __future__ import annotations
 
-import json
 import hashlib
 import os
 from pathlib import Path
@@ -25,8 +24,14 @@ from env.tool_runtime import daemon_client  # noqa: E402
 from runtime_kernel import protocol  # noqa: E402
 
 
-EVENT_ALLOWED_KEYS = {"type", "message_id", "from_actor_address", "to_actor_address"}
-EVENT_FORBIDDEN_KEYS = {"content", "message", "from_buddy", "to_buddy"}
+SIGNAL_ALLOWED_KEYS = {
+    "signal_id",
+    "type",
+    "source_actor_address",
+    "target_actor_address",
+    "payload",
+    "created_at",
+}
 
 
 def _actor_address_payload(value: Any, field: str) -> dict[str, str]:
@@ -38,34 +43,52 @@ def _actor_address_payload(value: Any, field: str) -> dict[str, str]:
         raise ValueError(f"{field} must be a valid actor_address") from exc
 
 
-def message_available_event(
+def _non_empty_string(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    return value.strip()
+
+
+def daemon_signal_envelope(
     *,
-    message_id: str,
-    from_actor_address: RuntimeActorAddress | dict[str, Any],
-    to_actor_address: RuntimeActorAddress | dict[str, Any],
+    signal_id: str,
+    signal_type: str,
+    source_actor_address: RuntimeActorAddress | dict[str, Any],
+    target_actor_address: RuntimeActorAddress | dict[str, Any],
+    payload: dict[str, Any],
+    created_at: str,
 ) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("payload must be an object")
     return {
-        "type": "message.available",
-        "message_id": runtime_files.require_id(message_id, "message_id"),
-        "from_actor_address": _actor_address_payload(from_actor_address, "from_actor_address"),
-        "to_actor_address": _actor_address_payload(to_actor_address, "to_actor_address"),
+        "signal_id": runtime_files.require_id(signal_id, "signal_id"),
+        "type": _non_empty_string(signal_type, "type"),
+        "source_actor_address": _actor_address_payload(source_actor_address, "source_actor_address"),
+        "target_actor_address": _actor_address_payload(target_actor_address, "target_actor_address"),
+        "payload": dict(payload),
+        "created_at": _non_empty_string(created_at, "created_at"),
     }
 
 
-def validate_mailbox_event(event: Any) -> dict[str, Any]:
-    if not isinstance(event, dict):
-        raise ValueError("mailbox event must be an object")
-    forbidden = sorted(key for key in event if key in EVENT_FORBIDDEN_KEYS)
-    extra = sorted(key for key in event if key not in EVENT_ALLOWED_KEYS)
-    if forbidden or extra:
-        bad = forbidden + [key for key in extra if key not in forbidden]
-        raise ValueError(f"mailbox event must be reference-only; unsupported fields: {', '.join(bad)}")
-    if event.get("type") != "message.available":
-        raise ValueError("unsupported mailbox event type")
-    return message_available_event(
-        message_id=event.get("message_id", ""),
-        from_actor_address=event.get("from_actor_address"),
-        to_actor_address=event.get("to_actor_address"),
+def validate_daemon_signal(signal: Any) -> dict[str, Any]:
+    if not isinstance(signal, dict):
+        raise ValueError("DaemonSignalEnvelope must be an object")
+    extra = sorted(key for key in signal if key not in SIGNAL_ALLOWED_KEYS)
+    missing = sorted(key for key in SIGNAL_ALLOWED_KEYS if key not in signal)
+    if missing or extra:
+        details: list[str] = []
+        if missing:
+            details.append(f"missing fields: {', '.join(missing)}")
+        if extra:
+            details.append(f"unsupported fields: {', '.join(extra)}")
+        raise ValueError(f"DaemonSignalEnvelope must contain only generic signal fields; {'; '.join(details)}")
+    return daemon_signal_envelope(
+        signal_id=signal.get("signal_id", ""),
+        signal_type=signal.get("type", ""),
+        source_actor_address=signal.get("source_actor_address"),
+        target_actor_address=signal.get("target_actor_address"),
+        payload=signal.get("payload"),
+        created_at=signal.get("created_at", ""),
     )
 
 
@@ -130,7 +153,14 @@ class DaemonMailboxServer:
                 except OSError:
                     pass
 
-    def _response(self, request_id: str | None, result: dict[str, Any] | None = None, *, code: str | None = None, message: str | None = None) -> dict[str, Any]:
+    def _response(
+        self,
+        request_id: str | None,
+        result: dict[str, Any] | None = None,
+        *,
+        code: str | None = None,
+        message: str | None = None,
+    ) -> dict[str, Any]:
         if code is None:
             return {
                 "protocol": daemon_client.MAILBOX_PROTOCOL,
@@ -169,32 +199,66 @@ class DaemonMailboxServer:
         if not isinstance(params, dict):
             return self._response(request_id, code="mailbox_protocol_error", message="params must be an object")
         try:
-            event = validate_mailbox_event(params.get("event"))
+            signal = validate_daemon_signal(params.get("signal"))
         except Exception as exc:
-            return self._response(request_id, code="invalid_mailbox_event", message=str(exc))
-        to_actor = RuntimeActorAddress.from_payload(event["to_actor_address"])
+            return self._response(request_id, code="invalid_signal", message=str(exc))
+        to_actor = RuntimeActorAddress.from_payload(signal["target_actor_address"])
         if to_actor != self.local_actor_address:
-            return self._response(request_id, code="wrong_target_actor", message="mailbox event target does not match local actor")
+            return self._response(request_id, code="wrong_target_actor", message="signal target does not match local actor")
 
         handled = 0
         errors: list[str] = []
+        matched = 0
         for handler in self.handlers:
-            handle = getattr(handler, "handle_mailbox_event", None)
+            handles = getattr(handler, "handles", None)
+            if not callable(handles):
+                continue
+            try:
+                if handles(signal) is not True:
+                    continue
+            except Exception as exc:
+                errors.append(str(exc))
+                continue
+            matched += 1
+            handle = getattr(handler, "handle_signal", None)
             if not callable(handle):
                 continue
             try:
                 actions = self.actions_factory() if callable(self.actions_factory) else None
-                result = handle(self.context, self.state, actions, event)
+                result = handle(self.context, self.state, actions, signal)
                 status = getattr(result, "status", None)
-                if status == "handled" or (isinstance(result, dict) and result.get("status") == "handled"):
+                if isinstance(result, dict):
+                    status = result.get("status")
+                if status == "handled":
                     handled += 1
                 if status == "failed":
-                    errors.append(str(getattr(result, "message", "") or "handler failed"))
+                    message = result.get("message") if isinstance(result, dict) else getattr(result, "message", "")
+                    errors.append(str(message or "handler failed"))
             except Exception as exc:
                 errors.append(str(exc))
         if errors:
-            return self._response(request_id, code="mailbox_handler_failed", message="; ".join(errors))
-        return self._response(request_id, {"accepted": True, "handled_count": handled, "event": event})
+            return self._response(
+                request_id,
+                {
+                    "accepted": True,
+                    "handled_count": handled,
+                    "matched_count": matched,
+                    "handling_status": "failed",
+                    "handling_error": "; ".join(errors),
+                    "signal": signal,
+                },
+            )
+        handling_status = "handled" if handled > 0 else "ignored"
+        return self._response(
+            request_id,
+            {
+                "accepted": True,
+                "handled_count": handled,
+                "matched_count": matched,
+                "handling_status": handling_status,
+                "signal": signal,
+            },
+        )
 
 
 def mailbox_socket_path(instance_root: Path) -> Path:
