@@ -345,6 +345,25 @@ textarea:focus-visible,
   background: #f7deda;
 }
 
+.button.accent-action {
+  border-color: #b9cfe5;
+  background: #f4f8fc;
+  color: var(--accent);
+}
+
+.button.accent-action:hover:not([disabled]) {
+  border-color: #9fbedc;
+  background: #e9f2fb;
+}
+
+.button.compact-button {
+  justify-self: start;
+  min-height: 30px;
+  min-width: auto;
+  padding-right: 10px;
+  padding-left: 10px;
+}
+
 .button.full-width {
   width: calc(100% - 16px);
   margin: 10px 8px 0;
@@ -530,6 +549,45 @@ textarea:focus-visible,
   gap: 9px;
 }
 
+.terminal-actions {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.terminal-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.inline-status {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.command-fallback {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+
+.command-fallback[hidden] {
+  display: none;
+}
+
+.command-fallback code {
+  display: block;
+  color: var(--text-strong);
+}
+
 .lifecycle-actions {
   padding-top: 10px;
   border-top: 1px solid var(--line);
@@ -614,6 +672,10 @@ textarea:focus-visible,
 
   .action-group .button {
     flex: 1 1 130px;
+  }
+
+  .terminal-action-row .button {
+    flex: 1 1 150px;
   }
 }
 

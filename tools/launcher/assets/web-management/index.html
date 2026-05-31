@@ -103,6 +103,16 @@
                   <button id="send-button" class="button primary" type="button">Send</button>
                   <button id="interrupt-button" class="button secondary" type="button">Interrupt</button>
                 </div>
+                <div class="terminal-actions" aria-label="TUI actions">
+                  <div class="terminal-action-row">
+                    <button id="open-tui-button" class="button secondary accent-action" type="button">Open TUI</button>
+                    <span id="open-tui-status" class="inline-status"></span>
+                  </div>
+                  <div id="open-tui-fallback" class="command-fallback" hidden>
+                    <code id="open-tui-command" class="mono-value long-value"></code>
+                    <button id="copy-tui-command-button" class="button secondary compact-button" type="button">Copy command</button>
+                  </div>
+                </div>
                 <div class="action-group lifecycle-actions" aria-label="Lifecycle actions">
                   <button id="clear-button" class="button secondary" type="button">Clear</button>
                   <button id="stop-button" class="button secondary" type="button">Stop</button>
