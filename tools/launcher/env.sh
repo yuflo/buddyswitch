@@ -758,6 +758,92 @@ temp_path.replace(instance_json)
 PY
 }
 
+buddyswitch_instance_clear_browser_port() {
+  local instance_id="$1"
+  local instance_json
+
+  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+
+  python3 - "${instance_json}" "${instance_id}" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+instance_json = Path(sys.argv[1])
+instance_id = sys.argv[2]
+
+if not instance_json.exists():
+    raise SystemExit(f"Instance record missing: {instance_json}")
+
+payload = json.loads(instance_json.read_text(encoding="utf-8"))
+if payload.get("instance_id") != instance_id:
+    raise SystemExit(f"Instance id mismatch in {instance_json}")
+
+payload["browser_port"] = None
+payload["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+temp_path = instance_json.with_suffix(".tmp")
+temp_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+temp_path.replace(instance_json)
+PY
+}
+
+buddyswitch_instance_record_failure() {
+  local instance_id="$1"
+  local phase="$2"
+  local message="$3"
+  local thread_id="${4:-}"
+  local browser_port="${5:-}"
+  local instance_json
+
+  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+
+  python3 - "${instance_json}" "${instance_id}" "${phase}" "${message}" "${thread_id}" "${browser_port}" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+instance_json = Path(sys.argv[1])
+instance_id = sys.argv[2]
+phase = sys.argv[3]
+message = sys.argv[4]
+thread_id = sys.argv[5]
+browser_port_text = sys.argv[6]
+
+if not instance_json.exists():
+    raise SystemExit(f"Instance record missing: {instance_json}")
+
+payload = json.loads(instance_json.read_text(encoding="utf-8"))
+if payload.get("instance_id") != instance_id:
+    raise SystemExit(f"Instance id mismatch in {instance_json}")
+
+now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+failure = {
+    "phase": phase,
+    "message": message,
+    "failed_at": now,
+}
+if thread_id:
+    failure["thread_id"] = thread_id
+if browser_port_text:
+    try:
+        browser_port = int(browser_port_text)
+    except ValueError:
+        browser_port = None
+    if browser_port is not None:
+        failure["browser_port"] = browser_port
+
+payload["last_failure"] = failure
+payload["updated_at"] = now
+
+temp_path = instance_json.with_suffix(".tmp")
+temp_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+temp_path.replace(instance_json)
+PY
+}
+
 buddyswitch_instance_app_server_is_active() {
   local instance_id="$1"
   if [[ -z "${instance_id}" ]]; then

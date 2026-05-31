@@ -2731,7 +2731,102 @@ exec "$real_git" "$@"
             self.assertIsNone(instance_payload["app_server_pid"])
             self.assertIsNone(instance_payload["app_server_socket"])
             self.assertIsNone(instance_payload["app_server_log"])
+            self.assertIsNone(instance_payload["browser_port"])
+            self.assertEqual(instance_payload["last_failure"]["phase"], "thread_bootstrap")
+            self.assertEqual(instance_payload.get("thread_id"), None)
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            bootstrap_calls = [row for row in rpc_rows if row.get("rpc_method") == "thread/inject_items"]
+            self.assertEqual(len(bootstrap_calls), 1)
             self.assertFalse((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "daemon.pid").exists())
+
+    def test_start_bootstrap_timeout_retries_once_and_succeeds(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                buddy="pm",
+                state_payload={
+                    "error_on_attempts": {
+                        "thread/inject_items": {
+                            "1": {
+                                "code": -32000,
+                                "message": "timed out waiting for thread/inject_items",
+                            }
+                        }
+                    }
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+            instance_payload = json.loads((Path(str(ctx["instance_root"])) / "instance.json").read_text(encoding="utf-8"))
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            thread_start_calls = [row for row in rpc_rows if row.get("rpc_method") == "thread/start"]
+            bootstrap_calls = [row for row in rpc_rows if row.get("rpc_method") == "thread/inject_items"]
+            daemon_resume = next(
+                row
+                for row in rpc_rows
+                if row.get("rpc_method") == "thread/resume" and row.get("client_name") == "buddyswitch_daemon"
+            )
+
+            self.assertEqual(len(thread_start_calls), 1)
+            self.assertEqual(len(bootstrap_calls), 2)
+            self.assertEqual(bootstrap_calls[0]["params"]["threadId"], bootstrap_calls[1]["params"]["threadId"])
+            self.assertEqual(bootstrap_calls[0]["params"]["threadId"], instance_payload["thread_id"])
+            self.assertEqual(daemon_resume["params"]["threadId"], instance_payload["thread_id"])
+            self.assertEqual(instance_payload["status"], "active")
+            self.assertNotIn("last_failure", instance_payload)
+
+    def test_start_bootstrap_retry_failure_cleans_state_and_records_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            ctx = self._start_service_instance(
+                Path(temp_root),
+                Path(source_home),
+                buddy="pm",
+                state_payload={
+                    "error_on_attempts": {
+                        "thread/inject_items": {
+                            "1": {
+                                "code": -32000,
+                                "message": "timed out waiting for thread/inject_items",
+                            },
+                            "2": {
+                                "code": -32000,
+                                "message": "timed out waiting for thread/inject_items again",
+                            },
+                        }
+                    }
+                },
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("timed out waiting for thread/inject_items", completed.stderr)
+
+            instance_root = Path(str(ctx["instance_root"]))
+            instance_payload = json.loads((instance_root / "instance.json").read_text(encoding="utf-8"))
+            rpc_rows = self._read_rpc_rows(Path(str(ctx["calls_path"])))
+            bootstrap_calls = [row for row in rpc_rows if row.get("rpc_method") == "thread/inject_items"]
+
+            self.assertEqual(len(bootstrap_calls), 2)
+            self.assertEqual(instance_payload["status"], "inactive")
+            self.assertIsNone(instance_payload["app_server_pid"])
+            self.assertIsNone(instance_payload["app_server_socket"])
+            self.assertIsNone(instance_payload["app_server_log"])
+            self.assertIsNone(instance_payload["browser_port"])
+            self.assertIsNone(instance_payload.get("thread_id"))
+            self.assertEqual(instance_payload["last_failure"]["phase"], "thread_bootstrap")
+            self.assertEqual(instance_payload["last_failure"]["thread_id"], bootstrap_calls[0]["params"]["threadId"])
+            self.assertIn("timed out waiting for thread/inject_items", instance_payload["last_failure"]["message"])
+            self.assertIsInstance(instance_payload["last_failure"].get("browser_port"), int)
+            self.assertTrue(instance_payload["last_failure"].get("failed_at"))
+            self.assertFalse((instance_root / "runtime" / "app-server.pid").exists())
+            self.assertFalse((instance_root / "runtime" / "app-server.sock").exists())
+            self.assertFalse((instance_root / "runtime" / "app-server.socket").exists())
+            self.assertFalse((instance_root / "runtime" / "runtime-broker.pid").exists())
+            self.assertFalse((instance_root / "runtime" / "daemon" / "daemon.pid").exists())
+            self.assertFalse((instance_root / "browser" / "chrome.pid").exists())
 
     def test_start_rejects_codex_args_passthrough(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
@@ -7262,6 +7357,18 @@ done
 exit 1
 """,
             )
+            self._write_exec(
+                fake_bin / "lsof",
+                """#!/usr/bin/env bash
+printf '12345\n'
+""",
+            )
+            self._write_exec(
+                fake_bin / "ps",
+                f"""#!/usr/bin/env bash
+printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={target_root / "browser" / "profile"}'
+""",
+            )
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
@@ -7279,6 +7386,61 @@ exit 1
             self.assertEqual(delete_result.returncode, 3)
             self.assertIn("active browser cockpit", delete_result.stderr)
             self.assertTrue(target_root.exists())
+
+    def test_instance_delete_ignores_foreign_browser_endpoint_on_stale_port(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            target_root, _ = self._write_instance_record(shared_root, "inst-pm-stale-port", browser_port=9333)
+            market_root, _ = self._write_instance_record(shared_root, "inst-market-live-port", buddy="market", browser_port=9333)
+            market_browser = market_root / "browser"
+            market_browser.mkdir(parents=True, exist_ok=True)
+            (market_browser / "chrome.pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_exec(
+                fake_bin / "curl",
+                """#!/usr/bin/env bash
+for arg in "$@"; do
+  if [[ "${arg}" == "http://127.0.0.1:9333/json/version" ]]; then
+    exit 0
+  fi
+done
+exit 1
+""",
+            )
+            self._write_exec(
+                fake_bin / "lsof",
+                """#!/usr/bin/env bash
+printf '12345\n'
+""",
+            )
+            self._write_exec(
+                fake_bin / "ps",
+                f"""#!/usr/bin/env bash
+printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={market_root / "browser" / "profile"}'
+""",
+            )
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+
+            delete_result = subprocess.run(
+                [str(LAUNCHER), "instance", "delete", "inst-pm-stale-port", "--yes"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(delete_result.returncode, 0, msg=delete_result.stderr)
+            self.assertIn("Instance deleted: inst-pm-stale-port", delete_result.stdout)
+            self.assertFalse(target_root.exists())
+            self.assertTrue(market_root.exists())
+            self.assertTrue((market_browser / "chrome.pid").exists())
 
     def test_instance_delete_ignores_stale_legacy_pid_file_without_active_service(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:

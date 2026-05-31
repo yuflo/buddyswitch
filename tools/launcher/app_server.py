@@ -702,8 +702,14 @@ def thread_fork(
         return client.request("thread/fork", params)
 
 
-def thread_inject_items(socket_path: Path, thread_id: str, items: list[dict[str, object]]) -> dict[str, Any]:
-    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
+def thread_inject_items(
+    socket_path: Path,
+    thread_id: str,
+    items: list[dict[str, object]],
+    *,
+    timeout_seconds: float = DEFAULT_RPC_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    with AppServerClient(socket_path, timeout_seconds=timeout_seconds) as client:
         return client.request(
             "thread/inject_items",
             {
@@ -721,10 +727,20 @@ def thread_bootstrap_marker_item() -> dict[str, object]:
     }
 
 
-def thread_bootstrap_rollout(socket_path: Path, thread_id: str) -> dict[str, Any]:
+def thread_bootstrap_rollout(
+    socket_path: Path,
+    thread_id: str,
+    *,
+    timeout_seconds: float = DEFAULT_RPC_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
     if not thread_id:
         raise AppServerProtocolError("thread bootstrap requires a thread id")
-    thread_inject_items(socket_path, thread_id, [thread_bootstrap_marker_item()])
+    thread_inject_items(
+        socket_path,
+        thread_id,
+        [thread_bootstrap_marker_item()],
+        timeout_seconds=timeout_seconds,
+    )
     return {"ok": True, "thread_id": thread_id}
 
 
@@ -952,7 +968,11 @@ def _command_thread_resume(args: argparse.Namespace) -> int:
 
 
 def _command_thread_bootstrap(args: argparse.Namespace) -> int:
-    payload = thread_bootstrap_rollout(Path(args.socket), args.thread_id)
+    payload = thread_bootstrap_rollout(
+        Path(args.socket),
+        args.thread_id,
+        timeout_seconds=args.timeout_seconds,
+    )
     print(json.dumps(payload, ensure_ascii=True))
     return 0
 
@@ -1068,6 +1088,7 @@ def build_parser() -> argparse.ArgumentParser:
     thread_bootstrap_parser = subparsers.add_parser("thread-bootstrap")
     thread_bootstrap_parser.add_argument("--socket", required=True)
     thread_bootstrap_parser.add_argument("--thread-id", required=True)
+    thread_bootstrap_parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_RPC_TIMEOUT_SECONDS)
     thread_bootstrap_parser.set_defaults(func=_command_thread_bootstrap)
 
     thread_read_parser = subparsers.add_parser("thread-read")

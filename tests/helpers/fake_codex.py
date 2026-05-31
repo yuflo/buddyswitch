@@ -762,6 +762,27 @@ def handle_rpc_message(
         if isinstance(error_on_count, int) and next_attempt == error_on_count:
             save_server_state(state)
             return rpc_error_response(request_id, -32001, "thread/resume failed")
+    attempt_counts = state.get("method_attempt_counts")
+    if not isinstance(attempt_counts, dict):
+        attempt_counts = {}
+    previous_attempt = attempt_counts.get(method)
+    next_attempt = (previous_attempt if isinstance(previous_attempt, int) else 0) + 1
+    attempt_counts[method] = next_attempt
+    state["method_attempt_counts"] = attempt_counts
+    error_on_attempts = state.get("error_on_attempts")
+    if isinstance(error_on_attempts, dict):
+        method_attempts = error_on_attempts.get(method)
+        if isinstance(method_attempts, dict):
+            attempt_error = method_attempts.get(str(next_attempt))
+            if isinstance(attempt_error, dict):
+                code = attempt_error.get("code")
+                message_text = attempt_error.get("message")
+                save_server_state(state)
+                return rpc_error_response(
+                    request_id,
+                    code if isinstance(code, int) else -32001,
+                    message_text if isinstance(message_text, str) else f"{method} failed",
+                )
     errors = state.get("errors", {})
     if isinstance(errors, dict):
         error = errors.get(method)

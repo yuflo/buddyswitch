@@ -417,6 +417,83 @@ PY
   buddyswitch_browser_cdp_curl "http://127.0.0.1:${browser_port}/json/version" >/dev/null 2>&1
 }
 
+_buddyswitch_browser_instance_recorded_port() {
+  local instance_id="$1"
+  local instance_json="${BUDDYSWITCH_SHARED_ROOT}/instances/${instance_id}/instance.json"
+
+  python3 - "${instance_json}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+port = payload.get("browser_port")
+if isinstance(port, int):
+    print(port)
+PY
+}
+
+_buddyswitch_browser_port_listener_pids() {
+  local browser_port="$1"
+
+  if ! command -v lsof >/dev/null 2>&1; then
+    return 1
+  fi
+  lsof -nP -iTCP:"${browser_port}" -sTCP:LISTEN -t 2>/dev/null | awk 'NF { print $1 }'
+}
+
+_buddyswitch_browser_process_command_line() {
+  local pid="$1"
+  ps -ww -p "${pid}" -o command= 2>/dev/null || true
+}
+
+buddyswitch_browser_instance_endpoint_ownership_state() {
+  local instance_id="$1"
+  local browser_port target_profile pid command_line found_listener=0 found_foreign=0
+
+  browser_port="$(_buddyswitch_browser_instance_recorded_port "${instance_id}")"
+  if [[ -z "${browser_port}" ]]; then
+    echo "inactive"
+    return 0
+  fi
+  if ! buddyswitch_browser_cdp_curl "http://127.0.0.1:${browser_port}/json/version" >/dev/null 2>&1; then
+    echo "inactive"
+    return 0
+  fi
+  if buddyswitch_browser_instance_pid_marker_is_active "${instance_id}"; then
+    echo "owned"
+    return 0
+  fi
+
+  target_profile="${BUDDYSWITCH_SHARED_ROOT}/instances/${instance_id}/browser/profile"
+  while IFS= read -r pid; do
+    [[ -n "${pid}" ]] || continue
+    found_listener=1
+    command_line="$(_buddyswitch_browser_process_command_line "${pid}")"
+    if [[ "${command_line}" == *"--user-data-dir=${target_profile}"* ]]; then
+      echo "owned"
+      return 0
+    fi
+    if [[ "${command_line}" == *"--user-data-dir="*"/browser/profile"* ]]; then
+      found_foreign=1
+    fi
+  done < <(_buddyswitch_browser_port_listener_pids "${browser_port}" || true)
+
+  if [[ "${found_foreign}" -eq 1 ]]; then
+    echo "foreign"
+    return 0
+  fi
+  echo "unknown"
+}
+
+buddyswitch_browser_instance_endpoint_is_owned_active() {
+  local instance_id="$1"
+  [[ "$(buddyswitch_browser_instance_endpoint_ownership_state "${instance_id}")" == "owned" ]]
+}
+
 buddyswitch_browser_any_recorded_instance_endpoint_is_active() {
   local instance_json browser_port
 
