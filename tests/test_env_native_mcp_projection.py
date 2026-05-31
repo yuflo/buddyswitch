@@ -57,6 +57,7 @@ class EnvNativeMcpProjectionTests(unittest.TestCase):
                         action.failure_state_guarantee,
                     ):
                         self.assertIn(token, description)
+                    self.assertNotIn("scripts/env/client.py", description)
                     self.assertTrue(any(row in description for row in action.use_when), msg=description)
                     self.assertTrue(any(row in description for row in action.do_not_use_when), msg=description)
 
@@ -124,8 +125,6 @@ print(json.dumps({
                         id="probe",
                         title="Probe Tool",
                         description="Temporary probe tool used to verify registry discovery.",
-                        cli_resource="probe",
-                        command="python3 scripts/env/client.py probe <action> --payload '<json>'",
                         scope="test-only",
                         capability_boundary="Reads temporary probe data only.",
                         object_model="Temporary probe object.",

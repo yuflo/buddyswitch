@@ -15,8 +15,6 @@ def _build_definition() -> ToolDefinition:
         id='comment',
         title='Object Comments',
         description='Add, list, and PM-resolve comments on readable track and artifact targets.',
-        cli_resource='comment',
-        command="python3 scripts/env/client.py comment <action> --payload '<json-object>'",
         scope='target-scoped plain-text comments on readable tracks and artifacts',
         capability_boundary='Comment scope requires active-buddy readability on the target object.',
         object_model=(

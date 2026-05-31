@@ -926,6 +926,13 @@ buddyswitch_arg_sets_native_web_search() {
   return 1
 }
 
+buddyswitch_print_native_search_rejection() {
+  echo "Native Codex web_search is disabled in BuddySwitch product sessions." >&2
+  echo "Use native BuddySwitch env MCP tool: search__status" >&2
+  echo "Use native BuddySwitch env MCP tool: search__open_browser" >&2
+  echo "Diagnostic: python3 scripts/turn_runtime.py status" >&2
+}
+
 buddyswitch_reject_native_search_args() {
   local arg next
   while [[ $# -gt 0 ]]; do
@@ -933,16 +940,12 @@ buddyswitch_reject_native_search_args() {
     next="${2:-}"
     case "${arg}" in
       --search|--search=*)
-        echo "Native Codex web_search is disabled in BuddySwitch product sessions." >&2
-        echo "Use: python3 scripts/env/client.py search status" >&2
-        echo "Use: python3 scripts/env/client.py search open-browser --query '<query>' --engine google" >&2
+        buddyswitch_print_native_search_rejection
         return 2
         ;;
       -c|--config)
         if [[ -n "${next}" ]] && buddyswitch_arg_sets_native_web_search "${next}"; then
-          echo "Native Codex web_search is disabled in BuddySwitch product sessions." >&2
-          echo "Use: python3 scripts/env/client.py search status" >&2
-          echo "Use: python3 scripts/env/client.py search open-browser --query '<query>' --engine google" >&2
+          buddyswitch_print_native_search_rejection
           return 2
         fi
         if [[ $# -ge 2 ]]; then
@@ -954,9 +957,7 @@ buddyswitch_reject_native_search_args() {
         ;;
       -c*|--config=*)
         if buddyswitch_arg_sets_native_web_search "${arg}"; then
-          echo "Native Codex web_search is disabled in BuddySwitch product sessions." >&2
-          echo "Use: python3 scripts/env/client.py search status" >&2
-          echo "Use: python3 scripts/env/client.py search open-browser --query '<query>' --engine google" >&2
+          buddyswitch_print_native_search_rejection
           return 2
         fi
         ;;

@@ -30,6 +30,7 @@ CLIENT_TITLE = "BuddySwitch Launcher"
 CLIENT_VERSION = "0.1.0"
 DEFAULT_TIMEOUT_SECONDS = 2.0
 DEFAULT_RPC_TIMEOUT_SECONDS = 15.0
+CLOSE_HANDSHAKE_TIMEOUT_SECONDS = 0.5
 MAX_UNIX_SOCKET_BYTES = 104
 APP_SERVER_STARTUP_POLL_SECONDS = 0.05
 APP_SERVER_STOP_GRACE_SECONDS = 2.0
@@ -333,13 +334,32 @@ class AppServerClient:
             return
         try:
             self._send_frame(0x8, b"")
+            self._wait_for_peer_close()
         except OSError:
+            pass
+        except AppServerError:
             pass
         try:
             self._sock.close()
         finally:
             self._sock = None
             self._closed = True
+
+    def _wait_for_peer_close(self) -> None:
+        while True:
+            opcode, payload = self._read_frame(
+                method="websocket close",
+                timeout_seconds=min(self.timeout_seconds, CLOSE_HANDSHAKE_TIMEOUT_SECONDS),
+            )
+            if opcode == 0x8:
+                self._closed = True
+                return
+            if opcode == 0x9:
+                self._send_frame(0xA, payload)
+                continue
+            if opcode in {0x1, 0x2, 0xA}:
+                continue
+            return
 
     def initialize(self) -> dict[str, object]:
         response = self.request(
@@ -469,8 +489,8 @@ class AppServerClient:
                 continue
             raise AppServerProtocolError(f"unexpected websocket opcode {opcode} while waiting for {method}")
 
-    def _read_frame(self, *, method: str) -> tuple[int, bytes]:
-        first_two = self._read_exact(2, method=method)
+    def _read_frame(self, *, method: str, timeout_seconds: float | None = None) -> tuple[int, bytes]:
+        first_two = self._read_exact(2, method=method, timeout_seconds=timeout_seconds)
         first, second = first_two[0], first_two[1]
         opcode = first & 0x0F
         length = second & 0x7F
@@ -478,16 +498,16 @@ class AppServerClient:
         if masked:
             raise AppServerProtocolError(f"server sent masked websocket frame while waiting for {method}")
         if length == 126:
-            length = int.from_bytes(self._read_exact(2, method=method), "big")
+            length = int.from_bytes(self._read_exact(2, method=method, timeout_seconds=timeout_seconds), "big")
         elif length == 127:
-            length = int.from_bytes(self._read_exact(8, method=method), "big")
-        payload = self._read_exact(length, method=method)
+            length = int.from_bytes(self._read_exact(8, method=method, timeout_seconds=timeout_seconds), "big")
+        payload = self._read_exact(length, method=method, timeout_seconds=timeout_seconds)
         return opcode, payload
 
-    def _read_exact(self, length: int, *, method: str) -> bytes:
+    def _read_exact(self, length: int, *, method: str, timeout_seconds: float | None = None) -> bytes:
         if self._sock is None:
             raise AppServerUnavailableError(f"app-server socket is not connected: {self.socket_path}")
-        deadline = time.monotonic() + self.timeout_seconds
+        deadline = time.monotonic() + (self.timeout_seconds if timeout_seconds is None else timeout_seconds)
         while len(self._recv_buffer) < length:
             remaining = deadline - time.monotonic()
             if remaining <= 0:

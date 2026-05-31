@@ -51,8 +51,6 @@ def _build_definition() -> ToolDefinition:
         id='track',
         title='Track Pages',
         description='Operate shared progress pages and shared material/proof publication.',
-        cli_resource='track',
-        command="python3 scripts/env/client.py track <action> --payload '<json-object>'",
         scope='shared track progress pages and publication timeline',
         capability_boundary='Only PM can create/archive tracks; shared mutation requires readable track scope.',
         object_model=(

@@ -1861,6 +1861,52 @@ exec "$real_git" "$@"
             self.assertIsNone(payload["active_buddy"])
             self.assertIsNone(payload["instance_id"])
 
+    def test_product_mode_run_codex_rejects_native_search_with_native_env_tool_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            temp_root_path = Path(temp_root)
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            capture_path = temp_root_path / "capture.json"
+            home = temp_root_path / "home"
+            codex_home = temp_root_path / "codex-home"
+            xdg_config_home = temp_root_path / "xdg-config"
+            codex_home.mkdir(parents=True)
+            (codex_home / "auth.json").write_text("{}\n", encoding="utf-8")
+            (codex_home / "config.toml").write_text("", encoding="utf-8")
+
+            command = (
+                "source tools/launcher/env.sh\n"
+                "BUDDYSWITCH_HOME=\"$1\"\n"
+                "BUDDYSWITCH_CODEX_HOME=\"$2\"\n"
+                "BUDDYSWITCH_XDG_CONFIG_HOME=\"$3\"\n"
+                "BUDDYSWITCH_ACTIVE_BUDDY=pm\n"
+                "BUDDYSWITCH_INSTANCE_ID=inst-pm-test\n"
+                "buddyswitch_run_codex --search\n"
+            )
+            env = os.environ.copy()
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+
+            completed = subprocess.run(
+                ["bash", "-lc", command, "buddyswitch-run-codex-test", str(home), str(codex_home), str(xdg_config_home)],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2, msg=completed.stderr)
+            self.assertIn("Native Codex web_search is disabled in BuddySwitch product sessions.", completed.stderr)
+            self.assertIn("search__status", completed.stderr)
+            self.assertIn("search__open_browser", completed.stderr)
+            self.assertIn("python3 scripts/turn_runtime.py status", completed.stderr)
+            self.assertNotIn("python3 scripts/env/client.py", completed.stderr)
+            self.assertNotIn("search open-browser --query", completed.stderr)
+            self.assertNotIn("search open-browser --payload", completed.stderr)
+            self.assertFalse(capture_path.exists(), "rejected native search must not invoke codex")
+
     def test_start_execution_worktree_uses_design_buddy_prompt_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -6674,6 +6720,76 @@ exec "$real_git" "$@"
                 if line.strip()
             ]
             self.assertTrue(any(entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"] for entry in call_entries))
+
+    def test_start_with_required_buddy_blocks_codex_when_env_mcp_setup_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+            temp_root_path = Path(temp_root)
+            source_home_path = Path(source_home)
+            source_codex_home = source_home_path / ".codex"
+            source_codex_home.mkdir(parents=True, exist_ok=True)
+            (source_codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "apikey",
+                        "openai_api_key": "test-key",
+                        "tokens": None,
+                        "last_refresh": None,
+                        "agent_identity": None,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            fake_bin = temp_root_path / "bin"
+            fake_bin.mkdir(parents=True, exist_ok=True)
+            self._write_fake_codex(fake_bin / "codex")
+            self._write_fake_curl(fake_bin / "curl")
+            self._write_fake_chrome(fake_bin / "fake-chrome")
+
+            state_file = temp_root_path / "cdp-state.json"
+            calls_path = temp_root_path / "calls.jsonl"
+            self._write_cdp_state(
+                state_file,
+                version_ok=True,
+                pages=[{"id": "target-about-blank", "type": "page", "url": "about:blank"}],
+            )
+
+            capture_path = temp_root_path / "capture.json"
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env.pop("CODEX_HOME", None)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["BUDDYSWITCH_BROWSER_CHROME_BIN"] = str(fake_bin / "fake-chrome")
+            env["BUDDYSWITCH_TEST_CDP_STATE_FILE"] = str(state_file)
+            env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
+            env["BUDDYSWITCH_TEST_CAPTURE"] = str(capture_path)
+            env["BUDDYSWITCH_TEST_FAIL_MCP_ADD_NAME"] = "buddyswitch-env"
+
+            completed = subprocess.run(
+                [str(LAUNCHER), "instance", "start", "--buddy", "market"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("simulated mcp add failure: buddyswitch-env", completed.stderr)
+            self.assertFalse(capture_path.exists(), "Codex must not launch when required env MCP setup fails")
+            call_entries = [
+                json.loads(line)
+                for line in calls_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertTrue(any(entry["argv"][:3] == ["mcp", "add", "buddyswitch-env"] for entry in call_entries))
+            self.assertFalse(
+                any(entry["argv"][:3] == ["mcp", "add", "chrome-devtools-cockpit"] for entry in call_entries),
+                "browser MCP setup must not run after required env MCP setup fails",
+            )
 
     def test_start_with_required_buddy_repairs_intro_only_browser_before_codex_launch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:

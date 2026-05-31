@@ -15,8 +15,6 @@ def _build_definition() -> ToolDefinition:
         id='search',
         title='Search Boundary',
         description='Expose search backend metadata, URL planning, and browser open actions.',
-        cli_resource='search',
-        command="python3 scripts/env/client.py search <action> --payload '<json-object>'",
         scope='runtime-visible search capability boundary',
         capability_boundary='Search actions remain inside configured profile backend and launcher browser boundaries.',
         object_model=(

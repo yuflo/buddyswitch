@@ -15,8 +15,6 @@ def _build_definition() -> ToolDefinition:
         id='evidence',
         title='Market Evidence',
         description='Issue target-scoped transient evidence token metadata for artifact quality gates.',
-        cli_resource='evidence',
-        command="python3 scripts/env/client.py evidence <action> --payload '<json-object>'",
         scope='target-scoped browser evidence for market quality gates',
         capability_boundary='Evidence actions are target-scoped and return transient token metadata.',
         object_model=(

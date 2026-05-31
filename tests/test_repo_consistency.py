@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -253,6 +254,17 @@ class RepoConsistencyTests(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assertEqual(desc[tool]["object_model"], definition.object_model)
                 self.assertEqual(compact[tool]["object_model"], definition.object_model)
+                self.assertNotIn("command", desc[tool])
+                self.assertNotIn("cli_resource", desc[tool])
+                self.assertIn("native_mcp", desc[tool])
+                native_mcp = desc[tool]["native_mcp"]
+                self.assertIsInstance(native_mcp, dict)
+                self.assertEqual(native_mcp.get("tool_name_pattern"), f"{tool}__<action>")
+                native_actions = native_mcp.get("actions")
+                self.assertIsInstance(native_actions, dict)
+                assert isinstance(native_actions, dict)
+                for action in definition.actions:
+                    self.assertEqual(native_actions.get(action.name), f"{tool}__{action.name}")
                 self.assertNotIn("input_schemas", compact[tool])
                 self.assertNotIn("payload_fields", compact[tool])
                 self.assertNotIn("action_semantics", compact[tool])
@@ -272,6 +284,26 @@ class RepoConsistencyTests(unittest.TestCase):
                     self.assertEqual(operation["reads"], list(action.reads))
                     self.assertEqual(operation["writes"], list(action.writes))
                     self.assertEqual(operation["does_not_write"], list(action.does_not_write))
+
+    def test_runtime_tool_catalog_exposes_native_affordances_not_env_cli_commands(self) -> None:
+        catalog = tool_catalog.env_tools_description()
+        catalog_text = json.dumps(catalog, ensure_ascii=True)
+        self.assertNotIn("scripts/env/client.py", catalog_text)
+        self.assertNotIn('"command"', catalog_text)
+        self.assertNotIn('"cli_resource"', catalog_text)
+
+        for tool, row in catalog.items():
+            with self.subTest(tool=tool):
+                native_mcp = row.get("native_mcp")
+                self.assertIsInstance(native_mcp, dict, msg=row)
+                assert isinstance(native_mcp, dict)
+                self.assertEqual(native_mcp.get("tool_name_pattern"), f"{tool}__<action>")
+                actions = native_mcp.get("actions")
+                self.assertIsInstance(actions, dict, msg=row)
+                assert isinstance(actions, dict)
+                self.assertEqual(set(actions), set(tool_catalog.supported_actions(tool)), msg=row)
+                for action in tool_catalog.supported_actions(tool):
+                    self.assertEqual(actions[action], f"{tool}__{action}")
 
     def test_env_manifest_has_no_retired_acl_rows(self) -> None:
         completed = subprocess.run(

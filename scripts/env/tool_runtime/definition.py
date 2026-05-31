@@ -57,8 +57,6 @@ class ToolDefinition:
     id: str
     title: str
     description: str
-    cli_resource: str
-    command: str
     scope: str
     capability_boundary: str
     object_model: str
@@ -210,8 +208,6 @@ def validate_definition(definition: ToolDefinition) -> None:
 
     _require_text(definition.title, field=f"{tool_id}.title")
     _require_text(definition.description, field=f"{tool_id}.description")
-    _require_text(definition.cli_resource, field=f"{tool_id}.cli_resource")
-    _require_text(definition.command, field=f"{tool_id}.command")
     _require_text(definition.scope, field=f"{tool_id}.scope")
     _require_text(definition.capability_boundary, field=f"{tool_id}.capability_boundary")
     _require_text(definition.object_model, field=f"{tool_id}.object_model")

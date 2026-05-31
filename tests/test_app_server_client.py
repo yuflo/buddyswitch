@@ -39,6 +39,9 @@ class FakeUnixWebSocketServer:
         self._incoming: queue.Queue[dict[str, object]] = queue.Queue()
         self._stop = threading.Event()
         self._handshake_headers: str | None = None
+        self.close_received = threading.Event()
+        self.close_response_sent = threading.Event()
+        self.close_response_delay_seconds = 0.0
 
     def start(self) -> None:
         if self.socket_path.exists():
@@ -128,7 +131,11 @@ class FakeUnixWebSocketServer:
             elif opcode == 0x9:
                 self._send_frame(0xA, payload)
             elif opcode == 0x8:
+                self.close_received.set()
+                if self.close_response_delay_seconds > 0:
+                    time.sleep(self.close_response_delay_seconds)
                 self._send_frame(0x8, payload)
+                self.close_response_sent.set()
                 return
 
     @staticmethod
@@ -267,6 +274,28 @@ class AppServerClientTests(unittest.TestCase):
 
             self.assertEqual(errors, [])
             self.assertEqual(results, [{"thread": {"id": "thread-1", "status": "idle"}}])
+
+    def test_close_waits_for_peer_close_frame(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.close_response_delay_seconds = 0.12
+            server.start()
+            self.addCleanup(server.close)
+
+            client = APP_SERVER.AppServerClient(socket_path, timeout_seconds=2.0)
+            client.connect()
+            self.addCleanup(client.close)
+            _init, _init_results, init_errors = self._initialize_client(client, server)
+            self.assertEqual(init_errors, [])
+
+            started = time.monotonic()
+            client.close()
+            elapsed = time.monotonic() - started
+
+            self.assertTrue(server.close_received.wait(timeout=1.0))
+            self.assertTrue(server.close_response_sent.wait(timeout=1.0))
+            self.assertGreaterEqual(elapsed, 0.10)
 
     def test_thread_resume_sends_thread_id_and_runtime_context(self) -> None:
         self.assertTrue(

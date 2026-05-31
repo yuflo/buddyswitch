@@ -145,8 +145,6 @@ print(json.dumps({"tools": tools, "impl": loaded_impl, "repos": loaded_repos, "d
                         id="probe",
                         title="Probe",
                         description="Probe tool",
-                        cli_resource="probe",
-                        command="python3 scripts/env/client.py probe ping --payload '<json-object>'",
                         scope="probe tool",
                         capability_boundary="test only",
                         object_model="Probe objects are test-only package discovery rows.",

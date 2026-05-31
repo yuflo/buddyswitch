@@ -7,6 +7,7 @@ import contextlib
 import importlib
 import io
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -86,6 +87,51 @@ class EnvClientPayloadCliTests(unittest.TestCase):
                         "env.tool",
                         {"tool": tool, "action": action, "args": payload},
                     )
+
+    def test_product_mode_env_cli_refuses_runtime_action_without_admin_override(self) -> None:
+        stdout = io.StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {
+                "BUDDYSWITCH_INSTANCE_ID": "inst-dev-test",
+                "BUDDYSWITCH_ACTIVE_BUDDY": "dev",
+                "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "/tmp/runtime.sock",
+            },
+            clear=False,
+        ):
+            with mock.patch.object(sys, "argv", ["client.py", "message", "list", "--payload", "{}"]):
+                with mock.patch.object(self.client, "request_runtime_broker") as broker:
+                    with contextlib.redirect_stdout(stdout):
+                        code = self.client.main()
+
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(code, 1, msg=output)
+        self.assertEqual(output.get("error", {}).get("code"), "E_ENV_CLI_PRODUCT_MODE_DISABLED")
+        self.assertEqual(output.get("permission_boundary"), "product-mode-native-mcp-only")
+        self.assertIs(output.get("state_changed"), False, msg=output)
+        self.assertEqual(output.get("durability"), "none", msg=output)
+        self.assertIn("allowed_next_actions", output)
+        self.assertNotIn("scripts/env/client.py", json.dumps(output, ensure_ascii=True))
+        broker.assert_not_called()
+
+    def test_product_mode_env_cli_allows_explicit_admin_override(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "BUDDYSWITCH_INSTANCE_ID": "inst-dev-test",
+                "BUDDYSWITCH_ACTIVE_BUDDY": "dev",
+                "BUDDYSWITCH_RUNTIME_BROKER_SOCKET": "/tmp/runtime.sock",
+                "BUDDYSWITCH_ALLOW_ENV_ADMIN_CLI": "1",
+            },
+            clear=False,
+        ):
+            code, output, broker = self._run_client(["message", "list", "--payload", "{}"])
+
+        self.assertEqual(code, 0, msg=output)
+        broker.assert_called_once_with(
+            "env.tool",
+            {"tool": "message", "action": "list", "args": {}},
+        )
 
     def test_missing_payload_defaults_to_empty_object(self) -> None:
         code, output, broker = self._run_client(["context", "list-sources"])

@@ -34,8 +34,6 @@ def _build_definition() -> ToolDefinition:
         id="request",
         title="Cross-Buddy Requests",
         description="Create and manage explicit cross-buddy collaboration requests on tracks.",
-        cli_resource="request",
-        command="python3 scripts/env/client.py request <action> --payload '<json-object>'",
         scope="durable cross-buddy collaboration request lifecycle on readable tracks",
         capability_boundary="Request mutations are constrained by requester/recipient role and request state transitions.",
         object_model=(
