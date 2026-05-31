@@ -110,8 +110,18 @@ class BuddySwitchLauncherTests(unittest.TestCase):
         super().setUp()
         self._process_registry_tmp = tempfile.TemporaryDirectory(prefix="buddyswitch-launcher-procs-")
         self._process_registry_path = Path(self._process_registry_tmp.name) / "processes.jsonl"
+        original_temporary_directory = tempfile.TemporaryDirectory
+        test_case = self
+
+        class ProcessAwareTemporaryDirectory(original_temporary_directory):  # type: ignore[misc, valid-type]
+            def cleanup(self) -> None:
+                test_case._cleanup_registered_test_processes()
+                super().cleanup()
+
+        tempfile.TemporaryDirectory = ProcessAwareTemporaryDirectory
         previous_process_registry = os.environ.get("BUDDYSWITCH_TEST_PROCESS_REGISTRY")
         os.environ["BUDDYSWITCH_TEST_PROCESS_REGISTRY"] = str(self._process_registry_path)
+        self.addCleanup(self._restore_temporary_directory, original_temporary_directory)
         self.addCleanup(self._process_registry_tmp.cleanup)
         self.addCleanup(self._restore_process_registry_env, previous_process_registry)
         self.addCleanup(self._cleanup_registered_test_processes)
@@ -1114,6 +1124,10 @@ exec "$real_git" "$@"
         self.assertTrue((runtime_skills / "artifact-tool" / "SKILL.md").exists())
         self.assertFalse((runtime_skills / "write-prd").exists())
         self.assertFalse((runtime_skills / "write-prd" / "assets" / "prd-template.md").exists())
+
+    @staticmethod
+    def _restore_temporary_directory(original_temporary_directory: type[tempfile.TemporaryDirectory]) -> None:
+        tempfile.TemporaryDirectory = original_temporary_directory
 
     @staticmethod
     def _restore_process_registry_env(previous_value: str | None) -> None:
