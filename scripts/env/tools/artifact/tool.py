@@ -97,8 +97,6 @@ def _build_definition() -> ToolDefinition:
         id='artifact',
         title='Artifact Bodies',
         description='Discover readable artifact summaries, read full artifact bodies, and manage active-buddy private drafts/metadata.',
-        cli_resource='artifact',
-        command="python3 scripts/env/client.py artifact <action> --payload '<json-object>'",
         scope='private drafts and published track material/proof artifacts',
         capability_boundary='Private drafts are owner-scoped until published on a non-archived track.',
         object_model=(

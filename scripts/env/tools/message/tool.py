@@ -15,8 +15,6 @@ def _build_definition() -> ToolDefinition:
         id='message',
         title='Buddy Messages',
         description='Discover online actor contacts, send direct actor-address messages, and list inbox messages.',
-        cli_resource='message',
-        command="python3 scripts/env/client.py message <action> --payload '<json-object>'",
         scope='direct runtime actor inbox messaging',
         capability_boundary='Messages are direct runtime actor-address scope only.',
         object_model=(

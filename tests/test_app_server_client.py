@@ -9,7 +9,10 @@ import importlib.util
 import json
 import os
 import queue
+import signal
 import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -36,6 +39,9 @@ class FakeUnixWebSocketServer:
         self._incoming: queue.Queue[dict[str, object]] = queue.Queue()
         self._stop = threading.Event()
         self._handshake_headers: str | None = None
+        self.close_received = threading.Event()
+        self.close_response_sent = threading.Event()
+        self.close_response_delay_seconds = 0.0
 
     def start(self) -> None:
         if self.socket_path.exists():
@@ -125,7 +131,11 @@ class FakeUnixWebSocketServer:
             elif opcode == 0x9:
                 self._send_frame(0xA, payload)
             elif opcode == 0x8:
+                self.close_received.set()
+                if self.close_response_delay_seconds > 0:
+                    time.sleep(self.close_response_delay_seconds)
                 self._send_frame(0x8, payload)
+                self.close_response_sent.set()
                 return
 
     @staticmethod
@@ -191,6 +201,14 @@ class FakeUnixWebSocketServer:
 
 
 class AppServerClientTests(unittest.TestCase):
+    @staticmethod
+    def _pid_is_live(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return False
+        return True
+
     def _socket_path(self, temp_root: Path, name: str = "app-server.sock") -> Path:
         return temp_root / name
 
@@ -256,6 +274,28 @@ class AppServerClientTests(unittest.TestCase):
 
             self.assertEqual(errors, [])
             self.assertEqual(results, [{"thread": {"id": "thread-1", "status": "idle"}}])
+
+    def test_close_waits_for_peer_close_frame(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.close_response_delay_seconds = 0.12
+            server.start()
+            self.addCleanup(server.close)
+
+            client = APP_SERVER.AppServerClient(socket_path, timeout_seconds=2.0)
+            client.connect()
+            self.addCleanup(client.close)
+            _init, _init_results, init_errors = self._initialize_client(client, server)
+            self.assertEqual(init_errors, [])
+
+            started = time.monotonic()
+            client.close()
+            elapsed = time.monotonic() - started
+
+            self.assertTrue(server.close_received.wait(timeout=1.0))
+            self.assertTrue(server.close_response_sent.wait(timeout=1.0))
+            self.assertGreaterEqual(elapsed, 0.10)
 
     def test_thread_resume_sends_thread_id_and_runtime_context(self) -> None:
         self.assertTrue(
@@ -706,6 +746,45 @@ class AppServerClientTests(unittest.TestCase):
             self.assertIn(str(socket_path), str(context.exception))
             self.assertIn("initialize", str(context.exception))
 
+    def test_thread_bootstrap_rollout_uses_dedicated_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = self._socket_path(Path(temp_root))
+            server = FakeUnixWebSocketServer(socket_path)
+            server.start()
+            self.addCleanup(server.close)
+
+            errors: list[BaseException] = []
+            started_at = time.monotonic()
+
+            def run_bootstrap() -> None:
+                try:
+                    APP_SERVER.thread_bootstrap_rollout(
+                        socket_path,
+                        "thread-1",
+                        timeout_seconds=0.2,
+                    )
+                except BaseException as exc:
+                    errors.append(exc)
+
+            bootstrap_thread = threading.Thread(target=run_bootstrap, daemon=True)
+            bootstrap_thread.start()
+
+            init = server.next_message()
+            self.assertEqual(init["method"], "initialize")
+            server.send_response(init["id"], {"userAgent": "codex/1.0.0"})
+            self.assertEqual(server.next_message()["method"], "initialized")
+
+            request = server.next_message()
+            self.assertEqual(request["method"], "thread/inject_items")
+
+            bootstrap_thread.join(timeout=2)
+            elapsed = time.monotonic() - started_at
+
+            self.assertEqual(len(errors), 1)
+            self.assertIsInstance(errors[0], APP_SERVER.AppServerTimeoutError)
+            self.assertIn("thread/inject_items", str(errors[0]))
+            self.assertLess(elapsed, 2.0)
+
     def test_close_ping_and_unexpected_binary_frames_are_safe(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = self._socket_path(Path(temp_root))
@@ -784,6 +863,70 @@ class AppServerClientTests(unittest.TestCase):
             self.assertTrue(socket_path.name.startswith("buddyswitch-app-server-"))
             self.assertTrue(str(socket_path).endswith(".sock"))
             self.assertLess(len(str(socket_path).encode("utf-8")), 104)
+
+    def test_stop_app_server_terminates_child_processes_in_launch_group(self) -> None:
+        script = (
+            "import subprocess, sys, time\n"
+            "from pathlib import Path\n"
+            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            "Path(sys.argv[1]).write_text(str(child.pid), encoding='utf-8')\n"
+            "time.sleep(60)\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            child_pid_file = root / "child.pid"
+            leader = subprocess.Popen(
+                [sys.executable, "-c", script, str(child_pid_file)],
+                start_new_session=True,
+            )
+            pgid = os.getpgid(leader.pid)
+            child_pid = 0
+            previous_grace = APP_SERVER.APP_SERVER_STOP_GRACE_SECONDS
+            APP_SERVER.APP_SERVER_STOP_GRACE_SECONDS = 0.2
+            try:
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if child_pid_file.exists():
+                        child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+                        break
+                    time.sleep(0.05)
+                self.assertNotEqual(child_pid, 0)
+                self.assertEqual(os.getpgid(child_pid), pgid)
+
+                socket_path = root / "app-server.sock"
+                pid_path = root / "app-server.pid"
+                marker_path = root / "app-server.socket"
+                log_path = root / "app-server.log"
+                pid_path.write_text(f"{leader.pid}\n", encoding="utf-8")
+                marker_path.write_text(f"{socket_path}\n", encoding="utf-8")
+                socket_path.touch()
+
+                payload = APP_SERVER.stop_app_server(socket_path, pid_path, marker_path, log_path)
+
+                self.assertTrue(payload["terminated"])
+                leader.wait(timeout=2)
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline and self._pid_is_live(child_pid):
+                    time.sleep(0.05)
+                self.assertFalse(self._pid_is_live(child_pid))
+                self.assertFalse(pid_path.exists())
+                self.assertFalse(marker_path.exists())
+                self.assertFalse(socket_path.exists())
+            finally:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except OSError:
+                    pass
+                if child_pid:
+                    try:
+                        os.kill(child_pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+                try:
+                    leader.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    pass
+                APP_SERVER.APP_SERVER_STOP_GRACE_SECONDS = previous_grace
 
 
 if __name__ == "__main__":

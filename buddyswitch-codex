@@ -201,6 +201,57 @@ PY
   echo "Delete instance: ./buddyswitch-codex instance delete ${instance_id} --yes"
 }
 
+buddyswitch_start_failure_cleanup() {
+  local instance_id="$1"
+  local phase="$2"
+  local message="$3"
+  local thread_id="${4:-}"
+  local browser_port="${5:-}"
+  local stop_output=""
+
+  stop_output="$(buddyswitch_app_server_stop 2>&1)" || {
+    echo "Warning: app-server stop failed during ${phase} cleanup for ${instance_id}." >&2
+    [[ -n "${stop_output}" ]] && echo "${stop_output}" >&2
+  }
+  buddyswitch_runtime_broker_stop || true
+  buddyswitch_browser_instance_stop "${instance_id}" || true
+  buddyswitch_instance_clear_app_server "${instance_id}" "inactive"
+  buddyswitch_instance_clear_browser_port "${instance_id}"
+  buddyswitch_instance_record_failure "${instance_id}" "${phase}" "${message}" "${thread_id}" "${browser_port}"
+}
+
+buddyswitch_thread_bootstrap_failure_is_timeout_like() {
+  local message="$1"
+
+  [[ "${message}" == *"timed out waiting for thread/inject_items"* ]] ||
+    [[ "${message}" == *"timed out waiting for thread/bootstrap"* ]] ||
+    [[ "${message}" == *"AppServerTimeout"* ]]
+}
+
+buddyswitch_start_thread_bootstrap_with_retry() {
+  local thread_id="$1"
+  local output retry_output
+
+  BUDDYSWITCH_LAST_THREAD_BOOTSTRAP_ERROR=""
+  if output="$(buddyswitch_app_server_thread_bootstrap "${thread_id}" 2>&1)"; then
+    return 0
+  fi
+  BUDDYSWITCH_LAST_THREAD_BOOTSTRAP_ERROR="${output}"
+  if ! buddyswitch_thread_bootstrap_failure_is_timeout_like "${output}"; then
+    [[ -n "${output}" ]] && echo "${output}" >&2
+    return 1
+  fi
+
+  echo "Thread bootstrap timed out for ${thread_id}; retrying once." >&2
+  if retry_output="$(buddyswitch_app_server_thread_bootstrap "${thread_id}" 2>&1)"; then
+    BUDDYSWITCH_LAST_THREAD_BOOTSTRAP_ERROR=""
+    return 0
+  fi
+  BUDDYSWITCH_LAST_THREAD_BOOTSTRAP_ERROR="${retry_output:-${output}}"
+  [[ -n "${retry_output}" ]] && echo "${retry_output}" >&2
+  return 1
+}
+
 start_locked_bootstrap() {
   local requested_buddy requested_instance_id app_server_json thread_json thread_id
   buddyswitch_require_runtime_lock
@@ -232,20 +283,31 @@ start_locked_bootstrap() {
   buddyswitch_instance_activate "${requested_instance_id}" "${requested_buddy}" "inactive" >/dev/null
   buddyswitch_runtime_broker_ensure
   buddyswitch_patch_codex_config
+  if ! buddyswitch_env_mcp_ensure; then
+    buddyswitch_runtime_broker_stop
+    return 1
+  fi
   if ! buddyswitch_browser_bootstrap; then
     buddyswitch_runtime_broker_stop
     return 1
   fi
   buddyswitch_instance_set_browser_port "${requested_instance_id}" "${BUDDYSWITCH_BROWSER_PORT}"
   app_server_json="$(buddyswitch_app_server_ensure)" || {
-    buddyswitch_runtime_broker_stop
-    buddyswitch_browser_instance_stop "${requested_instance_id}" || true
+    buddyswitch_start_failure_cleanup \
+      "${requested_instance_id}" \
+      "app_server_ensure" \
+      "App-server ensure failed." \
+      "" \
+      "${BUDDYSWITCH_BROWSER_PORT:-}"
     return 1
   }
   thread_json="$(buddyswitch_app_server_thread_start)" || {
-    buddyswitch_app_server_stop || true
-    buddyswitch_runtime_broker_stop
-    buddyswitch_browser_instance_stop "${requested_instance_id}" || true
+    buddyswitch_start_failure_cleanup \
+      "${requested_instance_id}" \
+      "thread_start" \
+      "${thread_json:-thread/start failed.}" \
+      "" \
+      "${BUDDYSWITCH_BROWSER_PORT:-}"
     return 1
   }
   thread_id="$(
@@ -264,17 +326,22 @@ PY
   if [[ -z "${thread_id}" ]]; then
     echo "App-server thread start did not return thread.id." >&2
     echo "${thread_json}" >&2
-    buddyswitch_app_server_stop || true
-    buddyswitch_runtime_broker_stop
-    buddyswitch_browser_instance_stop "${requested_instance_id}" || true
+    buddyswitch_start_failure_cleanup \
+      "${requested_instance_id}" \
+      "thread_start" \
+      "App-server thread start did not return thread.id." \
+      "" \
+      "${BUDDYSWITCH_BROWSER_PORT:-}"
     return 1
   fi
-  if ! buddyswitch_app_server_thread_bootstrap "${thread_id}" >/dev/null; then
+  if ! buddyswitch_start_thread_bootstrap_with_retry "${thread_id}"; then
     echo "Thread bootstrap failed for ${thread_id}." >&2
-    buddyswitch_app_server_stop || true
-    buddyswitch_runtime_broker_stop
-    buddyswitch_browser_instance_stop "${requested_instance_id}" || true
-    buddyswitch_instance_clear_app_server "${requested_instance_id}" "inactive"
+    buddyswitch_start_failure_cleanup \
+      "${requested_instance_id}" \
+      "thread_bootstrap" \
+      "${BUDDYSWITCH_LAST_THREAD_BOOTSTRAP_ERROR:-Thread bootstrap failed for ${thread_id}.}" \
+      "${thread_id}" \
+      "${BUDDYSWITCH_BROWSER_PORT:-}"
     return 1
   fi
   buddyswitch_instance_set_app_server \
@@ -1492,8 +1559,14 @@ instance_delete_locked() {
     echo "Instance delete blocked: active browser cockpit detected for ${instance_id}." >&2
     return 3
   fi
-  if buddyswitch_browser_instance_endpoint_is_active "${instance_id}"; then
+  local browser_ownership
+  browser_ownership="$(buddyswitch_browser_instance_endpoint_ownership_state "${instance_id}")"
+  if [[ "${browser_ownership}" == "owned" ]]; then
     echo "Instance delete blocked: active browser cockpit detected for ${instance_id}." >&2
+    return 3
+  fi
+  if [[ "${browser_ownership}" == "unknown" ]]; then
+    echo "Instance delete blocked: active browser cockpit ownership could not be verified for ${instance_id}." >&2
     return 3
   fi
 

@@ -82,8 +82,6 @@ def _build_definition() -> ToolDefinition:
         id="task",
         title="Task Management",
         description="Read, propose, and confirm active-buddy private task state inside the instance-local taskbox.",
-        cli_resource="task",
-        command="python3 scripts/env/client.py task <action> --payload '<json-object>'",
         scope="instance-local active-buddy private taskbox",
         capability_boundary="Only the active buddy's taskbox inside the active instance is readable and writable.",
         object_model=(

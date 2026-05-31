@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -15,6 +16,12 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from env.tool_runtime import registry as tool_registry
 from runtime_kernel.client import RuntimeBrokerError, broker_unavailable_feedback, request_runtime_broker
+
+_PRODUCT_MODE_ENV_KEYS = (
+    "BUDDYSWITCH_INSTANCE_ID",
+    "BUDDYSWITCH_ACTIVE_BUDDY",
+    "BUDDYSWITCH_RUNTIME_BROKER_SOCKET",
+)
 
 
 def _error_payload(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -77,6 +84,56 @@ def _load_json_object(raw: str) -> dict[str, Any]:
     return payload
 
 
+def _product_mode_env_cli_disabled_payload() -> dict[str, Any]:
+    return _error_payload(
+        "E_ENV_CLI_PRODUCT_MODE_DISABLED",
+        "env CLI is disabled for product-mode runtime actions; use native BuddySwitch env MCP tools.",
+        {
+            "permission_boundary": "product-mode-native-mcp-only",
+            "human_summary": "Product-mode env runtime actions must use native BuddySwitch env MCP tools.",
+            "why_blocked": "This process is running with BuddySwitch product-mode environment variables and the admin CLI override is not set.",
+            "impact": "No env action ran and runtime state was unchanged.",
+            "state_changed": False,
+            "durability": "none",
+            "retryable": False,
+            "retry_guidance": "Use native BuddySwitch env MCP tools, or inspect runtime diagnostics before retrying native tools.",
+            "allowed_next_actions": [
+                "Use native BuddySwitch env MCP tools such as context__summarize, context__get, and the relevant <tool>__<action>.",
+                "Use python3 scripts/turn_runtime.py status for runtime diagnostics.",
+                "Set BUDDYSWITCH_ALLOW_ENV_ADMIN_CLI=1 only for explicit human/admin debug sessions.",
+            ],
+            "allowed_next_action_options": [
+                {
+                    "id": "context.summarize",
+                    "tool": "context",
+                    "action": "summarize",
+                    "native_tool": "context__summarize",
+                    "mutates": "none",
+                    "preconditions": [],
+                    "reason": "Use when product-mode context should be inspected through native MCP tools.",
+                    "source_refs": ["runtime_context.operation_semantics['context.summarize']"],
+                },
+                {
+                    "id": "context.get",
+                    "tool": "context",
+                    "action": "get",
+                    "native_tool": "context__get",
+                    "mutates": "none",
+                    "preconditions": [],
+                    "reason": "Use when exact runtime tool catalog and schema details are needed through native MCP tools.",
+                    "source_refs": ["runtime_context.operation_semantics['context.get']"],
+                },
+            ],
+        },
+    )
+
+
+def _product_mode_env_cli_disabled() -> bool:
+    if os.environ.get("BUDDYSWITCH_ALLOW_ENV_ADMIN_CLI") == "1":
+        return False
+    return any(os.environ.get(key) for key in _PRODUCT_MODE_ENV_KEYS)
+
+
 def _dispatch_env_tool(tool: str, action: str, args: dict[str, Any]) -> dict[str, Any]:
     params = {
         "tool": tool,
@@ -125,6 +182,10 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     try:
+        if _product_mode_env_cli_disabled():
+            response = _product_mode_env_cli_disabled_payload()
+            print(json.dumps(response, ensure_ascii=True, indent=2))
+            return 1
         args = _parse_args()
         tool = getattr(args, "_env_tool", None)
         action = getattr(args, "_env_action", None)

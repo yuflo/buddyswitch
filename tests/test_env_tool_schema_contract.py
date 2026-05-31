@@ -325,8 +325,6 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             id="example",
             title="Example",
             description="Example tool",
-            cli_resource="example",
-            command="python3 scripts/env/client.py example do --payload '{}'",
             scope="example scope",
             capability_boundary="example capability boundary",
             object_model="Example objects are test-only validation rows.",

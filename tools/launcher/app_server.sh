@@ -188,7 +188,8 @@ buddyswitch_app_server_thread_bootstrap() {
   local thread_id="$1"
   python3 "${BUDDYSWITCH_APP_SERVER_HELPER}" thread-bootstrap \
     --socket "$(buddyswitch_app_server_socket)" \
-    --thread-id "${thread_id}"
+    --thread-id "${thread_id}" \
+    --timeout-seconds "${BUDDYSWITCH_THREAD_BOOTSTRAP_TIMEOUT_SECONDS:-30}"
 }
 
 buddyswitch_app_server_thread_read() {

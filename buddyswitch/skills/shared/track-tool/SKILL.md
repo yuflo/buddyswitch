@@ -11,28 +11,21 @@ description: Use when you need shared track-page context, PM lifecycle actions, 
 - Apply PM-owned lifecycle create/archive when authority allows.
 
 ## Runtime Route
-- CLI: `python3 scripts/env/client.py track add-material --payload '{"track_id":"track-alpha","artifact_id":"art-alpha","label":"Design Direction","summary":"Current design direction."}'`
-- Broker method: `env.tool`
-- Discover current operations, payload keys, effects, and recovery guidance with `context.get.tool_catalog['track']` or `python3 scripts/turn_runtime.py status`.
-
-## CLI Payload Rule
-- `--payload` takes one JSON object string.
-- Do not pass a filesystem path to `--payload`.
-- For long markdown bodies, generate JSON with `python3 - <<'PY'` and pass it via command substitution.
-
-```bash
-python3 scripts/env/client.py track add-material --payload '{"track_id":"track-alpha","artifact_id":"art-alpha","label":"Design Direction","summary":"Current design direction."}'
-```
+- Primary: use native BuddySwitch env MCP tools such as `track__list`, `track__open`, `track__create`, `track__update_now`, `track__add_material`, `track__add_update`, `track__add_proof`, and `track__archive`.
+- Exact payload schemas, allowed fields, effects, and response meanings come from native tool schemas and `context.get.tool_catalog['track']`.
+- Diagnostic fallback: `python3 scripts/turn_runtime.py status`.
+- Broker method remains `env.tool`; do not edit runtime state files directly.
 
 ## Workflow Notes
-- Shared collaboration path is `track.open -> shared_materials -> artifact.get`.
-- `add-material` and `add-proof` publish existing draft `artifact_id` values.
-- Track publication is the shared-state mutation path for artifact visibility.
-- `track.open` returns refs/summaries; use `artifact.get` for full markdown bodies.
+- Shared collaboration path is `track__open` -> shared materials -> `artifact__get`.
+- `track__add_material` and `track__add_proof` publish existing draft artifact ids. Historical CLI wording for these actions was add-material / add-proof; the product path is the native track tool.
+- `track__add_update` records timeline progress.
+- `track__update_now` records current next step or blocker.
+- `track__open` returns refs and summaries; use `artifact__get` for full markdown bodies.
 - Tasks are private hints and never required for shared material reads.
-- For action payloads and return meanings, inspect `context.get.tool_catalog['track']` or `python3 scripts/turn_runtime.py status`; runtime response fields are authoritative for effects and recovery.
+- For action details and recovery guidance, inspect `context.get.tool_catalog['track']` or `python3 scripts/turn_runtime.py status`; runtime response fields are authoritative.
 
 ## Verification
 - Confirm `ok=true`, returned ids, and `state_changes` for relation/lifecycle mutations.
 - On rejection, trust `permission_boundary`, `why_blocked`, `state_changed`, `durability`, `correctable_fields`, and `alternative_capabilities`.
-- Do not edit runtime state files directly.
+- Do not edit `buddyswitch/objects/**` or instance runtime state directly.

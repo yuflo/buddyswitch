@@ -32,6 +32,8 @@ buddyswitch_env_init() {
   export BUDDYSWITCH_RUN_STATE_DIR="${shared_root}/run"
   export BUDDYSWITCH_RUNTIME_LOCK_HELPER="${BUDDYSWITCH_RUNTIME_LOCK_HELPER:-${BUDDYSWITCH_RUNTIME_LOCK_HELPER_DEFAULT}}"
   export BUDDYSWITCH_REPO_ROOT="${BUDDYSWITCH_REPO_ROOT:-${REPO_ROOT:-$(cd "${BUDDYSWITCH_LAUNCHER_DIR}/../.." && pwd)}}"
+  export BUDDYSWITCH_ENV_MCP_NAME="${BUDDYSWITCH_ENV_MCP_NAME:-buddyswitch-env}"
+  export BUDDYSWITCH_ENV_MCP_SERVER="${BUDDYSWITCH_ENV_MCP_SERVER:-${BUDDYSWITCH_REPO_ROOT}/tools/launcher/env_tool_mcp_server.py}"
 
   buddyswitch_workspace_init_defaults
 }
@@ -139,6 +141,125 @@ EOF
 
 buddyswitch_codex_config_path() {
   printf '%s/config.toml\n' "${BUDDYSWITCH_CODEX_HOME}"
+}
+
+buddyswitch_env_mcp_has_server() {
+  local server_name="$1"
+  local config_path
+
+  config_path="$(buddyswitch_codex_config_path)"
+  if [[ ! -f "${config_path}" ]]; then
+    return 1
+  fi
+
+  grep -Eq "^\\[mcp_servers\\.${server_name}\\]$" "${config_path}"
+}
+
+buddyswitch_env_mcp_matches_instance() {
+  local server_name="$1"
+  local config_path
+  local active_buddy
+
+  config_path="$(buddyswitch_codex_config_path)"
+  active_buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
+  if [[ ! -f "${config_path}" ]]; then
+    return 1
+  fi
+  if [[ -z "${BUDDYSWITCH_INSTANCE_ID:-}" || -z "${active_buddy}" || -z "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET:-}" ]]; then
+    return 1
+  fi
+
+  python3 - "${config_path}" "${server_name}" "${BUDDYSWITCH_ENV_MCP_SERVER}" "${BUDDYSWITCH_REPO_ROOT}" "${BUDDYSWITCH_INSTANCE_ID}" "${active_buddy}" "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" <<'PY'
+import sys
+from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    import tomli as tomllib
+
+config_path = Path(sys.argv[1])
+server_name = sys.argv[2]
+server_path = sys.argv[3]
+repo_root = sys.argv[4]
+instance_id = sys.argv[5]
+buddy = sys.argv[6]
+broker_socket = sys.argv[7]
+
+try:
+    payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+
+server = payload.get("mcp_servers", {}).get(server_name)
+if not isinstance(server, dict):
+    raise SystemExit(1)
+args = server.get("args")
+if server.get("command") != "python3" or not isinstance(args, list):
+    raise SystemExit(1)
+
+required = [
+    server_path,
+    "--repo-root",
+    repo_root,
+    "--instance-id",
+    instance_id,
+    "--buddy",
+    buddy,
+    "--broker-socket",
+    broker_socket,
+]
+for value in required:
+    if value not in args:
+        raise SystemExit(1)
+PY
+}
+
+buddyswitch_env_mcp_remove_server() {
+  local server_name="$1"
+  buddyswitch_run_codex mcp remove "${server_name}"
+}
+
+buddyswitch_env_mcp_add_server() {
+  local server_name="$1"
+  local active_buddy
+  active_buddy="${BUDDYSWITCH_ACTIVE_BUDDY:-${BUDDYSWITCH_START_BUDDY:-}}"
+
+  if [[ -z "${active_buddy}" ]]; then
+    echo "BuddySwitch env MCP registration requires an active buddy." >&2
+    return 2
+  fi
+  if [[ -z "${BUDDYSWITCH_INSTANCE_ID:-}" ]]; then
+    echo "BuddySwitch env MCP registration requires BUDDYSWITCH_INSTANCE_ID." >&2
+    return 2
+  fi
+  if [[ -z "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET:-}" ]]; then
+    echo "BuddySwitch env MCP registration requires BUDDYSWITCH_RUNTIME_BROKER_SOCKET." >&2
+    return 2
+  fi
+
+  buddyswitch_run_codex mcp add "${server_name}" -- \
+    python3 \
+    "${BUDDYSWITCH_ENV_MCP_SERVER}" \
+    --repo-root "${BUDDYSWITCH_REPO_ROOT}" \
+    --instance-id "${BUDDYSWITCH_INSTANCE_ID}" \
+    --buddy "${active_buddy}" \
+    --broker-socket "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" || return $?
+  buddyswitch_patch_codex_config
+}
+
+buddyswitch_env_mcp_ensure() {
+  local server_name
+  server_name="${BUDDYSWITCH_ENV_MCP_NAME}"
+
+  if buddyswitch_env_mcp_has_server "${server_name}"; then
+    if buddyswitch_env_mcp_matches_instance "${server_name}"; then
+      return 0
+    fi
+    buddyswitch_env_mcp_remove_server "${server_name}" || return $?
+  fi
+
+  buddyswitch_env_mcp_add_server "${server_name}"
 }
 
 buddyswitch_validate_buddy_id() {
@@ -637,6 +758,92 @@ temp_path.replace(instance_json)
 PY
 }
 
+buddyswitch_instance_clear_browser_port() {
+  local instance_id="$1"
+  local instance_json
+
+  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+
+  python3 - "${instance_json}" "${instance_id}" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+instance_json = Path(sys.argv[1])
+instance_id = sys.argv[2]
+
+if not instance_json.exists():
+    raise SystemExit(f"Instance record missing: {instance_json}")
+
+payload = json.loads(instance_json.read_text(encoding="utf-8"))
+if payload.get("instance_id") != instance_id:
+    raise SystemExit(f"Instance id mismatch in {instance_json}")
+
+payload["browser_port"] = None
+payload["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+temp_path = instance_json.with_suffix(".tmp")
+temp_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+temp_path.replace(instance_json)
+PY
+}
+
+buddyswitch_instance_record_failure() {
+  local instance_id="$1"
+  local phase="$2"
+  local message="$3"
+  local thread_id="${4:-}"
+  local browser_port="${5:-}"
+  local instance_json
+
+  instance_json="$(buddyswitch_instance_json_path "${instance_id}")"
+
+  python3 - "${instance_json}" "${instance_id}" "${phase}" "${message}" "${thread_id}" "${browser_port}" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+instance_json = Path(sys.argv[1])
+instance_id = sys.argv[2]
+phase = sys.argv[3]
+message = sys.argv[4]
+thread_id = sys.argv[5]
+browser_port_text = sys.argv[6]
+
+if not instance_json.exists():
+    raise SystemExit(f"Instance record missing: {instance_json}")
+
+payload = json.loads(instance_json.read_text(encoding="utf-8"))
+if payload.get("instance_id") != instance_id:
+    raise SystemExit(f"Instance id mismatch in {instance_json}")
+
+now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+failure = {
+    "phase": phase,
+    "message": message,
+    "failed_at": now,
+}
+if thread_id:
+    failure["thread_id"] = thread_id
+if browser_port_text:
+    try:
+        browser_port = int(browser_port_text)
+    except ValueError:
+        browser_port = None
+    if browser_port is not None:
+        failure["browser_port"] = browser_port
+
+payload["last_failure"] = failure
+payload["updated_at"] = now
+
+temp_path = instance_json.with_suffix(".tmp")
+temp_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+temp_path.replace(instance_json)
+PY
+}
+
 buddyswitch_instance_app_server_is_active() {
   local instance_id="$1"
   if [[ -z "${instance_id}" ]]; then
@@ -719,6 +926,13 @@ buddyswitch_arg_sets_native_web_search() {
   return 1
 }
 
+buddyswitch_print_native_search_rejection() {
+  echo "Native Codex web_search is disabled in BuddySwitch product sessions." >&2
+  echo "Use native BuddySwitch env MCP tool: search__status" >&2
+  echo "Use native BuddySwitch env MCP tool: search__open_browser" >&2
+  echo "Diagnostic: python3 scripts/turn_runtime.py status" >&2
+}
+
 buddyswitch_reject_native_search_args() {
   local arg next
   while [[ $# -gt 0 ]]; do
@@ -726,16 +940,12 @@ buddyswitch_reject_native_search_args() {
     next="${2:-}"
     case "${arg}" in
       --search|--search=*)
-        echo "Native Codex web_search is disabled in BuddySwitch product sessions." >&2
-        echo "Use: python3 scripts/env/client.py search status" >&2
-        echo "Use: python3 scripts/env/client.py search open-browser --query '<query>' --engine google" >&2
+        buddyswitch_print_native_search_rejection
         return 2
         ;;
       -c|--config)
         if [[ -n "${next}" ]] && buddyswitch_arg_sets_native_web_search "${next}"; then
-          echo "Native Codex web_search is disabled in BuddySwitch product sessions." >&2
-          echo "Use: python3 scripts/env/client.py search status" >&2
-          echo "Use: python3 scripts/env/client.py search open-browser --query '<query>' --engine google" >&2
+          buddyswitch_print_native_search_rejection
           return 2
         fi
         if [[ $# -ge 2 ]]; then
@@ -747,9 +957,7 @@ buddyswitch_reject_native_search_args() {
         ;;
       -c*|--config=*)
         if buddyswitch_arg_sets_native_web_search "${arg}"; then
-          echo "Native Codex web_search is disabled in BuddySwitch product sessions." >&2
-          echo "Use: python3 scripts/env/client.py search status" >&2
-          echo "Use: python3 scripts/env/client.py search open-browser --query '<query>' --engine google" >&2
+          buddyswitch_print_native_search_rejection
           return 2
         fi
         ;;

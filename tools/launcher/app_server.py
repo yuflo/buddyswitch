@@ -30,6 +30,7 @@ CLIENT_TITLE = "BuddySwitch Launcher"
 CLIENT_VERSION = "0.1.0"
 DEFAULT_TIMEOUT_SECONDS = 2.0
 DEFAULT_RPC_TIMEOUT_SECONDS = 15.0
+CLOSE_HANDSHAKE_TIMEOUT_SECONDS = 0.5
 MAX_UNIX_SOCKET_BYTES = 104
 APP_SERVER_STARTUP_POLL_SECONDS = 0.05
 APP_SERVER_STOP_GRACE_SECONDS = 2.0
@@ -185,6 +186,20 @@ def _pid_is_live(pid: int) -> bool:
     return True
 
 
+def _process_group_is_live(pgid: int) -> bool:
+    if pgid <= 0:
+        return False
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def _read_pid(pid_path: Path) -> int | None:
     raw = _read_text_file(pid_path)
     if not raw:
@@ -319,13 +334,32 @@ class AppServerClient:
             return
         try:
             self._send_frame(0x8, b"")
+            self._wait_for_peer_close()
         except OSError:
+            pass
+        except AppServerError:
             pass
         try:
             self._sock.close()
         finally:
             self._sock = None
             self._closed = True
+
+    def _wait_for_peer_close(self) -> None:
+        while True:
+            opcode, payload = self._read_frame(
+                method="websocket close",
+                timeout_seconds=min(self.timeout_seconds, CLOSE_HANDSHAKE_TIMEOUT_SECONDS),
+            )
+            if opcode == 0x8:
+                self._closed = True
+                return
+            if opcode == 0x9:
+                self._send_frame(0xA, payload)
+                continue
+            if opcode in {0x1, 0x2, 0xA}:
+                continue
+            return
 
     def initialize(self) -> dict[str, object]:
         response = self.request(
@@ -455,8 +489,8 @@ class AppServerClient:
                 continue
             raise AppServerProtocolError(f"unexpected websocket opcode {opcode} while waiting for {method}")
 
-    def _read_frame(self, *, method: str) -> tuple[int, bytes]:
-        first_two = self._read_exact(2, method=method)
+    def _read_frame(self, *, method: str, timeout_seconds: float | None = None) -> tuple[int, bytes]:
+        first_two = self._read_exact(2, method=method, timeout_seconds=timeout_seconds)
         first, second = first_two[0], first_two[1]
         opcode = first & 0x0F
         length = second & 0x7F
@@ -464,16 +498,16 @@ class AppServerClient:
         if masked:
             raise AppServerProtocolError(f"server sent masked websocket frame while waiting for {method}")
         if length == 126:
-            length = int.from_bytes(self._read_exact(2, method=method), "big")
+            length = int.from_bytes(self._read_exact(2, method=method, timeout_seconds=timeout_seconds), "big")
         elif length == 127:
-            length = int.from_bytes(self._read_exact(8, method=method), "big")
-        payload = self._read_exact(length, method=method)
+            length = int.from_bytes(self._read_exact(8, method=method, timeout_seconds=timeout_seconds), "big")
+        payload = self._read_exact(length, method=method, timeout_seconds=timeout_seconds)
         return opcode, payload
 
-    def _read_exact(self, length: int, *, method: str) -> bytes:
+    def _read_exact(self, length: int, *, method: str, timeout_seconds: float | None = None) -> bytes:
         if self._sock is None:
             raise AppServerUnavailableError(f"app-server socket is not connected: {self.socket_path}")
-        deadline = time.monotonic() + self.timeout_seconds
+        deadline = time.monotonic() + (self.timeout_seconds if timeout_seconds is None else timeout_seconds)
         while len(self._recv_buffer) < length:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -576,15 +610,37 @@ def stop_app_server(socket_path: Path, pid_path: Path, marker_path: Path, log_pa
     pid = _read_pid(pid_path)
     terminated = False
     if pid is not None and _pid_is_live(pid):
-        os.kill(pid, signal.SIGTERM)
+        pgid: int | None = None
+        try:
+            candidate_pgid = os.getpgid(pid)
+        except OSError:
+            candidate_pgid = None
+        if candidate_pgid is not None and candidate_pgid != os.getpgrp():
+            pgid = candidate_pgid
+
+        def target_is_live() -> bool:
+            if pgid is not None:
+                return _process_group_is_live(pgid)
+            return _pid_is_live(pid)
+
+        def send_signal(signum: int) -> None:
+            try:
+                if pgid is not None:
+                    os.killpg(pgid, signum)
+                else:
+                    os.kill(pid, signum)
+            except (ProcessLookupError, PermissionError):
+                return
+
+        send_signal(signal.SIGTERM)
         deadline = time.monotonic() + APP_SERVER_STOP_GRACE_SECONDS
         while time.monotonic() < deadline:
-            if not _pid_is_live(pid):
+            if not target_is_live():
                 terminated = True
                 break
             time.sleep(APP_SERVER_STARTUP_POLL_SECONDS)
-        if not terminated and _pid_is_live(pid):
-            os.kill(pid, signal.SIGKILL)
+        if not terminated and target_is_live():
+            send_signal(signal.SIGKILL)
             terminated = True
     _cleanup_runtime_files(socket_path, pid_path, marker_path)
     return {
@@ -666,8 +722,14 @@ def thread_fork(
         return client.request("thread/fork", params)
 
 
-def thread_inject_items(socket_path: Path, thread_id: str, items: list[dict[str, object]]) -> dict[str, Any]:
-    with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
+def thread_inject_items(
+    socket_path: Path,
+    thread_id: str,
+    items: list[dict[str, object]],
+    *,
+    timeout_seconds: float = DEFAULT_RPC_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    with AppServerClient(socket_path, timeout_seconds=timeout_seconds) as client:
         return client.request(
             "thread/inject_items",
             {
@@ -685,10 +747,20 @@ def thread_bootstrap_marker_item() -> dict[str, object]:
     }
 
 
-def thread_bootstrap_rollout(socket_path: Path, thread_id: str) -> dict[str, Any]:
+def thread_bootstrap_rollout(
+    socket_path: Path,
+    thread_id: str,
+    *,
+    timeout_seconds: float = DEFAULT_RPC_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
     if not thread_id:
         raise AppServerProtocolError("thread bootstrap requires a thread id")
-    thread_inject_items(socket_path, thread_id, [thread_bootstrap_marker_item()])
+    thread_inject_items(
+        socket_path,
+        thread_id,
+        [thread_bootstrap_marker_item()],
+        timeout_seconds=timeout_seconds,
+    )
     return {"ok": True, "thread_id": thread_id}
 
 
@@ -916,7 +988,11 @@ def _command_thread_resume(args: argparse.Namespace) -> int:
 
 
 def _command_thread_bootstrap(args: argparse.Namespace) -> int:
-    payload = thread_bootstrap_rollout(Path(args.socket), args.thread_id)
+    payload = thread_bootstrap_rollout(
+        Path(args.socket),
+        args.thread_id,
+        timeout_seconds=args.timeout_seconds,
+    )
     print(json.dumps(payload, ensure_ascii=True))
     return 0
 
@@ -1032,6 +1108,7 @@ def build_parser() -> argparse.ArgumentParser:
     thread_bootstrap_parser = subparsers.add_parser("thread-bootstrap")
     thread_bootstrap_parser.add_argument("--socket", required=True)
     thread_bootstrap_parser.add_argument("--thread-id", required=True)
+    thread_bootstrap_parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_RPC_TIMEOUT_SECONDS)
     thread_bootstrap_parser.set_defaults(func=_command_thread_bootstrap)
 
     thread_read_parser = subparsers.add_parser("thread-read")

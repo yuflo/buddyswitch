@@ -45,14 +45,14 @@ description: Use when the task is shaping a visible UI/UX prototype and producin
 
 ## Shared Runtime Rules
 
-- Runtime execution uses env.tool through python3 scripts/env/client.py ... .
+- Runtime execution uses native BuddySwitch env MCP tools through env.tool; use runtime discovery when exact schemas matter.
 - Product-readable durable state is written explicitly as task or artifact objects.
 - Use `$BUDDYSWITCH_BUDDYBOX_DIR` for active-instance private working files and `artifact.attach_file` when a file must become product-readable.
 - Return after required explicit durable writes are complete.
 
 ## BuddySwitch Commit Output
 
-Write durable outputs explicitly via env tools. Do not rely on deprecated prepare/persist flows.
+Write durable outputs explicitly via native BuddySwitch env MCP tools. Do not rely on deprecated prepare/persist flows.
 
 Required top-level field:
 - `execution_summary`

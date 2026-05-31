@@ -197,6 +197,24 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.addCleanup(server.shutdown)
         return server, thread, int(server.server_port)
 
+    def _assert_no_env_cli_hint(self, response: dict[str, object]) -> None:
+        self.assertNotIn("command_hint", response, msg=response)
+        self.assertNotIn("scripts/env/client.py", json.dumps(response, ensure_ascii=True), msg=response)
+
+    def _assert_next_option(self, response: dict[str, object], *, tool: str, action: str) -> None:
+        options = response.get("allowed_next_action_options")
+        self.assertIsInstance(options, list, msg=response)
+        assert isinstance(options, list)
+        expected_native = f"{tool}__{action}"
+        for option in options:
+            if not isinstance(option, dict):
+                continue
+            if option.get("tool") == tool and option.get("action") == action:
+                self.assertEqual(option.get("native_tool"), expected_native, msg=option)
+                self.assertIsInstance(option.get("reason"), str, msg=option)
+                return
+        self.fail(f"missing next action option {expected_native}: {response}")
+
     def test_search_cli_help_exposes_status_request_and_open_browser(self) -> None:
         resource_help = subprocess.run(
             ["python3", "scripts/env/client.py", "search", "--help"],
@@ -283,7 +301,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         )
         self.assertIn("permission_boundary", response)
         self.assertIn("allowed_next_actions", response)
-        self.assertIn("command_hint", response)
+        self._assert_no_env_cli_hint(response)
+        self._assert_next_option(response, tool="search", action="open_browser")
         self.assertNotIn("preferred_backend", response)
         self.assertNotIn("market_workflow", response)
 
@@ -318,8 +337,10 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("page_opened"), False)
         self.assertNotIn("tool_evidence", response)
         self.assertIn("search.open_browser", " ".join(response.get("allowed_next_actions", [])))
+        self._assert_no_env_cli_hint(response)
+        self._assert_next_option(response, tool="search", action="open_browser")
 
-    def test_search_request_command_hint_does_not_echo_raw_query(self) -> None:
+    def test_search_request_next_action_option_does_not_echo_raw_query(self) -> None:
         instance_json = self._instance_json(browser_port=9222)
         query = "creator' && echo pwned"
         response = self._dispatch(
@@ -328,14 +349,11 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
             instance_json=instance_json,
         )
         self.assertTrue(response.get("ok"), msg=response)
-        command_hint = response.get("command_hint")
-        self.assertIsInstance(command_hint, str, msg=response)
-        assert isinstance(command_hint, str)
-        self.assertIn("--payload", command_hint)
-        self.assertIn('"query":"<query>"', command_hint)
-        self.assertIn('"engine":"google"', command_hint)
-        self.assertNotIn(query, command_hint)
-        self.assertNotIn("&&", command_hint)
+        self._assert_no_env_cli_hint(response)
+        self._assert_next_option(response, tool="search", action="open_browser")
+        options_text = json.dumps(response.get("allowed_next_action_options"), ensure_ascii=True)
+        self.assertNotIn(query, options_text)
+        self.assertNotIn("&&", options_text)
 
     def test_search_request_browser_builds_expected_url_for_supported_engines(self) -> None:
         instance_json = self._instance_json(browser_port=9222)
@@ -366,7 +384,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertEqual(response.get("allowed_backends"), ["browser", "search_api"])
                 self.assertIn("permission_boundary", response)
                 self.assertIn("allowed_next_actions", response)
-                self.assertIn("command_hint", response)
+                self._assert_no_env_cli_hint(response)
+                self._assert_next_option(response, tool="search", action="status")
 
     def test_search_request_rejects_empty_null_and_non_string_backend(self) -> None:
         instance_json = self._instance_json()
@@ -393,7 +412,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(response.get("ok"), msg=response)
         self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BACKEND_APPROVAL_REQUIRED")
         self.assertEqual(response.get("permission_boundary"), "search.search_api.user_approved_only")
-        self.assertIn("search open-browser", str(response.get("command_hint")))
+        self._assert_no_env_cli_hint(response)
+        self._assert_next_option(response, tool="search", action="open_browser")
 
     def test_search_request_search_api_returns_non_market_provider_unavailable(self) -> None:
         instance_json = self._instance_json(buddy="dev")
@@ -408,6 +428,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertFalse(response.get("ok"), msg=response)
         self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BACKEND_UNAVAILABLE")
         self.assertIn("No BuddySwitch-managed search API provider is configured", response.get("reason", ""))
+        self._assert_no_env_cli_hint(response)
+        self._assert_next_option(response, tool="search", action="open_browser")
 
     def test_search_open_browser_creates_background_cdp_target(self) -> None:
         state: dict[str, object] = {"requests": []}
@@ -481,10 +503,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
 
         self.assertFalse(response.get("ok"), msg=response)
         self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_UNAVAILABLE")
-        self.assertEqual(
-            response.get("command_hint"),
-            f"./buddyswitch-codex env browser ensure --instance {self._runtime_instance_id(buddy='market', label='inst-search-example')}",
-        )
+        self._assert_no_env_cli_hint(response)
+        self._assert_next_option(response, tool="search", action="status")
 
     def test_search_open_browser_reports_cdp_open_failure_with_target_url(self) -> None:
         state: dict[str, object] = {"requests": [], "fail": True}
@@ -501,6 +521,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_OPEN_FAILED")
         self.assertEqual(response.get("target_url"), "https://www.google.com/search?q=creator+analytics+pain")
         self.assertEqual(response.get("browser_endpoint"), f"http://127.0.0.1:{port}")
+        self._assert_no_env_cli_hint(response)
+        self._assert_next_option(response, tool="search", action="status")
 
     def test_search_source_has_no_direct_json_new_page_open(self) -> None:
         text = (ROOT / "scripts" / "env" / "tools" / "search" / "_impl.py").read_text(encoding="utf-8")
@@ -508,6 +530,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
         self.assertNotIn('"tools"', text)
         self.assertNotIn('"launcher"', text)
         self.assertNotIn("tools" + "/launcher", text)
+        self.assertNotIn("scripts/env/client.py", text)
         self.assertIn('"scripts"', text)
         self.assertIn('"env"', text)
         self.assertIn("cdp_background_page.py", text)
@@ -526,6 +549,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertFalse(response.get("ok"), msg=response)
                 self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_BROWSER_UNAVAILABLE")
                 self.assertIn("invalid", response.get("reason", ""))
+                self._assert_no_env_cli_hint(response)
+                self._assert_next_option(response, tool="search", action="status")
 
     def test_search_rejects_empty_query_and_unknown_engine(self) -> None:
         instance_json = self._instance_json()
@@ -539,6 +564,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 )
                 self.assertFalse(response.get("ok"), msg=response)
                 self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_QUERY")
+                self._assert_no_env_cli_hint(response)
+                self._assert_next_option(response, tool="search", action="status")
 
         for engine in ("", "bing"):
             with self.subTest(engine=engine):
@@ -550,6 +577,8 @@ class SearchEnvToolTests(RuntimeWorkspaceTestMixin, unittest.TestCase):
                 self.assertFalse(response.get("ok"), msg=response)
                 self.assertEqual(response.get("error", {}).get("code"), "E_SEARCH_ENGINE")
                 self.assertEqual(response.get("allowed_engines"), ["google", "web", "reddit", "x"])
+                self._assert_no_env_cli_hint(response)
+                self._assert_next_option(response, tool="search", action="status")
 
     def test_browser_and_search_dependency_rejections_include_semantic_impact(self) -> None:
         self.test_search_request_search_api_returns_market_approval_required()

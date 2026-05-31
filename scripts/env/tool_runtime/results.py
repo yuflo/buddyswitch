@@ -141,6 +141,7 @@ def next_action_option(
         "id": option_id or f"{tool}.{action}",
         "tool": tool,
         "action": action,
+        "native_tool": f"{tool}__{action}",
         "mutates": normalized_mutates,
         "preconditions": normalized_preconditions,
         "reason": _require_conditional_affordance_text(reason, "reason"),

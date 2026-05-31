@@ -15,8 +15,6 @@ def _build_definition() -> ToolDefinition:
         id='context',
         title='Context Discovery',
         description='Read runtime orientation, compact affordances, full tool catalog, operation semantics, and read-only source_workspace and writable_surfaces facts.',
-        cli_resource='context',
-        command="python3 scripts/env/client.py context <action> --payload '<json-object>'",
         scope='runless read-only orientation payload',
         capability_boundary='Context actions are read-only orientation only; they do not configure source roots or grant write authority.',
         object_model=(

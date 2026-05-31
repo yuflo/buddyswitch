@@ -119,6 +119,14 @@ def _require_allowed_fields(action: str, args: dict[str, Any], context: SearchSe
         allowed_next_actions=[
             "Use search.status to inspect supported payload fields and capability boundary.",
         ],
+        allowed_next_action_options=[
+            tool_results.next_action_option(
+                tool="search",
+                action="status",
+                option_id="search_status_for_payload_boundary",
+                reason="Use when you need supported field and capability metadata before retrying.",
+            )
+        ],
         correctable_fields=unknown,
     )
 
@@ -189,9 +197,16 @@ def _engine_error(*, action: str, context: SearchServiceContext) -> dict[str, An
                 condition="Use when you need backend and engine boundary metadata before retrying.",
             )
         ],
+        allowed_next_action_options=[
+            tool_results.next_action_option(
+                tool="search",
+                action="status",
+                option_id="search_status_for_engine_boundary",
+                reason="Use when you need supported engine values before retrying.",
+            )
+        ],
         extra={
             "allowed_engines": list(ALLOWED_ENGINES),
-            "command_hint": "python3 scripts/env/client.py search open-browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
         },
     )
 
@@ -222,9 +237,14 @@ def _query_error(*, action: str, context: SearchServiceContext) -> dict[str, Any
                 condition="Use when you need search boundary metadata before retrying a query.",
             )
         ],
-        extra={
-            "command_hint": "python3 scripts/env/client.py search open-browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
-        },
+        allowed_next_action_options=[
+            tool_results.next_action_option(
+                tool="search",
+                action="status",
+                option_id="search_status_for_query_boundary",
+                reason="Use when you need search capability metadata before retrying a query.",
+            )
+        ],
     )
 
 
@@ -254,9 +274,16 @@ def _backend_error(*, context: SearchServiceContext) -> dict[str, Any]:
                 condition="Use when you need the allowed backend set before retrying.",
             )
         ],
+        allowed_next_action_options=[
+            tool_results.next_action_option(
+                tool="search",
+                action="status",
+                option_id="search_status_for_backend_boundary",
+                reason="Use when you need allowed backend metadata before retrying.",
+            )
+        ],
         extra={
             "allowed_backends": list(ALLOWED_BACKENDS),
-            "command_hint": "python3 scripts/env/client.py search request --payload '{\"query\":\"<query>\",\"backend\":\"browser\",\"engine\":\"google\"}'",
         },
     )
 
@@ -271,7 +298,6 @@ def _browser_unavailable(
 ) -> dict[str, Any]:
     extra: dict[str, Any] = {
         "reason": reason,
-        "command_hint": f"./buddyswitch-codex env browser ensure --instance {context['instance_id']}",
     }
     if target_url is not None:
         extra["target_url"] = target_url
@@ -300,6 +326,14 @@ def _browser_unavailable(
                 tool="search",
                 action="status",
                 condition="Use when you need browser readiness metadata before retrying browser actions.",
+            )
+        ],
+        allowed_next_action_options=[
+            tool_results.next_action_option(
+                tool="search",
+                action="status",
+                option_id="search_status_for_browser_readiness",
+                reason="Use when you need browser readiness metadata before retrying browser actions.",
             )
         ],
         extra=extra,
@@ -343,11 +377,24 @@ def _browser_open_failed(
                 condition="Use when you need to re-validate target URL intent before opening browser.",
             ),
         ],
+        allowed_next_action_options=[
+            tool_results.next_action_option(
+                tool="search",
+                action="status",
+                option_id="search_status_for_browser_open_failure",
+                reason="Use when you need browser endpoint health metadata before retrying.",
+            ),
+            tool_results.next_action_option(
+                tool="search",
+                action="request",
+                option_id="search_request_to_revalidate_target",
+                reason="Use when you need to re-validate target URL intent before opening browser.",
+            ),
+        ],
         extra={
             "target_url": target_url,
             "browser_endpoint": browser_endpoint,
             "reason": reason,
-            "command_hint": f"./buddyswitch-codex env browser ensure --instance {context['instance_id']}",
         },
     )
 
@@ -385,8 +432,21 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
                     condition="Use when you need backend availability metadata before retrying.",
                 ),
             ],
+            allowed_next_action_options=[
+                tool_results.next_action_option(
+                    tool="search",
+                    action="open_browser",
+                    option_id="search_open_browser_when_search_api_blocked",
+                    reason="Use when browser backend is available and search_api is blocked.",
+                ),
+                tool_results.next_action_option(
+                    tool="search",
+                    action="status",
+                    option_id="search_status_for_backend_availability",
+                    reason="Use when you need backend availability metadata before retrying.",
+                ),
+            ],
             extra={
-                "command_hint": "python3 scripts/env/client.py search open-browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
                 "reason": "No BuddySwitch-managed search API provider is configured.",
             },
         )
@@ -420,8 +480,21 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
                 condition="Use when you need backend availability metadata before retrying.",
             ),
         ],
+        allowed_next_action_options=[
+            tool_results.next_action_option(
+                tool="search",
+                action="open_browser",
+                option_id="search_open_browser_when_search_api_unavailable",
+                reason="Use when browser backend is available and search_api provider is unavailable.",
+            ),
+            tool_results.next_action_option(
+                tool="search",
+                action="status",
+                option_id="search_status_for_backend_availability",
+                reason="Use when you need backend availability metadata before retrying.",
+            ),
+        ],
         extra={
-            "command_hint": "python3 scripts/env/client.py search open-browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
             "reason": "No BuddySwitch-managed search API provider is configured.",
         },
     )
@@ -473,10 +546,17 @@ def status_for_active_instance(*, args: dict[str, Any], context: SearchServiceCo
         allowed_next_actions=[
             "Use search.open_browser with backend browser for browser-native discovery.",
         ],
+        allowed_next_action_options=[
+            tool_results.next_action_option(
+                tool="search",
+                action="open_browser",
+                option_id="search_open_for_browser_native_discovery",
+                reason="Use when the browser backend is available and the host needs browser-native discovery.",
+            )
+        ],
         extra={
             **_status_payload(context, boundary),
             "permission_boundary": "search.profile",
-            "command_hint": "python3 scripts/env/client.py search open-browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
         },
     )
 
@@ -541,10 +621,6 @@ def request_for_active_instance(*, args: dict[str, Any], context: SearchServiceC
             "required_cockpit_tool": REQUIRED_COCKPIT_TOOL,
             "page_opened": False,
             "permission_boundary": "search.browser",
-            "command_hint": (
-                f"python3 scripts/env/client.py search open-browser "
-                f"--payload '{{\"query\":\"<query>\",\"engine\":\"{engine}\"}}'"
-            ),
         },
     )
 
@@ -608,7 +684,6 @@ def open_browser_for_active_instance(*, args: dict[str, Any], context: SearchSer
             "page_opened": True,
             "permission_boundary": "search.browser",
             "mutates_product_state": False,
-            "command_hint": "Use the chrome-devtools-cockpit MCP page tools against the opened search page.",
         },
     )
 

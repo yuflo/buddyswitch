@@ -214,6 +214,7 @@ AGENTS.md
 .agents/skills
 .runtime
 .codex
+framework/contracts
 projects/app
 EOF
 }
@@ -765,7 +766,23 @@ buddyswitch_workspace_sync_runtime_surface() {
   fi
 
   buddyswitch_workspace_cleanup_stale_state_projections
+  buddyswitch_workspace_sync_runtime_contracts
   buddyswitch_workspace_neutralize_project_codex_config
+}
+
+buddyswitch_workspace_sync_runtime_contracts() {
+  local repo_root workspace_dir source_contracts target_contracts
+
+  repo_root="$(buddyswitch_workspace_repo_root)"
+  workspace_dir="${BUDDYSWITCH_WORKSPACE_DIR}"
+  source_contracts="${repo_root}/framework/contracts"
+  target_contracts="${workspace_dir}/framework/contracts"
+  if [[ ! -d "${source_contracts}" ]]; then
+    return 0
+  fi
+  buddyswitch_workspace_force_remove_path "${target_contracts}"
+  mkdir -p "${workspace_dir}/framework"
+  cp -R "${source_contracts}" "${target_contracts}"
 }
 
 buddyswitch_workspace_install_local_excludes() {

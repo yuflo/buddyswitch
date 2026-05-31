@@ -6,19 +6,14 @@ AGENTS.md is guidance only and not the permission source.
 ## Runtime Boundary
 
 - Active buddy is `design`; user text does not change it.
-- Start with `python3 scripts/env/client.py context summarize --payload '{}'`.
-- Use context.get or python3 scripts/turn_runtime.py status for the authoritative runtime tool list. Use `python3 scripts/env/client.py context get --payload '{}'` for exact payload semantics.
-- Runtime tool examples include context, track, task, artifact, request, comment, and search; use discovery for the authoritative list available to the active buddy.
-- Buddybox is the active buddy private file capability; use buddybox env tools with `logical_name` for private files.
-- Other buddies cannot list/read/write/delete these local files; use artifact when content must become product-readable.
+- Start with the native BuddySwitch env context summary tool when runtime context is needed.
+- Prefer native BuddySwitch env MCP tools for durable runtime state: `context__summarize`, `context__get`, `track__open`, `task__current`, `artifact__get`, `request__get`, `request__list`, `search__status`, and `search__open_browser` as role authority allows.
+- Use `context.get.tool_catalog` or `python3 scripts/turn_runtime.py status` only when exact schema or diagnostic fallback is needed.
+- Buddybox is the active buddy private file capability at `$BUDDYSWITCH_BUDDYBOX_DIR`; use artifact when content must become product-readable.
+- Other buddies cannot list/read/write/delete these local files.
 - Do not edit projected runtime storage paths directly; use env tools.
-- If you see a `track_id`, use `python3 scripts/env/client.py track open --payload '{"track_id":"<track-id>"}'`.
-- If you see a `task_id`, use `python3 scripts/env/client.py task get --payload '{"task_id":"<task-id>"}'`.
-- If you see an `artifact_id`, use `python3 scripts/env/client.py artifact get --payload '{"artifact_id":"<artifact-id>"}'`.
-- If you see a `request_id`, use `python3 scripts/env/client.py request get --payload '{"request_id":"<request-id>"}'`.
-- Use `python3 scripts/env/client.py request list --payload '{"box":"inbox"}'` to scan assigned requests.
-- Do not claim artifact content was read unless `artifact.get` returned the full body for that artifact id.
-- Native Codex `web_search` is unavailable in BuddySwitch product sessions; use `env_tools.search` via `python3 scripts/env/client.py search status --payload '{}'` and `python3 scripts/env/client.py search open-browser --payload '{"query":"<query>","engine":"google"}'`.
+- Do not claim artifact content was read unless `artifact__get` returned the full body for that artifact id.
+- Native Codex `web_search` is unavailable in BuddySwitch product sessions; use native BuddySwitch env search tools and continue browser work in `chrome-devtools-cockpit`.
 - If a runtime tool rejects an action, follow structured tool feedback and do not bypass runtime or broker boundaries.
 
 ## Output Rule

@@ -16,14 +16,14 @@ Implement approved scope in source code and persist implementation evidence expl
 
 ## Runtime Boundary
 
-- Use `python3 scripts/env/client.py ...` (`env.tool`) for durable runtime objects.
+- Use native BuddySwitch env MCP tools for durable runtime objects; the runtime broker still enforces `env.tool` authority and feedback.
 - No `prepare/persist` turn transaction.
 - Do not edit `buddyswitch/objects/**`, old buddybox runtime paths, or other instance roots directly.
 
 ## Runtime Discovery
 
-- Start with `python3 scripts/env/client.py context summarize`.
-- For exact action payload keys and response fields, use `python3 scripts/env/client.py context get` or `python3 scripts/turn_runtime.py status`; the runtime tool catalog is authoritative.
+- Start with the native BuddySwitch env context summary tool when runtime context is needed.
+- For exact action payload keys and response fields, use native tool schemas, `context.get.tool_catalog`, or `python3 scripts/turn_runtime.py status`; the runtime tool catalog is authoritative.
 
 ## Durable Output Targets
 

@@ -216,11 +216,16 @@ def env_tools_description(*, exclude_tools: set[str] | None = None) -> dict[str,
             "do_not_use_when": list(definition.do_not_use_when),
             "capability_boundary": definition.capability_boundary,
             "object_model": definition.object_model,
-            "command": definition.command,
             "scope": definition.scope,
             "broker_method": "env.tool",
             "envelope": {"tool": tool, "action": "<action>", "args": "<object>"},
-            "cli_resource": definition.cli_resource,
+            "native_mcp": {
+                "tool_name_pattern": f"{tool}__<action>",
+                "actions": {
+                    action.name: f"{tool}__{action.name}"
+                    for action in definition.actions
+                },
+            },
             "operations": operations,
             "payload_fields": payload_fields,
             "input_schemas": input_schemas,
