@@ -21,7 +21,7 @@ description: Use when Dev starts source exploration, implementation, bug fixing,
 - Runtime contract references: `context.get.tool_catalog` and `python3 scripts/turn_runtime.py status`.
 
 ## Steps
-1. Run `python3 scripts/env/client.py context summarize --payload '{}'`.
+1. Use native `context__summarize` to read current runtime context.
 2. Read `source_workspace` and lock `source_workspace.path` as the locked source root for this turn.
 3. If `source_workspace` is absent, run `context.get` once and re-check.
 4. Classify `source_workspace.state` as `missing`, `empty`, `readme_only`, or `has_source`.

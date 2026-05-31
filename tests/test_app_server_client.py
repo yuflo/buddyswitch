@@ -9,7 +9,10 @@ import importlib.util
 import json
 import os
 import queue
+import signal
 import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -191,6 +194,14 @@ class FakeUnixWebSocketServer:
 
 
 class AppServerClientTests(unittest.TestCase):
+    @staticmethod
+    def _pid_is_live(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return False
+        return True
+
     def _socket_path(self, temp_root: Path, name: str = "app-server.sock") -> Path:
         return temp_root / name
 
@@ -784,6 +795,70 @@ class AppServerClientTests(unittest.TestCase):
             self.assertTrue(socket_path.name.startswith("buddyswitch-app-server-"))
             self.assertTrue(str(socket_path).endswith(".sock"))
             self.assertLess(len(str(socket_path).encode("utf-8")), 104)
+
+    def test_stop_app_server_terminates_child_processes_in_launch_group(self) -> None:
+        script = (
+            "import subprocess, sys, time\n"
+            "from pathlib import Path\n"
+            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            "Path(sys.argv[1]).write_text(str(child.pid), encoding='utf-8')\n"
+            "time.sleep(60)\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            child_pid_file = root / "child.pid"
+            leader = subprocess.Popen(
+                [sys.executable, "-c", script, str(child_pid_file)],
+                start_new_session=True,
+            )
+            pgid = os.getpgid(leader.pid)
+            child_pid = 0
+            previous_grace = APP_SERVER.APP_SERVER_STOP_GRACE_SECONDS
+            APP_SERVER.APP_SERVER_STOP_GRACE_SECONDS = 0.2
+            try:
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if child_pid_file.exists():
+                        child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+                        break
+                    time.sleep(0.05)
+                self.assertNotEqual(child_pid, 0)
+                self.assertEqual(os.getpgid(child_pid), pgid)
+
+                socket_path = root / "app-server.sock"
+                pid_path = root / "app-server.pid"
+                marker_path = root / "app-server.socket"
+                log_path = root / "app-server.log"
+                pid_path.write_text(f"{leader.pid}\n", encoding="utf-8")
+                marker_path.write_text(f"{socket_path}\n", encoding="utf-8")
+                socket_path.touch()
+
+                payload = APP_SERVER.stop_app_server(socket_path, pid_path, marker_path, log_path)
+
+                self.assertTrue(payload["terminated"])
+                leader.wait(timeout=2)
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline and self._pid_is_live(child_pid):
+                    time.sleep(0.05)
+                self.assertFalse(self._pid_is_live(child_pid))
+                self.assertFalse(pid_path.exists())
+                self.assertFalse(marker_path.exists())
+                self.assertFalse(socket_path.exists())
+            finally:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except OSError:
+                    pass
+                if child_pid:
+                    try:
+                        os.kill(child_pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+                try:
+                    leader.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    pass
+                APP_SERVER.APP_SERVER_STOP_GRACE_SECONDS = previous_grace
 
 
 if __name__ == "__main__":

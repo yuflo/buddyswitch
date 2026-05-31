@@ -440,7 +440,9 @@ class HostDecisionSurfaceProductModeTests(RuntimeWorkspaceTestMixin, unittest.Te
         )
         self.assertNotIn("project.access=", pm_agents)
         self.assertNotIn("projects/app", pm_agents)
-        self.assertIn("context summarize --payload '{}'", pm_agents)
+        self.assertIn("Start with the native BuddySwitch env context summary tool", pm_agents)
+        self.assertIn("context.get.tool_catalog", pm_agents)
+        self.assertNotIn("python3 scripts/env/client.py", pm_agents)
 
         summary = self._dispatch(buddy="pm", tool="context", action="summarize", args={})
         self.assertTrue(summary["ok"], msg=summary)

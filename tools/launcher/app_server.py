@@ -185,6 +185,20 @@ def _pid_is_live(pid: int) -> bool:
     return True
 
 
+def _process_group_is_live(pgid: int) -> bool:
+    if pgid <= 0:
+        return False
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def _read_pid(pid_path: Path) -> int | None:
     raw = _read_text_file(pid_path)
     if not raw:
@@ -576,15 +590,37 @@ def stop_app_server(socket_path: Path, pid_path: Path, marker_path: Path, log_pa
     pid = _read_pid(pid_path)
     terminated = False
     if pid is not None and _pid_is_live(pid):
-        os.kill(pid, signal.SIGTERM)
+        pgid: int | None = None
+        try:
+            candidate_pgid = os.getpgid(pid)
+        except OSError:
+            candidate_pgid = None
+        if candidate_pgid is not None and candidate_pgid != os.getpgrp():
+            pgid = candidate_pgid
+
+        def target_is_live() -> bool:
+            if pgid is not None:
+                return _process_group_is_live(pgid)
+            return _pid_is_live(pid)
+
+        def send_signal(signum: int) -> None:
+            try:
+                if pgid is not None:
+                    os.killpg(pgid, signum)
+                else:
+                    os.kill(pid, signum)
+            except (ProcessLookupError, PermissionError):
+                return
+
+        send_signal(signal.SIGTERM)
         deadline = time.monotonic() + APP_SERVER_STOP_GRACE_SECONDS
         while time.monotonic() < deadline:
-            if not _pid_is_live(pid):
+            if not target_is_live():
                 terminated = True
                 break
             time.sleep(APP_SERVER_STARTUP_POLL_SECONDS)
-        if not terminated and _pid_is_live(pid):
-            os.kill(pid, signal.SIGKILL)
+        if not terminated and target_is_live():
+            send_signal(signal.SIGKILL)
             terminated = True
     _cleanup_runtime_files(socket_path, pid_path, marker_path)
     return {

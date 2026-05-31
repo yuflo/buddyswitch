@@ -349,28 +349,31 @@ class RepoConsistencyTests(unittest.TestCase):
                     self.assertIn("track.add_proof", text)
                     self.assertNotIn("published_to_track", text)
 
-    def test_runtime_buddy_agents_use_payload_env_client_guidance(self) -> None:
+    def test_runtime_buddy_agents_use_native_first_env_tool_guidance(self) -> None:
         buddies = ("market", "pm", "design", "dev", "test")
         for buddy in buddies:
             path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(buddy=buddy):
                 self.assertIn("prefer native buddyswitch env mcp tools", text)
-                self.assertIn("authoritative fallback runtime tool list", text)
-                self.assertIn("runtime tool examples include", text)
-                self.assertIn("context summarize --payload '{}'", text)
-                self.assertIn("context get --payload '{}'", text)
-                self.assertIn("track open --payload '{\"track_id\":\"<track-id>\"}'", text)
-                self.assertIn("task current --payload '{\"history_limit\":8}'", text)
-                self.assertIn("artifact get --payload '{\"artifact_id\":\"<artifact-id>\"}'", text)
-                self.assertIn("request get --payload '{\"request_id\":\"<request-id>\"}'", text)
-                self.assertIn("search status --payload '{}'", text)
-                self.assertIn(
-                    "search open-browser --payload '{\"query\":\"<query>\",\"engine\":\"google\"}'",
-                    text,
-                )
+                self.assertIn("start with the native buddyswitch env context summary tool", text)
+                self.assertIn("context.get.tool_catalog", text)
+                self.assertIn("python3 scripts/turn_runtime.py status", text)
+                self.assertIn("do not bypass runtime", text)
+                self.assertIn("context__summarize", text)
+                self.assertIn("context__get", text)
+                self.assertIn("track__open", text)
+                self.assertIn("task__current", text)
+                self.assertIn("artifact__get", text)
+                self.assertIn("request__get", text)
+                self.assertIn("search__open_browser", text)
                 if buddy == "pm":
-                    self.assertIn("comment resolve --payload '{\"comment_id\":\"<comment-id>\",\"resolution_summary\":\"<summary>\"}'", text)
+                    self.assertIn("comment__resolve", text)
+                self.assertNotIn("python3 scripts/env/client.py", text)
+                self.assertNotIn("context summarize --payload", text)
+                self.assertNotIn("search open-browser --payload", text)
+                self.assertNotIn("runtime tool examples include", text)
+                self.assertNotIn("authoritative fallback runtime tool list", text)
                 for pattern in self._OLD_FLAG_PATTERNS:
                     self.assertNotIn(pattern, text)
                 self.assertNotIn("track join", text)
@@ -487,10 +490,11 @@ class RepoConsistencyTests(unittest.TestCase):
             path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(buddy=buddy):
-                self.assertIn("context summarize --payload '{}'", text)
-                self.assertIn("context get --payload '{}'", text)
+                self.assertIn("start with the native buddyswitch env context summary tool", text)
+                self.assertIn("context.get.tool_catalog", text)
                 self.assertIn("agents.md is guidance only and not the permission source", text)
                 self.assertIn("do not bypass runtime", text)
+                self.assertNotIn("python3 scripts/env/client.py", text)
                 self.assertNotIn("projects/app", text)
                 self.assertNotIn("project.access=", text)
 
@@ -543,6 +547,47 @@ class RepoConsistencyTests(unittest.TestCase):
                 continue
         disallowed = [line for line in hits if line not in allowed_hits]
         self.assertEqual(disallowed, [], msg="\n".join(disallowed))
+
+    def test_active_product_guidance_has_no_env_client_cli_first_examples(self) -> None:
+        targets = [
+            "buddyswitch/skills/shared",
+            "buddyswitch/skills/market",
+            "buddyswitch/skills/dev/enter-dev-workspace/SKILL.md",
+            "buddyswitch/skills/design/shape-prototype/SKILL.md",
+            "buddyswitch/skills/test/smoke-test/SKILL.md",
+            "framework/contracts",
+            "tools/launcher/assets/buddies",
+            "tools/launcher/message_available_handler.py",
+        ]
+        completed = subprocess.run(
+            [
+                "rg",
+                "-uuu",
+                "-n",
+                "-e",
+                "python3 scripts/env/client.py",
+                "-e",
+                "Fallback CLI",
+                "-e",
+                "CLI Payload Rule",
+                "-e",
+                "search open-browser --payload",
+                "-e",
+                "context summarize --payload",
+                "-e",
+                "context get --payload",
+                "-e",
+                "message list --payload",
+                *targets,
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
+        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        self.assertEqual(hits, [], msg="\n".join(hits))
 
     def test_invalid_old_env_client_flags_fail(self) -> None:
         old_commands = [
@@ -804,15 +849,19 @@ class RepoConsistencyTests(unittest.TestCase):
             path = ROOT / "framework" / "contracts" / f"{name}.md"
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(contract=name):
-                self.assertIn("context summarize", text)
-                self.assertIn("context get", text)
+                self.assertIn("native buddyswitch env mcp tools", text)
+                self.assertIn("context.get.tool_catalog", text)
+                self.assertIn("python3 scripts/turn_runtime.py status", text)
+                self.assertNotIn("python3 scripts/env/client.py", text)
 
         for buddy in ("market", "pm", "design", "dev", "test"):
             path = ROOT / "tools" / "launcher" / "assets" / "buddies" / buddy / "AGENTS.md"
             text = path.read_text(encoding="utf-8").lower()
             with self.subTest(buddy=buddy):
-                self.assertIn("context summarize", text)
-                self.assertIn("context get", text)
+                self.assertIn("start with the native buddyswitch env context summary tool", text)
+                self.assertIn("context.get.tool_catalog", text)
+                self.assertIn("python3 scripts/turn_runtime.py status", text)
+                self.assertNotIn("python3 scripts/env/client.py", text)
 
     def test_instance_private_writable_surface_has_no_legacy_buddybox_roots(self) -> None:
         forbidden = (

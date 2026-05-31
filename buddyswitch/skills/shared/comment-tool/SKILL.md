@@ -10,28 +10,18 @@ description: Use when adding, listing, and PM-resolving comments on readable tra
 Add, list, and PM-resolve plain-text comments on readable track, artifact, and artifact_section targets through the runtime env.tool layer.
 
 ## Runtime Route
-- Primary: use native BuddySwitch env MCP tools such as `comment__add` when available.
-- Fallback CLI: `python3 scripts/env/client.py comment add --payload '{"target_type":"track","target_id":"track-alpha","content":"Design direction is ready."}'`
-- Broker method: `env.tool`
-- Discover current operations, payload keys, effects, and recovery guidance with `context.get.tool_catalog['comment']` or `python3 scripts/turn_runtime.py status`.
-
-## CLI Payload Rule
-
-- `--payload` takes one JSON object string.
-- Do not pass a filesystem path to `--payload`.
-- For long markdown bodies, generate JSON with `python3 - <<'PY'` and pass it via command substitution.
-
-```bash
-python3 scripts/env/client.py comment add --payload '{"target_type":"track","target_id":"track-alpha","content":"Design direction is ready."}'
-```
+- Primary: use native BuddySwitch env MCP tools such as `comment__list`, `comment__add`, and `comment__resolve`.
+- Exact payload schemas, accepted target support, effects, and response meanings come from native tool schemas and `context.get.tool_catalog['comment']`.
+- Diagnostic fallback: `python3 scripts/turn_runtime.py status`.
+- Broker method remains `env.tool`; do not edit runtime state files directly.
 
 ## Workflow Notes
 
-- Use this tool for plain-text discussion on readable track, artifact, and artifact_section targets.
-- Start with `python3 scripts/env/client.py context summarize --payload '{}'` so comment actions run against current runtime-visible ids and state.
-- PM can close reviewed threads with `comment.resolve` and a non-empty `resolution_summary`.
-- Non-PM buddies keep discussion open by adding follow-up rows with `comment.add`.
-- For exact operations, payload keys, optional keys, and response fields, inspect `context.get.tool_catalog['comment']` or `python3 scripts/turn_runtime.py status`.
+- Use `context__summarize` when you need current runtime-visible ids before comment actions.
+- Use `comment__list` for existing discussion on readable `track`, `artifact`, and `artifact_section` targets.
+- Use `comment__add` to add plain-text follow-up rows.
+- PM can close reviewed threads with `comment__resolve` and a non-empty resolution summary.
+- Runtime response fields are authoritative for effects, rejection reasons, and recovery.
 
 ## Key Boundary Rules
 
@@ -40,22 +30,15 @@ python3 scripts/env/client.py comment add --payload '{"target_type":"track","tar
 - Comment objects are immutable after creation. No edit or delete.
 - Resolving one `comment_id` resolves its entire thread to durable `status=resolved`.
 - Task comments are not supported; accepted target support is discovered from `context.get.tool_catalog['comment']` and currently includes `track`, `artifact`, and `artifact_section`.
-- Cross-target replies are rejected (reply must stay on the same target).
+- Cross-target replies are rejected; replies must stay on the same target.
 - Foreign, superseded, or non-readable artifacts reject comment reads and writes.
 - Archived tracks reject comment reads and writes.
 
-## Verification
-
-```bash
-python3 scripts/env/client.py comment --help
-python3 scripts/env/client.py comment list --payload '{"target_type":"track","target_id":"<track_id>"}'
-```
-
 ## Do Not
 
-- Do not use for task comments; use runtime discovery for current accepted target support.
+- Do not use for task comments.
 - Do not attempt PM-only resolution as a non-PM buddy.
 - Do not attempt to edit or delete comments.
-- Do not use for direct buddy messaging; use `message.send` instead.
+- Do not use for direct buddy messaging; use `message__send` instead.
 - Do not use for review or approval workflows.
-- Do not assume non-comment workflow fields are accepted by comment payloads; confirm allowed keys through runtime discovery first.
+- Do not assume non-comment workflow fields are accepted; confirm allowed fields through runtime discovery first.

@@ -1926,12 +1926,15 @@ exec "$real_git" "$@"
             self.assertIn("locked to the `design` buddy", prompt_text)
             for token in (
                 "## Runtime Boundary",
-                "env_tools.search",
                 "Native Codex `web_search` is unavailable",
-                "scripts/env/client.py search status",
+                "native BuddySwitch env search tools",
+                "search__open_browser",
+                "chrome-devtools-cockpit",
                 "## Output Rule",
             ):
                 self.assertIn(token, prompt_text)
+            self.assertNotIn("python3 scripts/env/client.py", prompt_text)
+            self.assertNotIn("search open-browser --payload", prompt_text)
             self.assertNotIn("project.access=", prompt_text)
             self.assertNotIn("projects/app", prompt_text)
             runtime_skills = workspace_dir / ".agents" / "skills"
@@ -2153,12 +2156,15 @@ exec "$real_git" "$@"
             for token in (
                 "guidance only and not the permission source",
                 "prefer native buddyswitch env mcp tools",
-                "authoritative fallback runtime tool list",
-                "runtime tool examples include",
-                "python3 scripts/env/client.py context summarize",
+                "start with the native buddyswitch env context summary tool",
+                "context.get.tool_catalog",
+                "python3 scripts/turn_runtime.py status",
                 "## output rule",
             ):
                 self.assertIn(token, copied_agents)
+            self.assertNotIn("python3 scripts/env/client.py", copied_agents)
+            self.assertNotIn("context summarize --payload", copied_agents)
+            self.assertNotIn("search open-browser --payload", copied_agents)
             self.assertNotIn("use explicit ids and env tools (`", copied_agents)
             self.assertNotIn("project.access=", copied_agents)
             self.assertNotIn("projects/app", copied_agents)
@@ -2169,6 +2175,12 @@ exec "$real_git" "$@"
             self.assertNotIn("choose exactly one skill_id from prepare_context.skills", copied_agents)
             self.assertNotIn("read and execute the selected buddyswitch skill.md", copied_agents)
             self.assertNotIn("instruction_path", copied_agents)
+            runtime_pm_contract = workspace_dir / "framework" / "contracts" / "pm.md"
+            source_pm_contract = ROOT / "framework" / "contracts" / "pm.md"
+            runtime_pm_contract_text = runtime_pm_contract.read_text(encoding="utf-8")
+            self.assertEqual(runtime_pm_contract_text, source_pm_contract.read_text(encoding="utf-8"))
+            self.assertNotIn("python3 scripts/env/client.py", runtime_pm_contract_text)
+            self.assertIn("native BuddySwitch env MCP tools", runtime_pm_contract_text)
             runtime_skills = workspace_dir / ".agents" / "skills"
             self.assertTrue((runtime_skills / "task-management" / "SKILL.md").exists())
             self._assert_pm_runtime_skills(workspace_dir)

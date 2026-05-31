@@ -225,16 +225,18 @@ class RuntimeSkillsTests(unittest.TestCase):
                     self.assertGreaterEqual(do_not_idx, 0, msg=f"{path}: 'handoff' found without 'do not' section")
                     self.assertGreater(handoff_idx, do_not_idx, msg=f"{path}: 'handoff' found before 'do not' section")
 
-    def test_shared_tool_skills_teach_inline_json_payloads(self) -> None:
+    def test_shared_tool_skills_use_native_first_runtime_discovery(self) -> None:
         skill_paths = list(self.SHARED_TOOL_SKILLS.values())
         for path in skill_paths:
-            text = path.read_text(encoding="utf-8").lower()
+            text = path.read_text(encoding="utf-8")
+            lowered = text.lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
-                self.assertIn("--payload", text)
-                self.assertIn("json object string", text)
-                self.assertNotIn("--payload /tmp", text)
-                self.assertNotIn("payload file path", text)
-                self.assertNotIn("payload file", text)
+                self.assertIn("native buddyswitch env mcp tools", lowered)
+                self.assertIn("context.get.tool_catalog", text)
+                self.assertIn("python3 scripts/turn_runtime.py status", text)
+                self.assertNotIn("python3 scripts/env/client.py", text)
+                self.assertNotIn("CLI Payload Rule", text)
+                self.assertNotIn("--payload", text)
 
     def test_active_skills_do_not_teach_old_env_client_flags(self) -> None:
         for path in self._active_skill_files():
@@ -243,12 +245,15 @@ class RuntimeSkillsTests(unittest.TestCase):
                 for pattern in self._OLD_FLAG_PATTERNS:
                     self.assertNotIn(pattern, text)
 
-    def test_market_skills_use_payload_browser_entry(self) -> None:
+    def test_market_skills_use_native_browser_entry(self) -> None:
         for skill_id in self.MARKET_P0_SKILLS:
             text = self._market_skill_text(skill_id).lower()
             with self.subTest(skill=skill_id):
-                self.assertIn("search open-browser --payload", text)
+                self.assertIn("search__open_browser", text)
                 self.assertIn("chrome-devtools-cockpit", text)
+                self.assertIn("native buddyswitch env mcp tools", text)
+                self.assertNotIn("python3 scripts/env/client.py", text)
+                self.assertNotIn("search open-browser --payload", text)
                 self.assertNotIn("search open-browser --query", text)
                 self.assertNotIn("search open_browser --query", text)
 
@@ -309,7 +314,7 @@ class RuntimeSkillsTests(unittest.TestCase):
 
     def test_market_p0_skills_preserve_runtime_evidence_boundaries(self) -> None:
         required = (
-            "search open-browser --payload",
+            "search__open_browser",
             "chrome-devtools-cockpit",
             "artifact.create_revision",
             "tool_evidence",
@@ -619,23 +624,13 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertIn("artifact.attach_file", skill_text)
         self.assertIn("artifact.get_attachment", skill_text)
 
-    def test_shared_tool_skill_env_client_examples_use_payload(self) -> None:
+    def test_shared_tool_skills_do_not_include_copyable_env_client_examples(self) -> None:
         for tool, path in self.SHARED_TOOL_SKILLS.items():
             text = path.read_text(encoding="utf-8")
             with self.subTest(tool=tool):
-                for line in text.splitlines():
-                    stripped = line.strip()
-                    if "python3 scripts/env/client.py" not in stripped:
-                        continue
-                    if stripped.startswith("#"):
-                        continue
-                    if "..." in stripped:
-                        continue
-                    if stripped.startswith("- Runtime execution uses env.tool"):
-                        continue
-                    if " --help" in stripped:
-                        continue
-                    self.assertIn("--payload", stripped, msg=f"{path.relative_to(ROOT)} line missing --payload: {stripped}")
+                self.assertNotIn("python3 scripts/env/client.py", text)
+                self.assertNotIn("CLI Payload Rule", text)
+                self.assertNotIn("--payload", text)
 
     def test_shared_tool_skills_route_exact_fields_to_runtime_discovery(self) -> None:
         skill_paths = list(self.SHARED_TOOL_SKILLS.values())
@@ -647,16 +642,21 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertIn("turn_runtime.py status", text)
 
     def test_buddy_agents_do_not_present_authoritative_hardcoded_tool_lists(self) -> None:
-        supported_tool_names = ", ".join(sorted(tool_registry.supported_tools()))
         for path in self.BUDDY_AGENT_FILES:
             text = path.read_text(encoding="utf-8")
             lowered = text.lower()
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("Prefer native BuddySwitch env MCP tools", text)
-                self.assertIn("authoritative fallback runtime tool list", lowered)
-                self.assertIn("Runtime tool examples include", text)
+                self.assertIn("start with the native buddyswitch env context summary tool", lowered)
+                self.assertIn("context.get.tool_catalog", text)
+                self.assertIn("python3 scripts/turn_runtime.py status", text)
+                self.assertIn("do not bypass runtime", lowered)
+                self.assertNotIn("python3 scripts/env/client.py", text)
+                self.assertNotIn("context summarize --payload", lowered)
+                self.assertNotIn("search open-browser --payload", lowered)
+                self.assertNotIn("Runtime tool examples include", text)
+                self.assertNotIn("authoritative fallback runtime tool list", lowered)
                 self.assertNotIn("Use explicit ids and env tools (`", text)
-                self.assertNotIn(f"env tools (`{supported_tool_names}`)", lowered)
 
     def test_shared_comment_skill_target_support_matches_runtime_semantics(self) -> None:
         comment_skill = self.SHARED_TOOL_SKILLS["comment"].read_text(encoding="utf-8").lower()
@@ -732,15 +732,19 @@ class RuntimeSkillsTests(unittest.TestCase):
     def test_shared_message_skill_prevents_observed_invalid_calls(self) -> None:
         message_skill = self.SHARED_TOOL_SKILLS["message"].read_text(encoding="utf-8").lower()
 
-        self.assertIn("message contacts --payload", message_skill)
+        self.assertIn("message__contacts", message_skill)
         self.assertIn("target_actor_address", message_skill)
         self.assertIn("contact.actor_address", message_skill)
-        self.assertIn("message send --payload '{\"target_actor_address\"", message_skill)
-        self.assertIn("message conversation --payload", message_skill)
-        self.assertIn("message list --payload '{}'", message_skill)
+        self.assertIn("message__send", message_skill)
+        self.assertIn("message__conversation", message_skill)
+        self.assertIn("message__list", message_skill)
         self.assertIn("does not accept `box`", message_skill)
-        self.assertIn("request.list", message_skill)
+        self.assertIn("request__list", message_skill)
         self.assertIn("context.get.tool_catalog['message']", message_skill)
+        self.assertNotIn("message contacts --payload", message_skill)
+        self.assertNotIn("message send --payload", message_skill)
+        self.assertNotIn("message conversation --payload", message_skill)
+        self.assertNotIn("message list --payload", message_skill)
         self.assertNotIn("to_buddy", message_skill)
         self.assertNotIn("from_buddy", message_skill)
         self.assertNotIn('"actor_address":', message_skill)
@@ -762,7 +766,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                         encoding="utf-8"
                     ).lower()
                     self.assertIn("target_actor_address", installed)
-                    self.assertIn("message conversation --payload", installed)
+                    self.assertIn("message__conversation", installed)
                     self.assertNotIn("to_buddy", installed)
                     self.assertNotIn("from_buddy", installed)
 
@@ -1275,17 +1279,17 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("content.prd", pm_skill)
         self.assertNotIn("kind=prd", pm_skill)
 
-        self.assertIn("create-revision", artifact_skill)
+        self.assertIn("artifact__create_revision", artifact_skill)
         self.assertIn("private draft", artifact_skill)
-        self.assertIn("track.add-material", artifact_skill)
-        self.assertIn("track.add-proof", artifact_skill)
+        self.assertIn("track__add_material", artifact_skill)
+        self.assertIn("track__add_proof", artifact_skill)
         self.assertNotIn("published_to_track", artifact_skill)
         self.assertNotIn("content.prd", artifact_skill)
         self.assertNotIn("kind=prd", artifact_skill)
 
-        self.assertIn("add-material", track_skill)
-        self.assertIn("add-proof", track_skill)
-        self.assertIn("artifact.get", track_skill)
+        self.assertIn("track__add_material", track_skill)
+        self.assertIn("track__add_proof", track_skill)
+        self.assertIn("artifact__get", track_skill)
         self.assertNotIn("content.prd", track_skill)
         self.assertNotIn("kind=prd", track_skill)
         self.assertNotIn("published_to_track", track_skill)
@@ -1308,7 +1312,10 @@ class RuntimeSkillsTests(unittest.TestCase):
             "sequencing",
         ):
             self.assertIn(token, contract)
-        self.assertLess(contract.count("python3 scripts/env/client.py"), 8)
+        self.assertIn("native buddyswitch env mcp tools", contract)
+        self.assertIn("context.get.tool_catalog", contract)
+        self.assertIn("python3 scripts/turn_runtime.py status", contract)
+        self.assertNotIn("python3 scripts/env/client.py", combined)
 
     def test_shared_tool_skills_do_not_duplicate_runtime_action_catalogs(self) -> None:
         skill_paths = {

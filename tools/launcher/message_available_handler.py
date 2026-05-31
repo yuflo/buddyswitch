@@ -55,8 +55,8 @@ class MessageAvailableHandler:
             prompt = (
                 "[MESSAGE AVAILABLE]\n"
                 "A direct message is available for this actor.\n"
-                "Use native `message__list` to read the inbox, or `message__conversation` for bidirectional context.\n"
-                "Fallback CLI: `python3 scripts/env/client.py message list --payload '{}'`."
+                "Use native `message__list` to read the inbox.\n"
+                "Use native `message__conversation` when bidirectional context is needed."
             )
             actions.submit_turn(
                 prompt,

@@ -22,7 +22,7 @@ description: Use when you need to turn market evidence into narrow, operational 
 - Customer voice artifact, source rows, competitor evidence, and any existing hypotheses.
 
 ## Execution Order
-1. Before forming external market claims, call `python3 scripts/env/client.py search open-browser --payload '{"query":"<role> workflow pain","engine":"google"}'`, then continue discovery in `chrome-devtools-cockpit` and keep the workflow browser-native.
+1. Before forming external market claims, use native `search__open_browser` with a focused query, then continue discovery in `chrome-devtools-cockpit` and keep the workflow browser-native.
 2. Read upstream artifacts and source evidence before naming a segment.
 3. If a critical source requires login, pause for mandatory takeover.
 4. Do not continue with snippet-only or text-only research when browser-native evidence is required.
@@ -53,7 +53,7 @@ description: Use when you need to turn market evidence into narrow, operational 
 - Confirm exclusions prevent the segment from collapsing back into a broad audience.
 
 ## Shared Runtime Rules
-- Runtime execution uses env.tool through `python3 scripts/env/client.py ...`.
+- Runtime execution uses native BuddySwitch env MCP tools through env.tool; use runtime discovery when exact schemas matter.
 - Use runtime discovery when exact payload semantics matter.
 - Durable market deliverables use `artifact.create_revision` with `template: brief`.
 - Market artifact commits require broker-issued `tool_evidence`; do not invent token strings.
