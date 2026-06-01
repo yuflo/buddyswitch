@@ -262,6 +262,10 @@ class DaemonServiceContractTests(unittest.TestCase):
 
             saved = json.loads(self.core.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertEqual(saved["daemon_origin_turn_ids"], ["turn-daemon-1"])
+            self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-1"]["handler_name"], "fake")
+            self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-1"]["origin_turn_id"], "turn-user-1")
+            self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-1"]["turn_id"], "turn-daemon-1")
+            self.assertRegex(saved["daemon_origin_turns"]["turn-daemon-1"]["created_at"], r"^\d{4}-\d{2}-\d{2}T")
             self.assertEqual(saved["handlers"]["fake"]["last_origin_turn_id"], "turn-user-1")
             self.assertEqual(saved["handlers"]["fake"]["last_action_turn_id"], "turn-daemon-1")
             self.assertIsNone(saved["handlers"]["fake"]["last_error"])

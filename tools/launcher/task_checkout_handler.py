@@ -47,7 +47,7 @@ def completed_turn_for_checkout(notification: dict[str, Any], state: Any) -> dic
         return None
     if status != "completed":
         return None
-    if state.is_daemon_origin_turn(turn_id):
+    if state.is_daemon_origin_turn_from(turn_id, "task_checkout"):
         return None
     return {"thread_id": thread_id, "turn_id": turn_id, "status": status}
 

@@ -131,6 +131,7 @@ def _state_payload(actor_id: str, main_thread_id: str) -> dict[str, Any]:
         "actor_id": actor_id,
         "main_thread_id": main_thread_id,
         "daemon_origin_turn_ids": [],
+        "daemon_origin_turns": {},
         "ready": None,
         "last_error": None,
         "handlers": {},
@@ -220,6 +221,33 @@ class DaemonState:
         payload["daemon_origin_turn_ids"] = [
             item for item in payload["daemon_origin_turn_ids"] if isinstance(item, str) and item
         ][-MAX_DAEMON_ORIGIN_TURN_IDS:]
+        raw_turn_records = payload.get("daemon_origin_turns")
+        if not isinstance(raw_turn_records, dict):
+            raw_turn_records = {}
+        turn_records: dict[str, Any] = {}
+        for turn_id in payload["daemon_origin_turn_ids"]:
+            raw_record = raw_turn_records.get(turn_id)
+            if not isinstance(raw_record, dict):
+                continue
+            record_turn_id = raw_record.get("turn_id")
+            if isinstance(record_turn_id, str) and record_turn_id and record_turn_id != turn_id:
+                continue
+            handler_name = raw_record.get("handler_name")
+            if not isinstance(handler_name, str) or not handler_name:
+                continue
+            origin_turn_id = raw_record.get("origin_turn_id")
+            if not isinstance(origin_turn_id, str) or not origin_turn_id:
+                origin_turn_id = None
+            created_at = raw_record.get("created_at")
+            if not isinstance(created_at, str) or not created_at:
+                created_at = _utc_now()
+            turn_records[turn_id] = {
+                "turn_id": turn_id,
+                "handler_name": handler_name,
+                "origin_turn_id": origin_turn_id,
+                "created_at": created_at,
+            }
+        payload["daemon_origin_turns"] = turn_records
         if not isinstance(payload.get("ready"), dict):
             payload["ready"] = None
         if "last_error" not in payload:
@@ -240,11 +268,46 @@ class DaemonState:
     def is_daemon_origin_turn(self, turn_id: str) -> bool:
         return turn_id in self.payload.get("daemon_origin_turn_ids", [])
 
-    def record_daemon_origin_turn(self, turn_id: str) -> None:
+    def daemon_turn_record(self, turn_id: str) -> dict[str, Any] | None:
+        records = self.payload.get("daemon_origin_turns")
+        if not isinstance(records, dict):
+            return None
+        record = records.get(turn_id)
+        if not isinstance(record, dict):
+            return None
+        return record
+
+    def is_daemon_origin_turn_from(self, turn_id: str, handler_name: str) -> bool:
+        record = self.daemon_turn_record(turn_id)
+        if record is not None:
+            return record.get("handler_name") == handler_name
+        return self.is_daemon_origin_turn(turn_id) and handler_name == "task_checkout"
+
+    def record_daemon_origin_turn(
+        self,
+        turn_id: str,
+        *,
+        handler_name: str | None = None,
+        origin_turn_id: str | None = None,
+    ) -> None:
         turn_ids = [item for item in self.payload.get("daemon_origin_turn_ids", []) if isinstance(item, str) and item]
         turn_ids = [item for item in turn_ids if item != turn_id]
         turn_ids.append(turn_id)
         self.payload["daemon_origin_turn_ids"] = turn_ids[-MAX_DAEMON_ORIGIN_TURN_IDS:]
+        records = self.payload.get("daemon_origin_turns")
+        if not isinstance(records, dict):
+            records = {}
+        records = {key: value for key, value in records.items() if key in self.payload["daemon_origin_turn_ids"]}
+        if isinstance(handler_name, str) and handler_name:
+            records[turn_id] = {
+                "turn_id": turn_id,
+                "handler_name": handler_name,
+                "origin_turn_id": origin_turn_id if isinstance(origin_turn_id, str) and origin_turn_id else None,
+                "created_at": _utc_now(),
+            }
+        else:
+            records.pop(turn_id, None)
+        self.payload["daemon_origin_turns"] = records
         self.save()
 
     def record_error(self, *, origin_turn_id: str | None, message: str) -> None:
@@ -386,7 +449,11 @@ class ActionGateway:
         turn_id = _turn_id_from_submit_result(result)
         if not turn_id:
             raise launcher_submit_turn.SubmitTurnError("submit_turn did not return a turn id")
-        self.state.record_daemon_origin_turn(turn_id)
+        self.state.record_daemon_origin_turn(
+            turn_id,
+            handler_name=handler_name,
+            origin_turn_id=origin_turn_id,
+        )
         self.state.update_handler_state(
             handler_name,
             {

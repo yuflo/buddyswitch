@@ -200,11 +200,15 @@ class TaskCheckoutHandlerFilterTests(TaskCheckoutHandlerTestCase):
                 )
             )
 
-    def test_daemon_origin_turn_is_ignored(self) -> None:
+    def test_task_checkout_origin_turn_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             state = self._state(instance["instance_root"])
-            state.record_daemon_origin_turn("turn-daemon-1")
+            state.record_daemon_origin_turn(
+                "turn-daemon-1",
+                handler_name="task_checkout",
+                origin_turn_id="turn-user-1",
+            )
 
             previous_turn = self.task_checkout_handler.completed_turn_for_checkout(
                 self._completed(turn_id="turn-daemon-1"),
@@ -213,12 +217,36 @@ class TaskCheckoutHandlerFilterTests(TaskCheckoutHandlerTestCase):
 
             self.assertIsNone(previous_turn)
 
+    def test_message_available_daemon_origin_turn_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            state = self._state(instance["instance_root"])
+            state.record_daemon_origin_turn(
+                "turn-daemon-1",
+                handler_name="message_available",
+                origin_turn_id="msg-1",
+            )
+
+            previous_turn = self.task_checkout_handler.completed_turn_for_checkout(
+                self._completed(turn_id="turn-daemon-1"),
+                state,
+            )
+
+            self.assertEqual(
+                previous_turn,
+                {"thread_id": "thr-main", "turn_id": "turn-daemon-1", "status": "completed"},
+            )
+
     def test_handler_returns_ignored_result_for_ignored_notifications(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             context = self.daemon_core.load_daemon_context(instance["instance_json"])
             state = self._state(instance["instance_root"])
-            state.record_daemon_origin_turn("turn-daemon-1")
+            state.record_daemon_origin_turn(
+                "turn-daemon-1",
+                handler_name="task_checkout",
+                origin_turn_id="turn-user-1",
+            )
             actions = FakeActionGateway()
 
             ignored_notifications = [

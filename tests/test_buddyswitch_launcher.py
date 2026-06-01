@@ -5417,6 +5417,8 @@ exec "$real_git" "$@"
             self.assertNotIn("[USER INPUT]", prompt)
             daemon_state = json.loads((Path(str(ctx["instance_root"])) / "runtime" / "daemon" / "state.json").read_text(encoding="utf-8"))
             self.assertEqual(daemon_state["daemon_origin_turn_ids"], ["turn-daemon-1"])
+            self.assertEqual(daemon_state["daemon_origin_turns"]["turn-daemon-1"]["handler_name"], "task_checkout")
+            self.assertEqual(daemon_state["daemon_origin_turns"]["turn-daemon-1"]["origin_turn_id"], "turn-user-1")
             self.assertEqual(daemon_state["handlers"]["task_checkout"]["last_origin_turn_id"], "turn-user-1")
             self.assertEqual(daemon_state["handlers"]["task_checkout"]["last_action_turn_id"], "turn-daemon-1")
             self.assertEqual(daemon_state["handlers"]["task_checkout"]["last_result"], "handled")

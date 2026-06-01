@@ -133,7 +133,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             self.assertIsNone(state.payload["ready"])
             self.assertIsNone(state.payload["last_error"])
 
-    def test_recording_daemon_origin_turn_persists_state(self) -> None:
+    def test_recording_daemon_origin_turn_persists_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = self._instance_root(temp_root)
             state = self.core.DaemonState.load(
@@ -142,14 +142,41 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
                 main_thread_id="thr-main",
             )
 
-            state.record_daemon_origin_turn("turn-daemon-1")
+            state.record_daemon_origin_turn(
+                "turn-daemon-1",
+                handler_name="message_available",
+                origin_turn_id="msg-1",
+            )
 
             saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             self.assertEqual(saved["daemon_origin_turn_ids"], ["turn-daemon-1"])
+            self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-1"]["handler_name"], "message_available")
+            self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-1"]["origin_turn_id"], "msg-1")
+            self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-1"]["turn_id"], "turn-daemon-1")
+            self.assertRegex(saved["daemon_origin_turns"]["turn-daemon-1"]["created_at"], r"^\d{4}-\d{2}-\d{2}T")
+            self.assertEqual(state.daemon_turn_record("turn-daemon-1")["handler_name"], "message_available")
             self.assertTrue(state.is_daemon_origin_turn("turn-daemon-1"))
+            self.assertTrue(state.is_daemon_origin_turn_from("turn-daemon-1", "message_available"))
+            self.assertFalse(state.is_daemon_origin_turn_from("turn-daemon-1", "task_checkout"))
             self.assertFalse(state.is_daemon_origin_turn("turn-user-1"))
             self.assertNotIn("last_origin_turn_id", saved)
             self.assertNotIn("last_stop_tui_turn_id", saved)
+
+    def test_legacy_daemon_origin_without_provenance_is_only_task_checkout_filtered(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = self._instance_root(temp_root)
+            state = self.core.DaemonState.load(
+                instance_root=instance_root,
+                actor_id="act-dev-daed00000001",
+                main_thread_id="thr-main",
+            )
+
+            state.record_daemon_origin_turn("turn-legacy-1")
+
+            self.assertTrue(state.is_daemon_origin_turn("turn-legacy-1"))
+            self.assertIsNone(state.daemon_turn_record("turn-legacy-1"))
+            self.assertTrue(state.is_daemon_origin_turn_from("turn-legacy-1", "task_checkout"))
+            self.assertFalse(state.is_daemon_origin_turn_from("turn-legacy-1", "message_available"))
 
     def test_daemon_origin_turn_ids_keep_latest_50(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -161,12 +188,19 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             )
 
             for index in range(55):
-                state.record_daemon_origin_turn(f"turn-daemon-{index}")
+                state.record_daemon_origin_turn(
+                    f"turn-daemon-{index}",
+                    handler_name="task_checkout",
+                    origin_turn_id=f"turn-user-{index}",
+                )
 
             saved = json.loads(self.core.daemon_state_file(instance_root).read_text(encoding="utf-8"))
             self.assertEqual(len(saved["daemon_origin_turn_ids"]), 50)
             self.assertEqual(saved["daemon_origin_turn_ids"][0], "turn-daemon-5")
             self.assertEqual(saved["daemon_origin_turn_ids"][-1], "turn-daemon-54")
+            self.assertEqual(len(saved["daemon_origin_turns"]), 50)
+            self.assertNotIn("turn-daemon-4", saved["daemon_origin_turns"])
+            self.assertEqual(saved["daemon_origin_turns"]["turn-daemon-54"]["handler_name"], "task_checkout")
 
     def test_recording_error_persists_last_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
